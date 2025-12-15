@@ -1,38 +1,48 @@
-import { useScan } from '../context/ScanContext'
-// import { useAI } from '../context/AIContext'
-import AIStatus from './AIStatus'
+import { useAI } from '../context/AIContext';
+import { useScan } from '../context/ScanContext';
 
 export default function StatusBar() {
-    const { photos, filter, scanning, hasMore } = useScan()
-    // const { processingQueue } = useAI() // Not needed if using AIStatus component internally
+    const { calculatingBlur, blurProgress, isModelLoading, isCoolingDown, cooldownTimeLeft, processingQueue } = useAI();
+    // @ts-ignore
+    const { scanning } = useScan ? useScan() : { scanning: false };
 
-    let filterText = 'All Photos'
-    if (filter.initial) filterText = 'Ready'
-    else if (filter.untagged) filterText = 'Untagged'
-    else if (filter.tag) filterText = `Tag: ${filter.tag}`
-    else if (filter.folder) filterText = `Folder: ${filter.folder}`
+    // Show if ANY activity is happening
+    const isActive = calculatingBlur || isModelLoading || isCoolingDown || processingQueue.length > 0 || scanning;
+
+    if (!isActive) return null;
 
     return (
-        <footer className="h-8 bg-gray-800 border-t border-gray-700 flex items-center px-4 text-xs text-gray-400 select-none shrink-0 gap-4">
-            <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${scanning ? 'bg-indigo-500 animate-pulse' : 'bg-gray-600'}`} />
-                <span>{scanning ? 'Scanning...' : 'Ready'}</span>
-            </div>
+        <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 px-4 py-1 text-xs flex items-center justify-between z-50 shadow-up text-gray-400 h-8">
+            <div className="flex items-center gap-6">
+                {scanning && (
+                    <span className="flex items-center gap-2 text-blue-400 font-medium">
+                        <span className="animate-pulse">●</span> Scanning
+                    </span>
+                )}
 
-            <div className="w-px h-4 bg-gray-700" />
+                {calculatingBlur && (
+                    <span className="flex items-center gap-2 text-indigo-400 font-medium">
+                        <span className="animate-pulse">●</span> Blur Scores: {blurProgress.current} / {blurProgress.total}
+                    </span>
+                )}
 
-            <div className="flex items-center gap-1">
-                <span className="font-medium text-gray-300">{filterText}</span>
-                {photos.length > 0 && (
-                    <span>
-                        ({photos.length} item{photos.length !== 1 ? 's' : ''}{hasMore ? '+' : ''})
+                {isModelLoading && (
+                    <span className="flex items-center gap-2 text-yellow-400 font-medium">
+                        <span className="animate-spin">⟳</span> Loading Models
+                    </span>
+                )}
+
+                {processingQueue.length > 0 && (
+                    <span className="flex items-center gap-2 text-green-400 font-medium">
+                        <span className="animate-pulse">●</span> AI Queue: {processingQueue.length}
+                    </span>
+                )}
+                {isCoolingDown && (
+                    <span className="flex items-center gap-2 text-orange-400 font-medium">
+                        <span className="animate-pulse">●</span> Cooling: {cooldownTimeLeft}s
                     </span>
                 )}
             </div>
-
-            <div className="ml-auto flex items-center gap-4">
-                <AIStatus />
-            </div>
-        </footer>
-    )
+        </div>
+    );
 }

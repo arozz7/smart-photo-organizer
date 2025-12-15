@@ -7,101 +7,190 @@ interface AIContextType {
     addToQueue: (photos: any[]) => void;
     // Event subscription for specific or all photo updates
     onPhotoProcessed: (callback: (photoId: number) => void) => () => void;
+    // Queue Control
+    isPaused: boolean;
+    setIsPaused: (paused: boolean) => void;
+    queueConfig: { batchSize: number; cooldownSeconds: number };
+    setQueueConfig: (config: { batchSize: number; cooldownSeconds: number }) => void;
+    isCoolingDown: boolean;
+    cooldownTimeLeft: number;
+    skipCooldown: () => void;
+    // Blur Calculation
+    calculatingBlur: boolean;
+    blurProgress: { current: number; total: number };
+    calculateBlurScores: () => Promise<void>;
 }
 
 const AIContext = createContext<AIContextType>({
     isModelLoading: false,
-    isModelReady: false,
+    isModelReady: false, // Always true now as Python is managed by Main
     processingQueue: [],
     addToQueue: () => { },
-    onPhotoProcessed: () => () => { }
+    onPhotoProcessed: () => () => { },
+    isPaused: false,
+    setIsPaused: () => { },
+    queueConfig: { batchSize: 0, cooldownSeconds: 0 },
+    setQueueConfig: () => { },
+    isCoolingDown: false,
+    cooldownTimeLeft: 0,
+    skipCooldown: () => { },
+    calculatingBlur: false,
+    blurProgress: { current: 0, total: 0 },
+    calculateBlurScores: async () => { }
 });
 
 export const useAI = () => useContext(AIContext);
 
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [isModelLoading, setIsModelLoading] = useState(true);
-    const [isModelReady, setIsModelReady] = useState(false);
+    // Python backend starts with Main, so we assume it's ready. 
+    // We could add a check later, but for now simplify.
+    const [isModelLoading] = useState(false);
+    const [isModelReady] = useState(true);
+
     const [processingQueue, setProcessingQueue] = useState<any[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
+
+    // Queue Control State
+    const [isPaused, setIsPaused] = useState(false);
+
+    // Persistence for Queue Config
+    const [queueConfig, setQueueConfig] = useState({ batchSize: 0, cooldownSeconds: 60 });
+    const [isConfigLoaded, setIsConfigLoaded] = useState(false);
+
+    useEffect(() => {
+        const loadConfig = async () => {
+            try {
+                // @ts-ignore
+                const cfg = await window.ipcRenderer.invoke('settings:getQueueConfig');
+                if (cfg) {
+                    console.log("[AIContext] Loaded Queue Config:", cfg);
+                    setQueueConfig(cfg);
+                }
+            } catch (e) {
+                console.error("Failed to load queue config", e);
+            } finally {
+                setIsConfigLoaded(true);
+            }
+        }
+        loadConfig();
+    }, [])
+
+    useEffect(() => {
+        if (!isConfigLoaded) return; // Don't save default state before load finishes
+        // @ts-ignore
+        window.ipcRenderer.invoke('settings:setQueueConfig', queueConfig).catch(console.error);
+    }, [queueConfig, isConfigLoaded])
+
+    const [currentBatchCount, setCurrentBatchCount] = useState(0);
+    const [isCoolingDown, setIsCoolingDown] = useState(false);
+    const [cooldownTimeLeft, setCooldownTimeLeft] = useState(0);
+    const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Blur Calculation State
+    const [calculatingBlur, setCalculatingBlur] = useState(false);
+    const [blurProgress, setBlurProgress] = useState({ current: 0, total: 0 });
+
+    const calculateBlurScores = async () => {
+        if (calculatingBlur) return;
+        setCalculatingBlur(true);
+        try {
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('db:getPhotosMissingBlurScores');
+            if (res.success && res.photoIds.length > 0) {
+                const total = res.photoIds.length;
+                setBlurProgress({ current: 0, total });
+
+                for (let i = 0; i < total; i++) {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('ai:scanImage', { photoId: res.photoIds[i] });
+                    setBlurProgress({ current: i + 1, total });
+                }
+                alert(`Finished calculating blur scores for ${total} photos.`);
+            } else if (res.success) {
+                alert("No photos found missing blur scores.");
+            } else {
+                alert("Failed to find photos: " + res.error);
+            }
+        } catch (e) {
+            alert("Error: " + e);
+        } finally {
+            setCalculatingBlur(false);
+            setBlurProgress({ current: 0, total: 0 });
+        }
+    };
 
     // Callbacks for photo processing events
     const processedCallbacks = useRef<Set<(photoId: number) => void>>(new Set());
 
-    const workerRef = useRef<Worker | null>(null);
+    // Track pending operations for each photo (scan vs tags) to avoid premature completion
+    const pendingOperations = useRef<Map<number, Set<string>>>(new Map());
 
-    // Initialize Worker
+    // Listen for AI results from Main Process
     useEffect(() => {
-        const initWorker = async () => {
-            // Create worker
-            // @ts-ignore
-            const worker = new Worker(new URL('../workers/scanner.worker.ts', import.meta.url), { type: 'module' });
-            workerRef.current = worker;
-
-            worker.onmessage = async (e) => {
-                const { type, payload, error, photoId } = e.data;
-
-                if (type === 'ready') {
-                    console.log('[AIContext] AI Worker is ready');
-                    setIsModelLoading(false);
-                    setIsModelReady(true);
-                } else if (type === 'result') {
-                    await handleWorkerResult(payload);
-                } else if (type === 'error') {
-                    console.error('[AIContext] Worker Error:', error);
-                    if (photoId) {
-                        completeProcessing(photoId);
-                    }
-                }
-            };
-
-            // Start model loading in worker
-            const profile = localStorage.getItem('ai_profile') || 'balanced';
-            worker.postMessage({ type: 'init', payload: { profile } });
-        };
-
-        if (!workerRef.current) {
-            initWorker();
-        }
+        // @ts-ignore
+        const cleanup = window.ipcRenderer.on('ai:scan-result', (payload: any) => {
+            handleScanResult(payload);
+        });
 
         return () => {
-            if (workerRef.current) {
-                workerRef.current.terminate();
-                workerRef.current = null;
+            if (typeof cleanup === 'function') {
+                (cleanup as unknown as Function)();
             }
         };
     }, []);
 
-    const handleWorkerResult = async (payload: any) => {
-        const { photoId, faces, tags } = payload;
-        // console.log(`[AIContext] Received results for ${photoId}: ${faces.length} faces, ${tags.length} tags`);
+    const handleScanResult = async (payload: any) => {
+        const { photoId, faces, tags, error, type, previewPath, width, height } = payload;
+
+        if (error) {
+            console.error(`[AIContext] Error for ${photoId}:`, error);
+        }
 
         try {
-            // Store faces (Smart Update)
-            if (faces.length > 0 || tags.length > 0) {
+            // Store faces (and preview if available)
+            if (faces && faces.length > 0) {
                 // @ts-ignore
-                if (faces.length > 0) {
-                    // @ts-ignore
-                    await window.ipcRenderer.invoke('db:updateFaces', {
-                        photoId,
-                        faces: faces.map((f: any) => ({
-                            box: f.box,
-                            descriptor: f.descriptor
-                        }))
-                    });
-                }
+                await window.ipcRenderer.invoke('db:updateFaces', {
+                    photoId,
+                    previewPath,
+                    width,
+                    height,
+                    globalBlurScore: payload.globalBlurScore,
+                    faces: faces.map((f: any) => ({
+                        box: f.box,
+                        descriptor: f.descriptor,
+                        blur_score: f.blurScore
+                    }))
+                });
             }
 
-            // Store tags
-            if (tags.length > 0) {
+            // Store tags (from VLM or otherwise)
+            if (tags && tags.length > 0) {
                 // @ts-ignore
                 await window.ipcRenderer.invoke('db:addTags', { photoId, tags });
             }
 
+            // Handle VLM description specifically if present
+            // if (payload.description) {
+            //      window.ipcRenderer.invoke('db:addTags', { photoId, tags: [`AI Description`] }); 
+            // }
+
         } catch (err) {
             console.error('Failed to save AI results to DB:', err);
         } finally {
-            completeProcessing(photoId);
+            // Check if we are done with this photo
+            const ops = pendingOperations.current.get(photoId);
+            if (ops) {
+                if (type === 'scan_result') ops.delete('scan');
+                if (type === 'tags_result') ops.delete('tags');
+
+                if (ops.size === 0) {
+                    pendingOperations.current.delete(photoId);
+                    completeProcessing(photoId);
+                }
+            } else {
+                completeProcessing(photoId);
+            }
         }
     };
 
@@ -110,8 +199,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         processedCallbacks.current.forEach(cb => cb(photoId));
 
         // Update state
-        setProcessingQueue(prev => prev.slice(1));
+        setProcessingQueue(prev => prev.filter(p => p.id !== photoId));
         setIsProcessing(false);
+        setCurrentBatchCount(prev => prev + 1);
+    };
+
+    const skipCooldown = () => {
+        if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
+        setIsCoolingDown(false);
+        setCooldownTimeLeft(0);
+        setCurrentBatchCount(0);
     };
 
     // Add items to queue (deduplicate)
@@ -133,40 +230,65 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     // Process Queue
     useEffect(() => {
-        if (!isModelReady || processingQueue.length === 0 || isProcessing || !workerRef.current) return;
+        // Conditions to stop processing:
+        // 1. Queue empty
+        // 2. Already processing
+        // 3. Paused
+        // 4. Cooling down
+        if (processingQueue.length === 0 || isProcessing || isPaused || isCoolingDown) return;
+
+        // Check Batch Limits
+        if (queueConfig.batchSize > 0 && currentBatchCount >= queueConfig.batchSize) {
+            console.log(`[AI] Batch limit reached (${currentBatchCount}). Starting cooldown for ${queueConfig.cooldownSeconds}s.`);
+            setIsCoolingDown(true);
+            setCooldownTimeLeft(queueConfig.cooldownSeconds);
+
+            // Start Countdown
+            let timeLeft = queueConfig.cooldownSeconds;
+            const interval = setInterval(() => {
+                timeLeft -= 1;
+                setCooldownTimeLeft(timeLeft);
+                if (timeLeft <= 0) {
+                    clearInterval(interval);
+                    setIsCoolingDown(false);
+                    setCurrentBatchCount(0);
+                }
+            }, 1000);
+
+            cooldownTimerRef.current = interval; // Hacky type cast valid for browser/node
+            return;
+        }
 
         const processNext = async () => {
             setIsProcessing(true);
             const photo = processingQueue[0];
-            // console.log(`[AI] Processing photo in worker: ${photo.id}`);
+
+            pendingOperations.current.set(photo.id, new Set(['scan', 'tags']));
 
             try {
-                // Fetch image buffer via IPC (avoiding fetch protocol issues)
-                const path = photo.preview_cache_path || photo.file_path;
                 // @ts-ignore
-                const buffer = await window.ipcRenderer.invoke('read-file-buffer', path);
-                const blob = new Blob([buffer]);
+                await window.ipcRenderer.invoke('ai:scanImage', { photoId: photo.id });
 
-                // Create ImageBitmap (transferable)
+                // Trigger Smart Tag Generation (VLM)
                 // @ts-ignore
-                const imageBitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
-
-                const profile = localStorage.getItem('ai_profile') || 'balanced';
-
-                // Send to worker
-                workerRef.current?.postMessage(
-                    { type: 'process', payload: { photoId: photo.id, imageBitmap, profile } },
-                    [imageBitmap]
-                );
+                await window.ipcRenderer.invoke('ai:generateTags', { photoId: photo.id });
 
             } catch (err) {
-                console.error(`Failed to prepare photo ${photo.id} for worker:`, err);
+                console.error(`Failed to request scan for ${photo.id}:`, err);
+                pendingOperations.current.delete(photo.id);
                 completeProcessing(photo.id);
             }
         };
 
         processNext();
-    }, [isModelReady, processingQueue, isProcessing]);
+    }, [processingQueue, isProcessing, isPaused, isCoolingDown, currentBatchCount, queueConfig]);
+
+    // Clear interval on unmount
+    useEffect(() => {
+        return () => {
+            if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+        }
+    }, [])
 
     return (
         <AIContext.Provider value={{
@@ -174,10 +296,19 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             isModelReady,
             processingQueue,
             addToQueue,
-            onPhotoProcessed
+            onPhotoProcessed,
+            isPaused,
+            setIsPaused,
+            queueConfig,
+            setQueueConfig,
+            isCoolingDown,
+            cooldownTimeLeft,
+            skipCooldown,
+            calculatingBlur,
+            blurProgress,
+            calculateBlurScores
         }}>
             {children}
         </AIContext.Provider>
     );
 };
-

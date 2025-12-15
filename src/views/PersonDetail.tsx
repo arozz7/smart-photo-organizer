@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PersonFaceItem from '../components/PersonFaceItem';
+import BlurryFacesModal from '../components/BlurryFacesModal';
 
 interface Face {
     id: number;
@@ -28,6 +29,7 @@ const PersonDetail = () => {
     const [selectedFaces, setSelectedFaces] = useState<Set<number>>(new Set());
     const [loading, setLoading] = useState(true);
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+    const [isBlurryModalOpen, setIsBlurryModalOpen] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -125,23 +127,42 @@ const PersonDetail = () => {
                     <span className="text-gray-400 text-sm">({faces.length} faces)</span>
                 </div>
 
-                {selectedFaces.size > 0 && (
-                    <div className="flex gap-2">
-                        <button
-                            onClick={openRenameModal}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
-                        >
-                            Move / Rename ({selectedFaces.size})
-                        </button>
-                        <button
-                            onClick={handleUnassign}
-                            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
-                        >
-                            Remove ({selectedFaces.size})
-                        </button>
-                    </div>
-                )}
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => setIsBlurryModalOpen(true)}
+                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Cleanup Blurry
+                    </button>
+
+                    {selectedFaces.size > 0 && (
+                        <div className="flex gap-2">
+                            <button
+                                onClick={openRenameModal}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
+                            >
+                                Move / Rename ({selectedFaces.size})
+                            </button>
+                            <button
+                                onClick={handleUnassign}
+                                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
+                            >
+                                Remove ({selectedFaces.size})
+                            </button>
+                        </div>
+                    )}
+                </div>
             </div>
+
+            <BlurryFacesModal
+                open={isBlurryModalOpen}
+                onOpenChange={setIsBlurryModalOpen}
+                personId={personId ? parseInt(personId) : null}
+                onDeleteComplete={loadData}
+            />
 
             <div className="flex-1 overflow-y-auto pr-2">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">

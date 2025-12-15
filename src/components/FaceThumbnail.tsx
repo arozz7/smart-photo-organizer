@@ -4,11 +4,12 @@ import { useState } from 'react';
 interface FaceThumbnailProps {
     src: string;
     box?: { x: number; y: number; width: number; height: number; }; // Pixel coordinates relative to the image source
+    originalImageWidth?: number; // The width of the original image the box coords correspond to
     alt?: string;
     className?: string;
 }
 
-export default function FaceThumbnail({ src, box, alt, className }: FaceThumbnailProps) {
+export default function FaceThumbnail({ src, box, originalImageWidth, alt, className }: FaceThumbnailProps) {
     const [style, setStyle] = useState<React.CSSProperties>({
         opacity: 0, // Hide until loaded and positioned
         transition: 'opacity 0.2s',
@@ -26,35 +27,37 @@ export default function FaceThumbnail({ src, box, alt, className }: FaceThumbnai
 
         const img = e.currentTarget;
         const naturalW = img.naturalWidth;
-        const naturalH = img.naturalHeight;
+        // setNaturalWidth(naturalW); // Removed debug state
+        // const naturalH = img.naturalHeight;
 
         if (!naturalW) return;
 
-        // Calculate Crop
-        // We want box.width pixels to fill the container width (100%).
-        // So we scale the image width to: (naturalW / box.width) * 100 %
-        const widthPct = (naturalW / box.width) * 100;
+        // Calculate Scale Factor if using a preview (smaller/larger than original)
+        let scale = 1.0;
+        if (originalImageWidth && originalImageWidth > 0 && originalImageWidth !== naturalW) {
+            scale = naturalW / originalImageWidth;
+            // console.log(`[FaceThumbnail] Rescaling box: Original=${originalImageWidth}, Actual=${naturalW}, Scale=${scale}`);
+        }
 
-        // Offsets
-        // To center the face (box.x, box.y) at (0,0) [top-left], we shift by -box.x.
-        // As a percentage of the SCALED image width?
-        // No, margin-left % is relative to the CONTAINER width.
-        // We moved the image so it's huge. 
-        // We want to shift left by 'box.x' scaled pixels?
-        // Let's stick to the ratio logic:
-        // box.x is ratio (box.x / box.width) of "Face Widths" from left.
-        // Since Container Width = Face Width (conceptually), we shift by -(box.x/box.width) * 100 %.
+        // Apply scale to box coordinates
+        const rectW = box.width * scale;
+        const rectX = box.x * scale;
+        const rectY = box.y * scale;
 
-        const marginLeft = -(box.x / box.width) * 100;
-        const marginTop = -(box.y / box.width) * 100; // Relative to Width (maintaining aspect ratio in square container)
+        // 2. Calculate Scale: Container Width (100%) matches Target Width
+        const newWidthPct = (naturalW / rectW) * 100;
+
+        // 3. Calculate Offsets
+        const newMarginLeft = -(rectX / rectW) * 100;
+        const newMarginTop = -(rectY / rectW) * 100;
 
         setStyle({
             opacity: 1,
             display: 'block',
             maxWidth: 'none',
-            width: `${widthPct}%`,
-            marginLeft: `${marginLeft}%`,
-            marginTop: `${marginTop}%`,
+            width: `${newWidthPct}%`,
+            marginLeft: `${newMarginLeft}%`,
+            marginTop: `${newMarginTop}%`,
             height: 'auto'
         });
     };

@@ -30,3 +30,11 @@ test-exif.js
 
 # Gemini Agent
 .gemini/
+
+# Generated Files
+vectors.index
+
+# Python
+.venv
+__pycache__/
+*.pyc

@@ -30,6 +30,24 @@ export default function Layout() {
                         People
                     </NavLink>
                     <NavLink
+                        to="/locations"
+                        className={({ isActive }) =>
+                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                            }`
+                        }
+                    >
+                        Locations
+                    </NavLink>
+                    <NavLink
+                        to="/queues"
+                        className={({ isActive }) =>
+                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                            }`
+                        }
+                    >
+                        Queues
+                    </NavLink>
+                    <NavLink
                         to="/settings"
                         className={({ isActive }) =>
                             `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'

@@ -3,15 +3,24 @@ import { useScan } from '../context/ScanContext'
 import { useAI } from '../context/AIContext'
 import { VirtuosoGrid } from 'react-virtuoso'
 import PhotoDetail from '../components/PhotoDetail'
-import AIStatus from '../components/AIStatus'
+// import AIStatus from '../components/AIStatus'
+import ScanErrorsModal from '../components/ScanErrorsModal'
+import SettingsModal from '../components/SettingsModal'
+import { GearIcon } from '@radix-ui/react-icons'
 
 export default function Library() {
-    const { scanning, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, availableFolders } = useScan()
+    const { scanning, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, availableFolders, availablePeople, scanErrors, loadScanErrors } = useScan()
     const { addToQueue } = useAI()
     const [localPath, setLocalPath] = useState(scanPath || 'D:\\Photos')
     const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null)
     const [isSelectionMode, setIsSelectionMode] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+    const [showErrors, setShowErrors] = useState(false)
+    const [showSettings, setShowSettings] = useState(false)
+
+    useEffect(() => {
+        loadScanErrors()
+    }, [])
 
     useEffect(() => {
         if (photos.length === 0 && hasMore && !scanning) {
@@ -102,6 +111,29 @@ export default function Library() {
         </div>
     )), [])
 
+    // Local state for search to allow debouncing
+    const [searchQuery, setSearchQuery] = useState('')
+
+    // Sync local search query with filter when filter changes externally (or initializing)
+    useEffect(() => {
+        if ('search' in filter && filter.search !== searchQuery) {
+            setSearchQuery(filter.search || '')
+        }
+    }, [filter.search])
+
+    // Debounce search updates
+    useEffect(() => {
+        if (!('search' in filter)) return
+
+        const timeout = setTimeout(() => {
+            if (searchQuery !== filter.search) {
+                setFilter({ ...filter, search: searchQuery })
+            }
+        }, 500)
+
+        return () => clearTimeout(timeout)
+    }, [searchQuery])
+
     return (
         <div className="flex flex-col h-full bg-gray-900">
             {/* Top Bar */}
@@ -112,26 +144,37 @@ export default function Library() {
                 <div className="flex bg-gray-700 rounded overflow-hidden">
                     <select
                         className="bg-transparent text-white text-sm px-2 py-1 border-none outline-none focus:ring-0 cursor-pointer"
-                        value={filter.initial ? 'initial' : (filter.untagged ? 'untagged' : (filter.tag ? 'tag' : (filter.folder ? 'folder' : 'all')))}
+                        value={
+                            filter.initial ? 'initial' :
+                                ('untagged' in filter ? 'untagged' :
+                                    ('tag' in filter ? 'tag' :
+                                        ('people' in filter ? 'people' :
+                                            ('search' in filter ? 'search' :
+                                                ('folder' in filter ? 'folder' : 'all')))))
+                        }
                         onChange={(e) => {
-                            if (e.target.value === 'untagged') setFilter({ untagged: true })
-                            else if (e.target.value === 'all') setFilter({}) // Clear all filters (including initial)
-                            else if (e.target.value === 'tag') {
-                                setFilter({ tag: '' })
+                            const mode = e.target.value
+                            if (mode === 'untagged') setFilter({ untagged: true })
+                            else if (mode === 'all') setFilter({})
+                            else if (mode === 'tag') setFilter({ tag: '' })
+                            else if (mode === 'search') {
+                                setFilter({ search: '' })
+                                setSearchQuery('')
                             }
-                            else if (e.target.value === 'folder') {
-                                setFilter({ folder: '' })
-                            }
+                            else if (mode === 'folder') setFilter({ folder: '' })
+                            else if (mode === 'people') setFilter({ people: [] })
                         }}
                     >
                         {filter.initial && <option className="bg-gray-800 text-white" value="initial" disabled>Select Filter...</option>}
                         <option className="bg-gray-800 text-white" value="all">All Photos</option>
-                        <option className="bg-gray-800 text-white" value="untagged">Untagged (For Review)</option>
+                        <option className="bg-gray-800 text-white" value="untagged">Untagged (Review)</option>
                         <option className="bg-gray-800 text-white" value="tag">By Tag</option>
+                        <option className="bg-gray-800 text-white" value="people">By Person</option>
+                        <option className="bg-gray-800 text-white" value="search">Search (AI)</option>
                         <option className="bg-gray-800 text-white" value="folder">By Folder</option>
                     </select>
 
-                    {/* Tag Selector (only if 'tag' mode) */}
+                    {/* Tag Selector */}
                     {'tag' in filter && (
                         <select
                             className="bg-gray-600 text-white text-sm px-2 py-1 border-l border-gray-500 outline-none focus:ring-0 cursor-pointer"
@@ -145,7 +188,35 @@ export default function Library() {
                         </select>
                     )}
 
-                    {/* Folder Selector (only if 'folder' mode) */}
+                    {/* Person Selector */}
+                    {'people' in filter && (
+                        <select
+                            className="bg-gray-600 text-white text-sm px-2 py-1 border-l border-gray-500 outline-none focus:ring-0 cursor-pointer max-w-[200px]"
+                            value={(filter.people && filter.people.length > 0) ? filter.people[0] : ''}
+                            onChange={(e) => {
+                                const val = e.target.value
+                                setFilter({ ...filter, people: val ? [parseInt(val)] : [] })
+                            }}
+                        >
+                            <option className="bg-gray-800 text-white" value="">Select Person...</option>
+                            {availablePeople.map((p: any) => (
+                                <option className="bg-gray-800 text-white" key={p.id} value={p.id}>{p.name} ({p.face_count})</option>
+                            ))}
+                        </select>
+                    )}
+
+                    {/* Search Input */}
+                    {'search' in filter && (
+                        <input
+                            type="text"
+                            className="bg-gray-600 text-white text-sm px-2 py-1 border-l border-gray-500 outline-none focus:ring-0 w-32 placeholder-gray-400"
+                            placeholder="e.g. 'dog'"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                    )}
+
+                    {/* Folder Selector */}
                     {'folder' in filter && (
                         <select
                             className="bg-gray-600 text-white text-sm px-2 py-1 border-l border-gray-500 outline-none focus:ring-0 cursor-pointer max-w-[200px]"
@@ -213,7 +284,20 @@ export default function Library() {
 
                 {/* AI Status Indicator */}
                 <div className="flex items-center gap-2">
-                    <AIStatus />
+                    {/* AIStatus moved to StatusBar */}
+
+                    {scanErrors.length > 0 && (
+                        <button
+                            onClick={() => setShowErrors(true)}
+                            className="flex items-center gap-1.5 px-2 py-1 bg-red-900/50 hover:bg-red-900/80 border border-red-700/50 rounded transition-colors text-red-200"
+                            title={`${scanErrors.length} scanning errors`}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-xs font-medium">{scanErrors.length}</span>
+                        </button>
+                    )}
                 </div>
 
                 <div className="ml-auto flex items-center gap-2">
@@ -238,8 +322,20 @@ export default function Library() {
                     >
                         {scanning ? `Scanning...` : 'Scan'}
                     </button>
+                    <button
+                        onClick={() => setShowSettings(true)}
+                        className="bg-gray-700 hover:bg-gray-600 text-gray-300 p-1.5 rounded transition-colors"
+                        title="AI Settings"
+                    >
+                        <GearIcon className="w-5 h-5" />
+                    </button>
                 </div>
             </header>
+
+            <SettingsModal
+                open={showSettings}
+                onOpenChange={setShowSettings}
+            />
 
             {/* Grid Content */}
             <div className="flex-1 p-4 content-start h-full">
@@ -324,6 +420,11 @@ export default function Library() {
                     onNext={() => setSelectedPhotoIndex(prev => (prev === null || prev === photos.length - 1) ? prev : prev + 1)}
                     onPrev={() => setSelectedPhotoIndex(prev => (prev === null || prev === 0) ? prev : prev - 1)}
                 />
+            )}
+
+            {/* Error Modal */}
+            {showErrors && (
+                <ScanErrorsModal onClose={() => setShowErrors(false)} />
             )}
         </div>
     )

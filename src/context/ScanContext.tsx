@@ -15,6 +15,13 @@ interface ScanContextType {
     loadTags: () => Promise<void>
     availableFolders: any[]
     loadFolders: () => Promise<void>
+    availablePeople: any[]
+    loadPeople: () => Promise<void>
+    // Error Tracking
+    scanErrors: any[]
+    loadScanErrors: () => Promise<void>
+    retryErrors: () => Promise<void>
+    clearErrors: () => Promise<void>
 }
 
 const ScanContext = createContext<ScanContextType | undefined>(undefined)
@@ -30,6 +37,8 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     const [filter, setFilterState] = useState<any>({ initial: true })
     const [availableTags, setAvailableTags] = useState<any[]>([])
     const [availableFolders, setAvailableFolders] = useState<any[]>([])
+    const [availablePeople, setAvailablePeople] = useState<any[]>([])
+    const [scanErrors, setScanErrors] = useState<any[]>([])
     const { addToQueue } = useAI()
 
     useEffect(() => {
@@ -66,6 +75,41 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         }
     }
 
+    const loadScanErrors = async () => {
+        try {
+            // @ts-ignore
+            const errors = await window.ipcRenderer.invoke('db:getScanErrors')
+            setScanErrors(errors)
+        } catch (e) {
+            console.error('Failed to load scan errors', e)
+        }
+    }
+
+    const retryErrors = async () => {
+        try {
+            // @ts-ignore
+            const photosToRetry = await window.ipcRenderer.invoke('db:retryScanErrors')
+            if (photosToRetry && photosToRetry.length > 0) {
+                console.log(`Retrying ${photosToRetry.length} failed scans...`)
+                addToQueue(photosToRetry)
+            }
+            loadScanErrors() // Refresh (should be empty)
+        } catch (e) {
+            console.error('Failed to retry errors', e)
+        }
+    }
+
+    const clearErrors = async () => {
+        try {
+            // @ts-ignore
+            await window.ipcRenderer.invoke('db:clearScanErrors')
+            setScanErrors([])
+        } catch (e) {
+            console.error('Failed to clear errors', e)
+        }
+    }
+
+
     // Reload photos when filter changes
     useEffect(() => {
         if (filter.initial) {
@@ -80,6 +124,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         setHasMore(true)
         loadTags()
         loadFolders()
+        loadPeople()
 
         const initialLoad = async () => {
             try {
@@ -89,6 +134,9 @@ export function ScanProvider({ children }: { children: ReactNode }) {
                 setPhotos(newPhotos)
                 setOffset(50)
                 setHasMore(newPhotos.length >= 50)
+                if (newPhotos.length > 0) {
+                    // addToQueue(newPhotos); // FIX: Do not auto-queue on load
+                }
             } catch (e) {
                 console.error("Filter load failed", e)
             } finally {
@@ -122,7 +170,9 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             setPhotos(prev => [...prev, ...newPhotos])
             setOffset(prev => prev + 50)
 
-            if (newPhotos.length > 0) addToQueue(newPhotos);
+            if (newPhotos.length > 0) {
+                // addToQueue(newPhotos); // FIX: Do not auto-queue on scroll
+            }
         } catch (err) {
             console.error('Load photos error:', err)
         } finally {
@@ -136,9 +186,20 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         setScanPath(path)
         try {
             console.log(`[ScanContext] Starting scan of ${path}`);
-            // @ts-ignore
             await window.ipcRenderer.invoke('scan-directory', path)
             console.log(`[ScanContext] Scan complete.`);
+
+            // Queue Fix: Fetch ALL photos in this folder and add to AI Queue
+            // @ts-ignore
+            const scanPhotos = await window.ipcRenderer.invoke('db:getPhotosForRescan', { filter: { folder: path } })
+            if (scanPhotos.length > 0) {
+                console.log(`[ScanContext] check: Queueing ${scanPhotos.length} photos for AI.`);
+                addToQueue(scanPhotos)
+            }
+
+            // Also refresh errors if any occurred during scan (synchronous part, though AI is async)
+            loadScanErrors()
+
         } catch (err) {
             console.error('Scan error:', err)
             throw err
@@ -149,8 +210,22 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         }
     }
 
+    const loadPeople = async () => {
+        try {
+            // @ts-ignore
+            const people = await window.ipcRenderer.invoke('db:getPeople')
+            setAvailablePeople(people)
+        } catch (e) {
+            console.error('Failed to load people', e)
+        }
+    }
+
     return (
-        <ScanContext.Provider value={{ scanning, scanCount, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, loadTags, availableFolders, loadFolders }}>
+        <ScanContext.Provider value={{
+            scanning, scanCount, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter,
+            availableTags, loadTags, availableFolders, loadFolders, availablePeople, loadPeople,
+            scanErrors, loadScanErrors, retryErrors, clearErrors
+        }}>
             {children}
         </ScanContext.Provider>
     )
