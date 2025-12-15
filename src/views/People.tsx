@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { usePeople } from '../context/PeopleContext'
 import PersonCard from '../components/PersonCard'
 import FaceGrid from '../components/FaceGrid'
+import BlurryFacesModal from '../components/BlurryFacesModal'
 
 export default function People() {
     const navigate = useNavigate()
     const { people, faces, loadPeople, loadFaces, loading } = usePeople()
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
+    const [showBlurryModal, setShowBlurryModal] = useState(false)
 
     useEffect(() => {
         loadPeople()
@@ -54,7 +56,6 @@ export default function People() {
                                 if (!confirm(`Are you sure you want to ignore all ${faces.length} visible faces?`)) return;
                                 try {
                                     const faceIds = faces.map(f => f.id);
-                                    // @ts-ignore
                                     await window.ipcRenderer.invoke('db:ignoreFaces', faceIds);
                                     loadFaces({ unnamed: true }); // Refresh
                                 } catch (e) {
@@ -67,7 +68,37 @@ export default function People() {
                             Ignore All Visible
                         </button>
                     )}
+                    {activeTab === 'unnamed' && faces.length > 0 && (
+                        <button
+                            onClick={async () => {
+                                if (!confirm(`Are you sure you want to PERMANENTLY DELETE all ${faces.length} visible faces? They will reappear if you rescan.`)) return;
+                                try {
+                                    const faceIds = faces.map(f => f.id);
+                                    // @ts-ignore
+                                    await window.ipcRenderer.invoke('db:deleteFaces', faceIds);
+                                    loadFaces({ unnamed: true }); // Refresh
+                                } catch (e) {
+                                    console.error(e);
+                                    alert('Failed to delete faces');
+                                }
+                            }}
+                            className="bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-300 hover:text-white px-3 py-1 text-sm rounded-md ml-2 transition-colors"
+                        >
+                            Clear All
+                        </button>
+                    )}
                 </div>
+
+                {activeTab === 'unnamed' && (
+                    <div className="absolute top-6 right-6 flex gap-2">
+                        <button
+                            onClick={() => setShowBlurryModal(true)}
+                            className="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-1.5 rounded-lg text-sm border border-gray-700 transition-colors"
+                        >
+                            Cleanup Blurry
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Content */}
@@ -106,6 +137,13 @@ export default function People() {
                     </div>
                 )}
             </div>
+
+            <BlurryFacesModal
+                open={showBlurryModal}
+                onOpenChange={setShowBlurryModal}
+                personId={null}
+                onDeleteComplete={() => loadFaces({ unnamed: true })}
+            />
         </div>
     )
 }

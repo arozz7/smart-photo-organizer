@@ -93,6 +93,7 @@ export default function FaceGrid({ faces }: { faces: any[] }) {
                                         <FaceThumbnail
                                             src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
                                             box={face.box}
+                                            originalImageWidth={face.width}
                                             className="w-full h-full pointer-events-none"
                                         />
                                         <div className={`absolute top-2 right-2 w-5 h-5 rounded-full border border-white flex items-center justify-center transition-colors ${selectedMatchIds.has(face.id) ? 'bg-indigo-500' : 'bg-black/50'}`}>

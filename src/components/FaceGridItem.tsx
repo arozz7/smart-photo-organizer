@@ -57,6 +57,7 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
                 <FaceThumbnail
                     src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
                     box={face.box}
+                    originalImageWidth={face.width}
                     className="w-full h-full"
                 />
 

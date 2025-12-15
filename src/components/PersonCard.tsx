@@ -15,6 +15,7 @@ export default function PersonCard({ person, onClick }: { person: any, onClick: 
                     <FaceThumbnail
                         src={`local-resource://${encodeURIComponent(person.cover_path)}`}
                         box={box}
+                        originalImageWidth={person.cover_width}
                         className="w-full h-full opacity-80 group-hover:opacity-100 transition-opacity duration-500"
                     />
                 ) : (

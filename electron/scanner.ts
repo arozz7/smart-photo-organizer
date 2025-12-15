@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { app } from 'electron';
 import { ExifTool } from 'exiftool-vendored';
 import { getDB } from './db';
 import sharp from 'sharp';
@@ -45,13 +45,13 @@ async function getExifTool(): Promise<ExifTool | null> {
 
 const SUPPORTED_EXTS = ['.jpg', '.jpeg', '.png', '.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.tif', '.tiff'];
 
-export async function scanDirectory(dirPath: string, onProgress?: (count: number) => void) {
+export async function scanDirectory(dirPath: string, libraryPath: string, onProgress?: (count: number) => void) {
     const db = getDB();
     const photos: any[] = [];
     let count = 0;
 
     // Ensure preview directory exists
-    const previewDir = path.join(app.getPath('userData'), 'previews');
+    const previewDir = path.join(libraryPath, 'previews');
     await fs.mkdir(previewDir, { recursive: true });
 
     const insertStmt = db.prepare(`
@@ -66,8 +66,10 @@ export async function scanDirectory(dirPath: string, onProgress?: (count: number
 
     // Helper to extract preview
     async function extractPreview(filePath: string): Promise<string | null> {
+        // Use hash of filePath to ensure uniqueness across folders
         const fileName = path.basename(filePath);
-        const previewName = `${fileName}.jpg`;
+        const hash = createHash('md5').update(filePath).digest('hex');
+        const previewName = `${hash}.jpg`;
         const previewPath = path.join(previewDir, previewName);
 
         try {
@@ -89,21 +91,35 @@ export async function scanDirectory(dirPath: string, onProgress?: (count: number
                         try {
                             const tool = await getExifTool();
                             if (tool) {
+                                const tempPreviewPath = `${previewPath}.tmp`;
                                 const timeoutPromise = new Promise((_, reject) =>
                                     setTimeout(() => reject(new Error('Preview extraction timed out')), 15000)
                                 );
                                 await Promise.race([
-                                    tool.extractPreview(filePath, previewPath),
+                                    tool.extractPreview(filePath, tempPreviewPath),
                                     timeoutPromise
                                 ]);
-                                // Check if file was created? ExifTool usually throws if not.
-                                // Double check existence
-                                await fs.access(previewPath);
-                                console.log(`Extracted preview for ${fileName}`);
+
+                                // Check if file was created
+                                await fs.access(tempPreviewPath);
+
+                                // Normalize with Sharp (Auto-rotate and resize)
+                                await sharp(tempPreviewPath)
+                                    .rotate()
+                                    .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+                                    .jpeg({ quality: 80 })
+                                    .toFile(previewPath);
+
+                                // Cleanup temp file
+                                try { await fs.unlink(tempPreviewPath); } catch { }
+
+                                console.log(`Extracted and normalized preview for ${fileName}`);
                                 extracted = true;
                             }
                         } catch (e) {
-                            // console.log(`ExifTool extraction failed for ${fileName}, trying Sharp fallback...`);
+                            // Clean up temp if it exists
+                            try { await fs.unlink(`${previewPath}.tmp`); } catch { }
+                            // console.log(`ExifTool extraction failed for ${fileName}, trying Sharp fallback...`, e);
                         }
                     }
 
@@ -157,19 +173,34 @@ export async function scanDirectory(dirPath: string, onProgress?: (count: number
                         let needsUpdate = false;
 
                         // Check if we need to generate a preview for an existing photo (e.g. previous run failed)
+                        // Check if we need to generate a preview for an existing photo (e.g. previous run failed)
                         if (photo) {
                             const isRaw = !['.jpg', '.jpeg', '.png'].includes(ext);
-                            if (isRaw && !photo.preview_cache_path) {
-                                // Optimization: Only try if ExifTool is actually working
-                                const tool = await getExifTool();
-                                if (tool) {
-                                    // console.log(`Retry preview extraction for ${path.basename(fullPath)}`);
-                                    const previewPath = await extractPreview(fullPath);
-                                    if (previewPath) {
-                                        // Update DB
-                                        db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
-                                        photo.preview_cache_path = previewPath; // Update local obj for UI
-                                        needsUpdate = true;
+                            let previewMissing = false;
+
+                            if (isRaw) {
+                                if (photo.preview_cache_path) {
+                                    try {
+                                        await fs.access(photo.preview_cache_path);
+                                    } catch {
+                                        previewMissing = true;
+                                    }
+                                } else {
+                                    previewMissing = true;
+                                }
+
+                                if (previewMissing) {
+                                    // Optimization: Only try if ExifTool is actually working
+                                    const tool = await getExifTool();
+                                    if (tool) {
+                                        // console.log(`Retry preview extraction for ${path.basename(fullPath)}`);
+                                        const previewPath = await extractPreview(fullPath);
+                                        if (previewPath) {
+                                            // Update DB
+                                            db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
+                                            photo.preview_cache_path = previewPath; // Update local obj for UI
+                                            needsUpdate = true;
+                                        }
                                     }
                                 }
                             }

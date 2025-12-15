@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useContext, useState, ReactNode } from 'react'
 
 interface Person {
     id: number
@@ -15,6 +15,8 @@ interface Face {
     file_path: string
     preview_cache_path?: string
     person_name?: string
+    width?: number
+    height?: number
 }
 
 interface PeopleContextType {

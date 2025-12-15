@@ -1,0 +1,9 @@
+opencv-python
+numpy
+insightface
+faiss-cpu
+transformers
+torch
+pillow
+rawpy
+imageio
