@@ -27,6 +27,7 @@ interface PeopleContextType {
     loadFaces: (filter?: any) => Promise<void>
     assignPerson: (faceId: number, name: string) => Promise<any>
     ignoreFace: (faceId: number) => Promise<void>
+    ignoreFaces: (faceIds: number[]) => Promise<void>
     autoNameFaces: (faceIds: number[], name: string) => Promise<void>
 }
 
@@ -51,7 +52,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         setLoading(true)
         try {
             // @ts-ignore
-            const result = await window.ipcRenderer.invoke('db:getAllFaces', { limit: 100, filter })
+            const result = await window.ipcRenderer.invoke('db:getAllFaces', { limit: 2000, filter })
             setFaces(result)
         } catch (e) {
             console.error("Failed to load faces", e)
@@ -68,6 +69,16 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
             setFaces(prev => prev.filter(f => f.id !== faceId))
         } catch (e) {
             console.error("Failed to ignore face", e)
+        }
+    }
+
+    const ignoreFaces = async (faceIds: number[]) => {
+        try {
+            // @ts-ignore
+            await window.ipcRenderer.invoke('db:ignoreFaces', faceIds)
+            setFaces(prev => prev.filter(f => !faceIds.includes(f.id)))
+        } catch (e) {
+            console.error("Failed to ignore faces", e)
         }
     }
 
@@ -141,7 +152,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         <PeopleContext.Provider value={{
             people, faces, loading,
             loadPeople, loadFaces, assignPerson,
-            ignoreFace, autoNameFaces
+            ignoreFace, ignoreFaces, autoNameFaces
         }}>
             {children}
         </PeopleContext.Provider>

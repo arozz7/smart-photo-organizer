@@ -11,7 +11,8 @@ export default function Queues() {
         isCoolingDown,
         cooldownTimeLeft,
         skipCooldown,
-        addToQueue
+        addToQueue,
+        systemStatus
     } = useAI()
 
     const [recovering, setRecovering] = useState(false);
@@ -167,19 +168,109 @@ export default function Queues() {
                         </p>
                     </div>
 
-                    <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-                        <h3 className="text-lg font-medium text-white mb-2">System Status</h3>
-                        {/* Placeholder for future system stats */}
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-xs text-gray-500">Backend Status</label>
-                                <div className="text-green-400 text-sm font-medium">Connected</div>
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-500">Database</label>
-                                <div className="text-green-400 text-sm font-medium">Ready</div>
-                            </div>
+                    <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
+                        <div className="flex justify-between items-center">
+                            <h3 className="text-lg font-medium text-white">System Status</h3>
+                            {systemStatus?.system?.cuda_available ? (
+                                <span className="px-2 py-0.5 rounded text-xs font-bold bg-green-900 text-green-400 border border-green-700">
+                                    CUDA: {systemStatus.system.cuda_device}
+                                </span>
+                            ) : (
+                                <span className="px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400">
+                                    CPU Mode
+                                </span>
+                            )}
                         </div>
+
+                        {!systemStatus ? (
+                            <div className="text-sm text-gray-500 animate-pulse">Loading status...</div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm">
+
+                                {/* AI Engine */}
+                                <div>
+                                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">AI Engine (InsightFace)</h4>
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">Status</span>
+                                            <span className={systemStatus.insightface.loaded ? "text-green-400" : "text-red-400"}>
+                                                {systemStatus.insightface.loaded ? "Active" : "Failed"}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">Provider</span>
+                                            <span className="text-gray-200">{systemStatus.insightface.providers?.[0] || 'Unknown'}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">Detection Thresh</span>
+                                            <span className="text-gray-200">{systemStatus.insightface.det_thresh}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Vector DB */}
+                                <div>
+                                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Vector DB (FAISS)</h4>
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">Status</span>
+                                            <span className={systemStatus.faiss.loaded ? "text-green-400" : "text-red-400"}>
+                                                {systemStatus.faiss.loaded ? "Ready" : "Not Loaded"}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">Vectors</span>
+                                            <span className="text-gray-200">{systemStatus.faiss.count?.toLocaleString() || 0}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">Dimensions</span>
+                                            <span className="text-gray-200">{systemStatus.faiss.dim || 0}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* VLM */}
+                                <div>
+                                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Smart Vision (VLM)</h4>
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">Model</span>
+                                            <span className="text-gray-200">{systemStatus.vlm.model || 'None'}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">State</span>
+                                            <span className={systemStatus.vlm.loaded ? "text-green-400" : "text-gray-500"}>
+                                                {systemStatus.vlm.loaded ? "Loaded" : "Lazy Loading..."}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">Device</span>
+                                            <span className="text-gray-200">{systemStatus.vlm.device || 'N/A'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Backend */}
+                                <div>
+                                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Libraries</h4>
+                                    <div className="space-y-1 text-xs">
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">Torch</span>
+                                            <span className="text-gray-500">{systemStatus.system.torch}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">ONNX Runtime</span>
+                                            <span className="text-gray-500">{systemStatus.system.onnxruntime}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">OpenCV</span>
+                                            <span className="text-gray-500">{systemStatus.system.opencv}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+                        )}
                     </div>
 
                     {/* Scan Recovery */}

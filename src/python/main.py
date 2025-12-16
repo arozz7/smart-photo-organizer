@@ -7,7 +7,9 @@ import os
 import cv2
 import numpy as np
 import rawpy
+import rawpy
 import imageio
+
 
 # Ensure CUDA DLLs are found if installed via pip
 if os.name == 'nt':
@@ -33,6 +35,19 @@ if os.name == 'nt':
                      pass
         os.environ['PATH'] = os.path.pathsep.join([cudnn_dir, os.path.join(cudnn_dir, 'bin')] + os.environ['PATH'].split(os.path.pathsep))
                      
+    except ImportError:
+        pass
+
+    # Patch TensorRT DLLs
+    try:
+        import tensorrt_libs
+        trt_libs_dir = list(tensorrt_libs.__path__)[0]
+        if os.path.exists(trt_libs_dir):
+            try:
+                os.add_dll_directory(trt_libs_dir)
+            except Exception:
+                pass
+            os.environ['PATH'] = trt_libs_dir + os.path.pathsep + os.environ['PATH']
     except ImportError:
         pass
 
@@ -79,7 +94,19 @@ def init_insightface():
     try:
         from contextlib import redirect_stdout
         with redirect_stdout(sys.stderr):
-             app = FaceAnalysis(name='buffalo_l', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+             # Check if TensorRT is actually available to avoid spamming errors
+             try:
+                 import ctypes
+                 # Try to find nvinfer_10.dll (standard for TRT 10.x)
+                 # Since we added it to PATH/DLL_DIR above, this should succeed if correct
+                 ctypes.CDLL('nvinfer_10.dll')
+                 providers.insert(0, 'TensorrtExecutionProvider')
+                 logger.info("TensorRT libraries found. enabling TensorrtExecutionProvider.")
+             except Exception:
+                 logger.info("TensorRT not found. Skipping TensorrtExecutionProvider.")
+                 
+             app = FaceAnalysis(name='buffalo_l', providers=providers)
              # Using dynamic threshold
              app.prepare(ctx_id=0, det_size=(1280, 1280), det_thresh=DET_THRESH)
         logger.info("InsightFace initialized.")
@@ -389,16 +416,84 @@ def generate_captions(image_path):
 
     return description, tags
 
+def calculate_mean_embedding(descriptors):
+    """
+    Calculates the mean embedding from a list of descriptors.
+    descriptors: List of 512-d lists or numpy arrays.
+    Returns: 512-d list (mean vector).
+    """
+    if not descriptors:
+        return []
+    
+    # Convert to numpy array for easy mean calc
+    arr = np.array(descriptors)
+    mean_vec = np.mean(arr, axis=0)
+    
+    # Normalize? InsightFace descriptors are usually normalized. 
+    # Averaging might reduce length. Re-normalization is often good for cosine similarity.
+    norm = np.linalg.norm(mean_vec)
+    if norm > 0:
+        mean_vec = mean_vec / norm
+        
+    return mean_vec.tolist()
+
+def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2):
+    """
+    Clusters faces using DBSCAN.
+    descriptors: List of embedding vectors.
+    ids: List of corresponding face/photo IDs to return in clusters.
+    Returns: List of clusters, where each cluster is a list of ids.
+    """
+    if not descriptors:
+        return []
+
+    X = np.array(descriptors)
+    
+    # 1. Normalize Vectors (Critical for Cosine/Euclidean equivalence)
+    # If vectors are not normalized, Euclidean distance will be huge.
+    # L2 Normalization:
+    norm = np.linalg.norm(X, axis=1, keepdims=True)
+    # Avoid division by zero
+    norm[norm == 0] = 1e-10
+    X = X / norm
+
+    try:
+        from sklearn.cluster import DBSCAN
+    except ImportError:
+        return [] 
+
+    # DBSCAN with parameters tuned for ArcFace (Normalized Euclidean)
+    # metric='euclidean' on normalized vectors approximates cosine distance.
+    # dist = sqrt(2(1-cos)).
+    # eps=0.6 -> cos_dist approx 0.18 (Strict)
+    # eps=0.75 -> cos_dist approx 0.28 (Medium)
+    # eps=0.85 -> cos_dist approx 0.36 (Loose)
+    # Smart Naming uses cos_dist 0.4. We choose 0.75 to be safe but inclusive.
+    clustering = DBSCAN(eps=eps, min_samples=min_samples, metric='euclidean').fit(X)
+    
+    labels = clustering.labels_
+    
+    clusters = {}
+    for idx, label in enumerate(labels):
+        if label == -1: continue # Noise
+        if label not in clusters: clusters[label] = []
+        clusters[label].append(ids[idx])
+        
+    return list(clusters.values())
+
 # --- COMMAND HANDLER ---
 
 def handle_command(command):
     cmd_type = command.get('type')
     payload = command.get('payload', {})
+    req_id = payload.get('reqId')
     
     logger.info(f"Received command: {cmd_type}")
 
+    response = {}
+
     if cmd_type == 'ping':
-        return {"type": "pong", "timestamp": time.time()}
+        response = {"type": "pong", "timestamp": time.time()}
 
     elif cmd_type == 'update_config':
         global DET_THRESH, BLUR_THRESH, VLM_TEMP, VLM_MAX_TOKENS
@@ -421,7 +516,7 @@ def handle_command(command):
         if 'vlmMaxTokens' in config:
             VLM_MAX_TOKENS = int(config['vlmMaxTokens'])
 
-        return {"type": "config_updated"}
+        response = {"type": "config_updated"}
 
 
     elif cmd_type == 'scan_image':
@@ -589,12 +684,10 @@ def handle_command(command):
                 except Exception as e:
                     logger.error(f"Failed to save debug image: {e}")
 
-            return {
+            response = {
                 "type": "scan_result",
                 "photoId": photo_id,
                 "faces": results,
-                "previewPath": preview_path,
-                "width": img_width,
                 "previewPath": preview_path,
                 "width": img_width,
                 "height": img_height,
@@ -603,7 +696,7 @@ def handle_command(command):
             
         except Exception as e:
             logger.exception("Face Scan Error")
-            return {"error": str(e)}
+            response = {"error": str(e)}
 
     elif cmd_type == 'generate_tags':
         photo_id = payload.get('photoId')
@@ -611,7 +704,7 @@ def handle_command(command):
         logger.info(f"Generating tags for {photo_id}...")
         try:
              description, tags = generate_captions(file_path)
-             return {
+             response = {
                  "type": "tags_result",
                  "photoId": photo_id,
                  "description": description,
@@ -620,14 +713,117 @@ def handle_command(command):
         except Exception as e:
             logger.exception("VLM Error")
             # Return error so we can log it in DB
-            return {
+            response = {
                 "type": "tags_result",
                 "photoId": photo_id, 
                 "error": str(e)
             }
 
+    elif cmd_type == 'cluster_faces':
+        photo_id = payload.get('photoId')
+        descriptors = payload.get('descriptors', [])
+        ids = payload.get('ids', [])
+        eps = payload.get('eps', 0.75)
+        min_samples = payload.get('min_samples', 2)
+        
+        logger.info(f"Clustering {len(descriptors)} faces... (ReqID: {photo_id})")
+        try:
+            clusters = cluster_faces_dbscan(descriptors, ids, eps, min_samples)
+            logger.info(f"Found {len(clusters)} clusters.")
+            response = {
+                "type": "cluster_result",
+                "photoId": photo_id,
+                "clusters": clusters
+            }
+        except Exception as e:
+            logger.exception("Clustering Error")
+            response = {"error": str(e)}
+
+    elif cmd_type == 'get_mean_embedding':
+        descriptors = payload.get('descriptors', [])
+        try:
+            mean_vector = calculate_mean_embedding(descriptors)
+            response = {
+                "type": "mean_embedding_result",
+                "embedding": mean_vector
+            }
+        except Exception as e:
+            response = {"error": str(e)}
+
+    elif cmd_type == 'get_system_status':
+        status = {}
+        try:
+            # 1. InsightFace Status
+            insightface_status = {'loaded': False}
+            if app:
+                providers = []
+                try:
+                    # Attempt to get providers from the detection model (usually active)
+                    if hasattr(app, 'models') and 'detection' in app.models:
+                        det_model = app.models['detection']
+                        if hasattr(det_model, 'session'):
+                            providers = det_model.session.get_providers()
+                        elif hasattr(det_model, 'net') and hasattr(det_model.net, 'session'):
+                            providers = det_model.net.session.get_providers()
+                except Exception:
+                    providers = ["Unknown"]
+
+                insightface_status = {
+                    'loaded': True,
+                    'providers': providers,
+                    'det_thresh': DET_THRESH,
+                    'blur_thresh': BLUR_THRESH
+                }
+            status['insightface'] = insightface_status
+
+            # 2. FAISS Status
+            faiss_status = {'loaded': False}
+            if index:
+                 faiss_status = {
+                     'loaded': True,
+                     'count': index.ntotal,
+                     'dim': index.d
+                 }
+            status['faiss'] = faiss_status
+
+            # 3. VLM Status
+            vlm_status = {
+                'loaded': vlm_model is not None,
+                'device': str(vlm_model.device) if vlm_model else 'N/A',
+                'model': 'SmolVLM',
+                'config': {
+                    'temp': VLM_TEMP,
+                    'max_tokens': VLM_MAX_TOKENS
+                }
+            }
+            status['vlm'] = vlm_status
+
+            # 4. Libraries & System
+            import onnxruntime
+            status['system'] = {
+                'python': sys.version.split()[0],
+                'torch': torch.__version__,
+                'cuda_available': torch.cuda.is_available(),
+                'cuda_device': torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None',
+                'onnxruntime': onnxruntime.__version__,
+                'opencv': cv2.__version__
+            }
+
+            response = {
+                "type": "system_status_result",
+                "status": status
+            }
+        except Exception as e:
+            logger.error(f"Error getting status: {e}")
+            response = {"error": str(e)}
     else:
-        return {"error": f"Unknown command: {cmd_type}"}
+        response = {"error": f"Unknown command: {cmd_type}"}
+        
+    # Inject request ID if present so Electron can map the promise
+    if req_id is not None:
+        response['reqId'] = req_id
+        
+    return response
 
 # --- MAIN LOOP ---
 

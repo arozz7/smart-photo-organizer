@@ -70,41 +70,39 @@ function startPythonBackend() {
       try {
         const message = JSON.parse(line);
         console.log('[Python]', message);
-        // Forward relevant messages to renderer if needed
         if (win && (message.type === 'scan_result' || message.type === 'tags_result')) {
           win.webContents.send('ai:scan-result', message);
+        }
 
-          // Log errors if present
-          if (message.error && message.photoId) {
-            // We can't easily import db here due to scope, but we can do a quick check or just rely on Renderer to handle it?
-            // Actually, Renderer receives it, so Renderer can call db:logScanError. 
-            // BUT, if Renderer is backgrounded or busy, might be better here.
-            // Let's rely on Renderer for now as it orchestrates the queue, OR simpler:
-            // Let's make a dedicated helper to log it here if we want to be robust. 
-            // For now, I'll stick to the plan: "Main: When Python returns an error... call db:logScanError"
-            // Since I can't easily access 'db' instance here without importing, and 'db' is initialized later...
-            // Wait, `initDB` is exported. `getDB` is exported.
-            try {
-              const { getDB } = await import('./db'); // Dynamic import to avoid circular dep issues if any
-              const db = getDB();
-              const logError = db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, (SELECT file_path FROM photos WHERE id = ?), ?, ?)');
-              const stage = message.type === 'scan_result' ? 'Face Scan' : 'Smart Tags';
-              logError.run(message.photoId, message.photoId, message.error, stage);
-              console.log(`[Main] Logged scan error for ${message.photoId}`);
-            } catch (err) {
-              // DB might not be ready or other issue
-              console.error("[Main] Failed to log auto-error:", err);
-            }
+        if (message.type === 'cluster_result') {
+          console.log(`[Main] Received Cluster Result for ${message.photoId}. Clusters: ${message.clusters?.length}`);
+        }
+
+
+        // Shared Promise Resolution (works for scan_result, tags_result, cluster_result, system_status_result)
+        const resId = message.photoId || message.reqId || (message.payload && message.payload.reqId);
+
+        if (resId && scanPromises.has(resId)) {
+          const promise = scanPromises.get(resId);
+          if (message.error) {
+            promise?.reject(message.error);
+          } else {
+            promise?.resolve(message);
           }
+          scanPromises.delete(resId);
+        }
 
-          if (scanPromises.has(message.photoId)) {
-            const promise = scanPromises.get(message.photoId);
-            if (message.error) {
-              promise?.reject(message.error);
-            } else {
-              promise?.resolve(message);
-            }
-            scanPromises.delete(message.photoId);
+        // Special case for Logging errors (only for scans/tags?)
+        if ((message.type === 'scan_result' || message.type === 'tags_result') && message.error && message.photoId) {
+          try {
+            const { getDB } = await import('./db'); // Dynamic import to avoid circular dep issues if any
+            const db = getDB();
+            const logError = db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, (SELECT file_path FROM photos WHERE id = ?), ?, ?)');
+            const stage = message.type === 'scan_result' ? 'Face Scan' : 'Smart Tags';
+            logError.run(message.photoId, message.photoId, message.error, stage);
+            console.log(`[Main] Logged scan error for ${message.photoId}`);
+          } catch (err) {
+            console.error("[Main] Failed to log auto-error:", err);
           }
         }
       } catch (e) {
@@ -115,7 +113,12 @@ function startPythonBackend() {
 
   if (pythonProcess.stderr) {
     pythonProcess.stderr.on('data', (data) => {
-      console.error(`[Python API Error]: ${data}`);
+      const msg = data.toString();
+      if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('exception')) {
+        console.error(`[Python Error]: ${msg}`);
+      } else {
+        console.log(`[Python Log]: ${msg}`);
+      }
     });
   }
 
@@ -467,13 +470,13 @@ app.whenReady().then(async () => {
         return new Promise((resolve, reject) => {
           scanPromises.set(photoId, { resolve, reject });
 
-          // Timeout safety (30s)
+          // Timeout safety (5 minutes - AI on CPU can be slow)
           setTimeout(() => {
             if (scanPromises.has(photoId)) {
               scanPromises.delete(photoId);
               reject('Scan timed out');
             }
-          }, 30000);
+          }, 300000);
         });
       } else {
         console.error('[Main] Photo not found or no path:', photoId);
@@ -502,6 +505,136 @@ app.whenReady().then(async () => {
       }
     } catch (e) {
       console.error('[Main] Failed to lookup photo for VLM:', e);
+      return { success: false, error: e };
+    }
+  })
+
+  // Generic AI Command Handler (Request-Response)
+  ipcMain.handle('ai:command', async (_, command) => {
+    try {
+      // If the command expects a response, we need to track it.
+      // We'll use a random requestId/photoId to track the promise.
+      const requestId = Math.floor(Math.random() * 10000000);
+
+      // Inject requestId into payload so Python can echo it back if needed
+      // Most of our generic commands might not need photoId, but our promise map is keyed by photoId (number).
+      // We will assume 'payload' exists or create it.
+      if (!command.payload) command.payload = {};
+
+      // If the command is 'get_system_status' or similar that doesn't inherently have an ID, we assign one.
+      // We need to modify Python to respect/echo this ID if we want to use the same map.
+      // Actually, let's check Python's get_system_status. It returns { type: 'system_status_result', ... }
+      // It DOES NOT currently return an ID. We need to fix that or handle non-ID messages.
+
+      // WAIT: Python's 'handle_command' just returns the result dictionary.
+      // AND 'main.py' loop prints the result.
+      // 'electron/main.ts' reader loop (line 69) parses it.
+
+      // The current reader loop (line 83) relies on `message.photoId`.
+      // If Python returns a result WITHOUT photoId, the promise won't be resolved!
+
+      // STRATEGY: 
+      // 1. We must send a unique ID to Python.
+      // 2. Python must echo it back.
+      // 3. Update 'main.py' to echo 'id' from command to response? 
+      //    OR just update specific commands in Python to accept/return an ID.
+
+      // FOR NOW: Let's focus on 'get_system_status'. 
+      // Python's `handle_command` returns the dict directly.
+      // We can wrap the `handle_command` call in `main.py` to inject the ID back?
+      // Or just update `get_system_status` in `main.py` to accept and return an ID.
+
+      // Let's rely on a temporary specific fix for now and plan a better ID system later.
+      // Update `electron/main.ts` to expect `ai:command` but we likely need to patch Python again 
+      // if we want to wait for response using the existing `scanPromises` map.
+
+      // ALTERNATIVE: Use a separate promise mechanism for system status?
+      // No, let's reuse.
+
+      // Let's modify the command payload to include 'reqId'.
+      command.payload.reqId = requestId;
+
+      return new Promise((resolve, reject) => {
+        scanPromises.set(requestId, { resolve, reject });
+
+        // We also need to update the reader loop to look for 'reqId' if 'photoId' is missing.
+        sendToPython(command);
+
+        setTimeout(() => {
+          if (scanPromises.has(requestId)) {
+            scanPromises.delete(requestId);
+            reject('Command timed out');
+          }
+        }, 10000);
+      });
+    } catch (e) {
+      console.error('AI Command Failed:', e);
+      return { error: e };
+    }
+  });
+
+  ipcMain.handle('ai:clusterFaces', async (_, { faceIds, eps, min_samples } = {}) => {
+    const { getDB } = await import('./db');
+    const db = getDB();
+    try {
+      let rows;
+      if (faceIds && faceIds.length > 0) {
+        // Specific faces
+        const placeholders = faceIds.map(() => '?').join(',');
+        const stmt = db.prepare(`SELECT id, descriptor_json FROM faces WHERE id IN (${placeholders})`);
+        rows = stmt.all(...faceIds);
+      } else {
+        // All unnamed, non-ignored faces
+        const stmt = db.prepare('SELECT id, descriptor_json FROM faces WHERE person_id IS NULL AND is_ignored = 0');
+        rows = stmt.all();
+      }
+
+      const descriptors = rows.map((r: any) => JSON.parse(r.descriptor_json));
+      const ids = rows.map((r: any) => r.id);
+
+      if (descriptors.length === 0) return { success: true, clusters: [] };
+
+      // Call Python
+      return new Promise((resolve, reject) => {
+        // We need a way to get the response back. 
+        // Since sendToPython is fire-and-forget for async commands usually handled by event listeners...
+        // But here we want a direct response.
+        // The current 'sendToPython' / 'reader.on' architecture in startPythonBackend handles 'scan_result' and 'tags_result' via events.
+        // We need to extend it to handle 'cluster_result'.
+        // OR: We can use a request/response ID map if we want to be fancy.
+
+        // Wait! The reader loop (line 69) currently sends 'ai:scan-result' to window.
+        // It also checks `scanPromises` map! 
+        // So if I pass a specific ID, I can piggyback on that system.
+        // But `cluster_faces` isn't photo-specific. 
+        // I'll generate a random request ID.
+
+        const requestId = Math.floor(Math.random() * 1000000);
+
+        // Register promise
+        scanPromises.set(requestId, { resolve: (res: any) => resolve({ success: true, clusters: res.clusters }), reject });
+
+        sendToPython({
+          type: 'cluster_faces',
+          payload: {
+            photoId: requestId, // Abuse photoId as requestId
+            descriptors,
+            ids,
+            eps,
+            min_samples
+          }
+        });
+
+        setTimeout(() => {
+          if (scanPromises.has(requestId)) {
+            scanPromises.delete(requestId);
+            reject('Clustering timed out');
+          }
+        }, 300000);
+      });
+
+    } catch (e) {
+      console.error('Failed to cluster faces:', e);
       return { success: false, error: e };
     }
   })
@@ -728,6 +861,47 @@ app.whenReady().then(async () => {
     }
   })
 
+  ipcMain.handle('db:renamePerson', async (_, { personId, newName }) => {
+    const { getDB } = await import('./db');
+    const db = getDB();
+    const cleanName = newName.trim();
+    if (!cleanName) return { success: false, error: 'Name cannot be empty' };
+
+    try {
+      // Check if target name exists
+      const targetPerson = db.prepare('SELECT id FROM people WHERE name = ? COLLATE NOCASE').get(cleanName) as { id: number } | undefined;
+
+      if (targetPerson) {
+        if (targetPerson.id === personId) {
+          return { success: true }; // No change
+        }
+
+        // MERGE STRATEGY
+        console.log(`[Main] Merging person ${personId} into ${targetPerson.id} (${cleanName})`);
+
+        db.transaction(() => {
+          // 1. Move all faces to target person
+          db.prepare('UPDATE faces SET person_id = ? WHERE person_id = ?').run(targetPerson.id, personId);
+
+          // 2. Delete source person
+          db.prepare('DELETE FROM people WHERE id = ?').run(personId);
+        })();
+
+        return { success: true, merged: true, targetId: targetPerson.id };
+
+      } else {
+        // RENAME STRATEGY
+        console.log(`[Main] Renaming person ${personId} to ${cleanName}`);
+        db.prepare('UPDATE people SET name = ? WHERE id = ?').run(cleanName, personId);
+        return { success: true, merged: false };
+      }
+
+    } catch (e) {
+      console.error('Failed to rename person:', e);
+      return { success: false, error: String(e) };
+    }
+  });
+
   ipcMain.handle('db:updateFaces', async (_, { photoId, faces, previewPath, width, height, globalBlurScore }) => {
     const { getDB } = await import('./db');
     const db = getDB();
@@ -736,6 +910,7 @@ app.whenReady().then(async () => {
       const getOldFaces = db.prepare('SELECT id, box_json, person_id FROM faces WHERE photo_id = ?');
       const updateFace = db.prepare('UPDATE faces SET box_json = ?, descriptor_json = ?, blur_score = ? WHERE id = ?');
       const insertFace = db.prepare('INSERT INTO faces (photo_id, box_json, descriptor_json, person_id, blur_score) VALUES (?, ?, ?, ?, ?)');
+
       const deleteFace = db.prepare('DELETE FROM faces WHERE id = ?');
       const getAllKnownPeople = db.prepare('SELECT id, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL');
       // Fallback for people without mean yet
@@ -809,7 +984,7 @@ app.whenReady().then(async () => {
           } else {
             // INSERT new face (Auto-recognize)
             let matchedPersonId = null;
-            let bestDistance = 0.6; // Cosine Distance Threshold (Relaxed from 0.4)
+            let bestDistance = 0.45; // Cosine Distance Threshold (Approx Sim > 0.55)
 
             // A. Try matching against People Means (Fast & Robust)
             const knownPeople = getAllKnownPeople.all();
@@ -1436,8 +1611,18 @@ const recalculatePersonMean = (db: any, personId: number) => {
     }
   }
 
+  let mag = 0;
   for (let i = 0; i < dim; i++) {
     mean[i] /= vectors.length;
+    mag += mean[i] ** 2;
+  }
+
+  // L2 Normalize
+  mag = Math.sqrt(mag);
+  if (mag > 0) {
+    for (let i = 0; i < dim; i++) {
+      mean[i] /= mag;
+    }
   }
 
   db.prepare('UPDATE people SET descriptor_mean_json = ? WHERE id = ?').run(JSON.stringify(mean), personId);

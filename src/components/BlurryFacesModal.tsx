@@ -95,7 +95,9 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
 
     const handleDelete = async () => {
         if (selectedIds.size === 0) return;
-        if (!confirm(`Are you sure you want to discard ${selectedIds.size} blurry face(s)? They will be removed from recognition.`)) return;
+        const shouldDiscard = confirm(`Are you sure you want to discard ${selectedIds.size} blurry face(s)? They will be removed from recognition.`);
+        window.focus();
+        if (!shouldDiscard) return;
 
         setLoading(true);
         try {

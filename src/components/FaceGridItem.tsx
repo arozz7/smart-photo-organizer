@@ -23,7 +23,18 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
             setSuggestions([])
         } else {
             // Focus on mount/select
-            setTimeout(() => inputRef.current?.focus(), 50)
+            // User reports minimizing/restoring window fixes it -> Suggests window focus loss.
+            // Force window focus first.
+            if (window.focus) window.focus();
+
+            // Use requestAnimationFrame + setTimeout to ensure paint is done and focus is ready
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    if (inputRef.current) {
+                        inputRef.current.focus({ preventScroll: true });
+                    }
+                }, 100);
+            });
         }
     }, [isSelected])
 
@@ -108,12 +119,23 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
                             className="w-full bg-black/50 border border-gray-600 rounded px-2 py-1 text-xs text-white mb-2 focus:ring-1 focus:ring-indigo-500 outline-none"
                             placeholder="Name..."
                             value={nameInput}
+                            autoFocus
+                            onMouseDown={(e) => {
+                                // Critical: Prevent drag/selection on parent
+                                e.stopPropagation();
+                                // Double ensure focus
+                                if (document.activeElement !== e.currentTarget) {
+                                    e.currentTarget.focus();
+                                }
+                            }}
+                            onClick={(e) => e.stopPropagation()}
                             onChange={e => setNameInput(e.target.value)}
                             onKeyDown={e => {
                                 if (e.key === 'Enter') handleSubmit();
                                 if (e.key === 'Escape') onSelect(null);
                             }}
                             onFocus={() => {
+                                console.log('Input focused');
                                 if (!nameInput) setSuggestions(people.map(p => p.name).slice(0, 5));
                             }}
                         />

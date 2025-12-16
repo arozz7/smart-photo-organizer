@@ -1,5 +1,66 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 
+interface SystemStatus {
+    insightface: {
+        loaded: boolean
+        providers?: string[]
+        det_thresh?: number
+        blur_thresh?: number
+    }
+    faiss: {
+        loaded: boolean
+        count?: number
+        dim?: number
+    }
+    vlm: {
+        loaded: boolean
+        device?: string
+        model?: string
+        config?: any
+    }
+    system: {
+        python: string
+        torch: string
+        cuda_available: boolean
+        cuda_device: string
+        onnxruntime: string
+        opencv: string
+    }
+}
+
+interface QueueConfig {
+    batchSize: number;
+    cooldownSeconds: number;
+}
+
+interface SystemStatus {
+    insightface: {
+        loaded: boolean
+        providers?: string[]
+        det_thresh?: number
+        blur_thresh?: number
+    }
+    faiss: {
+        loaded: boolean
+        count?: number
+        dim?: number
+    }
+    vlm: {
+        loaded: boolean
+        device?: string
+        model?: string
+        config?: any
+    }
+    system: {
+        python: string
+        torch: string
+        cuda_available: boolean
+        cuda_device: string
+        onnxruntime: string
+        opencv: string
+    }
+}
+
 interface AIContextType {
     isModelLoading: boolean;
     isModelReady: boolean;
@@ -19,6 +80,11 @@ interface AIContextType {
     calculatingBlur: boolean;
     blurProgress: { current: number; total: number };
     calculateBlurScores: () => Promise<void>;
+    // Clustering
+    clusterFaces: (faceIds?: number[]) => Promise<{ success: boolean; clusters?: number[][]; error?: any }>;
+    // System Status
+    systemStatus: SystemStatus | null;
+    fetchSystemStatus: () => Promise<void>;
 }
 
 const AIContext = createContext<AIContextType>({
@@ -36,7 +102,10 @@ const AIContext = createContext<AIContextType>({
     skipCooldown: () => { },
     calculatingBlur: false,
     blurProgress: { current: 0, total: 0 },
-    calculateBlurScores: async () => { }
+    calculateBlurScores: async () => { },
+    clusterFaces: async () => ({ success: false }),
+    systemStatus: null,
+    fetchSystemStatus: async () => { }
 });
 
 export const useAI = () => useContext(AIContext);
@@ -54,7 +123,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [isPaused, setIsPaused] = useState(false);
 
     // Persistence for Queue Config
-    const [queueConfig, setQueueConfig] = useState({ batchSize: 0, cooldownSeconds: 60 });
+    const [queueConfig, setQueueConfig] = useState<QueueConfig>({ batchSize: 0, cooldownSeconds: 60 });
     const [isConfigLoaded, setIsConfigLoaded] = useState(false);
 
     useEffect(() => {
@@ -73,6 +142,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }
         }
         loadConfig();
+        fetchSystemStatus(); // Call fetchSystemStatus here
     }, [])
 
     useEffect(() => {
@@ -85,6 +155,19 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [isCoolingDown, setIsCoolingDown] = useState(false);
     const [cooldownTimeLeft, setCooldownTimeLeft] = useState(0);
     const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+
+    const fetchSystemStatus = async () => {
+        try {
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('ai:command', { type: 'get_system_status' });
+            if (result && result.type === 'system_status_result') {
+                setSystemStatus(result.status);
+            }
+        } catch (error) {
+            console.error("Failed to fetch system status:", error);
+        }
+    };
 
     // Blur Calculation State
     const [calculatingBlur, setCalculatingBlur] = useState(false);
@@ -116,6 +199,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setCalculatingBlur(false);
             setBlurProgress({ current: 0, total: 0 });
+        }
+    };
+
+    const clusterFaces = async (faceIds?: number[]) => {
+        try {
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('ai:clusterFaces', { faceIds });
+            return res;
+        } catch (e) {
+            console.error("Cluster Faces Error:", e);
+            return { success: false, error: e };
         }
     };
 
@@ -306,7 +400,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             skipCooldown,
             calculatingBlur,
             blurProgress,
-            calculateBlurScores
+            calculateBlurScores,
+            clusterFaces,
+            systemStatus,
+            fetchSystemStatus
         }}>
             {children}
         </AIContext.Provider>

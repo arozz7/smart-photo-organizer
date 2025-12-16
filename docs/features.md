@@ -35,7 +35,7 @@ The core feature of the application is local, privacy-focused face recognition.
 
 ### Management
 - **Naming:** You can click any unnamed face to assign it to a new or existing person.
-- **Merging:** If you accidentally create two people (e.g., "John" and "John Doe"), assigning a face from one to the other will trigger a merge logic (future enhancement) or simply re-assign that face.
+- **Renaming & Merging:** You can rename a person at any time. If you rename "John" to "John Doe", and "John Doe" already exists, the application will intelligently merge all photos and faces into the target person.
 - **Ignore:** You can "Hide" faces that are not relevant (background strangers).
 
 ### Blur Detection & Quality Control
@@ -45,7 +45,7 @@ The core feature of the application is local, privacy-focused face recognition.
 
 ## 3. AI Configuration
 
-The application allows you to fine-tune the AI models to match your specific hardware and preferences.
+The application allows you to fine-tune the AI models to match your specific hardware and preferences. **Settings are automatically saved and persisted across restarts.**
 
 ### Face AI Settings
 - **Detection Threshold:** Adjust how strict the AI is when finding faces. Lower values find more faces but may find false positives (e.g., patterns in trees).

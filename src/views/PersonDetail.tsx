@@ -30,6 +30,7 @@ const PersonDetail = () => {
     const [loading, setLoading] = useState(true);
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     const [isBlurryModalOpen, setIsBlurryModalOpen] = useState(false);
+    const [isNameEditOpen, setIsNameEditOpen] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -91,6 +92,35 @@ const PersonDetail = () => {
         }
     };
 
+    const handleRenamePerson = async (newName: string) => {
+        if (!newName || !person || !newName.trim()) return;
+
+        try {
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('db:renamePerson', {
+                personId: person.id,
+                newName: newName.trim()
+            });
+
+            if (result.success) {
+                setIsNameEditOpen(false);
+                if (result.merged) {
+                    // Navigate to the target person (merged destination)
+                    navigate(`/people/${result.targetId}`, { replace: true });
+                } else {
+                    // Just refresh
+                    loadData();
+                    // Also refresh global people list if we had context... but here we just show this person.
+                }
+            } else {
+                alert('Failed to rename: ' + result.error);
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Failed to rename person');
+        }
+    };
+
     const openRenameModal = () => {
         if (selectedFaces.size === 0) return;
         setIsRenameModalOpen(true);
@@ -98,7 +128,9 @@ const PersonDetail = () => {
 
     const handleUnassign = async () => {
         if (selectedFaces.size === 0) return;
-        if (!confirm(`Remove ${selectedFaces.size} faces from ${person?.name}?`)) return;
+        const confirmed = confirm(`Remove ${selectedFaces.size} faces from ${person?.name}?`);
+        setTimeout(() => window.focus(), 100);
+        if (!confirmed) return;
 
         try {
             // @ts-ignore
@@ -108,6 +140,7 @@ const PersonDetail = () => {
         } catch (err) {
             console.error(err);
             alert('Failed to remove faces');
+            setTimeout(() => window.focus(), 100);
         }
     };
 
@@ -123,7 +156,18 @@ const PersonDetail = () => {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                         </svg>
                     </button>
-                    <h1 className="text-3xl font-bold">{person.name}</h1>
+                    <h1 className="text-3xl font-bold flex items-center gap-2">
+                        {person.name}
+                        <button
+                            onClick={() => setIsNameEditOpen(true)}
+                            className="p-1.5 text-gray-500 hover:text-white hover:bg-gray-800 rounded-md transition-colors"
+                            title="Rename Person"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                            </svg>
+                        </button>
+                    </h1>
                     <span className="text-gray-400 text-sm">({faces.length} faces)</span>
                 </div>
 
@@ -184,11 +228,18 @@ const PersonDetail = () => {
                 initialValue=""
                 count={selectedFaces.size}
             />
+
+            <EditPersonNameModal
+                isOpen={isNameEditOpen}
+                onClose={() => setIsNameEditOpen(false)}
+                currentName={person.name}
+                onRename={handleRenamePerson}
+            />
         </div>
     );
 };
 
-// Simple Modal Component
+// Modal for Moving Faces (Renaming specific faces to another person)
 const RenameModal = ({
     isOpen,
     onClose,
@@ -217,10 +268,9 @@ const RenameModal = ({
         try {
             // @ts-ignore
             const people = await window.ipcRenderer.invoke('db:getPeople');
-            console.log('API db:getPeople returned:', people);
             setAllPeopleNames(people.map((p: any) => p.name));
         } catch (err) {
-            console.error('Failed to fetch people for autocomplete', err);
+            console.error('Failed to fetch people', err);
         }
     };
 
@@ -231,7 +281,6 @@ const RenameModal = ({
                 .slice(0, 50);
             setSuggestions(filtered);
         } else {
-            // Show first 50 people as default suggestions
             setSuggestions(allPeopleNames.slice(0, 50));
         }
     }, [name, allPeopleNames]);
@@ -248,7 +297,7 @@ const RenameModal = ({
                 onClick={e => e.stopPropagation()}
             >
                 <h3 className="text-xl font-bold text-white mb-2">Move {count} Faces</h3>
-                <p className="text-gray-400 mb-4 text-sm">Enter the name of the person to move these faces to. Select from existing people or create a new one.</p>
+                <p className="text-gray-400 mb-4 text-sm">Enter the name of the person to move these faces to.</p>
 
                 <div className="relative mb-6">
                     <input
@@ -290,6 +339,78 @@ const RenameModal = ({
                         className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-medium"
                     >
                         Move Faces
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Modal for Renaming the Person (Global Rename/Merge)
+const EditPersonNameModal = ({
+    isOpen,
+    onClose,
+    currentName,
+    onRename
+}: {
+    isOpen: boolean,
+    onClose: () => void,
+    currentName: string,
+    onRename: (newName: string) => void
+}) => {
+    const [name, setName] = useState(currentName);
+
+    useEffect(() => {
+        if (isOpen) {
+            setName(currentName);
+            // Force focus fix
+            if (window.focus) window.focus();
+        }
+    }, [isOpen, currentName]);
+
+    if (!isOpen) return null;
+
+    return (
+        <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100]"
+            onClick={onClose}
+        >
+            <div
+                className="bg-gray-800 p-6 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"
+                onClick={e => e.stopPropagation()}
+            >
+                <h3 className="text-xl font-bold text-white mb-4">Rename Person</h3>
+
+                <div className="mb-6">
+                    <label className="block text-gray-400 text-sm mb-2">New Name</label>
+                    <input
+                        type="text"
+                        value={name}
+                        onChange={e => setName(e.target.value)}
+                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                        autoFocus
+                        onKeyDown={e => {
+                            if (e.key === 'Enter') onRename(name);
+                            if (e.key === 'Escape') onClose();
+                        }}
+                    />
+                    <p className="text-xs text-gray-500 mt-2">
+                        Note: If this name belongs to another person, these two people will be <strong>merged</strong>. This cannot be undone.
+                    </p>
+                </div>
+
+                <div className="flex justify-end gap-3">
+                    <button
+                        onClick={onClose}
+                        className="px-4 py-2 rounded-lg hover:bg-gray-700 text-gray-300 transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={() => onRename(name)}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-medium"
+                    >
+                        Rename
                     </button>
                 </div>
             </div>
