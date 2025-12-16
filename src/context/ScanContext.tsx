@@ -22,6 +22,7 @@ interface ScanContextType {
     loadScanErrors: () => Promise<void>
     retryErrors: () => Promise<void>
     clearErrors: () => Promise<void>
+    loadingPhotos: boolean
 }
 
 const ScanContext = createContext<ScanContextType | undefined>(undefined)
@@ -224,7 +225,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         <ScanContext.Provider value={{
             scanning, scanCount, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter,
             availableTags, loadTags, availableFolders, loadFolders, availablePeople, loadPeople,
-            scanErrors, loadScanErrors, retryErrors, clearErrors
+            scanErrors, loadScanErrors, retryErrors, clearErrors, loadingPhotos
         }}>
             {children}
         </ScanContext.Provider>

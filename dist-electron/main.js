@@ -828,7 +828,7 @@ if (!IS_WINDOWS) {
 if (IS_LINUX) {
   Signals.push("SIGIO", "SIGPOLL", "SIGPWR", "SIGSTKFLT");
 }
-let Interceptor$1 = class Interceptor {
+class Interceptor {
   /* CONSTRUCTOR */
   constructor() {
     this.callbacks = /* @__PURE__ */ new Set();
@@ -865,9 +865,9 @@ let Interceptor$1 = class Interceptor {
     };
     this.hook();
   }
-};
-const Interceptor2 = new Interceptor$1();
-const whenExit = Interceptor2.register;
+}
+const Interceptor$1 = new Interceptor();
+const whenExit = Interceptor$1.register;
 const Temp = {
   /* VARIABLES */
   store: {},
@@ -3347,9 +3347,9 @@ function commentKeyword$1({ gen, schemaEnv, schema, errSchemaPath, opts }) {
   }
 }
 function returnResults$1(it) {
-  const { gen, schemaEnv, validateName, ValidationError: ValidationError2, opts } = it;
+  const { gen, schemaEnv, validateName, ValidationError: ValidationError3, opts } = it;
   if (schemaEnv.$async) {
-    gen.if((0, codegen_1$X._)`${names_1$d.default.errors} === 0`, () => gen.return(names_1$d.default.data), () => gen.throw((0, codegen_1$X._)`new ${ValidationError2}(${names_1$d.default.vErrors})`));
+    gen.if((0, codegen_1$X._)`${names_1$d.default.errors} === 0`, () => gen.return(names_1$d.default.data), () => gen.throw((0, codegen_1$X._)`new ${ValidationError3}(${names_1$d.default.vErrors})`));
   } else {
     gen.assign((0, codegen_1$X._)`${validateName}.errors`, names_1$d.default.vErrors);
     if (opts.unevaluated)
@@ -3694,14 +3694,14 @@ function getData$1($data, { dataLevel, dataNames, dataPathArr }) {
 validate$1.getData = getData$1;
 var validation_error$1 = {};
 Object.defineProperty(validation_error$1, "__esModule", { value: true });
-class ValidationError extends Error {
+let ValidationError$1 = class ValidationError extends Error {
   constructor(errors2) {
     super("validation failed");
     this.errors = errors2;
     this.ajv = this.validation = true;
   }
-}
-validation_error$1.default = ValidationError;
+};
+validation_error$1.default = ValidationError$1;
 var ref_error$1 = {};
 Object.defineProperty(ref_error$1, "__esModule", { value: true });
 const resolve_1$4 = resolve$4;
@@ -10215,9 +10215,9 @@ function commentKeyword({ gen, schemaEnv, schema, errSchemaPath, opts }) {
   }
 }
 function returnResults(it) {
-  const { gen, schemaEnv, validateName, ValidationError: ValidationError2, opts } = it;
+  const { gen, schemaEnv, validateName, ValidationError: ValidationError3, opts } = it;
   if (schemaEnv.$async) {
-    gen.if((0, codegen_1$n._)`${names_1$3.default.errors} === 0`, () => gen.return(names_1$3.default.data), () => gen.throw((0, codegen_1$n._)`new ${ValidationError2}(${names_1$3.default.vErrors})`));
+    gen.if((0, codegen_1$n._)`${names_1$3.default.errors} === 0`, () => gen.return(names_1$3.default.data), () => gen.throw((0, codegen_1$n._)`new ${ValidationError3}(${names_1$3.default.vErrors})`));
   } else {
     gen.assign((0, codegen_1$n._)`${validateName}.errors`, names_1$3.default.vErrors);
     if (opts.unevaluated)
@@ -10561,21 +10561,15 @@ function getData($data, { dataLevel, dataNames, dataPathArr }) {
 }
 validate.getData = getData;
 var validation_error = {};
-var hasRequiredValidation_error;
-function requireValidation_error() {
-  if (hasRequiredValidation_error) return validation_error;
-  hasRequiredValidation_error = 1;
-  Object.defineProperty(validation_error, "__esModule", { value: true });
-  class ValidationError2 extends Error {
-    constructor(errors2) {
-      super("validation failed");
-      this.errors = errors2;
-      this.ajv = this.validation = true;
-    }
+Object.defineProperty(validation_error, "__esModule", { value: true });
+class ValidationError2 extends Error {
+  constructor(errors2) {
+    super("validation failed");
+    this.errors = errors2;
+    this.ajv = this.validation = true;
   }
-  validation_error.default = ValidationError2;
-  return validation_error;
 }
+validation_error.default = ValidationError2;
 var ref_error = {};
 Object.defineProperty(ref_error, "__esModule", { value: true });
 const resolve_1$1 = resolve$1;
@@ -10591,7 +10585,7 @@ var compile = {};
 Object.defineProperty(compile, "__esModule", { value: true });
 compile.resolveSchema = compile.getCompilingSchema = compile.resolveRef = compile.compileSchema = compile.SchemaEnv = void 0;
 const codegen_1$m = codegen;
-const validation_error_1 = requireValidation_error();
+const validation_error_1 = validation_error;
 const names_1$2 = names$1;
 const resolve_1 = resolve$1;
 const util_1$k = util;
@@ -10864,7 +10858,7 @@ uri$1.default = uri;
   Object.defineProperty(exports$1, "CodeGen", { enumerable: true, get: function() {
     return codegen_12.CodeGen;
   } });
-  const validation_error_12 = requireValidation_error();
+  const validation_error_12 = validation_error;
   const ref_error_12 = ref_error;
   const rules_12 = rules;
   const compile_12 = compile;
@@ -13317,7 +13311,7 @@ const require$$3 = {
   Object.defineProperty(exports$1, "CodeGen", { enumerable: true, get: function() {
     return codegen_12.CodeGen;
   } });
-  var validation_error_12 = requireValidation_error();
+  var validation_error_12 = validation_error;
   Object.defineProperty(exports$1, "ValidationError", { enumerable: true, get: function() {
     return validation_error_12.default;
   } });
@@ -15122,7 +15116,7 @@ const ltr = ltr_1;
 const intersects = intersects_1;
 const simplifyRange = simplify;
 const subset = subset_1;
-var semver$1 = {
+var semver = {
   parse,
   valid,
   clean,
@@ -15169,7 +15163,7 @@ var semver$1 = {
   compareIdentifiers: identifiers.compareIdentifiers,
   rcompareIdentifiers: identifiers.rcompareIdentifiers
 };
-const semver = /* @__PURE__ */ getDefaultExportFromCjs(semver$1);
+const semver$1 = /* @__PURE__ */ getDefaultExportFromCjs(semver);
 const objectToString = Object.prototype.toString;
 const uint8ArrayStringified = "[object Uint8Array]";
 const arrayBufferStringified = "[object ArrayBuffer]";
@@ -15633,7 +15627,7 @@ class Conf {
         throw new Error(`Something went wrong during the migration! Changes applied to the store until this failed migration will be restored. ${errorMessage}`);
       }
     }
-    if (this._isVersionInRangeFormat(previousMigratedVersion) || !semver.eq(previousMigratedVersion, versionToMigrate)) {
+    if (this._isVersionInRangeFormat(previousMigratedVersion) || !semver$1.eq(previousMigratedVersion, versionToMigrate)) {
       this._set(MIGRATION_KEY, versionToMigrate);
     }
   }
@@ -15664,19 +15658,19 @@ class Conf {
     return candidate === INTERNAL_KEY || candidate.startsWith(`${INTERNAL_KEY}.`);
   }
   _isVersionInRangeFormat(version) {
-    return semver.clean(version) === null;
+    return semver$1.clean(version) === null;
   }
   _shouldPerformMigration(candidateVersion, previousMigratedVersion, versionToMigrate) {
     if (this._isVersionInRangeFormat(candidateVersion)) {
-      if (previousMigratedVersion !== "0.0.0" && semver.satisfies(previousMigratedVersion, candidateVersion)) {
+      if (previousMigratedVersion !== "0.0.0" && semver$1.satisfies(previousMigratedVersion, candidateVersion)) {
         return false;
       }
-      return semver.satisfies(versionToMigrate, candidateVersion);
+      return semver$1.satisfies(versionToMigrate, candidateVersion);
     }
-    if (semver.lte(candidateVersion, previousMigratedVersion)) {
+    if (semver$1.lte(candidateVersion, previousMigratedVersion)) {
       return false;
     }
-    if (semver.gt(candidateVersion, versionToMigrate)) {
+    if (semver$1.gt(candidateVersion, versionToMigrate)) {
       return false;
     }
     return true;
@@ -16416,7 +16410,6 @@ app$1.whenReady().then(async () => {
     const { getDB: getDB2 } = await Promise.resolve().then(() => db$1);
     const db2 = getDB2();
     try {
-      console.log(`[Main] db:getPhotos request: limit=${limit2}, offset=${offset}, filter=`, filter);
       let query = "SELECT p.* FROM photos p";
       const params = [];
       const conditions = [];
@@ -16427,7 +16420,29 @@ app$1.whenReady().then(async () => {
         conditions.push(`p.file_path LIKE ?`);
         params.push(`${filter.folder}%`);
       }
-      if (filter.tag) {
+      if (filter.tags && Array.isArray(filter.tags) && filter.tags.length > 0) {
+        const matchAll = filter.tagsMatchAll;
+        if (matchAll) {
+          const placeholders = filter.tags.map(() => "?").join(",");
+          conditions.push(`p.id IN (
+             SELECT pt.photo_id FROM photo_tags pt
+             JOIN tags t ON pt.tag_id = t.id
+             WHERE t.name IN (${placeholders})
+             GROUP BY pt.photo_id
+             HAVING COUNT(DISTINCT t.name) = ?
+           )`);
+          params.push(...filter.tags);
+          params.push(filter.tags.length);
+        } else {
+          const placeholders = filter.tags.map(() => "?").join(",");
+          conditions.push(`p.id IN (
+             SELECT pt.photo_id FROM photo_tags pt
+             JOIN tags t ON pt.tag_id = t.id
+             WHERE t.name IN (${placeholders})
+           )`);
+          params.push(...filter.tags);
+        }
+      } else if (filter.tag) {
         conditions.push(`p.id IN (
           SELECT pt.photo_id FROM photo_tags pt
           JOIN tags t ON pt.tag_id = t.id
@@ -16445,12 +16460,24 @@ app$1.whenReady().then(async () => {
         params.push(searchTerm);
       }
       if (filter.people && Array.isArray(filter.people) && filter.people.length > 0) {
+        const matchAll = filter.peopleMatchAll;
         const placeholders = filter.people.map(() => "?").join(",");
-        conditions.push(`p.id IN (
-          SELECT f.photo_id FROM faces f
-          WHERE f.person_id IN (${placeholders})
-        )`);
-        params.push(...filter.people);
+        if (matchAll) {
+          conditions.push(`p.id IN (
+              SELECT f.photo_id FROM faces f
+              WHERE f.person_id IN (${placeholders})
+              GROUP BY f.photo_id
+              HAVING COUNT(DISTINCT f.person_id) = ?
+            )`);
+          params.push(...filter.people);
+          params.push(filter.people.length);
+        } else {
+          conditions.push(`p.id IN (
+              SELECT f.photo_id FROM faces f
+              WHERE f.person_id IN (${placeholders})
+            )`);
+          params.push(...filter.people);
+        }
       }
       if (conditions.length > 0) {
         query += " WHERE " + conditions.join(" AND ");
@@ -16459,11 +16486,41 @@ app$1.whenReady().then(async () => {
       params.push(limit2, offset);
       const stmt = db2.prepare(query);
       const photos = stmt.all(...params);
-      console.log(`[Main] db:getPhotos returned ${photos.length} photos.`);
       return photos;
     } catch (error2) {
       console.error("Failed to get photos:", error2);
       return [];
+    }
+  });
+  ipcMain$1.handle("os:createAlbum", async (_, { photoIds, targetDir }) => {
+    const { getDB: getDB2 } = await Promise.resolve().then(() => db$1);
+    const db2 = getDB2();
+    console.log(`[Main] Creating album with ${photoIds == null ? void 0 : photoIds.length} photos in ${targetDir}`);
+    if (!photoIds || !photoIds.length || !targetDir) {
+      return { success: false, error: "Invalid arguments" };
+    }
+    try {
+      const placeholders = photoIds.map(() => "?").join(",");
+      const rows = db2.prepare(`SELECT file_path FROM photos WHERE id IN (${placeholders})`).all(...photoIds);
+      let successCount = 0;
+      let failCount = 0;
+      await fs.mkdir(targetDir, { recursive: true });
+      for (const row of rows) {
+        const src = row.file_path;
+        const fileName = path.basename(src);
+        const dest = path.join(targetDir, fileName);
+        try {
+          await fs.copyFile(src, dest);
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to copy ${src} to ${dest}`, e);
+          failCount++;
+        }
+      }
+      return { success: true, successCount, failCount };
+    } catch (error2) {
+      console.error("Create Album failed", error2);
+      return { success: false, error: error2 };
     }
   });
   ipcMain$1.handle("db:getPhotosForRescan", async (_, { filter = {} } = {}) => {

@@ -7,6 +7,7 @@ import PersonDetail from './views/PersonDetail'
 import Settings from './views/Settings'
 import Locations from './views/Locations'
 import Queues from './views/Queues'
+import Create from './views/Create'
 import LoadingScreen from './components/LoadingScreen'
 import StatusBar from './components/StatusBar'
 
@@ -24,6 +25,7 @@ function App() {
           <Route index element={<Library />} />
           <Route path="people" element={<People />} />
           <Route path="people/:personId" element={<PersonDetail />} />
+          <Route path="create" element={<Create />} />
           <Route path="locations" element={<Locations />} />
           <Route path="queues" element={<Queues />} />
           <Route path="settings" element={<Settings />} />

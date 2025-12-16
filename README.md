@@ -17,14 +17,16 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
 *   **📷 RAW Support:** Native support for professional formats (Sony ARW, Canon CR2, Nikon NEF, etc.).
 *   **⚡ High Performance:** Virtualized grid handles libraries with 100,000+ photos smoothly.
 *   **🔍 Semantic Search:** Search your photos by content, date, or person.
+*   **🎨 Set Builder:** Create custom albums by combining complex search queries (e.g., "Person A AND Person B in Summer") and export them to disk.
 
 ## Documentation
 
 For detailed examples of how the application works, logic flows, and architecture, please see the `docs/` folder:
 
-*   [**Features Guide**](docs/features.md): Detailed breakdown of user-facing features.
-*   [**System Architecture**](docs/architecture.md): Diagrams of how Electron, React, and Python communicate.
-*   [**Logic Examples & Flows**](docs/logic_examples.md): Deep dive into the Scanning and AI logic.
+*   **[Features Guide](docs/features.md):** Detailed breakdown of user-facing features.
+*   **[Create & Set Builder](docs/create_feature.md):** Guide to the new advanced search and album creation tools.
+*   **[System Architecture](docs/architecture.md):** Diagrams of how Electron, React, and Python communicate.
+*   **[Logic Examples & Flows](docs/logic_examples.md):** Deep dive into the Scanning and AI logic.
 
 ## Usage Guide
 

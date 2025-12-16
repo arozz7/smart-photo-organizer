@@ -709,7 +709,7 @@ app.whenReady().then(async () => {
     const { getDB } = await import('./db');
     const db = getDB();
     try {
-      console.log(`[Main] db:getPhotos request: limit=${limit}, offset=${offset}, filter=`, filter);
+      // console.log(`[Main] db:getPhotos request: limit=${limit}, offset=${offset}, filter=`, filter);
       let query = 'SELECT p.* FROM photos p';
       const params: any[] = [];
       const conditions: string[] = [];
@@ -725,8 +725,34 @@ app.whenReady().then(async () => {
         params.push(`${filter.folder}%`);
       }
 
-      // Filter: Specific Tag
-      if (filter.tag) {
+      // Filter: Tags (Advanced Logic)
+      if (filter.tags && Array.isArray(filter.tags) && filter.tags.length > 0) {
+        const matchAll = filter.tagsMatchAll; // boolean
+        if (matchAll) {
+          // Must have ALL usage tags
+          // Subquery: Get photo_ids that have all these tags
+          const placeholders = filter.tags.map(() => '?').join(',');
+          conditions.push(`p.id IN (
+             SELECT pt.photo_id FROM photo_tags pt
+             JOIN tags t ON pt.tag_id = t.id
+             WHERE t.name IN (${placeholders})
+             GROUP BY pt.photo_id
+             HAVING COUNT(DISTINCT t.name) = ?
+           )`);
+          params.push(...filter.tags);
+          params.push(filter.tags.length);
+        } else {
+          // Match ANY
+          const placeholders = filter.tags.map(() => '?').join(',');
+          conditions.push(`p.id IN (
+             SELECT pt.photo_id FROM photo_tags pt
+             JOIN tags t ON pt.tag_id = t.id
+             WHERE t.name IN (${placeholders})
+           )`);
+          params.push(...filter.tags);
+        }
+      } else if (filter.tag) {
+        // Legacy single tag support (keep for compatibility if needed, or map to array)
         conditions.push(`p.id IN (
           SELECT pt.photo_id FROM photo_tags pt
           JOIN tags t ON pt.tag_id = t.id
@@ -734,6 +760,7 @@ app.whenReady().then(async () => {
         )`);
         params.push(filter.tag);
       }
+
 
       // Filter: Text Search (Semantic/Tag Search)
       if (filter.search) {
@@ -748,14 +775,25 @@ app.whenReady().then(async () => {
 
       // Filter: Specific People (Array of IDs)
       if (filter.people && Array.isArray(filter.people) && filter.people.length > 0) {
-        // Find photos that contain ANY of the selected people
-        // (Use separate logic if you want ALL, but ANY is standard for filters)
+        const matchAll = filter.peopleMatchAll;
         const placeholders = filter.people.map(() => '?').join(',');
-        conditions.push(`p.id IN (
-          SELECT f.photo_id FROM faces f
-          WHERE f.person_id IN (${placeholders})
-        )`);
-        params.push(...filter.people);
+
+        if (matchAll) {
+          conditions.push(`p.id IN (
+              SELECT f.photo_id FROM faces f
+              WHERE f.person_id IN (${placeholders})
+              GROUP BY f.photo_id
+              HAVING COUNT(DISTINCT f.person_id) = ?
+            )`);
+          params.push(...filter.people);
+          params.push(filter.people.length);
+        } else {
+          conditions.push(`p.id IN (
+              SELECT f.photo_id FROM faces f
+              WHERE f.person_id IN (${placeholders})
+            )`);
+          params.push(...filter.people);
+        }
       }
 
       if (conditions.length > 0) {
@@ -767,13 +805,55 @@ app.whenReady().then(async () => {
 
       const stmt = db.prepare(query);
       const photos = stmt.all(...params);
-      console.log(`[Main] db:getPhotos returned ${photos.length} photos.`);
+      // console.log(`[Main] db:getPhotos returned ${photos.length} photos.`);
       return photos;
     } catch (error) {
       console.error('Failed to get photos:', error);
       return [];
     }
   })
+
+  ipcMain.handle('os:createAlbum', async (_, { photoIds, targetDir }) => {
+    const { getDB } = await import('./db');
+    const db = getDB();
+    console.log(`[Main] Creating album with ${photoIds?.length} photos in ${targetDir}`);
+
+    if (!photoIds || !photoIds.length || !targetDir) {
+      return { success: false, error: 'Invalid arguments' };
+    }
+
+    try {
+      // Get file paths
+      const placeholders = photoIds.map(() => '?').join(',');
+      const rows = db.prepare(`SELECT file_path FROM photos WHERE id IN (${placeholders})`).all(...photoIds);
+
+      let successCount = 0;
+      let failCount = 0;
+
+      await fs.mkdir(targetDir, { recursive: true });
+
+      for (const row of rows) {
+        const src = (row as any).file_path;
+        const fileName = path.basename(src);
+        // TODO: duplicate name handling? For now, let's keep it simple or maybe prefix if exists.
+        // Let's just overwrite for now or use standard copy.
+        const dest = path.join(targetDir, fileName);
+
+        try {
+          await fs.copyFile(src, dest);
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to copy ${src} to ${dest}`, e);
+          failCount++;
+        }
+      }
+      return { success: true, successCount, failCount };
+
+    } catch (error) {
+      console.error('Create Album failed', error);
+      return { success: false, error };
+    }
+  });
 
   ipcMain.handle('db:getPhotosForRescan', async (_, { filter = {} } = {}) => {
     const { getDB } = await import('./db');
