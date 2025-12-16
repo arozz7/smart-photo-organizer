@@ -29,6 +29,19 @@ if os.name == 'nt':
     except ImportError:
         pass
 
+    # Patch TensorRT DLLs
+    try:
+        import tensorrt_libs
+        trt_libs_dir = list(tensorrt_libs.__path__)[0]
+        if os.path.exists(trt_libs_dir):
+            try:
+                os.add_dll_directory(trt_libs_dir)
+            except Exception:
+                pass
+            os.environ['PATH'] = trt_libs_dir + os.path.pathsep + os.environ['PATH']
+    except ImportError:
+        pass
+
 from insightface.app import FaceAnalysis
 
 print("--- ONNX Runtime Check ---")

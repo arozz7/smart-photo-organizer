@@ -7,3 +7,5 @@ torch
 pillow
 rawpy
 imageio
+scikit-learn
+tensorrt
