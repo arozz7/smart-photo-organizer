@@ -10,24 +10,24 @@ The scanner is responsible for ingesting files. It handles failures gracefully (
 
 ```mermaid
 graph TD
-    Start(Start Scan) --> ReadDir{Read Directory}
-    ReadDir --> |File| CheckExt{Supported Ext?}
-    ReadDir --> |Dir| Recurse[Recursive Call]
+    Start("Start Scan") --> ReadDir{"Read Directory"}
+    ReadDir --> |File| CheckExt{"Supported Ext?"}
+    ReadDir --> |Dir| Recurse["Recursive Call"]
     
     CheckExt -- No --> Skip
-    CheckExt -- Yes --> DBCheck{In DB?}
+    CheckExt -- Yes --> DBCheck{"In DB?"}
     
-    DBCheck -- Yes --> UpdateCheck{Needs Update?}
-    DBCheck -- No --> NewFile[Process New File]
+    DBCheck -- Yes --> UpdateCheck{"Needs Update?"}
+    DBCheck -- No --> NewFile["Process New File"]
     
-    NewFile --> Exif[Extract Metadata (ExifTool)]
-    NewFile --> Preview{Gen Preview}
+    NewFile --> Exif["Extract Metadata (ExifTool)"]
+    NewFile --> Preview{"Gen Preview"}
     
-    Preview --> |RAW| TryExif[Try ExifTool Extraction]
-    TryExif -- Fail --> TrySharp[Try Sharp Conversion]
+    Preview --> |RAW| TryExif["Try ExifTool Extraction"]
+    TryExif -- Fail --> TrySharp["Try Sharp Conversion"]
     
-    TrySharp --> SavePreview[Save .jpg to Cache]
-    SavePreview --> InsertDB[INSERT INTO photos]
+    TrySharp --> SavePreview["Save .jpg to Cache"]
+    SavePreview --> InsertDB["INSERT INTO photos"]
 ```
 
 ### Logic Snippet (TypeScript)

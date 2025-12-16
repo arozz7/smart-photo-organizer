@@ -21,6 +21,15 @@ export default function Layout() {
                         Library
                     </NavLink>
                     <NavLink
+                        to="/create"
+                        className={({ isActive }) =>
+                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                            }`
+                        }
+                    >
+                        Create
+                    </NavLink>
+                    <NavLink
                         to="/people"
                         className={({ isActive }) =>
                             `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
