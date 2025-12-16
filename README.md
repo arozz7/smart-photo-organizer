@@ -2,7 +2,7 @@
 
 > A local-first, AI-powered photo management tool. Organize your memories without leaving your hard drive.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Electron](https://img.shields.io/badge/electron-v28+-blue) ![React](https://img.shields.io/badge/react-v18-blue)
+![License](https://img.shields.io/badge/license-GPL3+-blue.svg) ![Electron](https://img.shields.io/badge/electron-v28+-blue) ![React](https://img.shields.io/badge/react-v18-blue)
 
 ## Overview
 
@@ -70,4 +70,4 @@ See [Architecture](docs/architecture.md) for more details.
 
 ## License
 
-MIT
+GPL-3.0-or-later
