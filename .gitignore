@@ -38,3 +38,7 @@ vectors.index
 .venv
 __pycache__/
 *.pyc
+*.pkl
+lint_*.txt
+verify_*.py
+verify_*.js
