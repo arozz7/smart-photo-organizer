@@ -40,9 +40,20 @@ export default function LoadingScreen({ onReady }: { onReady: () => void }) {
 
     return (
         <div className="fixed inset-0 bg-gray-900 flex flex-col items-center justify-center z-50 select-none">
+            <style>{`
+                @keyframes logo-pulse {
+                    0% { transform: scale(1); opacity: 1; }
+                    50% { transform: scale(1.05); opacity: 0.8; }
+                    100% { transform: scale(1); opacity: 1; }
+                }
+                .animate-logo-pulse {
+                    animation: logo-pulse 2s infinite;
+                }
+            `}</style>
             <div className="w-64 space-y-4">
                 <div className="flex justify-center mb-8">
-                    <span className="text-4xl">📸</span>
+                    {/* Replaced emoji with animated logo */}
+                    <img src="/icon.png" alt="App Logo" className="w-24 h-24 animate-logo-pulse" />
                 </div>
 
                 <h2 className="text-xl font-bold text-white text-center">Photo AI</h2>
@@ -60,7 +71,7 @@ export default function LoadingScreen({ onReady }: { onReady: () => void }) {
             </div>
 
             <div className="absolute bottom-4 text-gray-600 text-[10px]">
-                v0.1.0-beta
+                v0.2.0-beta
             </div>
         </div>
     )

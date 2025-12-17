@@ -828,7 +828,7 @@ if (!IS_WINDOWS) {
 if (IS_LINUX) {
   Signals.push("SIGIO", "SIGPOLL", "SIGPWR", "SIGSTKFLT");
 }
-class Interceptor {
+let Interceptor$1 = class Interceptor {
   /* CONSTRUCTOR */
   constructor() {
     this.callbacks = /* @__PURE__ */ new Set();
@@ -865,9 +865,9 @@ class Interceptor {
     };
     this.hook();
   }
-}
-const Interceptor$1 = new Interceptor();
-const whenExit = Interceptor$1.register;
+};
+const Interceptor2 = new Interceptor$1();
+const whenExit = Interceptor2.register;
 const Temp = {
   /* VARIABLES */
   store: {},
@@ -15116,7 +15116,7 @@ const ltr = ltr_1;
 const intersects = intersects_1;
 const simplifyRange = simplify;
 const subset = subset_1;
-var semver = {
+var semver$1 = {
   parse,
   valid,
   clean,
@@ -15163,7 +15163,7 @@ var semver = {
   compareIdentifiers: identifiers.compareIdentifiers,
   rcompareIdentifiers: identifiers.rcompareIdentifiers
 };
-const semver$1 = /* @__PURE__ */ getDefaultExportFromCjs(semver);
+const semver = /* @__PURE__ */ getDefaultExportFromCjs(semver$1);
 const objectToString = Object.prototype.toString;
 const uint8ArrayStringified = "[object Uint8Array]";
 const arrayBufferStringified = "[object ArrayBuffer]";
@@ -15627,7 +15627,7 @@ class Conf {
         throw new Error(`Something went wrong during the migration! Changes applied to the store until this failed migration will be restored. ${errorMessage}`);
       }
     }
-    if (this._isVersionInRangeFormat(previousMigratedVersion) || !semver$1.eq(previousMigratedVersion, versionToMigrate)) {
+    if (this._isVersionInRangeFormat(previousMigratedVersion) || !semver.eq(previousMigratedVersion, versionToMigrate)) {
       this._set(MIGRATION_KEY, versionToMigrate);
     }
   }
@@ -15658,19 +15658,19 @@ class Conf {
     return candidate === INTERNAL_KEY || candidate.startsWith(`${INTERNAL_KEY}.`);
   }
   _isVersionInRangeFormat(version) {
-    return semver$1.clean(version) === null;
+    return semver.clean(version) === null;
   }
   _shouldPerformMigration(candidateVersion, previousMigratedVersion, versionToMigrate) {
     if (this._isVersionInRangeFormat(candidateVersion)) {
-      if (previousMigratedVersion !== "0.0.0" && semver$1.satisfies(previousMigratedVersion, candidateVersion)) {
+      if (previousMigratedVersion !== "0.0.0" && semver.satisfies(previousMigratedVersion, candidateVersion)) {
         return false;
       }
-      return semver$1.satisfies(versionToMigrate, candidateVersion);
+      return semver.satisfies(versionToMigrate, candidateVersion);
     }
-    if (semver$1.lte(candidateVersion, previousMigratedVersion)) {
+    if (semver.lte(candidateVersion, previousMigratedVersion)) {
       return false;
     }
-    if (semver$1.gt(candidateVersion, versionToMigrate)) {
+    if (semver.gt(candidateVersion, versionToMigrate)) {
       return false;
     }
     return true;
@@ -16286,6 +16286,67 @@ app$1.whenReady().then(async () => {
       return { success: false, error: e };
     }
   });
+  ipcMain$1.handle("ai:enhanceImage", async (_, { photoId, task, modelName }) => {
+    const { getDB: getDB2 } = await Promise.resolve().then(() => db$1);
+    const db2 = getDB2();
+    console.log(`[Main] Enhance Request: ${photoId} [${task}]`);
+    try {
+      const stmt = db2.prepare("SELECT file_path FROM photos WHERE id = ?");
+      const photo = stmt.get(photoId);
+      if (!photo || !photo.file_path) return { success: false, error: "Photo not found" };
+      const ext = path.extname(photo.file_path);
+      const name = path.basename(photo.file_path, ext);
+      const suffix = task === "upscale" ? "_upscaled" : "_restored";
+      const outPath = path.join(path.dirname(photo.file_path), `${name}${suffix}.jpg`);
+      return new Promise((resolve2, reject) => {
+        const requestId = Math.floor(Math.random() * 1e6);
+        scanPromises.set(requestId, {
+          resolve: (res) => {
+            if (res.success) resolve2({ success: true, outPath: res.outPath });
+            else resolve2({ success: false, error: res.error });
+          },
+          reject
+        });
+        sendToPython({
+          type: "enhance_image",
+          payload: {
+            reqId: requestId,
+            // We piggyback on generic promise handler
+            filePath: photo.file_path,
+            outPath,
+            task,
+            modelName
+          }
+        });
+        setTimeout(() => {
+          if (scanPromises.has(requestId)) {
+            scanPromises.delete(requestId);
+            reject("Enhancement timed out");
+          }
+        }, 6e5);
+      });
+    } catch (e) {
+      console.error("Enhance failed:", e);
+      return { success: false, error: String(e) };
+    }
+  });
+  ipcMain$1.handle("ai:downloadModel", async (_, { modelName }) => {
+    console.log(`[Main] Requesting model download: ${modelName}`);
+    return new Promise((resolve2, reject) => {
+      const requestId = Math.floor(Math.random() * 1e6);
+      scanPromises.set(requestId, {
+        resolve: (res) => resolve2(res),
+        reject
+      });
+      sendToPython({
+        type: "download_model",
+        payload: {
+          reqId: requestId,
+          modelName
+        }
+      });
+    });
+  });
   ipcMain$1.handle("ai:command", async (_, command) => {
     try {
       const requestId = Math.floor(Math.random() * 1e7);
@@ -16299,7 +16360,7 @@ app$1.whenReady().then(async () => {
             scanPromises.delete(requestId);
             reject("Command timed out");
           }
-        }, 1e4);
+        }, 3e4);
       });
     } catch (e) {
       console.error("AI Command Failed:", e);
@@ -16762,14 +16823,34 @@ app$1.whenReady().then(async () => {
     const db2 = getDB2();
     try {
       const stmt = db2.prepare(`
-        SELECT p.*, COUNT(f.id) as face_count,
-        (SELECT COALESCE(ph.preview_cache_path, ph.file_path) FROM faces f2 JOIN photos ph ON f2.photo_id = ph.id WHERE f2.person_id = p.id LIMIT 1) as cover_path,
-        (SELECT f2.box_json FROM faces f2 WHERE f2.person_id = p.id LIMIT 1) as cover_box,
-        (SELECT ph.width FROM faces f2 JOIN photos ph ON f2.photo_id = ph.id WHERE f2.person_id = p.id LIMIT 1) as cover_width,
-        (SELECT ph.height FROM faces f2 JOIN photos ph ON f2.photo_id = ph.id WHERE f2.person_id = p.id LIMIT 1) as cover_height
+        WITH BestFaces AS (
+          SELECT 
+            person_id,
+            id as face_id,
+            photo_id,
+            box_json,
+            blur_score,
+            ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY blur_score DESC) as rn
+          FROM faces 
+          WHERE person_id IS NOT NULL
+        ),
+        PersonCounts AS (
+            SELECT person_id, COUNT(*) as face_count 
+            FROM faces 
+            WHERE person_id IS NOT NULL 
+            GROUP BY person_id
+        )
+        SELECT 
+          p.*, 
+          COALESCE(pc.face_count, 0) as face_count,
+          COALESCE(ph.preview_cache_path, ph.file_path) as cover_path,
+          bf.box_json as cover_box,
+          ph.width as cover_width,
+          ph.height as cover_height
         FROM people p
-        LEFT JOIN faces f ON f.person_id = p.id
-        GROUP BY p.id
+        LEFT JOIN PersonCounts pc ON p.id = pc.person_id
+        LEFT JOIN BestFaces bf ON p.id = bf.person_id AND bf.rn = 1
+        LEFT JOIN photos ph ON bf.photo_id = ph.id
         ORDER BY face_count DESC
       `);
       return stmt.all();
