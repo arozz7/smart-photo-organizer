@@ -39,12 +39,15 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     const [loading, setLoading] = useState(false)
 
     const loadPeople = async () => {
+        setLoading(true)
         try {
             // @ts-ignore
             const result = await window.ipcRenderer.invoke('db:getPeople')
             setPeople(result)
         } catch (e) {
             console.error("Failed to load people", e)
+        } finally {
+            setLoading(false)
         }
     }
 

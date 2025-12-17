@@ -9,3 +9,8 @@ rawpy
 imageio
 scikit-learn
 tensorrt
+basicsr
+gfpgan
+realesrgan
+tqdm
+requests

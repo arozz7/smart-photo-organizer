@@ -509,6 +509,82 @@ app.whenReady().then(async () => {
     }
   })
 
+  // AI Enhancement
+  ipcMain.handle('ai:enhanceImage', async (_, { photoId, task, modelName }) => {
+    const { getDB } = await import('./db');
+    const db = getDB();
+    console.log(`[Main] Enhance Request: ${photoId} [${task}]`);
+
+    try {
+      const stmt = db.prepare('SELECT file_path FROM photos WHERE id = ?');
+      const photo = stmt.get(photoId) as { file_path: string };
+
+      if (!photo || !photo.file_path) return { success: false, error: 'Photo not found' };
+
+      const ext = path.extname(photo.file_path);
+      const name = path.basename(photo.file_path, ext);
+      const suffix = task === 'upscale' ? '_upscaled' : '_restored';
+      // Save next to original for now, or in a specific 'enhanced' folder?
+      // Let's save next to original but verify write permissions? 
+      // Safest is same directory.
+      const outPath = path.join(path.dirname(photo.file_path), `${name}${suffix}.jpg`); // Force JPG output?
+
+      return new Promise((resolve, reject) => {
+        const requestId = Math.floor(Math.random() * 1000000);
+        scanPromises.set(requestId, {
+          resolve: (res: any) => {
+            if (res.success) resolve({ success: true, outPath: res.outPath });
+            else resolve({ success: false, error: res.error });
+          },
+          reject
+        });
+
+        sendToPython({
+          type: 'enhance_image',
+          payload: {
+            reqId: requestId, // We piggyback on generic promise handler
+            filePath: photo.file_path,
+            outPath,
+            task,
+            modelName
+          }
+        });
+
+        setTimeout(() => {
+          if (scanPromises.has(requestId)) {
+            scanPromises.delete(requestId);
+            reject('Enhancement timed out');
+          }
+        }, 600000); // 10 min timeout
+      });
+
+    } catch (e) {
+      console.error('Enhance failed:', e);
+      return { success: false, error: String(e) };
+    }
+  })
+
+  ipcMain.handle('ai:downloadModel', async (_, { modelName }) => {
+    console.log(`[Main] Requesting model download: ${modelName}`);
+    return new Promise((resolve, reject) => {
+      const requestId = Math.floor(Math.random() * 1000000);
+      scanPromises.set(requestId, {
+        resolve: (res: any) => resolve(res),
+        reject
+      });
+
+      sendToPython({
+        type: 'download_model',
+        payload: {
+          reqId: requestId,
+          modelName
+        }
+      });
+
+      // No timeout or very long timeout for download
+    });
+  })
+
   // Generic AI Command Handler (Request-Response)
   ipcMain.handle('ai:command', async (_, command) => {
     try {
@@ -565,7 +641,7 @@ app.whenReady().then(async () => {
             scanPromises.delete(requestId);
             reject('Command timed out');
           }
-        }, 10000);
+        }, 30000);
       });
     } catch (e) {
       console.error('AI Command Failed:', e);
@@ -1174,14 +1250,34 @@ app.whenReady().then(async () => {
     const db = getDB();
     try {
       const stmt = db.prepare(`
-        SELECT p.*, COUNT(f.id) as face_count,
-        (SELECT COALESCE(ph.preview_cache_path, ph.file_path) FROM faces f2 JOIN photos ph ON f2.photo_id = ph.id WHERE f2.person_id = p.id LIMIT 1) as cover_path,
-        (SELECT f2.box_json FROM faces f2 WHERE f2.person_id = p.id LIMIT 1) as cover_box,
-        (SELECT ph.width FROM faces f2 JOIN photos ph ON f2.photo_id = ph.id WHERE f2.person_id = p.id LIMIT 1) as cover_width,
-        (SELECT ph.height FROM faces f2 JOIN photos ph ON f2.photo_id = ph.id WHERE f2.person_id = p.id LIMIT 1) as cover_height
+        WITH BestFaces AS (
+          SELECT 
+            person_id,
+            id as face_id,
+            photo_id,
+            box_json,
+            blur_score,
+            ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY blur_score DESC) as rn
+          FROM faces 
+          WHERE person_id IS NOT NULL
+        ),
+        PersonCounts AS (
+            SELECT person_id, COUNT(*) as face_count 
+            FROM faces 
+            WHERE person_id IS NOT NULL 
+            GROUP BY person_id
+        )
+        SELECT 
+          p.*, 
+          COALESCE(pc.face_count, 0) as face_count,
+          COALESCE(ph.preview_cache_path, ph.file_path) as cover_path,
+          bf.box_json as cover_box,
+          ph.width as cover_width,
+          ph.height as cover_height
         FROM people p
-        LEFT JOIN faces f ON f.person_id = p.id
-        GROUP BY p.id
+        LEFT JOIN PersonCounts pc ON p.id = pc.person_id
+        LEFT JOIN BestFaces bf ON p.id = bf.person_id AND bf.rn = 1
+        LEFT JOIN photos ph ON bf.photo_id = ph.id
         ORDER BY face_count DESC
       `);
       return stmt.all();

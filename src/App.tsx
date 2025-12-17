@@ -10,6 +10,7 @@ import Queues from './views/Queues'
 import Create from './views/Create'
 import LoadingScreen from './components/LoadingScreen'
 import StatusBar from './components/StatusBar'
+import EnhanceLab from './views/EnhanceLab' // Added
 
 function App() {
   const [isReady, setIsReady] = useState(false)
@@ -26,6 +27,7 @@ function App() {
           <Route path="people" element={<People />} />
           <Route path="people/:personId" element={<PersonDetail />} />
           <Route path="create" element={<Create />} />
+          <Route path="enhance/:photoId" element={<EnhanceLab />} /> {/* Added */}
           <Route path="locations" element={<Locations />} />
           <Route path="queues" element={<Queues />} />
           <Route path="settings" element={<Settings />} />

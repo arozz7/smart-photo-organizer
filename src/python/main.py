@@ -57,6 +57,28 @@ import pickle
 import torch
 from transformers import AutoProcessor, AutoModelForVision2Seq
 
+# PATCH: Basicsr/Torchvision compatibility
+# basicsr tries to import from 'torchvision.transforms.functional_tensor' which was removed in torchvision 0.18+
+import torchvision
+if hasattr(torchvision.transforms, 'functional_tensor'):
+    pass # All good
+else:
+    try:
+        import torchvision.transforms.functional as F
+        import sys
+        import types
+        # Create a mock module
+        mod = types.ModuleType("torchvision.transforms.functional_tensor")
+        mod.rgb_to_grayscale = F.rgb_to_grayscale
+        # Inject into sys.modules
+        sys.modules["torchvision.transforms.functional_tensor"] = mod
+        # Also inject into torchvision.transforms for good measure
+        torchvision.transforms.functional_tensor = mod
+    except ImportError:
+        pass
+
+import enhance # Local module
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -491,6 +513,8 @@ def handle_command(command):
     logger.info(f"Received command: {cmd_type}")
 
     response = {}
+    if req_id:
+         response['reqId'] = req_id
 
     if cmd_type == 'ping':
         response = {"type": "pong", "timestamp": time.time()}
@@ -749,6 +773,47 @@ def handle_command(command):
             }
         except Exception as e:
             response = {"error": str(e)}
+
+    elif cmd_type == 'enhance_image':
+        file_path = payload.get('filePath')
+        out_path = payload.get('outPath')
+        task = payload.get('task', 'upscale') # upscale | restore_faces
+        model_name = payload.get('modelName', 'RealESRGAN_x4plus')
+        
+        logger.info(f"Enhancing image: {file_path} -> {out_path} [{task}/{model_name}]")
+        try:
+            # Check if model exists first? enhance.py handles it
+            result_path = enhance.enhancer.enhance(file_path, out_path, task, model_name)
+            response = {
+                "type": "enhance_result",
+                "success": True,
+                "outPath": result_path
+            }
+        except Exception as e:
+            logger.exception("Enhancement Error")
+            response = {
+                "type": "enhance_result",
+                "success": False,
+                "error": str(e)
+            }
+
+    elif cmd_type == 'download_model':
+        model_name = payload.get('modelName')
+        logger.info(f"Downloading model: {model_name}")
+        try:
+            path = enhance.enhancer._download_model(model_name)
+            response = {
+                "type": "download_model_result",
+                "success": True,
+                "path": path
+            }
+        except Exception as e:
+            logger.exception("Download Error")
+            response = {
+                "type": "download_model_result",
+                "success": False,
+                "error": str(e)
+            }
 
     elif cmd_type == 'get_system_status':
         status = {}
