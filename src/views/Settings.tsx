@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import SettingsModal from '../components/SettingsModal';
 import { useAI } from '../context/AIContext';
+import { useAlert } from '../context/AlertContext';
 
 function PreviewManager() {
     const [stats, setStats] = useState<{ count: number, size: number } | null>(null)
     const [loading, setLoading] = useState(false)
+    const { showAlert, showConfirm } = useAlert()
 
     const loadStats = async () => {
         // @ts-ignore
@@ -19,22 +21,40 @@ function PreviewManager() {
     }, [])
 
     const handleCleanup = async (days: number) => {
-        if (!confirm(`Delete previews older than ${days} days?`)) return
-        setLoading(true)
-        try {
-            // @ts-ignore
-            const res = await window.ipcRenderer.invoke('settings:cleanupPreviews', { days })
-            if (res.success) {
-                alert(`Cleanup complete.\nDeleted: ${res.deletedCount} files\nFreed: ${(res.deletedSize / 1024 / 1024).toFixed(2)} MB`)
-                loadStats()
-            } else {
-                alert("Cleanup failed: " + res.error)
+        showConfirm({
+            title: 'Clear Preview Cache',
+            description: `Delete previews older than ${days} days?`,
+            confirmLabel: 'Clear Cache',
+            variant: days === 0 ? 'danger' : 'primary',
+            onConfirm: async () => {
+                setLoading(true)
+                try {
+                    // @ts-ignore
+                    const res = await window.ipcRenderer.invoke('settings:cleanupPreviews', { days })
+                    if (res.success) {
+                        showAlert({
+                            title: 'Cleanup Complete',
+                            description: `Deleted: ${res.deletedCount} files\nFreed: ${(res.deletedSize / 1024 / 1024).toFixed(2)} MB`
+                        });
+                        loadStats()
+                    } else {
+                        showAlert({
+                            title: 'Cleanup Failed',
+                            description: res.error,
+                            variant: 'danger'
+                        });
+                    }
+                } catch (e) {
+                    showAlert({
+                        title: 'Error',
+                        description: String(e),
+                        variant: 'danger'
+                    });
+                } finally {
+                    setLoading(false)
+                }
             }
-        } catch (e) {
-            alert("Error: " + e)
-        } finally {
-            setLoading(false)
-        }
+        });
     }
 
     const formatSize = (bytes: number) => {
@@ -65,14 +85,14 @@ function PreviewManager() {
                     onClick={() => handleCleanup(30)}
                     className="px-3 py-1.5 rounded text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white transition-colors"
                 >
-                    Clear &gt; 30 Days
+                    Clear {'\u003e'} 30 Days
                 </button>
                 <button
                     disabled={loading}
                     onClick={() => handleCleanup(7)}
                     className="px-3 py-1.5 rounded text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white transition-colors"
                 >
-                    Clear &gt; 7 Days
+                    Clear {'\u003e'} 7 Days
                 </button>
                 <button
                     disabled={loading}
@@ -95,6 +115,7 @@ export default function Settings() {
     const [libraryPath, setLibraryPath] = useState(localStorage.getItem('libraryPath') || '')
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const { calculatingBlur, blurProgress, calculateBlurScores } = useAI();
+    const { showAlert, showConfirm } = useAlert();
 
     useEffect(() => {
         // @ts-ignore
@@ -104,24 +125,29 @@ export default function Settings() {
         })
     }, [])
 
-
     const handleClearAITags = async () => {
-        if (!confirm('Are you sure you want to delete ALL AI-generated tags? This cannot be undone.')) return
-
-        setClearing(true)
-        try {
-            // @ts-ignore
-            const result = await window.ipcRenderer.invoke('db:clearAITags')
-            if (result.success) {
-                setMessage('Successfully cleared all AI tags.')
-            } else {
-                setMessage('Failed to clear tags: ' + result.error)
+        showConfirm({
+            title: 'Clear AI Tags',
+            description: 'Are you sure you want to delete ALL AI-generated tags? This cannot be undone.',
+            confirmLabel: 'Delete All Tags',
+            variant: 'danger',
+            onConfirm: async () => {
+                setClearing(true)
+                try {
+                    // @ts-ignore
+                    const result = await window.ipcRenderer.invoke('db:clearAITags')
+                    if (result.success) {
+                        setMessage('Successfully cleared all AI tags.')
+                    } else {
+                        setMessage('Failed to clear tags: ' + result.error)
+                    }
+                } catch (error) {
+                    setMessage('Error invoking command: ' + error)
+                } finally {
+                    setClearing(false)
+                }
             }
-        } catch (error) {
-            setMessage('Error invoking command: ' + error)
-        } finally {
-            setClearing(false)
-        }
+        });
     }
 
     const [showResetConfirm, setShowResetConfirm] = useState(false)
@@ -134,16 +160,26 @@ export default function Settings() {
             // @ts-ignore
             const res = await window.ipcRenderer.invoke('db:factoryReset')
             if (res.success) {
-                alert("Factory reset complete. Application will now reload.")
-                window.location.reload()
+                showAlert({
+                    title: 'Reset Complete',
+                    description: 'Factory reset complete. Application will now reload.',
+                    onConfirm: () => window.location.reload()
+                });
             } else {
-                alert("Reset failed: " + res.error)
+                showAlert({
+                    title: 'Reset Failed',
+                    description: res.error,
+                    variant: 'danger'
+                });
             }
         } catch (e) {
-            alert('Failed: ' + e)
+            showAlert({
+                title: 'Error',
+                description: String(e),
+                variant: 'danger'
+            });
         }
     }
-
 
     return (
         <div className="p-8 h-full overflow-y-auto bg-gray-900 text-gray-100 relative">
@@ -184,13 +220,22 @@ export default function Settings() {
                                     // @ts-ignore
                                     const path = await window.ipcRenderer.invoke('dialog:openDirectory')
                                     if (path) {
-                                        if (confirm(`Move library to:\n${path}\n\nThe application will restart automatically.`)) {
-                                            // @ts-ignore
-                                            const res = await window.ipcRenderer.invoke('settings:moveLibrary', path)
-                                            if (!res.success) {
-                                                alert('Move failed: ' + res.error)
+                                        showConfirm({
+                                            title: 'Move Library',
+                                            description: `Move library to:\n${path}\n\nThe application will restart automatically.`,
+                                            confirmLabel: 'Move & Restart',
+                                            onConfirm: async () => {
+                                                // @ts-ignore
+                                                const res = await window.ipcRenderer.invoke('settings:moveLibrary', path)
+                                                if (!res.success) {
+                                                    showAlert({
+                                                        title: 'Move Failed',
+                                                        description: res.error,
+                                                        variant: 'danger'
+                                                    });
+                                                }
                                             }
-                                        }
+                                        });
                                     }
                                 }}
                                 className="px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
@@ -218,9 +263,12 @@ export default function Settings() {
                                 value={localStorage.getItem('ai_profile') || 'balanced'}
                                 onChange={(e) => {
                                     localStorage.setItem('ai_profile', e.target.value)
-                                    if (confirm('Changing the AI profile requires a reload to load the new models. Reload now?')) {
-                                        window.location.reload()
-                                    }
+                                    showConfirm({
+                                        title: 'Reload Required',
+                                        description: 'Changing the AI profile requires a reload to load the new models. Reload now?',
+                                        confirmLabel: 'Reload Now',
+                                        onConfirm: () => window.location.reload()
+                                    });
                                 }}
                             >
                                 <option value="balanced">Balanced (Faster)</option>
@@ -280,15 +328,27 @@ export default function Settings() {
                             <div className="flex gap-3">
                                 <button
                                     onClick={async () => {
-                                        if (confirm('Find and remove duplicate faces? This will keep named faces and remove duplicates.')) {
-                                            try {
-                                                // @ts-ignore
-                                                const res = await window.ipcRenderer.invoke('db:removeDuplicateFaces')
-                                                alert(`Cleanup complete. Removed ${res.removedCount} duplicate faces.`)
-                                            } catch (e) {
-                                                alert('Failed: ' + e)
+                                        showConfirm({
+                                            title: 'Deduplicate Faces',
+                                            description: 'Find and remove duplicate faces? This will keep named faces and remove duplicates.',
+                                            confirmLabel: 'Start Cleanup',
+                                            onConfirm: async () => {
+                                                try {
+                                                    // @ts-ignore
+                                                    const res = await window.ipcRenderer.invoke('db:removeDuplicateFaces')
+                                                    showAlert({
+                                                        title: 'Cleanup Complete',
+                                                        description: `Removed ${res.removedCount} duplicate faces.`
+                                                    });
+                                                } catch (e) {
+                                                    showAlert({
+                                                        title: 'Cleanup Failed',
+                                                        description: String(e),
+                                                        variant: 'danger'
+                                                    });
+                                                }
                                             }
-                                        }
+                                        });
                                     }}
                                     className="px-4 py-2 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white border border-gray-600"
                                 >

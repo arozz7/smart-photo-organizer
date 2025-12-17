@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import { useAlert } from './AlertContext';
 
 interface SystemStatus {
     insightface: {
@@ -113,6 +114,7 @@ export const useAI = () => useContext(AIContext);
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     // Python backend starts with Main, so we assume it's ready. 
     // We could add a check later, but for now simplify.
+    const { showAlert } = useAlert();
     const [isModelLoading] = useState(false);
     const [isModelReady] = useState(true);
 
@@ -188,14 +190,28 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     await window.ipcRenderer.invoke('ai:scanImage', { photoId: res.photoIds[i] });
                     setBlurProgress({ current: i + 1, total });
                 }
-                alert(`Finished calculating blur scores for ${total} photos.`);
+                showAlert({
+                    title: 'Blur Calculation Complete',
+                    description: `Finished calculating blur scores for ${total} photos.`
+                });
             } else if (res.success) {
-                alert("No photos found missing blur scores.");
+                showAlert({
+                    title: 'No Action Required',
+                    description: 'No photos found missing blur scores.'
+                });
             } else {
-                alert("Failed to find photos: " + res.error);
+                showAlert({
+                    title: 'Error',
+                    description: "Failed to find photos: " + res.error,
+                    variant: 'danger'
+                });
             }
         } catch (e) {
-            alert("Error: " + e);
+            showAlert({
+                title: 'Error',
+                description: "Error: " + e,
+                variant: 'danger'
+            });
         } finally {
             setCalculatingBlur(false);
             setBlurProgress({ current: 0, total: 0 });

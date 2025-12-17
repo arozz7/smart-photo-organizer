@@ -11,6 +11,15 @@
     "dist",
     "dist-electron"
   ],
+  "extraResources": [
+    {
+      "from": "python-dist",
+      "to": "python-bin",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
   "mac": {
     "target": [
       "dmg"

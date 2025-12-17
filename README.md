@@ -10,23 +10,25 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
 
 ## Features at a Glance
 
-*   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. learns as you name them.
-*   **⚙️ Configurable AI:** Fine-tune face detection, blur sensitivity, and tagging creativity settings to match your needs.
-*   **🧼 Blur Detection:** Automatically filters out blurry faces and provides tools to clean up low-quality captures.
-*   **🏷️ Smart Tagging:** "Reads" your photos and generates searchable tags (e.g., "sunset", "dog", "birthday party").
-*   **📷 RAW Support:** Native support for professional formats (Sony ARW, Canon CR2, Nikon NEF, etc.).
-*   **⚡ High Performance:** Virtualized grid handles libraries with 100,000+ photos smoothly.
-*   **🔍 Semantic Search:** Search your photos by content, date, or person.
-*   **🎨 Set Builder:** Create custom albums by combining complex search queries (e.g., "Person A AND Person B in Summer") and export them to disk.
+*   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. Learns as you name them. Uses FAISS for lightning-fast similarity search across millions of faces.
+*   **⚙️ Configurable AI & Storage:** Fine-tune face detection, blur sensitivity, and tagging creativity settings. Choose where your library data (DB, previews, indices) is stored.
+*   **🧼 Blur Detection & Cleanup:** Automatically filters out blurry faces and provides tools to bulk-cleanup low-quality captures.
+*   **🏷️ Smart Tagging:** "Reads" your photos using vision models (VLM) to generate searchable tags and descriptions.
+*   **✨ AI Enhancement Lab:** Upscale old photos (x4) and restore grainy or blurry faces using state-of-the-art models (Real-ESRGAN, GFPGAN).
+*   **📷 RAW Support:** Native support for professional formats (Sony ARW, Canon CR2, Nikon NEF, etc.) with fast preview extraction.
+*   **⚡ High Performance:** Virtualized grid and optimized backend handles libraries with 100,000+ photos smoothly.
+*   **🔍 Semantic Search:** Search your photos by content, date, or person using AI-generated descriptions and tags.
+*   **🎨 Set Builder (Create View):** Build custom collections by combining complex filters (e.g., "Person A AND Person B in 2024"). Export your sets to organized folders on disk.
 
 ## Documentation
 
 For detailed examples of how the application works, logic flows, and architecture, please see the `docs/` folder:
 
-*   **[Features Guide](docs/features.md):** Detailed breakdown of user-facing features.
-*   **[Create & Set Builder](docs/create_feature.md):** Guide to the new advanced search and album creation tools.
+*   **[User Instruction Manual](docs/user_manual.md):** The comprehensive guide to using every part of the app.
+*   **[Features Guide](docs/features.md):** Detailed breakdown of technical capabilities and AI models.
+*   **[Create & Set Builder](docs/create_feature.md):** Deep dive into the advanced search and album creation tools.
 *   **[System Architecture](docs/architecture.md):** Diagrams of how Electron, React, and Python communicate.
-*   **[Logic Examples & Flows](docs/logic_examples.md):** Deep dive into the Scanning and AI logic.
+*   **[Logic Examples & Flows](docs/logic_examples.md):** Detailed look at the Scanning, AI, and Enhancement logic.
 
 ## Usage Guide
 

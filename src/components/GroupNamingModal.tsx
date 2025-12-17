@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Cross2Icon } from '@radix-ui/react-icons';
 import FaceThumbnail from './FaceThumbnail';
@@ -15,23 +15,38 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set(faces.map(f => f.id)));
     const [name, setName] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     // Reset selection and force focus when opening
-    React.useEffect(() => {
+    useEffect(() => {
         if (open) {
             setSelectedIds(new Set(faces.map(f => f.id)));
             setName('');
 
-            // Force window focus first (Electron fix)
+            // Electronic workaround: ensure window focus before targeting input
             if (window.focus) window.focus();
 
-            // Then focus input after a short delay
-            setTimeout(() => {
-                const input = document.querySelector('input[list="people-suggestions"]') as HTMLInputElement;
-                if (input) input.focus();
-            }, 100);
+            const timer = setTimeout(() => {
+                if (inputRef.current) inputRef.current.focus();
+            }, 150);
+            return () => clearTimeout(timer);
         }
     }, [open, faces]);
+
+    // Handle window focus events to restore input focus if modal is active
+    useEffect(() => {
+        if (!open) return;
+
+        const handleWindowFocus = () => {
+            // Explicitly request app window focus in Electron first
+            // @ts-ignore
+            if (window.ipcRenderer) window.ipcRenderer.invoke('app:focusWindow');
+            if (inputRef.current) inputRef.current.focus();
+        };
+
+        window.addEventListener('focus', handleWindowFocus);
+        return () => window.removeEventListener('focus', handleWindowFocus);
+    }, [open]);
 
     const toggleSelection = (id: number) => {
         const next = new Set(selectedIds);
@@ -94,6 +109,7 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
                                 Who is this? ({selectedIds.size} faces selected)
                             </label>
                             <input
+                                ref={inputRef}
                                 list="people-suggestions"
                                 type="text"
                                 value={name}

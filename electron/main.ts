@@ -4,7 +4,6 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url'
 import { initDB } from './db'
 import { scanDirectory } from './scanner'
-import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import {
@@ -46,17 +45,30 @@ let pythonProcess: ChildProcess | null = null;
 const scanPromises = new Map<number, { resolve: (v: any) => void, reject: (err: any) => void }>();
 
 function startPythonBackend() {
-  const pythonPath = path.join(process.env.APP_ROOT, 'src', 'python', '.venv', 'Scripts', 'python.exe');
-  const scriptPath = path.join(process.env.APP_ROOT, 'src', 'python', 'main.py');
+  let pythonPath: string;
+  let args: string[];
 
-  console.log(`[Main] Starting Python Backend: ${pythonPath} ${scriptPath}`);
+  if (app.isPackaged) {
+    // In production, use the bundled executable
+    // Note: 'python-bin' is the folder name in extraResources
+    pythonPath = path.join(process.resourcesPath, 'python-bin', 'smart-photo-ai', 'smart-photo-ai.exe');
+    args = [];
+    console.log(`[Main] Starting Bundled Python Backend (Prod): ${pythonPath}`);
+  } else {
+    // In development, use the venv
+    pythonPath = path.join(process.env.APP_ROOT, 'src', 'python', '.venv', 'Scripts', 'python.exe');
+    const scriptPath = path.join(process.env.APP_ROOT, 'src', 'python', 'main.py');
+    args = [scriptPath];
+    console.log(`[Main] Starting Python Backend (Dev): ${pythonPath} ${scriptPath}`);
+  }
 
-  pythonProcess = spawn(pythonPath, [scriptPath], {
+  pythonProcess = spawn(pythonPath, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
       HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
-      LIBRARY_PATH: LIBRARY_PATH
+      LIBRARY_PATH: LIBRARY_PATH,
+      PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True'
     }
   });
 
@@ -231,13 +243,30 @@ app.whenReady().then(async () => {
   startPythonBackend()
 
   protocol.handle('local-resource', (request) => {
-    const filePath = request.url.replace('local-resource://', '')
+    let filePath = request.url.replace('local-resource://', '')
+
+    // Fix: Strip query string (e.g. ?t=...)
+    const queryIndex = filePath.indexOf('?');
+    if (queryIndex !== -1) {
+      filePath = filePath.substring(0, queryIndex);
+    }
+
     const decodedPath = decodeURIComponent(filePath)
+    // console.log(`[Protocol] Request: ${request.url} -> ${decodedPath}`);
     return net.fetch(pathToFileURL(decodedPath).toString())
   })
 
   createSplashWindow()
   createWindow()
+
+  ipcMain.handle('app:focusWindow', () => {
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+      return true;
+    }
+    return false;
+  });
 
   ipcMain.handle('scan-directory', async (event, dirPath) => {
     return await scanDirectory(dirPath, LIBRARY_PATH, (count) => {
@@ -585,6 +614,42 @@ app.whenReady().then(async () => {
     });
   })
 
+  ipcMain.handle('ai:rebuildIndex', async () => {
+    const { getDB } = await import('./db');
+    const db = getDB();
+    console.log('[Main] Rebuilding Vector Index...');
+    try {
+      // Get all faces that have a descriptor
+      const rows = db.prepare('SELECT id, descriptor_json FROM faces WHERE descriptor_json IS NOT NULL').all();
+      const descriptors = rows.map((r: any) => JSON.parse(r.descriptor_json));
+      const ids = rows.map((r: any) => r.id);
+
+      if (descriptors.length === 0) {
+        return { success: true, count: 0 };
+      }
+
+      return new Promise((resolve, reject) => {
+        const requestId = Math.floor(Math.random() * 1000000);
+        scanPromises.set(requestId, {
+          resolve: (res: any) => resolve({ success: true, count: res.count }),
+          reject
+        });
+
+        sendToPython({
+          type: 'rebuild_index',
+          payload: {
+            reqId: requestId,
+            descriptors,
+            ids
+          }
+        });
+      });
+    } catch (e) {
+      console.error('Failed to rebuild index:', e);
+      return { success: false, error: String(e) };
+    }
+  });
+
   // Generic AI Command Handler (Request-Response)
   ipcMain.handle('ai:command', async (_, command) => {
     try {
@@ -778,6 +843,18 @@ app.whenReady().then(async () => {
     } catch (error) {
       console.error('Failed to clear AI tags:', error);
       return { success: false, error };
+    }
+  })
+
+  ipcMain.handle('db:getPhoto', async (_, photoId: number) => {
+    const { getDB } = await import('./db');
+    const db = getDB();
+    try {
+      const photo = db.prepare('SELECT * FROM photos WHERE id = ?').get(photoId);
+      return photo || null;
+    } catch (error) {
+      console.error('Failed to get photo:', error);
+      return null;
     }
   })
 

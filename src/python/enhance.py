@@ -1,10 +1,18 @@
 import os
 import cv2
 import requests
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch")
+# Suppress UserWarnings from torch/torchvision
+warnings.filterwarnings("ignore", category=UserWarning, message=".*expandable_segments not supported.*")
+warnings.filterwarnings("ignore", category=UserWarning, message=".*The parameter 'pretrained' is deprecated.*")
+warnings.filterwarnings("ignore", category=UserWarning, message=".*Arguments other than a weight enum.*")
+
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from realesrgan import RealESRGANer
 from gfpgan import GFPGANer
 from tqdm import tqdm
+import piexif
 
 # Model Weights URLs
 MODEL_URLS = {
@@ -57,10 +65,11 @@ class Enhancer:
 
         if model_name == 'RealESRGAN_x4plus':
             model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
-            self.upsampler = RealESRGANer(scale=4, model_path=model_path, model=model, tile=0, tile_pad=10, pre_pad=0, half=True)
+            # Use tile=1024 to avoid OOM on large images (was 0/auto)
+            self.upsampler = RealESRGANer(scale=4, model_path=model_path, model=model, tile=1024, tile_pad=10, pre_pad=0, half=True)
         elif model_name == 'RealESRGAN_x4plus_anime_6B':
              model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=6, num_grow_ch=32, scale=4)
-             self.upsampler = RealESRGANer(scale=4, model_path=model_path, model=model, tile=0, tile_pad=10, pre_pad=0, half=True)
+             self.upsampler = RealESRGANer(scale=4, model_path=model_path, model=model, tile=1024, tile_pad=10, pre_pad=0, half=True)
         
         self.current_model_name = model_name
 
@@ -79,6 +88,11 @@ class Enhancer:
             raise FileNotFoundError(f"Image not found: {img_path}")
 
         if task == 'upscale':
+            # Safeguard: Ensure model is valid for upscaling
+            if 'RealESRGAN' not in model_name: 
+                print(f"Warning: {model_name} is not an upsampler. Defaulting to RealESRGAN_x4plus.")
+                model_name = 'RealESRGAN_x4plus'
+
             self.load_upsampler(model_name)
             output, _ = self.upsampler.enhance(img, outscale=4)
             
@@ -96,6 +110,16 @@ class Enhancer:
              _, _, output = self.face_enhancer.enhance(img, has_aligned=False, only_center_face=False, paste_back=True)
         
         cv2.imwrite(out_path, output)
+        
+        # Transfer EXIF to preserve orientation
+        try:
+            exif_dict = piexif.load(img_path)
+            exif_bytes = piexif.dump(exif_dict)
+            piexif.insert(exif_bytes, out_path)
+        except Exception as e:
+            print(f"Failed to transfer EXIF: {e}")
+            # Non-critical, continue
+            
         return out_path
 
 # Global instance

@@ -1,10 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { useScan } from '../context/ScanContext'
+import { useAlert } from '../context/AlertContext'
 import { VirtuosoGrid } from 'react-virtuoso'
 import { Cross2Icon, PlusIcon, FilePlusIcon, MagnifyingGlassIcon } from '@radix-ui/react-icons'
 
 export default function Create() {
     const { photos, loadMorePhotos, hasMore, setFilter, availableTags, availablePeople, loadTags, loadPeople, loadingPhotos, filter } = useScan()
+    const { showAlert } = useAlert()
 
     // Local Search State
     const [localTags, setLocalTags] = useState<string[]>([])
@@ -15,9 +17,6 @@ export default function Create() {
 
     // Staging State
     const [currentSet, setCurrentSet] = useState<any[]>([])
-    const [showExportModal, setShowExportModal] = useState(false)
-    const [exportPath, setExportPath] = useState('')
-
     // Initialize filter on mount
     useEffect(() => {
         // Start empty
@@ -65,10 +64,17 @@ export default function Create() {
             })
 
             if (result.success) {
-                alert(`Successfully exported ${result.successCount} photos to ${dir}`)
+                showAlert({
+                    title: 'Export Successful',
+                    description: `Successfully exported ${result.successCount} photos to ${dir}`
+                });
                 setCurrentSet([]) // Clear set on success?
             } else {
-                alert(`Export failed: ${result.error}`)
+                showAlert({
+                    title: 'Export Failed',
+                    description: `Export failed: ${result.error}`,
+                    variant: 'danger'
+                });
             }
         }
     }

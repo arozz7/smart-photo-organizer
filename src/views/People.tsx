@@ -6,13 +6,16 @@ import FaceGrid from '../components/FaceGrid'
 import BlurryFacesModal from '../components/BlurryFacesModal'
 import GroupNamingModal from '../components/GroupNamingModal'
 import { useAI } from '../context/AIContext'
+import { useAlert } from '../context/AlertContext'
 
 export default function People() {
     const navigate = useNavigate()
     const { people, faces, loadPeople, loadFaces, loading, autoNameFaces, ignoreFaces } = usePeople()
     const { clusterFaces } = useAI()
+    const { showAlert, showConfirm } = useAlert()
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
     const [showBlurryModal, setShowBlurryModal] = useState(false)
+    const [hasNewFaces, setHasNewFaces] = useState(false)
 
     // Clustering State
     const [clusters, setClusters] = useState<{ id: number; faces: any[] }[]>([])
@@ -23,15 +26,45 @@ export default function People() {
     // Group Naming Modal
     const [namingGroup, setNamingGroup] = useState<{ faces: any[], name: string } | null>(null)
 
+
     // Run clustering when faces are loaded
     useEffect(() => {
         if (activeTab === 'unnamed' && faces.length > 0) {
-            runClustering()
+            // Debounce clustering to avoid CPU thrashing during heavy scans
+            const timeout = setTimeout(() => {
+                runClustering()
+                setHasNewFaces(false)
+            }, 500)
+            return () => clearTimeout(timeout)
         } else {
             setClusters([])
             setSingles([])
         }
     }, [faces, activeTab])
+
+    const { onPhotoProcessed } = useAI()
+
+    useEffect(() => {
+        // Refresh faces when AI finishing processing, if we are on unnamed tab
+        const cleanup = onPhotoProcessed((_photoId) => {
+            if (activeTab === 'unnamed') {
+                setHasNewFaces(true)
+                // We could auto-load, but let's be subtle or debounced
+                // Triggering a reload after a short delay if multiple photos finish
+            }
+        })
+        return cleanup
+    }, [activeTab, onPhotoProcessed])
+
+    // Auto-reload faces when new ones are detected (debounced)
+    useEffect(() => {
+        if (hasNewFaces && activeTab === 'unnamed') {
+            const timeout = setTimeout(() => {
+                loadFaces({ unnamed: true })
+            }, 3000)
+            return () => clearTimeout(timeout)
+        }
+    }, [hasNewFaces, activeTab])
 
     const runClustering = async () => {
         if (isClustering) return
@@ -152,32 +185,43 @@ export default function People() {
                             Unnamed Faces
                         </button>
                         {activeTab === 'unnamed' && (
-                            <button
-                                onClick={() => loadFaces({ unnamed: true })}
-                                className="p-2 rounded-md text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-                                title="Refresh"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v3.292a1 1 0 01-2 0V13.099a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-                                </svg>
-                            </button>
+                            <div className="flex items-center">
+                                <button
+                                    onClick={() => loadFaces({ unnamed: true })}
+                                    className={`p-2 rounded-md transition-colors ${hasNewFaces ? 'text-indigo-400 animate-pulse' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+                                    title={hasNewFaces ? "New faces detected! Refreshing..." : "Refresh"}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v3.292a1 1 0 01-2 0V13.099a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                                {hasNewFaces && <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider ml-1">New</span>}
+                            </div>
                         )}
                     </div>
                     {activeTab === 'unnamed' && faces.length > 0 && (
                         <button
-                            onClick={async () => {
-                                const shouldIgnore = confirm(`Are you sure you want to ignore all ${faces.length} visible faces?`);
-                                setTimeout(() => window.focus(), 100);
-                                if (!shouldIgnore) return;
-                                try {
-                                    const faceIds = faces.map(f => f.id);
-                                    await window.ipcRenderer.invoke('db:ignoreFaces', faceIds);
-                                    loadFaces({ unnamed: true }); // Refresh
-                                } catch (e) {
-                                    console.error(e);
-                                    alert('Failed to ignore faces');
-                                    setTimeout(() => window.focus(), 100);
-                                }
+                            onClick={() => {
+                                showConfirm({
+                                    title: 'Ignore All Faces',
+                                    description: `Are you sure you want to ignore all ${faces.length} visible faces?`,
+                                    confirmLabel: 'Ignore All',
+                                    variant: 'danger',
+                                    onConfirm: async () => {
+                                        try {
+                                            const faceIds = faces.map(f => f.id);
+                                            await window.ipcRenderer.invoke('db:ignoreFaces', faceIds);
+                                            loadFaces({ unnamed: true }); // Refresh
+                                        } catch (e) {
+                                            console.error(e);
+                                            showAlert({
+                                                title: 'Error',
+                                                description: 'Failed to ignore faces',
+                                                variant: 'danger'
+                                            });
+                                        }
+                                    }
+                                });
                             }}
                             className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 text-sm rounded-md ml-4 transition-colors"
                         >
@@ -186,21 +230,28 @@ export default function People() {
                     )}
                     {activeTab === 'unnamed' && faces.length > 0 && (
                         <button
-                            onClick={async () => {
-                                const shouldDelete = confirm(`Are you sure you want to PERMANENTLY DELETE all ${faces.length} visible faces? They will reappear if you rescan.`);
-                                setTimeout(() => window.focus(), 100);
-                                if (!shouldDelete) return;
-
-                                try {
-                                    const faceIds = faces.map(f => f.id);
-                                    // @ts-ignore
-                                    await window.ipcRenderer.invoke('db:deleteFaces', faceIds);
-                                    loadFaces({ unnamed: true }); // Refresh
-                                } catch (e) {
-                                    console.error(e);
-                                    alert('Failed to delete faces');
-                                    setTimeout(() => window.focus(), 100);
-                                }
+                            onClick={() => {
+                                showConfirm({
+                                    title: 'PERMANENT DELETE',
+                                    description: `Are you sure you want to PERMANENTLY DELETE all ${faces.length} visible faces? They will reappear if you rescan.`,
+                                    confirmLabel: 'Delete All',
+                                    variant: 'danger',
+                                    onConfirm: async () => {
+                                        try {
+                                            const faceIds = faces.map(f => f.id);
+                                            // @ts-ignore
+                                            await window.ipcRenderer.invoke('db:deleteFaces', faceIds);
+                                            loadFaces({ unnamed: true }); // Refresh
+                                        } catch (e) {
+                                            console.error(e);
+                                            showAlert({
+                                                title: 'Error',
+                                                description: 'Failed to delete faces',
+                                                variant: 'danger'
+                                            });
+                                        }
+                                    }
+                                });
                             }}
                             className="bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-300 hover:text-white px-3 py-1 text-sm rounded-md ml-2 transition-colors"
                         >
@@ -276,14 +327,16 @@ export default function People() {
                                                     <div className="flex gap-2">
                                                         <button
                                                             onClick={async () => {
-                                                                const shouldIgnore = confirm(`Ignore all ${group.faces.length} faces in this group?`);
-                                                                // Restore window focus delayed
-                                                                setTimeout(() => window.focus(), 100);
-                                                                if (!shouldIgnore) return;
-
-                                                                const ids = group.faces.map(f => f.id);
-                                                                await ignoreFaces(ids);
-                                                                // Local update will trigger re-render
+                                                                showConfirm({
+                                                                    title: 'Ignore Group',
+                                                                    description: `Ignore all ${group.faces.length} faces in this group?`,
+                                                                    confirmLabel: 'Ignore',
+                                                                    variant: 'danger',
+                                                                    onConfirm: async () => {
+                                                                        const ids = group.faces.map(f => f.id);
+                                                                        await ignoreFaces(ids);
+                                                                    }
+                                                                });
                                                             }}
                                                             className="text-xs bg-gray-700 hover:bg-red-600 text-gray-300 hover:text-white px-3 py-1.5 rounded transition-colors border border-gray-600 hover:border-red-500"
                                                         >
@@ -307,24 +360,37 @@ export default function People() {
 
                                 {singles.length > 0 && (
                                     <div>
-                                        {clusters.length > 0 && (
-                                            <div className="sticky top-0 z-20 px-6 py-3 bg-gray-950/90 backdrop-blur-md border-y border-gray-800 text-sm font-medium text-gray-400 flex justify-between items-center">
-                                                <span>Unsorted Faces ({singles.length})</span>
-                                                <button
-                                                    onClick={async () => {
-                                                        const shouldIgnore = confirm(`Ignore all ${singles.length} unsorted faces?`);
-                                                        setTimeout(() => window.focus(), 100);
-                                                        if (!shouldIgnore) return;
-                                                        const ids = singles.map(f => f.id);
-                                                        await ignoreFaces(ids);
-                                                    }}
-                                                    className="text-xs bg-gray-800 hover:bg-red-900/50 text-gray-400 hover:text-red-200 px-3 py-1.5 rounded transition-colors border border-gray-700 hover:border-red-800"
-                                                >
-                                                    Ignore All Unsorted
-                                                </button>
+                                        <div className="sticky top-0 z-20 px-6 py-3 bg-gray-950/90 backdrop-blur-md border-y border-gray-800 text-sm font-medium text-gray-400 flex justify-between items-center">
+                                            <span>
+                                                {clusters.length > 0 ? 'Unsorted Faces' : 'Identified Faces'} ({singles.length > 200 ? 'Showing 200 of ' : ''}{singles.length})
+                                                {singles.length > 200 && <span className="ml-2 text-xs text-indigo-400 font-normal opacity-80">(Complete groups above first)</span>}
+                                            </span>
+                                            <button
+                                                onClick={async () => {
+                                                    const toIgnore = singles.slice(0, 200);
+                                                    showConfirm({
+                                                        title: 'Ignore Visible',
+                                                        description: `Ignore all ${toIgnore.length} currently visible unsorted faces?`,
+                                                        confirmLabel: 'Ignore',
+                                                        variant: 'danger',
+                                                        onConfirm: async () => {
+                                                            const ids = toIgnore.map(f => f.id);
+                                                            await ignoreFaces(ids);
+                                                        }
+                                                    });
+                                                }}
+                                                className="text-xs bg-gray-800 hover:bg-red-900/50 text-gray-400 hover:text-red-200 px-3 py-1.5 rounded transition-colors border border-gray-700 hover:border-red-800"
+                                            >
+                                                Ignore Visible
+                                            </button>
+                                        </div>
+                                        <FaceGrid faces={singles.slice(0, 200)} />
+                                        {singles.length > 200 && (
+                                            <div className="px-6 py-10 text-center text-gray-500 bg-gray-900/10 border-b border-gray-900">
+                                                <p>+ {singles.length - 200} more unsorted faces hidden.</p>
+                                                <p className="text-xs mt-2 italic text-gray-600">Group or name the faces above to see more unsorted ones.</p>
                                             </div>
                                         )}
-                                        <FaceGrid faces={singles} />
                                     </div>
                                 )}
 
@@ -356,15 +422,22 @@ export default function People() {
                 onDeleteComplete={() => loadFaces({ unnamed: true })}
             />
 
-            {namingGroup && (
-                <GroupNamingModal
-                    open={!!namingGroup}
-                    onOpenChange={(open) => !open && setNamingGroup(null)}
-                    faces={namingGroup.faces}
-                    onConfirm={handleConfirmName}
-                    people={people}
-                />
-            )}
+            {
+                namingGroup && (
+                    <GroupNamingModal
+                        open={!!namingGroup}
+                        onOpenChange={(open) => {
+                            if (!open) {
+                                setNamingGroup(null);
+                            }
+                        }}
+                        faces={namingGroup.faces}
+                        onConfirm={handleConfirmName}
+                        people={people}
+                    />
+                )
+            }
+
         </div >
     )
 }

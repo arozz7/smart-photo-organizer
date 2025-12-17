@@ -779,22 +779,25 @@ def handle_command(command):
         out_path = payload.get('outPath')
         task = payload.get('task', 'upscale') # upscale | restore_faces
         model_name = payload.get('modelName', 'RealESRGAN_x4plus')
+        face_enhance = payload.get('faceEnhance', False) # New flag
         
-        logger.info(f"Enhancing image: {file_path} -> {out_path} [{task}/{model_name}]")
+        logger.info(f"Enhancing image: {file_path} -> {out_path} [{task}/{model_name}] (FaceEnhance: {face_enhance})")
         try:
             # Check if model exists first? enhance.py handles it
-            result_path = enhance.enhancer.enhance(file_path, out_path, task, model_name)
+            result_path = enhance.enhancer.enhance(file_path, out_path, task, model_name, face_enhance)
             response = {
                 "type": "enhance_result",
                 "success": True,
-                "outPath": result_path
+                "outPath": result_path,
+                "reqId": req_id
             }
         except Exception as e:
             logger.exception("Enhancement Error")
             response = {
                 "type": "enhance_result",
                 "success": False,
-                "error": str(e)
+                "error": str(e),
+                "reqId": req_id
             }
 
     elif cmd_type == 'download_model':
@@ -814,6 +817,71 @@ def handle_command(command):
                 "success": False,
                 "error": str(e)
             }
+
+    elif cmd_type == 'rebuild_index':
+        descriptors = payload.get('descriptors', [])
+        ids = payload.get('ids', [])
+        logger.info(f"Rebuilding FAISS index with {len(descriptors)} vectors...")
+        try:
+            # Reset index and id_map
+            global index, id_map
+            index = faiss.IndexFlatL2(512)
+            id_map = {}
+            
+            if descriptors:
+                X = np.array(descriptors).astype('float32')
+                # FAISS prefers normalized vectors for L2 to act like Cosine similarity
+                faiss.normalize_L2(X)
+                index.add(X)
+                
+                for i, face_id in enumerate(ids):
+                    id_map[i] = face_id
+                
+            save_faiss()
+            response = {
+                "type": "rebuild_index_result",
+                "count": index.ntotal,
+                "success": True,
+                "reqId": req_id
+            }
+        except Exception as e:
+            logger.exception("Index rebuild failed")
+            response = {"error": str(e), "reqId": req_id}
+
+    elif cmd_type == 'search_index':
+        descriptor = payload.get('descriptor')
+        k = payload.get('k', 10)
+        threshold = payload.get('threshold', 0.6) # L2 distance threshold
+        
+        if not descriptor or index is None or index.ntotal == 0:
+            response = {"type": "search_result", "matches": [], "reqId": req_id}
+        else:
+            try:
+                X = np.array([descriptor]).astype('float32')
+                faiss.normalize_L2(X)
+                
+                distances, indices = index.search(X, k)
+                
+                matches = []
+                for dist, idx in zip(distances[0], indices[0]):
+                    if idx == -1: continue
+                    if dist > threshold: continue # In L2 on normalized vectors, smaller = closer
+                    
+                    face_id = id_map.get(int(idx))
+                    if face_id is not None:
+                        matches.append({
+                            "id": face_id,
+                            "distance": float(dist)
+                        })
+                
+                response = {
+                    "type": "search_result",
+                    "matches": matches,
+                    "reqId": req_id
+                }
+            except Exception as e:
+                logger.exception("Search failed")
+                response = {"error": str(e), "reqId": req_id}
 
     elif cmd_type == 'get_system_status':
         status = {}

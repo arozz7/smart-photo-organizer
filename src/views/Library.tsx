@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { useScan } from '../context/ScanContext'
 import { useAI } from '../context/AIContext'
+import { useAlert } from '../context/AlertContext'
 import { VirtuosoGrid } from 'react-virtuoso'
 import PhotoDetail from '../components/PhotoDetail'
 // import AIStatus from '../components/AIStatus'
@@ -11,6 +12,7 @@ import { GearIcon } from '@radix-ui/react-icons'
 export default function Library() {
     const { scanning, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, availableFolders, availablePeople, scanErrors, loadScanErrors } = useScan()
     const { addToQueue } = useAI()
+    const { showAlert, showConfirm } = useAlert()
     const [localPath, setLocalPath] = useState(scanPath || 'D:\\Photos')
     const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null)
     const [isSelectionMode, setIsSelectionMode] = useState(false)
@@ -56,34 +58,54 @@ export default function Library() {
 
     const handleRescanSelected = () => {
         if (selectedIds.size === 0) return
-        if (!confirm(`Rescan ${selectedIds.size} selected photos with AI?`)) return
 
-        // Find photo objects for selected Ids (only loaded ones)
-        // If we want to support selected but not loaded, we need a different approach,
-        // but for now, selection is only possible on loaded items.
-        const photosToRescan = photos.filter(p => selectedIds.has(p.id))
-        addToQueue(photosToRescan)
-        setIsSelectionMode(false)
-        setSelectedIds(new Set())
+        showConfirm({
+            title: 'Rescan with AI',
+            description: `Rescan ${selectedIds.size} selected photos with AI?`,
+            confirmLabel: 'Rescan Now',
+            onConfirm: () => {
+                const photosToRescan = photos.filter(p => selectedIds.has(p.id))
+                addToQueue(photosToRescan)
+                setIsSelectionMode(false)
+                setSelectedIds(new Set())
+            }
+        });
     }
 
     const handleRescanFiltered = async () => {
-        if (!confirm("Rescan ALL photos matching the current filter? This might take a while.")) return
-
-        try {
-            // @ts-ignore
-            const photosToRescan = await window.ipcRenderer.invoke('db:getPhotosForRescan', { filter })
-            if (photosToRescan.length > 0) {
-                if (confirm(`Found ${photosToRescan.length} photos. Proceed with AI processing?`)) {
-                    addToQueue(photosToRescan)
+        showConfirm({
+            title: 'Bulk Rescan',
+            description: 'Rescan ALL photos matching the current filter? This might take a while.',
+            confirmLabel: 'Prepare Rescan',
+            onConfirm: async () => {
+                try {
+                    // @ts-ignore
+                    const photosToRescan = await window.ipcRenderer.invoke('db:getPhotosForRescan', { filter })
+                    if (photosToRescan.length > 0) {
+                        showConfirm({
+                            title: 'Proceed with Rescan',
+                            description: `Found ${photosToRescan.length} photos. Proceed with AI processing?`,
+                            confirmLabel: 'Start Processing',
+                            onConfirm: () => {
+                                addToQueue(photosToRescan)
+                            }
+                        });
+                    } else {
+                        showAlert({
+                            title: 'No Photos Found',
+                            description: 'No photo found matching current filter.'
+                        });
+                    }
+                } catch (e) {
+                    console.error(e)
+                    showAlert({
+                        title: 'Error',
+                        description: 'Failed to fetch photos for rescan.',
+                        variant: 'danger'
+                    });
                 }
-            } else {
-                alert("No photo found matching current filter.")
             }
-        } catch (e) {
-            console.error(e)
-            alert("Failed to fetch photos for rescan.")
-        }
+        });
     }
 
     // Custom components for VirtuosoGrid must support refs
@@ -341,21 +363,33 @@ export default function Library() {
             <div className="flex-1 p-4 content-start h-full">
                 {photos.length === 0 && !hasMore ? (
                     <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-4">
-                        <p>No photos loaded.</p>
-                        <div className="flex gap-4">
-                            <button
-                                onClick={() => setFilter({})}
-                                className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded font-medium transition-colors"
-                            >
-                                Load All Photos
-                            </button>
-                            <button
-                                onClick={handleBrowse}
-                                className="bg-gray-700 hover:bg-gray-600 text-white px-6 py-2 rounded font-medium transition-colors"
-                            >
-                                Scan Folder
-                            </button>
-                        </div>
+                        {('tag' in filter && !filter.tag) ? (
+                            <p className="text-lg">Select a tag from the dropdown above to view photos.</p>
+                        ) : ('folder' in filter && !filter.folder) ? (
+                            <p className="text-lg">Select a folder from the dropdown above to view photos.</p>
+                        ) : ('people' in filter && (!filter.people || filter.people.length === 0)) ? (
+                            <p className="text-lg">Select a person from the dropdown above to view photos.</p>
+                        ) : ('search' in filter && !filter.search) ? (
+                            <p className="text-lg">Start typing to search for photos via AI.</p>
+                        ) : (
+                            <>
+                                <p>No photos loaded.</p>
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => setFilter({})}
+                                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded font-medium transition-colors"
+                                    >
+                                        Load All Photos
+                                    </button>
+                                    <button
+                                        onClick={handleBrowse}
+                                        className="bg-gray-700 hover:bg-gray-600 text-white px-6 py-2 rounded font-medium transition-colors"
+                                    >
+                                        Scan Folder
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 ) : (
                     <VirtuosoGrid

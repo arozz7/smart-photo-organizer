@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import * as Slider from '@radix-ui/react-slider';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { Cross2Icon, InfoCircledIcon } from '@radix-ui/react-icons';
+import { useAlert } from '../context/AlertContext';
 
 interface SettingsModalProps {
     open: boolean;
@@ -17,6 +18,7 @@ interface AISettings {
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => {
+    const { showAlert, showConfirm } = useAlert();
     const [loading, setLoading] = useState(true);
     const [settings, setSettings] = useState<AISettings>({
         faceDetectionThreshold: 0.6,
@@ -52,7 +54,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
             onOpenChange(false);
         } catch (e) {
             console.error("Failed to save settings:", e);
-            alert("Failed to save settings");
+            showAlert({
+                title: 'Save Failed',
+                description: 'Failed to save settings',
+                variant: 'danger'
+            });
         } finally {
             setLoading(false);
         }
@@ -63,14 +69,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
     };
 
     const handleReset = () => {
-        if (confirm("Reset all AI settings to default values?")) {
-            setSettings({
-                faceDetectionThreshold: 0.6,
-                faceBlurThreshold: 20.0,
-                vlmTemperature: 0.2,
-                vlmMaxTokens: 100
-            });
-        }
+        showConfirm({
+            title: 'Reset AI Settings',
+            description: 'Reset all AI settings to default values?',
+            confirmLabel: 'Reset Defaults',
+            onConfirm: () => {
+                setSettings({
+                    faceDetectionThreshold: 0.6,
+                    faceBlurThreshold: 20.0,
+                    vlmTemperature: 0.2,
+                    vlmMaxTokens: 100
+                });
+            }
+        });
     };
 
     return (

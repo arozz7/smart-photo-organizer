@@ -6,7 +6,8 @@
   "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
+    "build:python": "node scripts/build-python.js",
+    "build": "npm run build:python && tsc && vite build && electron-builder",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
     "preview": "vite preview"
   },
