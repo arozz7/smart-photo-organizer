@@ -51,15 +51,16 @@ Found an old, blurry, or low-resolution photo? Use the **Enhance Lab**.
 3.  **Model Selection:** Use "General" for standard photos and "Anime" for illustrations or cartoons.
 ### 💻 Hardware Requirements & Performance
 AI enhancement is a computationally intensive task. For the best experience:
-- **NVIDIA GPU (Recommended):** A modern NVIDIA GPU with **at least 2GB of VRAM** and CUDA installed will provide the fastest results (seconds vs minutes).
-- **CPU Fallback:** The app will work on systems without a GPU, but processing will be significantly slower.
-- **Memory (RAM):** We recommend at least **16GB of system RAM** for processing large RAW files or high-resolution upscaling.
+- **NVIDIA GPU (Recommended):** A modern NVIDIA GPU with **at least 2GB of VRAM** will provide the fastest results (seconds vs minutes). **Note:** Requires downloading the **AI GPU Runtime** (see Section 6).
+- **CPU Fallback:** The app will work on systems without a GPU or if the runtime is not downloaded. Processing will be slower but functional.
+- **Memory (RAM):** We recommend at least **16GB of system RAM** for processing large RAW files.
 
-### 🧬 Model Selection
-The app allows you to choose specific models for different types of content:
+### 🧬 Model Selection & Downloading
+To keep the initial app size small (~400MB), the large AI models and runtimes are managed via the **Manage Models** UI:
+- **AI GPU Runtime:** To enable your NVIDIA card, you must download the GPU Runtime engine (approx 5GB) from the **Settings > Manage Models** menu.
+- **On-Demand Models:** Weights for Real-ESRGAN or GFPGAN (and other enhancement models) are downloaded the first time you use them. You can also manually trigger downloads in the Enhance Lab if you encounter a "Model Not Found" error.
 - **General (Real-ESRGAN x4 Plus):** The best all-rounder for photographs. It excels at removing noise and reconstructing natural textures.
 - **Anime (Real-ESRGAN x4 Plus Anime):** Specifically tuned for illustrations, cartoons, and drawings. It preserves sharp edges and flat colors without adding realistic photographic noise.
-- **On-Demand Downloads:** To keep the initial app size small, model weights are downloaded the first time you use them. You can also manually trigger downloads in the Enhance Lab if you encounter a "Model Not Found" error.
 
 4.  **Preview & Save:** Use the slider to compare the result with the original. If you like it, the enhanced version is automatically saved in the same folder as the original.
 
@@ -101,12 +102,17 @@ Tools for maintaining the health and accuracy of your library:
 - **Calculate Blur Scores:** Missing scores for old scans? Use this to calculate quality scores for existing faces, enabling the "Cleanup Blurry" feature.
 - **Factory Reset:** ⚠️ **Extreme Caution.** Wipes the database and all settings to start fresh.
 
-### ⚙️ AI Configuration (Fine-Tuning)
-Click **"Configure AI Models"** for even more granular control:
-- **Face Detection Confidence:** Adjust how sure the AI must be to mark a face. Lowering this finds more "tiny" or distant faces but increases false positives.
-- **Face Blur Threshold:** Minimum quality score for faces. Faces below this value are automatically hidden or marked for cleanup.
+### ⚙️ AI Configuration & Model Management
+Click **"Manage Models"** in Settings for a transparent overview of your AI engine:
+- **AI GPU Runtime (REQUIRED FOR GPU):** The core Torch/CUDA engine. Download this to move from CPU to GPU processing.
+- **Buffalo_L (InsightFace):** The model responsible for finding and identifying faces.
+- **SmolVLM-Instruct:** The model that "reads" your photos and generates tags and descriptions.
+- **Enhancement Models:** Models like `RealESRGAN` and `GFPGAN` for upscaling and restoration.
+
+Other Fine-Tuning controls:
+- **Face Detection Confidence:** Adjust how sure the AI must be to mark a face.
+- **Face Blur Threshold:** Minimum quality score for faces.
 - **Tagging Creativity (Temperature):** 
     - **LOWER (0.1 - 0.3):** Factual, consistent descriptions. 
     - **HIGHER (0.7+):** Multi-sentence, descriptive, and "creative" tagging.
-- **Max Tagging Tokens:** Maximum length of AI-generated descriptions. Use higher values (e.g., 100-200) for detailed captions.
 -   **Queue Management:** In the **Queues** tab, you can watch the AI working in real-time and adjust how many photos it processes at once to manage your computer's performance.

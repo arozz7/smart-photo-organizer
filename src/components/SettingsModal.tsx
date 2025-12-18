@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Slider from '@radix-ui/react-slider';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { Cross2Icon, InfoCircledIcon } from '@radix-ui/react-icons';
+import { InfoCircledIcon, DownloadIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { useAlert } from '../context/AlertContext';
+import ModelDownloader from './ModelDownloader';
 
 interface SettingsModalProps {
     open: boolean;
@@ -20,6 +21,7 @@ interface AISettings {
 const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => {
     const { showAlert, showConfirm } = useAlert();
     const [loading, setLoading] = useState(true);
+    const [downloaderOpen, setDownloaderOpen] = useState(false);
     const [settings, setSettings] = useState<AISettings>({
         faceDetectionThreshold: 0.6,
         faceBlurThreshold: 20.0,
@@ -92,7 +94,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                     <Dialog.Title className="text-xl font-bold mb-4 text-white">Settings</Dialog.Title>
 
                     <div className="space-y-6">
-                        <h3 className="text-lg font-semibold text-blue-400 border-b border-gray-700 pb-2">AI Configuration</h3>
+                        <div className="flex items-center justify-between border-b border-gray-700 pb-2">
+                            <h3 className="text-lg font-semibold text-blue-400">AI Configuration</h3>
+                            <button
+                                onClick={() => setDownloaderOpen(true)}
+                                className="flex items-center gap-2 px-3 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-xs transition-colors font-medium border border-blue-500/30"
+                            >
+                                <DownloadIcon className="w-3 h-3" />
+                                Manage Models
+                            </button>
+                        </div>
 
                         {/* Face Detection Threshold */}
                         <SettingSlider
@@ -169,6 +180,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                             <Cross2Icon />
                         </button>
                     </Dialog.Close>
+                    <ModelDownloader open={downloaderOpen} onOpenChange={setDownloaderOpen} />
                 </Dialog.Content>
             </Dialog.Portal>
         </Dialog.Root>

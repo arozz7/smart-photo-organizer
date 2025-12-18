@@ -8,6 +8,9 @@
 
 Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for objects) to classify and organize your photo library. Unlike cloud services, **all processing happens locally** on your machine, ensuring your privacy.
 
+> [!TIP]
+> **Extreme Slim Installer:** The v0.2.0-beta release features a lightweight (~400MB) installer. While it works on CPU out-of-box, you can download the optional 5GB GPU Runtime for massive performance gains.
+
 ## Features at a Glance
 
 *   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. Learns as you name them. Uses FAISS for lightning-fast similarity search across millions of faces.
@@ -32,14 +35,18 @@ For detailed examples of how the application works, logic flows, and architectur
 
 ## Usage Guide
 
-### 1. Installation & Setup
+### 1. Installation (Binaries)
 
-**Prerequisites:**
-*   Node.js (v18+)
-*   Python 3.10+ (for the AI backend)
-*   **Windows Users:** An NVIDIA GPU is recommended (with CUDA installed) for faster AI processing, but it will work on CPU.
+The easiest way to get started is to download the latest release:
 
-**Running from Source:**
+1.  **Download:** Grab the `Smart Photo Organizer-Windows-v0.2.0-Setup.7z` from the [Releases](https://github.com/arozz7/smart-photo-organizer/releases) page.
+2.  **Unpack:** Extract the archive using [7-Zip](https://www.7-zip.org/) or WinRAR.
+3.  **Run:** Open `Smart Photo Organizer.exe`.
+4.  **GPU Setup (Optional):** If you have an NVIDIA GPU, go to **Settings > Manage Models** and download the **AI GPU Runtime**. This will enable hardware acceleration for lightning-fast processing.
+
+---
+
+### 2. Running from Source (Development)
 
 ```bash
 # 1. Install Dependencies
@@ -55,6 +62,9 @@ pip install -r requirements.txt
 cd ../..
 npm run dev
 ```
+
+> [!NOTE]
+> If running from source, you will need to manually install the GPU requirements: `pip install -r requirements-gpu.txt`.
 
 ### 2. Getting Started
 

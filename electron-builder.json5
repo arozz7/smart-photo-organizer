@@ -5,7 +5,8 @@
   "asar": true,
   "productName": "Smart Photo Organizer",
   "directories": {
-    "output": "release/${version}"
+    "output": "release/${version}",
+    "buildResources": "build"
   },
   "files": [
     "dist",
@@ -27,9 +28,10 @@
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {
+    "icon": "build/icon.png",
     "target": [
       {
-        "target": "nsis",
+        "target": "7z",
         "arch": [
           "x64"
         ]

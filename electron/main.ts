@@ -91,8 +91,12 @@ function startPythonBackend() {
         }
 
 
-        // Shared Promise Resolution (works for scan_result, tags_result, cluster_result, system_status_result)
+        // Shared Promise Resolution
         const resId = message.photoId || message.reqId || (message.payload && message.payload.reqId);
+
+        if (win && (message.type === 'download_progress' || message.type === 'download_result')) {
+          win.webContents.send('ai:model-progress', message);
+        }
 
         if (resId && scanPromises.has(resId)) {
           const promise = scanPromises.get(resId);
@@ -301,7 +305,7 @@ app.whenReady().then(async () => {
     return getAISettings();
   });
 
-  ipcMain.handle('ai:saveSettings', (event, settings) => {
+  ipcMain.handle('ai:saveSettings', (_event, settings) => {
     setAISettings(settings);
     // Propagate to Python
     if (pythonProcess && pythonProcess.stdin) {
@@ -311,9 +315,58 @@ app.whenReady().then(async () => {
     return true;
   });
 
+  ipcMain.handle('ai:downloadModel', async (_event, { modelName }) => {
+    console.log(`[Main] Requesting model download: ${modelName}`);
+    return new Promise((resolve, reject) => {
+      const requestId = Math.floor(Math.random() * 1000000);
+      scanPromises.set(requestId, {
+        resolve: (res: any) => resolve(res),
+        reject
+      });
+
+      sendToPython({
+        type: 'download_model',
+        payload: {
+          reqId: requestId,
+          modelName
+        }
+      });
+
+      // Long timeout for downloads (30 minutes)
+      setTimeout(() => {
+        if (scanPromises.has(requestId)) {
+          scanPromises.delete(requestId);
+          reject('Model download timed out');
+        }
+      }, 1800000);
+    });
+  });
+
+  ipcMain.handle('ai:getSystemStatus', async () => {
+    return new Promise((resolve, reject) => {
+      const requestId = Math.floor(Math.random() * 1000000);
+      scanPromises.set(requestId, {
+        resolve: (res: any) => resolve(res.status || {}),
+        reject
+      });
+
+      sendToPython({
+        type: 'get_system_status',
+        payload: { reqId: requestId }
+      });
+
+      setTimeout(() => {
+        if (scanPromises.has(requestId)) {
+          scanPromises.delete(requestId);
+          reject('Get system status timed out');
+        }
+      }, 10000);
+    });
+  });
+
   // Handle Face Blur
-  // Handle Face Blur
-  ipcMain.handle('face:getBlurry', async (event, { personId, threshold, scope }) => {
+
+  ipcMain.handle('face:getBlurry', async (_event, { personId, threshold, scope }) => {
     const { getDB } = await import('./db');
     const db = getDB();
 
@@ -433,7 +486,7 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle('settings:cleanupPreviews', async (event, { days }) => {
+  ipcMain.handle('settings:cleanupPreviews', async (_event, { days }) => {
     try {
       const previewDir = path.join(getLibraryPath(), 'previews');
       try { await fs.access(previewDir); } catch { return { success: true, deletedCount: 0, deletedSize: 0 }; }
@@ -463,7 +516,7 @@ app.whenReady().then(async () => {
   });
 
 
-  ipcMain.handle('face:deleteFaces', async (event, faceIds) => {
+  ipcMain.handle('face:deleteFaces', async (_event, faceIds) => {
     const { getDB } = await import('./db');
     const db = getDB();
     const deleteParams = faceIds.map(() => '?').join(',');
@@ -591,27 +644,6 @@ app.whenReady().then(async () => {
       console.error('Enhance failed:', e);
       return { success: false, error: String(e) };
     }
-  })
-
-  ipcMain.handle('ai:downloadModel', async (_, { modelName }) => {
-    console.log(`[Main] Requesting model download: ${modelName}`);
-    return new Promise((resolve, reject) => {
-      const requestId = Math.floor(Math.random() * 1000000);
-      scanPromises.set(requestId, {
-        resolve: (res: any) => resolve(res),
-        reject
-      });
-
-      sendToPython({
-        type: 'download_model',
-        payload: {
-          reqId: requestId,
-          modelName
-        }
-      });
-
-      // No timeout or very long timeout for download
-    });
   })
 
   ipcMain.handle('ai:rebuildIndex', async () => {
@@ -830,7 +862,7 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('db:clearAITags', async () => {
+  ipcMain.handle('db:clearAITags', async (_event) => {
     const { getDB } = await import('./db');
     const db = getDB();
     try {
@@ -1521,8 +1553,7 @@ app.whenReady().then(async () => {
     // ... rest of implementation ...
     // Note: The file cut off here in previous view, so I will append the new handlers at the end of the file or after a known block.
     // Actually, I should probably read the end of the file first to be safe, but I can append to the `ipcMain` block if I find a good anchor.
-    // I'll use the last known handler `db:reassignFaces` as anchor? No, that was cut off.
-    // I will use `ipcMain.handle('db:deleteFaces'` as anchor.
+    // I will use the last known handler `db:deleteFaces` as anchor.
 
     const getPerson = db.prepare('SELECT id FROM people WHERE name = ?');
 

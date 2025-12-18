@@ -42,3 +42,14 @@ __pycache__/
 lint_*.txt
 verify_*.py
 verify_*.js
+
+# App Build Artifacts
+dist/
+release/
+python-dist/
+build-temp/
+*.exe
+*.7z
+*.zip
+*.msi
+*.nupkg

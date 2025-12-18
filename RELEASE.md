@@ -15,8 +15,10 @@ This release introduces significant AI capabilities and architectural improvemen
 - **Configurable Storage:** Choose where your application data (DB, previews, indices) is stored.
 
 ## Technical Improvements
-- **Bundled Python Backend:** No longer requires a local Python installation to run.
-- **Improved RAW Handling:** Faster preview extraction and orientation preservation.
+- **Standalone Executable**: No Python installation required.
+- **Slim AI Engine**: Reduced initial installer size by 80% (models now downloaded on-demand).
+- **Transparent Model Management**: New UI to see exactly what is being downloaded and from where.
+- **Improved Face Restoration**: Faster and more robust AI processing.
 - **AI Performance Profiles:** Choose between "Balanced" and "High Accuracy" based on your hardware.
 
 ## Known Issues

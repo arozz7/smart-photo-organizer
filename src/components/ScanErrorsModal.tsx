@@ -1,4 +1,3 @@
-import React from 'react'
 import { useScan } from '../context/ScanContext'
 
 interface ScanErrorsModalProps {

@@ -1,14 +1,34 @@
 import sys
 import json
 import logging
-import torch
 import time
 import os
 import cv2
 import numpy as np
 import rawpy
-import rawpy
 import imageio
+import pickle
+import re
+import types
+from sklearn.cluster import DBSCAN
+
+# --- RUNTIME LOADING ---
+# If an external AI runtime (torch, cuda, etc) is downloaded, we inject it into the path
+LIBRARY_PATH = os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer'))
+AI_RUNTIME_PATH = os.path.join(LIBRARY_PATH, 'ai-runtime')
+
+if os.path.exists(AI_RUNTIME_PATH):
+    # Add the external site-packages to sys.path
+    # This allows on-demand downloading of the 5GB Torch/CUDA environment
+    site_packages = os.path.join(AI_RUNTIME_PATH, 'lib', 'site-packages')
+    if os.path.exists(site_packages):
+        sys.path.insert(0, site_packages)
+        # Also add DLL directory for CUDA
+        bin_dir = os.path.join(AI_RUNTIME_PATH, 'bin')
+        if os.name == 'nt' and os.path.exists(bin_dir):
+            try:
+                os.add_dll_directory(bin_dir)
+            except: pass
 
 
 # Ensure CUDA DLLs are found if installed via pip
@@ -51,31 +71,45 @@ if os.name == 'nt':
     except ImportError:
         pass
 
-from insightface.app import FaceAnalysis
-import faiss
-import pickle
-import torch
-from transformers import AutoProcessor, AutoModelForVision2Seq
-
-# PATCH: Basicsr/Torchvision compatibility
-# basicsr tries to import from 'torchvision.transforms.functional_tensor' which was removed in torchvision 0.18+
-import torchvision
-if hasattr(torchvision.transforms, 'functional_tensor'):
-    pass # All good
-else:
+# --- LAZY IMPORTS ---
+def get_torch():
     try:
-        import torchvision.transforms.functional as F
-        import sys
-        import types
-        # Create a mock module
-        mod = types.ModuleType("torchvision.transforms.functional_tensor")
-        mod.rgb_to_grayscale = F.rgb_to_grayscale
-        # Inject into sys.modules
-        sys.modules["torchvision.transforms.functional_tensor"] = mod
-        # Also inject into torchvision.transforms for good measure
-        torchvision.transforms.functional_tensor = mod
+        import torch
+        return torch
     except ImportError:
-        pass
+        return None
+
+def get_transformers():
+    try:
+        from transformers import AutoProcessor, AutoModelForVision2Seq
+        return AutoProcessor, AutoModelForVision2Seq
+    except ImportError:
+        return None, None
+
+def get_faiss():
+    try:
+        import faiss
+        return faiss
+    except ImportError:
+        return None
+
+# Initial cleanup of global scope to avoid early import failures
+torch_lib = get_torch()
+faiss_lib = get_faiss()
+
+if torch_lib:
+    # PATCH: Basicsr/Torchvision compatibility
+    import torchvision
+    if not hasattr(torchvision.transforms, 'functional_tensor'):
+        try:
+            import torchvision.transforms.functional as F
+            import types
+            mod = types.ModuleType("torchvision.transforms.functional_tensor")
+            mod.rgb_to_grayscale = F.rgb_to_grayscale
+            sys.modules["torchvision.transforms.functional_tensor"] = mod
+            torchvision.transforms.functional_tensor = mod
+        except ImportError:
+            pass
 
 import enhance # Local module
 
@@ -115,6 +149,7 @@ def init_insightface():
     logger.info("Initializing InsightFace (Buffalo_L)...")
     try:
         from contextlib import redirect_stdout
+        from insightface.app import FaceAnalysis
         with redirect_stdout(sys.stderr):
              providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
              # Check if TensorRT is actually available to avoid spamming errors
@@ -123,7 +158,6 @@ def init_insightface():
                  # Try to find nvinfer_10.dll (standard for TRT 10.x)
                  # Since we added it to PATH/DLL_DIR above, this should succeed if correct
                  ctypes.CDLL('nvinfer_10.dll')
-                 providers.insert(0, 'TensorrtExecutionProvider')
                  logger.info("TensorRT libraries found. enabling TensorrtExecutionProvider.")
              except Exception:
                  logger.info("TensorRT not found. Skipping TensorrtExecutionProvider.")
@@ -136,113 +170,62 @@ def init_insightface():
         logger.error(f"Failed to init InsightFace: {e}")
         raise e
 
-# ... (init_faiss, save_faiss, init_vlm... no changes)
-
 def smart_crop_landmarks(bbox, kps, img_width, img_height):
     """
     Uses 5 facial landmarks to center the crop and ensure adequate context.
     kps: 5x2 array [RightEye, LeftEye, Nose, RightMouth, LeftMouth]
     bbox: [x1, y1, x2, y2]
     """
-    # 1. Calculate Face Center from landmarks
-    # kps order in insightface (usually): [left_eye, right_eye, nose, left_mouth, right_mouth]
-    # Check shape: kps is numpy array
-    
     if kps is None or len(kps) == 0:
-         # Fallback to simple box expansion if no landmarks
          return expand_box(bbox, img_width, img_height, 0.4)
-
-    # Centroid of keypoints
-    center_x = np.mean(kps[:, 0])
-    center_y = np.mean(kps[:, 1])
     
-    # 2. Determine Scale/Box Size
-    # Use the bounding box size as a baseline
-    x1, y1, x2, y2 = bbox
-    raw_w = x2 - x1
-    raw_h = y2 - y1
-    raw_size = max(raw_w, raw_h)
+    # Calculate crop center and size
+    eye_center = np.mean(kps[:2], axis=0)
+    mouth_center = np.mean(kps[3:], axis=0)
+    face_center = (eye_center + mouth_center) / 2
     
-    # Expansion Factor: 
-    # Faces are approx 50-60% of the head height. 
-    # We want to include hair (top) and neck (bottom).
-    # 1.5x is a safer bet to avoid "huge" boxes while getting the hair.
-    final_size = raw_size * 1.5
+    # Heuristic for face size based on landmarks
+    face_size = np.linalg.norm(eye_center - mouth_center) * 2.5
+    final_size = face_size * 1.5
+    
     half_size = final_size / 2
+    center_x, center_y = face_center
     
-    # 3. Apply Offset
-    # Center of landmarks is usually the nose/mid-face.
-    # We want the distinct "Center" of the image to be slightly higher (eyes at 1/3 or 1/2 line).
-    # Shift center_y up slightly (8% instead of 10% since box is smaller)
+    # Shift center_y up slightly
     center_y_shifted = center_y - (final_size * 0.08)
     
-    # 4. Calculate coordinates
-    new_x1 = center_x - half_size
-    new_y1 = center_y_shifted - half_size
-    new_x2 = center_x + half_size
-    new_y2 = center_y_shifted + half_size
-    
-    # 5. Square enforcement? (Already square from half_size).
-    # Just clamp.
-    
-    new_x1 = max(0, new_x1)
-    new_y1 = max(0, new_y1)
-    new_x2 = min(img_width, new_x2)
-    new_y2 = min(img_height, new_y2)
+    new_x1 = max(0, center_x - half_size)
+    new_y1 = max(0, center_y_shifted - half_size)
+    new_x2 = min(img_width, center_x + half_size)
+    new_y2 = min(img_height, center_y_shifted + half_size)
     
     return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)]
-
-def expand_box(bbox, img_width, img_height, expansion_factor=0.25):
-    """
-    Fallback: Expands the bounding box by a factor to include more context.
-    """
-    x1, y1, x2, y2 = bbox
-    w = x2 - x1
-    h = y2 - y1
-    
-    pad_w = w * expansion_factor * 0.5
-    pad_h = h * expansion_factor * 0.5
-    
-    new_x1 = max(0, x1 - pad_w)
-    new_y1 = max(0, y1 - pad_h)
-    new_x2 = min(img_width, x2 + pad_w)
-    new_y2 = min(img_height, y2 + pad_h)
-    
-    return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)]
-
-# ... (ensure we match indentation for helper functions if any, but expand_box can be top level or helper)
-# Actually, I'll place it before generate_captions or inside helpers section.
-# Since I am replacing a block, I will just insert it effectively or ensure context is right.
-# Wait, replacing a huge block is risky if I get lines wrong. 
-# `scan_image` is inside `handle_command`. 
-# calculated `det_size` change is in `init_insightface`.
-# usage is in `handle_command`.
-# I should probably split this into two edits if the blocks are far apart.
-# init_insightface is around line 62.
-# handle_command is around line 229.
-# I will use multi_replace.
 
 
 def init_faiss():
     global index, id_map
     logger.info("Initializing FAISS...")
+    if not faiss_lib:
+        logger.warning("FAISS library not loaded. Vector search will be disabled.")
+        return
+
     try:
         if os.path.exists(index_file):
-            index = faiss.read_index(index_file)
+            index = faiss_lib.read_index(index_file)
             if os.path.exists(id_map_file):
                 with open(id_map_file, 'rb') as f:
                     id_map = pickle.load(f)
             logger.info(f"Loaded existing index with {index.ntotal} vectors.")
         else:
-            index = faiss.IndexFlatL2(512)
+            index = faiss_lib.IndexFlatL2(512)
             logger.info("Created new FAISS index (512d).")
     except Exception as e:
         logger.error(f"Failed to init FAISS: {e}")
-        index = faiss.IndexFlatL2(512)
+        index = faiss_lib.IndexFlatL2(512)
 
 def save_faiss():
-    if index:
-        faiss.write_index(index, index_file)
+    if index and faiss_lib:
+        faiss_lib.write_index(index, index_file)
         with open(id_map_file, 'wb') as f:
             pickle.dump(id_map, f)
 
@@ -616,6 +599,9 @@ def handle_command(command):
             # InsightFace expects BGR (cv2 default) 
             # but let's double check if FaceAnalysis handles it. Yes, it uses cv2 internally.
             
+            if not app:
+                init_insightface()
+
             faces = app.get(img)
             
             img_height, img_width = img.shape[:2]
@@ -727,6 +713,8 @@ def handle_command(command):
         file_path = payload.get('filePath')
         logger.info(f"Generating tags for {photo_id}...")
         try:
+             if not vlm_model:
+                 init_vlm()
              description, tags = generate_captions(file_path)
              response = {
                  "type": "tags_result",
@@ -804,18 +792,57 @@ def handle_command(command):
         model_name = payload.get('modelName')
         logger.info(f"Downloading model: {model_name}")
         try:
-            path = enhance.enhancer._download_model(model_name)
+            def progress_callback(current, total):
+                if total > 0:
+                    pct = (current / total) * 100
+                    print(json.dumps({
+                        "type": "download_progress",
+                        "modelName": model_name,
+                        "current": current,
+                        "total": total,
+                        "percent": pct,
+                        "reqId": req_id
+                    }))
+                    sys.stdout.flush()
+
+            if "AI GPU Runtime" in model_name:
+                import zipfile
+                # Download to a temp file
+                temp_zip = os.path.join(LIBRARY_PATH, "runtime_download.zip")
+                def runtime_progress(cur, tot):
+                    progress_callback(cur, tot)
+                
+                # We can reuse the same download logic but with extraction
+                # For now, let's assume enhancer.download_model_with_progress can be used
+                save_path = enhance.enhancer.download_model_at_url(
+                    "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.2.0-beta/ai-runtime-win-x64.zip",
+                    temp_zip,
+                    progress_callback
+                )
+                
+                logger.info("Extracting AI Runtime...")
+                with zipfile.ZipFile(save_path, 'r') as zip_ref:
+                    zip_ref.extractall(AI_RUNTIME_PATH)
+                
+                os.remove(save_path) # Cleanup zip
+                save_path = AI_RUNTIME_PATH
+            else:
+                save_path = enhance.enhancer.download_model_with_progress(model_name, progress_callback)
+            
             response = {
-                "type": "download_model_result",
+                "type": "download_result",
                 "success": True,
-                "path": path
+                "modelName": model_name,
+                "savePath": save_path,
+                "reqId": req_id
             }
         except Exception as e:
             logger.exception("Download Error")
             response = {
-                "type": "download_model_result",
+                "type": "download_result",
                 "success": False,
-                "error": str(e)
+                "error": str(e),
+                "reqId": req_id
             }
 
     elif cmd_type == 'rebuild_index':
@@ -823,27 +850,17 @@ def handle_command(command):
         ids = payload.get('ids', [])
         logger.info(f"Rebuilding FAISS index with {len(descriptors)} vectors...")
         try:
-            # Reset index and id_map
             global index, id_map
             index = faiss.IndexFlatL2(512)
             id_map = {}
-            
             if descriptors:
                 X = np.array(descriptors).astype('float32')
-                # FAISS prefers normalized vectors for L2 to act like Cosine similarity
                 faiss.normalize_L2(X)
                 index.add(X)
-                
                 for i, face_id in enumerate(ids):
                     id_map[i] = face_id
-                
             save_faiss()
-            response = {
-                "type": "rebuild_index_result",
-                "count": index.ntotal,
-                "success": True,
-                "reqId": req_id
-            }
+            response = {"type": "rebuild_index_result", "count": index.ntotal, "success": True, "reqId": req_id}
         except Exception as e:
             logger.exception("Index rebuild failed")
             response = {"error": str(e), "reqId": req_id}
@@ -851,34 +868,22 @@ def handle_command(command):
     elif cmd_type == 'search_index':
         descriptor = payload.get('descriptor')
         k = payload.get('k', 10)
-        threshold = payload.get('threshold', 0.6) # L2 distance threshold
-        
+        threshold = payload.get('threshold', 0.6)
         if not descriptor or index is None or index.ntotal == 0:
             response = {"type": "search_result", "matches": [], "reqId": req_id}
         else:
             try:
                 X = np.array([descriptor]).astype('float32')
                 faiss.normalize_L2(X)
-                
                 distances, indices = index.search(X, k)
-                
                 matches = []
                 for dist, idx in zip(distances[0], indices[0]):
                     if idx == -1: continue
-                    if dist > threshold: continue # In L2 on normalized vectors, smaller = closer
-                    
+                    if dist > threshold: continue
                     face_id = id_map.get(int(idx))
                     if face_id is not None:
-                        matches.append({
-                            "id": face_id,
-                            "distance": float(dist)
-                        })
-                
-                response = {
-                    "type": "search_result",
-                    "matches": matches,
-                    "reqId": req_id
-                }
+                        matches.append({"id": face_id, "distance": float(dist)})
+                response = {"type": "search_result", "matches": matches, "reqId": req_id}
             except Exception as e:
                 logger.exception("Search failed")
                 response = {"error": str(e), "reqId": req_id}
@@ -886,12 +891,49 @@ def handle_command(command):
     elif cmd_type == 'get_system_status':
         status = {}
         try:
-            # 1. InsightFace Status
+            # 1. Models Status (Transparent listing)
+            models_info = {}
+            
+            # Special markers for core libraries
+            runtime_exists = os.path.exists(AI_RUNTIME_PATH)
+            models_info["AI GPU Runtime (Torch/CUDA)"] = {
+                "exists": runtime_exists,
+                "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.2.0-beta/ai-runtime-win-x64.zip",
+                "size": 5800000000, # Approx 5.8GB
+                "localPath": AI_RUNTIME_PATH,
+                "isRuntime": True
+            }
+
+            for name, url in enhance.MODEL_URLS.items():
+                m_path = os.path.join(enhance.WEIGHTS_DIR, f"{name}.pth")
+                exists = os.path.exists(m_path)
+                models_info[name] = {
+                    "exists": exists,
+                    "url": url,
+                    "size": os.path.getsize(m_path) if exists else 0,
+                    "localPath": m_path
+                }
+            
+            # Special markers for core models
+            models_info["Buffalo_L (InsightFace)"] = {
+                "exists": os.path.exists(os.path.expanduser('~/.insightface/models/buffalo_l')),
+                "url": "InsightFace Internal (Buffalo_L)",
+                "size": os.path.getsize(os.path.expanduser('~/.insightface/models/buffalo_l/model-0000.params')) if os.path.exists(os.path.expanduser('~/.insightface/models/buffalo_l/model-0000.params')) else 0,
+                "localPath": os.path.expanduser('~/.insightface/models/buffalo_l')
+            }
+            models_info["SmolVLM-Instruct"] = {
+                "exists": os.path.exists(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')),
+                "url": "HuggingFace (SmolVLM-Instruct)",
+                "size": os.path.getsize(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct/snapshots/f919106093554181f2113202970119100232491a/model.safetensors')) if os.path.exists(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct/snapshots/f919106093554181f2113202970119100232491a/model.safetensors')) else 0,
+                "localPath": os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')
+            }
+            status['models'] = models_info
+
+            # 2. InsightFace Status
             insightface_status = {'loaded': False}
             if app:
                 providers = []
                 try:
-                    # Attempt to get providers from the detection model (usually active)
                     if hasattr(app, 'models') and 'detection' in app.models:
                         det_model = app.models['detection']
                         if hasattr(det_model, 'session'):
@@ -900,76 +942,43 @@ def handle_command(command):
                             providers = det_model.net.session.get_providers()
                 except Exception:
                     providers = ["Unknown"]
-
-                insightface_status = {
-                    'loaded': True,
-                    'providers': providers,
-                    'det_thresh': DET_THRESH,
-                    'blur_thresh': BLUR_THRESH
-                }
+                insightface_status = {'loaded': True, 'providers': providers, 'det_thresh': DET_THRESH, 'blur_thresh': BLUR_THRESH}
             status['insightface'] = insightface_status
 
-            # 2. FAISS Status
-            faiss_status = {'loaded': False}
-            if index:
-                 faiss_status = {
-                     'loaded': True,
-                     'count': index.ntotal,
-                     'dim': index.d
-                 }
-            status['faiss'] = faiss_status
+            # 3. FAISS Status
+            status['faiss'] = {'loaded': index is not None, 'count': index.ntotal if index else 0}
 
-            # 3. VLM Status
-            vlm_status = {
-                'loaded': vlm_model is not None,
-                'device': str(vlm_model.device) if vlm_model else 'N/A',
-                'model': 'SmolVLM',
-                'config': {
-                    'temp': VLM_TEMP,
-                    'max_tokens': VLM_MAX_TOKENS
-                }
-            }
-            status['vlm'] = vlm_status
+            # 4. Libraries
+            try:
+                import onnxruntime
+                onnx_info = onnxruntime.__version__
+            except ImportError:
+                onnx_info = "Not Found"
 
-            # 4. Libraries & System
-            import onnxruntime
             status['system'] = {
                 'python': sys.version.split()[0],
-                'torch': torch.__version__,
-                'cuda_available': torch.cuda.is_available(),
-                'cuda_device': torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None',
-                'onnxruntime': onnxruntime.__version__,
-                'opencv': cv2.__version__
+                'torch': torch_lib.__version__ if torch_lib else "Missing/Download Required",
+                'cuda': torch_lib.cuda.is_available() if torch_lib else False,
+                'onnx': onnx_info,
+                'ai_runtime_exists': os.path.exists(AI_RUNTIME_PATH)
             }
 
-            response = {
-                "type": "system_status_result",
-                "status": status
-            }
+            response = {"type": "system_status_result", "status": status, "reqId": req_id}
         except Exception as e:
             logger.error(f"Error getting status: {e}")
-            response = {"error": str(e)}
+            response = {"error": str(e), "reqId": req_id}
     else:
-        response = {"error": f"Unknown command: {cmd_type}"}
+        response = {"error": f"Unknown command: {cmd_type}", "reqId": req_id}
         
     # Inject request ID if present so Electron can map the promise
-    if req_id is not None:
+    if req_id is not None and "reqId" not in response: # Only add if not already present
         response['reqId'] = req_id
         
     return response
 
 # --- MAIN LOOP ---
 
-def main():
-    try:
-        init_insightface()
-        init_faiss()
-        # init_vlm() # Lazy load to save startup time? Or eager?
-        # Let's eager load if it's fast enough, but it's big. Keep lazy for now.
-    except Exception:
-        logger.critical("Model initialization failed. Exiting.")
-        sys.exit(1)
-
+def main_loop():
     logger.info("AI Engine started. Waiting for commands...")
     
     while True:
@@ -979,19 +988,26 @@ def main():
             line = line.strip()
             if not line: continue
             
-            try:
-                command = json.loads(line)
-                response = handle_command(command)
-                print(json.dumps(response))
-                sys.stdout.flush()
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON: {e}")
-                print(json.dumps({"error": "Invalid JSON"}))
+            command = json.loads(line)
+            result = handle_command(command)
+            # handle_command might have already printed progress messages
+            # but it MUST return the final response object.
+            if result:
+                print(json.dumps(result))
                 sys.stdout.flush()
         except Exception as e:
-            logger.exception("Critical loop error")
-            print(json.dumps({"error": str(e)}))
-            sys.stdout.flush()
+            logger.error(f"Loop error: {e}")
+            try:
+                print(json.dumps({"error": str(e)}))
+                sys.stdout.flush()
+            except: pass
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    # Move initialization to the background or lazy-load to avoid long startup delay
+    try:
+        # We always try to init FAISS as it is small
+        init_faiss()
+    except Exception as e:
+        logger.error(f"FAISS init failed: {e}")
+
+    main_loop()

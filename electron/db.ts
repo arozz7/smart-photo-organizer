@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 
-let db: Database.Database;
+let db: any;
 
 export function initDB(basePath: string) {
   const dbPath = path.join(basePath, 'library.db');
