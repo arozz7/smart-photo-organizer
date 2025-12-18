@@ -114,12 +114,23 @@ if torch_lib:
 import enhance # Local module
 
 # Configure logging
+LOG_PATH = os.environ.get('LOG_PATH')
+handlers = [logging.StreamHandler(sys.stderr)]
+
+if LOG_PATH:
+    if not os.path.exists(LOG_PATH):
+        os.makedirs(LOG_PATH, exist_ok=True)
+    from logging.handlers import RotatingFileHandler
+    handlers.append(RotatingFileHandler(
+        os.path.join(LOG_PATH, 'python.log'),
+        maxBytes=5*1024*1024, # 5MB
+        backupCount=1
+    ))
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stderr)
-    ]
+    handlers=handlers
 )
 logger = logging.getLogger('ai_engine')
 

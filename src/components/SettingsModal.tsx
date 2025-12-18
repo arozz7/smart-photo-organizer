@@ -149,6 +149,39 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                             />
                         </div>
 
+                        <div className="flex flex-col space-y-3 pt-2">
+                            <div className="flex items-center justify-between border-b border-gray-700 pb-2">
+                                <h3 className="text-lg font-semibold text-orange-400">Diagnostics</h3>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    onClick={async () => {
+                                        // @ts-ignore
+                                        const path = await window.ipcRenderer.invoke('os:getLogPath');
+                                        // @ts-ignore
+                                        window.ipcRenderer.invoke('os:showInFolder', path);
+                                    }}
+                                    className="flex flex-col items-center justify-center gap-2 p-3 bg-gray-800 border border-gray-700 rounded hover:bg-gray-750 transition-colors group"
+                                >
+                                    <span className="text-xs font-semibold text-gray-300 group-hover:text-white">View Logs</span>
+                                    <span className="text-[10px] text-gray-500">Troubleshooting</span>
+                                </button>
+
+                                <button
+                                    onClick={async () => {
+                                        // @ts-ignore
+                                        const path = await window.ipcRenderer.invoke('settings:getLibraryPath');
+                                        // @ts-ignore
+                                        window.ipcRenderer.invoke('os:openFolder', path);
+                                    }}
+                                    className="flex flex-col items-center justify-center gap-2 p-3 bg-gray-800 border border-gray-700 rounded hover:bg-gray-750 transition-colors group"
+                                >
+                                    <span className="text-xs font-semibold text-gray-300 group-hover:text-white">Open App Data</span>
+                                    <span className="text-[10px] text-gray-500">Database & Assets</span>
+                                </button>
+                            </div>
+                        </div>
+
                     </div>
 
                     <div className="mt-8 flex gap-3">

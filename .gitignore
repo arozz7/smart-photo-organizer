@@ -45,6 +45,7 @@ verify_*.js
 
 # App Build Artifacts
 dist/
+dist-electron/
 release/
 python-dist/
 build-temp/

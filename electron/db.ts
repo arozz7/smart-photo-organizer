@@ -1,11 +1,12 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
+import logger from './logger';
 
 let db: any;
 
 export function initDB(basePath: string) {
   const dbPath = path.join(basePath, 'library.db');
-  console.log('Initializing Database at:', dbPath);
+  logger.info('Initializing Database at:', dbPath);
 
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
@@ -101,13 +102,13 @@ export function initDB(basePath: string) {
       db.prepare('DELETE FROM photo_tags WHERE tag_id = ?').run(tag.id);
       // 3. Delete from tags
       db.prepare('DELETE FROM tags WHERE id = ?').run(tag.id);
-      console.log('Migration complete: "AI Description" tag removed.');
+      logger.info('Migration complete: "AI Description" tag removed.');
     }
   } catch (e) {
-    console.error('Migration failed:', e);
+    logger.error('Migration failed:', e);
   }
 
-  console.log('Database schema ensured.');
+  logger.info('Database schema ensured.');
 }
 
 export function getDB() {
@@ -119,7 +120,7 @@ export function getDB() {
 
 export function closeDB() {
   if (db) {
-    console.log('Closing Database connection.');
+    logger.info('Closing Database connection.');
     db.close();
     db = undefined!;
   }
