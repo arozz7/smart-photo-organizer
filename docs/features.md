@@ -98,3 +98,16 @@ The "Create" view is a powerful workspace for building specific sets of photos.
 ## 7. Privacy & Performance
 - **Local-First:** No photos are ever uploaded to the cloud. All AI runs on your GPU/CPU.
 - **Virtualization:** The gallery uses `react-window` to handle libraries with 100,000+ photos without lagging.
+
+## 8. Detailed Hardware Requirements
+
+| Feature | CPU Only (Minimum) | GPU (Recommended) | Notes |
+| :--- | :--- | :--- | :--- |
+| **Face Detection** | ~2-5s per photo | < 0.2s per photo | CPU is viable for background scanning overnight. |
+| **Face Recognition** | Workable | Instant | Vector search is CPU-based (FAISS) and always fast. |
+| **Smart Tagging (VLM)** | **Not Available** | **Required** (4GB+ VRAM) | Current implementation requires NVIDIA GPU + AI Runtime. |
+| **Upscaling (x4)** | ~30-60s per photo | ~2-5s per photo | massive speed difference. |
+| **Face Restoration** | ~10-20s per photo | ~1-2s per photo |  |
+
+> [!IMPORTANT]
+> **VLM / Smart Tagging** requires the **AI GPU Runtime** (~5.8GB) to be installed. It currently **does not support CPU-only mode** due to memory bandwidth constraints on standard system RAM.

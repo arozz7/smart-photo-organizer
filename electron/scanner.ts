@@ -83,6 +83,38 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                 const ext = path.extname(filePath).toLowerCase();
                 const isRaw = !['.jpg', '.jpeg', '.png'].includes(ext);
 
+                // EXPLICIT ORIENTATION HANDLING
+                // Sharp's .rotate() (auto-rotate) can be flaky with some metadata.
+                // We use ExifTool to be the source of truth.
+                let rotationDegrees = 0;
+                let shouldRotate = false;
+
+                try {
+                    const tool = await getExifTool();
+                    if (tool) {
+                        const tags = await tool.read(filePath, ['Orientation']);
+
+                        // Map Exif Orientation to Degrees
+                        // 1 = Horizontal (normal)
+                        // 3 = Rotate 180
+                        // 6 = Rotate 90 CW
+                        // 8 = Rotate 270 CW (or 90 CCW)
+                        // Default to 0 if missing or unknown
+                        if (tags?.Orientation) {
+                            const val = tags.Orientation as any; // Cast to any because runtime value can be string despite TS type
+
+                            if (val === 1 || val === 'Horizontal (normal)') { rotationDegrees = 0; shouldRotate = false; }
+                            else if (val === 3 || val === 'Rotate 180') { rotationDegrees = 180; shouldRotate = true; }
+                            else if (val === 6 || val === 'Rotate 90 CW') { rotationDegrees = 90; shouldRotate = true; }
+                            else if (val === 8 || val === 'Rotate 270 CW') { rotationDegrees = 270; shouldRotate = true; }
+                            // Note: We ignore mirrored orientations (2, 4, 5, 7) for now as they are rare in photos
+                        }
+                    }
+                } catch (e) {
+                    logger.warn(`Failed to read orientation for ${fileName}, assuming upright.`);
+                }
+
+
                 if (isRaw) {
                     // Try ExifTool first for RAWs (fast extraction of embedded preview)
                     // But for TIFs, ExifTool often fails if no embedded preview, so we might skip to Sharp or try/catch
@@ -104,9 +136,11 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                                 // Check if file was created
                                 await fs.access(tempPreviewPath);
 
-                                // Normalize with Sharp (Auto-rotate and resize)
-                                await sharp(tempPreviewPath)
-                                    .rotate()
+                                // Normalize with Sharp
+                                const pipeline = sharp(tempPreviewPath);
+                                if (shouldRotate) pipeline.rotate(rotationDegrees);
+
+                                await pipeline
                                     .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
                                     .jpeg({ quality: 80 })
                                     .toFile(previewPath);
@@ -127,8 +161,10 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                     if (!extracted) {
                         try {
                             logger.info(`Generating preview with Sharp for ${fileName}...`);
-                            await sharp(filePath)
-                                .rotate() // Auto-rotate based on EXIF
+                            const pipeline = sharp(filePath);
+                            if (shouldRotate) pipeline.rotate(rotationDegrees);
+
+                            await pipeline
                                 .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true }) // Reasonable preview size
                                 .jpeg({ quality: 80 })
                                 .toFile(previewPath);
@@ -140,6 +176,22 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                     }
 
                     if (extracted) return previewPath;
+                } else {
+                    // NON-RAW (JPG, PNG)
+                    try {
+                        // For standard images, we also apply our explicit rotation logic
+                        // bypassing sharp().rotate() which is auto-only
+                        const pipeline = sharp(filePath);
+                        if (shouldRotate) pipeline.rotate(rotationDegrees);
+
+                        await pipeline
+                            .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+                            .jpeg({ quality: 80 })
+                            .toFile(previewPath);
+                        return previewPath;
+                    } catch (e) {
+                        logger.error(`Failed to generate preview for image ${fileName}`, e);
+                    }
                 }
             }
         } catch (e) {

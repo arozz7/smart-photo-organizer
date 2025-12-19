@@ -43,6 +43,15 @@ const buildCmd = [
     '--hidden-import insightface',
     '--hidden-import transformers',
     '--hidden-import scipy.special._cdflib', // Common scipy issue
+    '--hidden-import pickletools',  // Required by pure-python torch
+    '--hidden-import distutils',    // Often required
+    '--hidden-import xml.etree.ElementTree', // Often required
+    '--hidden-import modulefinder', // Required by torchvision (runtime)
+    '--hidden-import cProfile',     // Required by torch (dynamo)
+    '--hidden-import pstats',       // often used with cProfile
+    '--collect-all imageio',
+    '--collect-all rawpy',
+    '--collect-all PIL',            // Ensure full Pillow is included
     // EXCLUDE HEAVY MODULES for extreme slim installer
     '--exclude-module torch',
     '--exclude-module torchvision',

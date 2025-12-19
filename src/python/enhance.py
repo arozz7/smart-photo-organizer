@@ -46,6 +46,7 @@ class Enhancer:
             
         print(f"Downloading {model_name} from {url}...")
         response = requests.get(url, stream=True)
+        response.raise_for_status()
         total_size = int(response.headers.get('content-length', 0))
         
         current_size = 0
@@ -68,6 +69,7 @@ class Enhancer:
             
         print(f"Downloading from {url}...")
         response = requests.get(url, stream=True)
+        response.raise_for_status()
         total_size = int(response.headers.get('content-length', 0))
         
         current_size = 0
@@ -101,7 +103,7 @@ class Enhancer:
             self.upsampler = RealESRGANer(scale=4, model_path=model_path, model=model, tile=1024, tile_pad=10, pre_pad=0, half=torch.cuda.is_available())
         elif model_name == 'RealESRGAN_x4plus_anime_6B':
              model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=6, num_grow_ch=32, scale=4)
-             self.upsampler = RealESRGANer(scale=4, model_path=model_path, model=model, tile=1024, tile_pad=10, pre_pad=0, half=True)
+             self.upsampler = RealESRGANer(scale=4, model_path=model_path, model=model, tile=1024, tile_pad=10, pre_pad=0, half=torch.cuda.is_available())
         
         self.current_model_name = model_name
 

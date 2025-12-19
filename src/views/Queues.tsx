@@ -278,17 +278,17 @@ export default function Queues() {
                                     <div className="space-y-1">
                                         <div className="flex justify-between">
                                             <span className="text-gray-400">Model</span>
-                                            <span className="text-gray-200">{systemStatus.vlm.model || 'None'}</span>
+                                            <span className="text-gray-200">{systemStatus.vlm?.model || 'None'}</span>
                                         </div>
                                         <div className="flex justify-between">
                                             <span className="text-gray-400">State</span>
-                                            <span className={systemStatus.vlm.loaded ? "text-green-400" : "text-gray-500"}>
-                                                {systemStatus.vlm.loaded ? "Loaded" : "Lazy Loading..."}
+                                            <span className={systemStatus.vlm?.loaded ? "text-green-400" : "text-gray-500"}>
+                                                {systemStatus.vlm?.loaded ? "Loaded" : "Lazy Loading..."}
                                             </span>
                                         </div>
                                         <div className="flex justify-between">
                                             <span className="text-gray-400">Device</span>
-                                            <span className="text-gray-200">{systemStatus.vlm.device || 'N/A'}</span>
+                                            <span className="text-gray-200">{systemStatus.vlm?.device || 'N/A'}</span>
                                         </div>
                                     </div>
                                 </div>

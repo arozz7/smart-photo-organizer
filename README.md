@@ -23,6 +23,16 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
 *   **🔍 Semantic Search:** Search your photos by content, date, or person using AI-generated descriptions and tags.
 *   **🎨 Set Builder (Create View):** Build custom collections by combining complex filters (e.g., "Person A AND Person B in 2024"). Export your sets to organized folders on disk.
 
+## Hardware Requirements
+
+| Component | Minimum (Basic) | Recommended (Enhanced) | Notes |
+| :--- | :--- | :--- | :--- |
+| **Processor** | Modern CPU (Intle i5/i7 8th Gen+, M1/M2) | CPU with AVX2 Support | Required for all operations. |
+| **Graphics** | Integrated Graphics | **NVIDIA RTX 2060 (6GB)+** | **Crucial for AI Speed.** <br> • Face Scan: 10x faster <br> • Tagging: Required for VLM <br> • Upscaling: 20x faster |
+| **RAM** | 8 GB System RAM | 16 GB System RAM | AI Models need ~4GB dedicated memory. |
+| **Storage** | 1 GB Free Space | 10 GB Free Space | For AI Runtime (~6GB) and Database/Previews. |
+
+
 ## Documentation
 
 For detailed examples of how the application works, logic flows, and architecture, please see the `docs/` folder:
@@ -42,7 +52,27 @@ The easiest way to get started is to download the latest release:
 1.  **Download:** Grab the `Smart Photo Organizer-Windows-v0.2.0-Setup.7z` from the [Releases](https://github.com/arozz7/smart-photo-organizer/releases) page.
 2.  **Unpack:** Extract the archive using [7-Zip](https://www.7-zip.org/) or WinRAR.
 3.  **Run:** Open `Smart Photo Organizer.exe`.
-4.  **GPU Setup (Optional):** If you have an NVIDIA GPU, go to **Settings > Manage Models** and download the **AI GPU Runtime**. This will enable hardware acceleration for lightning-fast processing.
+4.  **GPU Setup (Automatic):** 
+    *   Go to **Settings > Manage Models**.
+    *   Click **"Download AI GPU Runtime"**. The app will automatically download and install it into your library folder (typically `%APPDATA%\smart-photo-organizer\library\ai-runtime`).
+5.  **GPU Setup (Manual):**
+    *   If you have the `ai-runtime-win-x64.zip` already, **do not** put it in the application folder.
+    *   Instead, unzip its contents into the **`ai-runtime`** folder inside your **Library Path** (found in Settings). The final structure should be `[Library Path]\ai-runtime\lib\site-packages\...`
+
+---
+
+### 3. Releasing (Maintainers)
+
+To create a new release for distribution:
+
+1.  **Build App**: Run `npm run build`. This creates the application installer (e.g., `release/0.2.0/...-Setup.7z`).
+2.  **GPU Runtime (Separate Asset)**: 
+    *   The GPU Runtime is **NOT** bundled inside the Setup package (to keep it slim).
+    *   You must create or reference a separate `ai-runtime-win-x64.zip` containing the `bin` and `lib` directories.
+3.  **GitHub Release**: 
+    *   Create a release on GitHub (e.g., `v0.2.0`).
+    *   Upload the Setup package (`...-Setup.7z`).
+    *   **CRITICAL:** Upload `ai-runtime-win-x64.zip` as a **separate standalone asset** to the same release. The application's downloader specifically looks for this filename in your GitHub releases to enable GPU support.
 
 ---
 

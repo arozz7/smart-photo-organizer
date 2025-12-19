@@ -53,10 +53,10 @@ export default function LoadingScreen({ onReady }: { onReady: () => void }) {
             <div className="w-64 space-y-4">
                 <div className="flex justify-center mb-8">
                     {/* Replaced emoji with animated logo */}
-                    <img src="/icon.png" alt="App Logo" className="w-24 h-24 animate-logo-pulse" />
+                    <img src="icon.png" alt="App Logo" className="w-24 h-24 animate-logo-pulse" />
                 </div>
 
-                <h2 className="text-xl font-bold text-white text-center">Photo AI</h2>
+                <h2 className="text-xl font-bold text-white text-center">Smart Photo Organizer</h2>
 
                 <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden border border-gray-700">
                     <div
