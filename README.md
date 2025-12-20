@@ -14,14 +14,20 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
 ## Features at a Glance
 
 *   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. Learns as you name them. Uses FAISS for lightning-fast similarity search across millions of faces.
+    
+    ![People Interactions](docs/assets/PeopleSectionInteractions.gif)
 *   **⚙️ Configurable AI & Storage:** Fine-tune face detection, blur sensitivity, and tagging creativity settings. Choose where your library data (DB, previews, indices) is stored.
 *   **🧼 Blur Detection & Cleanup:** Automatically filters out blurry faces and provides tools to bulk-cleanup low-quality captures.
 *   **🏷️ Smart Tagging:** "Reads" your photos using vision models (VLM) to generate searchable tags and descriptions.
+    
+    ![Smart Tagging Details](docs/assets/ViewPictureDetailsLibrary.gif)
 *   **✨ AI Enhancement Lab:** Upscale old photos (x4) and restore grainy or blurry faces using state-of-the-art models (Real-ESRGAN, GFPGAN).
 *   **📷 RAW Support:** Native support for professional formats (Sony ARW, Canon CR2, Nikon NEF, etc.) with fast preview extraction.
 *   **⚡ High Performance:** Virtualized grid and optimized backend handles libraries with 100,000+ photos smoothly.
 *   **🔍 Semantic Search:** Search your photos by content, date, or person using AI-generated descriptions and tags.
 *   **🎨 Set Builder (Create View):** Build custom collections by combining complex filters (e.g., "Person A AND Person B in 2024"). Export your sets to organized folders on disk.
+    
+    ![Set Builder](docs/assets/CreateAlbumFromFilters.gif)
 
 ## Hardware Requirements
 
@@ -100,8 +106,12 @@ npm run dev
 
 1.  **Select Library:** On first launch, go to **Settings** and choose your photo folder. The app will creating a `photos.db` and `previews/` folder in a location you choose (or default to AppData).
 2.  **Scan Photos:** Click **"Scan Library"**. The app will recursively find all images, generate previews, and extract metadata.
+    
+    ![Scan Library](docs/assets/StartScanFolder.gif)
 3.  **Detect Faces:** The AI will automatically start processing photos to find faces. You can watch the progress in the status bar.
 4.  **Organize People:** Go to the **"People"** tab. You will see groups of "Unnamed Faces". Click one, type a name (e.g., "Mom"), and the AI will auto-group similar faces under that name.
+    
+    ![Name Faces](docs/assets/NameFaces.gif)
 5.  **Generate Tags:** Select photos and click **"Generate Smart Tags"** to have the AI describe them.
 
 ## Development

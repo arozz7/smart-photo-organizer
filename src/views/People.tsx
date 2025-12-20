@@ -57,6 +57,9 @@ export default function People() {
     }, [activeTab, onPhotoProcessed])
 
     // Auto-reload faces when new ones are detected (debounced)
+    // Auto-reload faces when new ones are detected (debounced)
+    // DISABLED: User requested manual refresh only (2025-12-19)
+    /*
     useEffect(() => {
         if (hasNewFaces && activeTab === 'unnamed') {
             const timeout = setTimeout(() => {
@@ -65,6 +68,7 @@ export default function People() {
             return () => clearTimeout(timeout)
         }
     }, [hasNewFaces, activeTab])
+    */
 
     const runClustering = async () => {
         if (isClustering) return
@@ -187,9 +191,12 @@ export default function People() {
                         {activeTab === 'unnamed' && (
                             <div className="flex items-center">
                                 <button
-                                    onClick={() => loadFaces({ unnamed: true })}
+                                    onClick={() => {
+                                        loadFaces({ unnamed: true });
+                                        setHasNewFaces(false);
+                                    }}
                                     className={`p-2 rounded-md transition-colors ${hasNewFaces ? 'text-indigo-400 animate-pulse' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
-                                    title={hasNewFaces ? "New faces detected! Refreshing..." : "Refresh"}
+                                    title={hasNewFaces ? "New faces available (Click to refresh)" : "Refresh"}
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                                         <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v3.292a1 1 0 01-2 0V13.099a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />

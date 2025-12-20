@@ -284,10 +284,26 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                 <div className="space-y-2">
                     <h4 className="text-gray-500 text-xs font-bold uppercase tracking-wider">People</h4>
                     {faces.length === 0 ? (
-                        <p className="text-gray-500 text-sm italic">No people detected</p>
+                        <div className="flex items-center gap-2">
+                            <p className="text-gray-500 text-sm italic">No people detected</p>
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        // @ts-ignore
+                                        await window.ipcRenderer.invoke('ai:scanImage', { photoId: photo.id, scanMode: 'MACRO', debug: true })
+                                    } catch (e) {
+                                        console.error(e)
+                                    }
+                                }}
+                                className="px-2 py-1 bg-indigo-900/30 text-indigo-300 text-xs rounded border border-indigo-500/30 hover:bg-indigo-900/50 transition-colors"
+                                title="Force deep scan for faces (Macro Mode)"
+                            >
+                                Force Face Scan
+                            </button>
+                        </div>
                     ) : (
                         <div className="flex flex-wrap gap-2">
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap gap-2 items-center">
                                 {(() => {
                                     const seenPeople = new Set<number>();
                                     return faces.map((face) => {
@@ -311,6 +327,20 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                         );
                                     });
                                 })()}
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            // @ts-ignore
+                                            await window.ipcRenderer.invoke('ai:scanImage', { photoId: photo.id, scanMode: 'MACRO', debug: true })
+                                        } catch (e) {
+                                            console.error(e)
+                                        }
+                                    }}
+                                    className="px-2 py-1 bg-gray-800 text-gray-400 text-xs rounded-full border border-gray-700 hover:bg-gray-700 hover:text-gray-200 transition-colors flex items-center gap-1"
+                                    title="Force deep scan for missed faces"
+                                >
+                                    <span className="text-xs">🔍</span>
+                                </button>
                             </div>
                         </div>
                     )}

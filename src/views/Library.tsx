@@ -82,19 +82,24 @@ export default function Library() {
                     // @ts-ignore
                     const photosToRescan = await window.ipcRenderer.invoke('db:getPhotosForRescan', { filter })
                     if (photosToRescan.length > 0) {
-                        showConfirm({
-                            title: 'Proceed with Rescan',
-                            description: `Found ${photosToRescan.length} photos. Proceed with AI processing?`,
-                            confirmLabel: 'Start Processing',
-                            onConfirm: () => {
-                                addToQueue(photosToRescan)
-                            }
-                        });
+                        // Workaround: Wait for current modal to close before opening next one
+                        setTimeout(() => {
+                            showConfirm({
+                                title: 'Proceed with Rescan',
+                                description: `Found ${photosToRescan.length} photos. Proceed with AI processing?`,
+                                confirmLabel: 'Start Processing',
+                                onConfirm: () => {
+                                    addToQueue(photosToRescan)
+                                }
+                            });
+                        }, 200);
                     } else {
-                        showAlert({
-                            title: 'No Photos Found',
-                            description: 'No photo found matching current filter.'
-                        });
+                        setTimeout(() => {
+                            showAlert({
+                                title: 'No Photos Found',
+                                description: 'No photo found matching current filter.'
+                            });
+                        }, 200);
                     }
                 } catch (e) {
                     console.error(e)
