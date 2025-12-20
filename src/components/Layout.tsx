@@ -1,5 +1,6 @@
 import { Outlet, NavLink } from 'react-router-dom'
 import StatusBar from './StatusBar'
+import { AIStatusIndicator } from './AIStatusIndicator'
 
 export default function Layout() {
     return (
@@ -7,7 +8,7 @@ export default function Layout() {
             {/* Sidebar */}
             <aside className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
                 <div className="p-4 border-b border-gray-700">
-                    <h1 className="text-xl font-bold tracking-tight text-white">Photo AI</h1>
+                    <h1 className="text-xl font-bold tracking-tight text-white">Smart Photo Organizer</h1>
                 </div>
 
                 <nav className="flex-1 p-2 space-y-1">
@@ -67,8 +68,9 @@ export default function Layout() {
                     </NavLink>
                 </nav>
 
-                <div className="p-4 border-t border-gray-700">
-                    <div className="text-xs text-gray-500">v0.1.0</div>
+                <div className="p-4 border-t border-gray-700 space-y-2">
+                    <AIStatusIndicator />
+                    <div className="text-xs text-gray-500">v0.2.0</div>
                 </div>
             </aside>
 

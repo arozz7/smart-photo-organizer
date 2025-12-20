@@ -14,6 +14,7 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
     const [nameInput, setNameInput] = useState('')
     const [suggestions, setSuggestions] = useState<string[]>([])
     const [showDebug, setShowDebug] = useState(false)
+    const [selectedIndex, setSelectedIndex] = useState(-1)
     const inputRef = useRef<HTMLInputElement>(null)
 
     // Reset input when not selected
@@ -31,12 +32,28 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
             requestAnimationFrame(() => {
                 setTimeout(() => {
                     if (inputRef.current) {
+                        if (window.focus) window.focus();
                         inputRef.current.focus({ preventScroll: true });
                     }
-                }, 100);
+                }, 150);
             });
         }
     }, [isSelected])
+
+    // Handle window focus to restore input focus
+    useEffect(() => {
+        if (!isSelected) return;
+
+        const handleWindowFocus = () => {
+            // Explicitly request app window focus in Electron
+            // @ts-ignore
+            if (window.ipcRenderer) window.ipcRenderer.invoke('app:focusWindow');
+            if (inputRef.current) inputRef.current.focus({ preventScroll: true });
+        };
+
+        window.addEventListener('focus', handleWindowFocus);
+        return () => window.removeEventListener('focus', handleWindowFocus);
+    }, [isSelected]);
 
     // Update suggestions upon input
     useEffect(() => {
@@ -44,14 +61,16 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
 
         if (!nameInput.trim()) {
             setSuggestions([])
+            setSelectedIndex(-1)
             return
         }
         const lowerInput = nameInput.toLowerCase()
         const filtered = people
             .map(p => p.name)
             .filter(name => name.toLowerCase().includes(lowerInput) && name !== nameInput)
-            .slice(0, 50)
+            .slice(0, 10) // Small list is better
         setSuggestions(filtered)
+        setSelectedIndex(-1)
     }, [nameInput, people, isSelected])
 
     const handleSubmit = async () => {
@@ -121,9 +140,7 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
                             value={nameInput}
                             autoFocus
                             onMouseDown={(e) => {
-                                // Critical: Prevent drag/selection on parent
                                 e.stopPropagation();
-                                // Double ensure focus
                                 if (document.activeElement !== e.currentTarget) {
                                     e.currentTarget.focus();
                                 }
@@ -131,39 +148,62 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
                             onClick={(e) => e.stopPropagation()}
                             onChange={e => setNameInput(e.target.value)}
                             onKeyDown={e => {
-                                if (e.key === 'Enter') handleSubmit();
-                                if (e.key === 'Escape') onSelect(null);
+                                if (e.key === 'ArrowDown') {
+                                    e.preventDefault();
+                                    setSelectedIndex(prev => (prev < suggestions.length - 1 ? prev + 1 : prev));
+                                } else if (e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    setSelectedIndex(prev => (prev > -1 ? prev - 1 : -1));
+                                } else if (e.key === 'Enter') {
+                                    if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
+                                        const selectedName = suggestions[selectedIndex];
+                                        setNameInput(selectedName);
+                                        onNameSubmit(face.id, selectedName);
+                                        setSuggestions([]);
+                                    } else {
+                                        handleSubmit();
+                                    }
+                                } else if (e.key === 'Escape') {
+                                    if (suggestions.length > 0) {
+                                        setSuggestions([]);
+                                    } else {
+                                        onSelect(null);
+                                    }
+                                }
                             }}
                             onFocus={() => {
-                                console.log('Input focused');
-                                if (!nameInput) setSuggestions(people.map(p => p.name).slice(0, 5));
+                                if (!nameInput) {
+                                    const initial = people.map(p => p.name).slice(0, 5);
+                                    setSuggestions(initial);
+                                }
                             }}
                         />
-                        {/* Suggestions List */}
+
+                        <div className="flex justify-between items-center mb-1">
+                            <button onClick={() => onSelect(null)} className="text-[10px] text-gray-500 hover:text-white px-1">Cancel</button>
+                            <button onClick={handleSubmit} className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold px-1">Save</button>
+                        </div>
+
+                        {/* Suggestions List - Now below buttons or absolute relative to container */}
                         {suggestions.length > 0 && (
-                            <div className="absolute top-full left-0 right-0 bg-gray-800 border border-gray-600 rounded mt-1 z-50 max-h-32 overflow-y-auto shadow-lg">
+                            <div className="bg-gray-900/95 border border-gray-700 rounded overflow-hidden shadow-2xl mt-1">
                                 {suggestions.map((name, idx) => (
                                     <div
                                         key={idx}
-                                        className="px-2 py-1 hover:bg-indigo-600 cursor-pointer text-xs text-gray-200"
+                                        className={`px-2 py-1.5 cursor-pointer text-[11px] border-b border-gray-800/50 last:border-0 transition-colors ${selectedIndex === idx ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-white/5'}`}
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            // Directly checking logic for suggestion click
-                                            setNameInput(name); // Visual update
-                                            onNameSubmit(face.id, name); // Submit immediately
+                                            setNameInput(name);
+                                            onNameSubmit(face.id, name);
                                             setSuggestions([]);
                                         }}
+                                        onMouseEnter={() => setSelectedIndex(idx)}
                                     >
                                         {name}
                                     </div>
                                 ))}
                             </div>
                         )}
-                    </div>
-
-                    <div className="flex justify-between">
-                        <button onClick={() => onSelect(null)} className="text-xs text-gray-400 hover:text-white">Cancel</button>
-                        <button onClick={handleSubmit} className="text-xs text-indigo-400 hover:text-indigo-300 font-bold">Save</button>
                     </div>
                 </div>
             )}

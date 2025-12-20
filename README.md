@@ -8,36 +8,75 @@
 
 Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for objects) to classify and organize your photo library. Unlike cloud services, **all processing happens locally** on your machine, ensuring your privacy.
 
+> [!TIP]
+> **Extreme Slim Installer:** The v0.2.0-beta release features a lightweight (~400MB) installer. While it works on CPU out-of-box, you can download the optional 5GB GPU Runtime for massive performance gains.
+
 ## Features at a Glance
 
-*   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. learns as you name them.
-*   **⚙️ Configurable AI:** Fine-tune face detection, blur sensitivity, and tagging creativity settings to match your needs.
-*   **🧼 Blur Detection:** Automatically filters out blurry faces and provides tools to clean up low-quality captures.
-*   **🏷️ Smart Tagging:** "Reads" your photos and generates searchable tags (e.g., "sunset", "dog", "birthday party").
-*   **📷 RAW Support:** Native support for professional formats (Sony ARW, Canon CR2, Nikon NEF, etc.).
-*   **⚡ High Performance:** Virtualized grid handles libraries with 100,000+ photos smoothly.
-*   **🔍 Semantic Search:** Search your photos by content, date, or person.
-*   **🎨 Set Builder:** Create custom albums by combining complex search queries (e.g., "Person A AND Person B in Summer") and export them to disk.
+*   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. Learns as you name them. Uses FAISS for lightning-fast similarity search across millions of faces.
+*   **⚙️ Configurable AI & Storage:** Fine-tune face detection, blur sensitivity, and tagging creativity settings. Choose where your library data (DB, previews, indices) is stored.
+*   **🧼 Blur Detection & Cleanup:** Automatically filters out blurry faces and provides tools to bulk-cleanup low-quality captures.
+*   **🏷️ Smart Tagging:** "Reads" your photos using vision models (VLM) to generate searchable tags and descriptions.
+*   **✨ AI Enhancement Lab:** Upscale old photos (x4) and restore grainy or blurry faces using state-of-the-art models (Real-ESRGAN, GFPGAN).
+*   **📷 RAW Support:** Native support for professional formats (Sony ARW, Canon CR2, Nikon NEF, etc.) with fast preview extraction.
+*   **⚡ High Performance:** Virtualized grid and optimized backend handles libraries with 100,000+ photos smoothly.
+*   **🔍 Semantic Search:** Search your photos by content, date, or person using AI-generated descriptions and tags.
+*   **🎨 Set Builder (Create View):** Build custom collections by combining complex filters (e.g., "Person A AND Person B in 2024"). Export your sets to organized folders on disk.
+
+## Hardware Requirements
+
+| Component | Minimum (Basic) | Recommended (Enhanced) | Notes |
+| :--- | :--- | :--- | :--- |
+| **Processor** | Modern CPU (Intle i5/i7 8th Gen+, M1/M2) | CPU with AVX2 Support | Required for all operations. |
+| **Graphics** | Integrated Graphics | **NVIDIA RTX 2060 (6GB)+** | **Crucial for AI Speed.** <br> • Face Scan: 10x faster <br> • Tagging: Required for VLM <br> • Upscaling: 20x faster |
+| **RAM** | 8 GB System RAM | 16 GB System RAM | AI Models need ~4GB dedicated memory. |
+| **Storage** | 1 GB Free Space | 10 GB Free Space | For AI Runtime (~6GB) and Database/Previews. |
+
 
 ## Documentation
 
 For detailed examples of how the application works, logic flows, and architecture, please see the `docs/` folder:
 
-*   **[Features Guide](docs/features.md):** Detailed breakdown of user-facing features.
-*   **[Create & Set Builder](docs/create_feature.md):** Guide to the new advanced search and album creation tools.
+*   **[User Instruction Manual](docs/user_manual.md):** The comprehensive guide to using every part of the app.
+*   **[Features Guide](docs/features.md):** Detailed breakdown of technical capabilities and AI models.
+*   **[Create & Set Builder](docs/create_feature.md):** Deep dive into the advanced search and album creation tools.
 *   **[System Architecture](docs/architecture.md):** Diagrams of how Electron, React, and Python communicate.
-*   **[Logic Examples & Flows](docs/logic_examples.md):** Deep dive into the Scanning and AI logic.
+*   **[Logic Examples & Flows](docs/logic_examples.md):** Detailed look at the Scanning, AI, and Enhancement logic.
 
 ## Usage Guide
 
-### 1. Installation & Setup
+### 1. Installation (Binaries)
 
-**Prerequisites:**
-*   Node.js (v18+)
-*   Python 3.10+ (for the AI backend)
-*   **Windows Users:** An NVIDIA GPU is recommended (with CUDA installed) for faster AI processing, but it will work on CPU.
+The easiest way to get started is to download the latest release:
 
-**Running from Source:**
+1.  **Download:** Grab the `Smart Photo Organizer-Windows-v0.2.0-Setup.7z` from the [Releases](https://github.com/arozz7/smart-photo-organizer/releases) page.
+2.  **Unpack:** Extract the archive using [7-Zip](https://www.7-zip.org/) or WinRAR.
+3.  **Run:** Open `Smart Photo Organizer.exe`.
+4.  **GPU Setup (Automatic):** 
+    *   Go to **Settings > Manage Models**.
+    *   Click **"Download AI GPU Runtime"**. The app will automatically download and install it into your library folder (typically `%APPDATA%\smart-photo-organizer\library\ai-runtime`).
+5.  **GPU Setup (Manual):**
+    *   If you have the `ai-runtime-win-x64.zip` already, **do not** put it in the application folder.
+    *   Instead, unzip its contents into the **`ai-runtime`** folder inside your **Library Path** (found in Settings). The final structure should be `[Library Path]\ai-runtime\lib\site-packages\...`
+
+---
+
+### 3. Releasing (Maintainers)
+
+To create a new release for distribution:
+
+1.  **Build App**: Run `npm run build`. This creates the application installer (e.g., `release/0.2.0/...-Setup.7z`).
+2.  **GPU Runtime (Separate Asset)**: 
+    *   The GPU Runtime is **NOT** bundled inside the Setup package (to keep it slim).
+    *   You must create or reference a separate `ai-runtime-win-x64.zip` containing the `bin` and `lib` directories.
+3.  **GitHub Release**: 
+    *   Create a release on GitHub (e.g., `v0.2.0`).
+    *   Upload the Setup package (`...-Setup.7z`).
+    *   **CRITICAL:** Upload `ai-runtime-win-x64.zip` as a **separate standalone asset** to the same release. The application's downloader specifically looks for this filename in your GitHub releases to enable GPU support.
+
+---
+
+### 2. Running from Source (Development)
 
 ```bash
 # 1. Install Dependencies
@@ -53,6 +92,9 @@ pip install -r requirements.txt
 cd ../..
 npm run dev
 ```
+
+> [!NOTE]
+> If running from source, you will need to manually install the GPU requirements: `pip install -r requirements-gpu.txt`.
 
 ### 2. Getting Started
 

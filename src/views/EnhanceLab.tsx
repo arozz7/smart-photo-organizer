@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeftIcon, MagicWandIcon, DownloadIcon, ReloadIcon, CheckIcon } from '@radix-ui/react-icons'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { ArrowLeftIcon, MagicWandIcon, DownloadIcon, ReloadIcon } from '@radix-ui/react-icons'
 import BeforeAfterSlider from '../components/BeforeAfterSlider'
+import { useAlert } from '../context/AlertContext'
 
 export default function EnhanceLab() {
     const { photoId } = useParams() // Expecting /enhance/:photoId
     const navigate = useNavigate()
+    const { showAlert } = useAlert()
 
     // State
     const [originalPath, setOriginalPath] = useState('')
@@ -17,44 +19,34 @@ export default function EnhanceLab() {
     // Config
     const [task, setTask] = useState('upscale') // 'upscale' | 'restore_faces'
     const [modelName, setModelName] = useState('RealESRGAN_x4plus')
+    const [faceEnhance, setFaceEnhance] = useState(false)
 
+    // Fix: Use useLocation for proper state access
+    // But since I am editing keeping existing structure:
+
+    // Actually, I need to fetch if 'originalPath' is empty and 'statePhoto' is empty.
     useEffect(() => {
-        // Load photo details on mount
-        if (!photoId) return;
-
-        // We need to fetch the file path for this photo ID. 
-        // We can reuse 'db:getPhotos' with a filter or add a specific handler.
-        // Or simply assume we might be passed state from navigation? No, refresh should work.
-        // Let's verify file path existence via IPC.
         const loadPhoto = async () => {
-            // We don't have a direct 'getPhoto' IPC exposed to renderer widely, 
-            // but we can query by ID filter.
-            // @ts-ignore
-            const photos = await window.ipcRenderer.invoke('db:getPhotos', { filter: { people: [], tags: [], folder: '' } })
-            // Wait, getPhotos with empty filter gets ALL. That's bad.
-            // We need a way to get ONE photo. 
-            // Let's use the scan result or just trust we can send the ID to enhance?
-            // But we need to display it "Before".
+            if (originalPath) return;
 
-            // Workaround: We'll fetch it using a specially crafted filter or just a new IPC `db:getPhoto`.
-            // Actually, `face:getBlurry` returns photo paths.
-            // Let's just add `db:getPhoto` quickly or filter by ID if possible?
-            // `db:getPhotos` doesn't filter by ID array.
-
-            // Hack: use `db:getPhotos` with limit 1? No no ID filter.
-            // I'll add `db:getPhoto` to main.ts? Or use existing logic?
-
-            // Simplest: Request `ai:scanImage`? No.
-            // Let's filter client side if needed or just add the IPC.
-            // I recall `ai:generateTags` fetches path internally.
-
-            // Let's just create a new IPC `db:getPhoto(id)` in next step if needed. 
-            // For now, I will assume I can get the path.
-            // Actually `local-resource://` works with absolute paths.
-            // Maybe I passed the path in history state?
-            // If not, I'll need to fetch it.
+            try {
+                // @ts-ignore
+                const photo = await window.ipcRenderer.invoke('db:getPhoto', parseInt(photoId));
+                if (photo) {
+                    setOriginalPath(photo.preview_cache_path || photo.file_path);
+                } else {
+                    setError('Photo not found');
+                }
+            } catch (err) {
+                console.error(err);
+                setError('Failed to load photo');
+            }
         }
-    }, [photoId])
+
+        // Pass location state check inside effect or rely on render?
+        // Let's rely on fetch if render state is missing.
+        loadPhoto();
+    }, [photoId, originalPath])
 
     const handleEnhance = async () => {
         setLoading(true)
@@ -64,7 +56,8 @@ export default function EnhanceLab() {
             const res = await window.ipcRenderer.invoke('ai:enhanceImage', {
                 photoId: parseInt(photoId!),
                 task,
-                modelName
+                modelName,
+                faceEnhance
             })
 
             if (res.success) {
@@ -86,7 +79,10 @@ export default function EnhanceLab() {
             // @ts-ignore
             const res = await window.ipcRenderer.invoke('ai:downloadModel', { modelName })
             if (res.success) {
-                alert('Model downloaded successfully!')
+                showAlert({
+                    title: 'Model Downloaded',
+                    description: 'Model weights have been downloaded successfully!'
+                });
             } else {
                 setError(res.error)
             }
@@ -99,7 +95,7 @@ export default function EnhanceLab() {
 
     // Pseudo-loader for now until I fix the photo fetch
     // I will pass photo object via location state for MVP
-    const location: any = window.location
+    const location = useLocation()
     const statePhoto = location.state?.photo
 
     if (!statePhoto && !originalPath) {
@@ -127,7 +123,10 @@ export default function EnhanceLab() {
                         <div className="flex bg-gray-900 rounded p-1">
                             <button
                                 className={`flex-1 py-2 text-sm rounded ${task === 'upscale' ? 'bg-indigo-600 text-white' : 'hover:bg-gray-700'}`}
-                                onClick={() => setTask('upscale')}
+                                onClick={() => {
+                                    setTask('upscale');
+                                    if (modelName === 'GFPGANv1.4') setModelName('RealESRGAN_x4plus');
+                                }}
                             >
                                 Upscale (x4)
                             </button>
@@ -146,13 +145,33 @@ export default function EnhanceLab() {
                             className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm"
                             value={modelName}
                             onChange={e => setModelName(e.target.value)}
-                            disabled={task === 'restore_faces'} // Only one model for now
+                            disabled={task === 'restore_faces'}
                         >
-                            <option value="RealESRGAN_x4plus">Real-ESRGAN x4 Plus (General)</option>
-                            <option value="RealESRGAN_x4plus_anime_6B">Real-ESRGAN x4 Anime</option>
-                            <option value="GFPGANv1.4">GFPGAN v1.4 (Faces)</option>
+                            {task === 'upscale' ? (
+                                <>
+                                    <option value="RealESRGAN_x4plus">Real-ESRGAN x4 Plus (General)</option>
+                                    <option value="RealESRGAN_x4plus_anime_6B">Real-ESRGAN x4 Anime</option>
+                                </>
+                            ) : (
+                                <option value="GFPGANv1.4">GFPGAN v1.4 (Faces)</option>
+                            )}
                         </select>
                     </div>
+
+                    {task === 'upscale' && (
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                id="faceEnhance"
+                                checked={faceEnhance}
+                                onChange={e => setFaceEnhance(e.target.checked)}
+                                className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <label htmlFor="faceEnhance" className="text-sm text-gray-300 select-none cursor-pointer">
+                                Enhance Faces (Slower)
+                            </label>
+                        </div>
+                    )}
 
                     <button
                         onClick={handleEnhance}
@@ -185,12 +204,12 @@ export default function EnhanceLab() {
             <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
                 {enhancedPath ? (
                     <BeforeAfterSlider
-                        originalSrc={`local-resource://${encodeURIComponent(displayPath)}`}
-                        enhancedSrc={`local-resource://${encodeURIComponent(enhancedPath)}?t=${Date.now()}`}
+                        originalSrc={`local-resource://${encodeURIComponent(displayPath.replace(/\\/g, '/'))}`}
+                        enhancedSrc={`local-resource://${encodeURIComponent(enhancedPath.replace(/\\/g, '/'))}?t=${Date.now()}`}
                     />
                 ) : (
                     <img
-                        src={`local-resource://${encodeURIComponent(displayPath)}`}
+                        src={`local-resource://${encodeURIComponent(displayPath.replace(/\\/g, '/'))}`}
                         className="max-w-full max-h-full object-contain"
                     />
                 )}

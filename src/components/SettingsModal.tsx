@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Slider from '@radix-ui/react-slider';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { Cross2Icon, InfoCircledIcon } from '@radix-ui/react-icons';
+import { InfoCircledIcon, DownloadIcon, Cross2Icon } from '@radix-ui/react-icons';
+import { useAlert } from '../context/AlertContext';
+import ModelDownloader from './ModelDownloader';
 
 interface SettingsModalProps {
     open: boolean;
@@ -17,7 +19,9 @@ interface AISettings {
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => {
+    const { showAlert, showConfirm } = useAlert();
     const [loading, setLoading] = useState(true);
+    const [downloaderOpen, setDownloaderOpen] = useState(false);
     const [settings, setSettings] = useState<AISettings>({
         faceDetectionThreshold: 0.6,
         faceBlurThreshold: 20.0,
@@ -52,7 +56,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
             onOpenChange(false);
         } catch (e) {
             console.error("Failed to save settings:", e);
-            alert("Failed to save settings");
+            showAlert({
+                title: 'Save Failed',
+                description: 'Failed to save settings',
+                variant: 'danger'
+            });
         } finally {
             setLoading(false);
         }
@@ -63,14 +71,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
     };
 
     const handleReset = () => {
-        if (confirm("Reset all AI settings to default values?")) {
-            setSettings({
-                faceDetectionThreshold: 0.6,
-                faceBlurThreshold: 20.0,
-                vlmTemperature: 0.2,
-                vlmMaxTokens: 100
-            });
-        }
+        showConfirm({
+            title: 'Reset AI Settings',
+            description: 'Reset all AI settings to default values?',
+            confirmLabel: 'Reset Defaults',
+            onConfirm: () => {
+                setSettings({
+                    faceDetectionThreshold: 0.6,
+                    faceBlurThreshold: 20.0,
+                    vlmTemperature: 0.2,
+                    vlmMaxTokens: 100
+                });
+            }
+        });
     };
 
     return (
@@ -81,7 +94,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                     <Dialog.Title className="text-xl font-bold mb-4 text-white">Settings</Dialog.Title>
 
                     <div className="space-y-6">
-                        <h3 className="text-lg font-semibold text-blue-400 border-b border-gray-700 pb-2">AI Configuration</h3>
+                        <div className="flex items-center justify-between border-b border-gray-700 pb-2">
+                            <h3 className="text-lg font-semibold text-blue-400">AI Configuration</h3>
+                            <button
+                                onClick={() => setDownloaderOpen(true)}
+                                className="flex items-center gap-2 px-3 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-xs transition-colors font-medium border border-blue-500/30"
+                            >
+                                <DownloadIcon className="w-3 h-3" />
+                                Manage Models
+                            </button>
+                        </div>
 
                         {/* Face Detection Threshold */}
                         <SettingSlider
@@ -127,6 +149,39 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                             />
                         </div>
 
+                        <div className="flex flex-col space-y-3 pt-2">
+                            <div className="flex items-center justify-between border-b border-gray-700 pb-2">
+                                <h3 className="text-lg font-semibold text-orange-400">Diagnostics</h3>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    onClick={async () => {
+                                        // @ts-ignore
+                                        const path = await window.ipcRenderer.invoke('os:getLogPath');
+                                        // @ts-ignore
+                                        window.ipcRenderer.invoke('os:showInFolder', path);
+                                    }}
+                                    className="flex flex-col items-center justify-center gap-2 p-3 bg-gray-800 border border-gray-700 rounded hover:bg-gray-750 transition-colors group"
+                                >
+                                    <span className="text-xs font-semibold text-gray-300 group-hover:text-white">View Logs</span>
+                                    <span className="text-[10px] text-gray-500">Troubleshooting</span>
+                                </button>
+
+                                <button
+                                    onClick={async () => {
+                                        // @ts-ignore
+                                        const path = await window.ipcRenderer.invoke('settings:getLibraryPath');
+                                        // @ts-ignore
+                                        window.ipcRenderer.invoke('os:openFolder', path);
+                                    }}
+                                    className="flex flex-col items-center justify-center gap-2 p-3 bg-gray-800 border border-gray-700 rounded hover:bg-gray-750 transition-colors group"
+                                >
+                                    <span className="text-xs font-semibold text-gray-300 group-hover:text-white">Open App Data</span>
+                                    <span className="text-[10px] text-gray-500">Database & Assets</span>
+                                </button>
+                            </div>
+                        </div>
+
                     </div>
 
                     <div className="mt-8 flex gap-3">
@@ -158,6 +213,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                             <Cross2Icon />
                         </button>
                     </Dialog.Close>
+                    <ModelDownloader open={downloaderOpen} onOpenChange={setDownloaderOpen} />
                 </Dialog.Content>
             </Dialog.Portal>
         </Dialog.Root>

@@ -1,0 +1,13 @@
+torch
+torchvision
+torchaudio
+nvidia-cudnn-cu12
+nvidia-cublas-cu12
+tensorrt
+tensorrt_libs
+bitsandbytes
+basicsr
+realesrgan
+gfpgan
+transformers
+accelerate

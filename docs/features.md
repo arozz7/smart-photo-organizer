@@ -28,8 +28,9 @@ The core feature of the application is local, privacy-focused face recognition.
 
 ### Recognition & Clustering
 - **Descriptor:** Each face is converted into a 512-dimensional vector (embedding).
+- **Indexing:** The application uses **FAISS (Facebook AI Similarity Search)** to index all face descriptors. This allows for near-instant similarity searches even as your library grows into the millions.
 - **Matching:**
-  - **Identified People:** When a new face is found, it is compared against the *mean descriptor* of all known people. If the distance is low (Similarity > ~0.4), it is auto-assigned.
+  - **Identified People:** When a new face is found, it is compared against the *mean descriptor* of all known people using the FAISS index. If the distance is low (Similarity > ~0.4), it is auto-assigned.
   - **Unknowns:** If no match is found, it remains in the "Unnamed Faces" pool.
 - **Visual Confirmation:** The "Unnamed Faces" view groups similar faces together, allowing you to confirm matches before they are finalized.
 
@@ -68,7 +69,45 @@ The application uses a small Vision-Language Model (SmolVLM) to "see" your photo
 
 ### Search
 - You can search for photos using these tags (e.g., typing "dog" will find the photo above, even if "dog" isn't in the filename).
+- **Semantic Search:** The application performs a keyword-based search across both user-provided and AI-generated tags and descriptions.
 
-## 5. Privacy & Performance
+## 5. ✨ AI Enhance Lab
+
+The Enhance Lab allows you to restore and upgrade low-quality or old photographs using state-of-the-art Generative AI models.
+
+### Capabilities
+- **Upscaling (x4):** Powered by **Real-ESRGAN**, this triples/quadruples the resolution of images while intelligently reconstructing missing details. Perfect for small crops or old digital photos.
+- **Face Restoration:** Powered by **GFPGAN**, this specifically targets human faces to remove artifacts, noise, and blur, making them sharp and clear.
+- **Hybrid Mode:** You can choose to upscale an entire image while simultaneously applying face restoration for the best possible results.
+
+### Workflow
+1. Select a photo in the Library and click the **"Enhance"** magic wand.
+2. Choose your task (Upscale or Restore Faces).
+3. Select the appropriate model (General vs Anime).
+4. View the results side-by-side using the **Before/After slider**.
+5. Enhanced images are saved alongside the original with a suffix (e.g., `photo_upscaled.jpg`).
+
+## 6. 🎨 Create View (Collections & Sets)
+
+The "Create" view is a powerful workspace for building specific sets of photos.
+
+- **Complex Filtering:** Filter by multiple people AND multiple tags simultaneously (e.g., "Find all photos with 'John' AND 'Jane' tagged as 'Birthday'").
+- **Staging Set:** Manually add specific photos from results to your "Current Set".
+- **Exporting Albums:** Once you've built your set, you can export the entire collection to a new folder on your computer.
+
+## 7. Privacy & Performance
 - **Local-First:** No photos are ever uploaded to the cloud. All AI runs on your GPU/CPU.
 - **Virtualization:** The gallery uses `react-window` to handle libraries with 100,000+ photos without lagging.
+
+## 8. Detailed Hardware Requirements
+
+| Feature | CPU Only (Minimum) | GPU (Recommended) | Notes |
+| :--- | :--- | :--- | :--- |
+| **Face Detection** | ~2-5s per photo | < 0.2s per photo | CPU is viable for background scanning overnight. |
+| **Face Recognition** | Workable | Instant | Vector search is CPU-based (FAISS) and always fast. |
+| **Smart Tagging (VLM)** | **Not Available** | **Required** (4GB+ VRAM) | Current implementation requires NVIDIA GPU + AI Runtime. |
+| **Upscaling (x4)** | ~30-60s per photo | ~2-5s per photo | massive speed difference. |
+| **Face Restoration** | ~10-20s per photo | ~1-2s per photo |  |
+
+> [!IMPORTANT]
+> **VLM / Smart Tagging** requires the **AI GPU Runtime** (~5.8GB) to be installed. It currently **does not support CPU-only mode** due to memory bandwidth constraints on standard system RAM.

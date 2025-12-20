@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import { useAlert } from './AlertContext';
 
 interface SystemStatus {
     insightface: {
@@ -25,40 +26,13 @@ interface SystemStatus {
         cuda_device: string
         onnxruntime: string
         opencv: string
+        ai_mode?: string
     }
 }
 
 interface QueueConfig {
     batchSize: number;
     cooldownSeconds: number;
-}
-
-interface SystemStatus {
-    insightface: {
-        loaded: boolean
-        providers?: string[]
-        det_thresh?: number
-        blur_thresh?: number
-    }
-    faiss: {
-        loaded: boolean
-        count?: number
-        dim?: number
-    }
-    vlm: {
-        loaded: boolean
-        device?: string
-        model?: string
-        config?: any
-    }
-    system: {
-        python: string
-        torch: string
-        cuda_available: boolean
-        cuda_device: string
-        onnxruntime: string
-        opencv: string
-    }
 }
 
 interface AIContextType {
@@ -85,6 +59,8 @@ interface AIContextType {
     // System Status
     systemStatus: SystemStatus | null;
     fetchSystemStatus: () => Promise<void>;
+    aiMode: 'UNKNOWN' | 'GPU' | 'CPU' | 'SAFE_MODE';
+    vlmEnabled: boolean;
 }
 
 const AIContext = createContext<AIContextType>({
@@ -105,7 +81,9 @@ const AIContext = createContext<AIContextType>({
     calculateBlurScores: async () => { },
     clusterFaces: async () => ({ success: false }),
     systemStatus: null,
-    fetchSystemStatus: async () => { }
+    fetchSystemStatus: async () => { },
+    aiMode: 'UNKNOWN',
+    vlmEnabled: false
 });
 
 export const useAI = () => useContext(AIContext);
@@ -113,6 +91,7 @@ export const useAI = () => useContext(AIContext);
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     // Python backend starts with Main, so we assume it's ready. 
     // We could add a check later, but for now simplify.
+    const { showAlert } = useAlert();
     const [isModelLoading] = useState(false);
     const [isModelReady] = useState(true);
 
@@ -142,7 +121,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }
         }
         loadConfig();
-        fetchSystemStatus(); // Call fetchSystemStatus here
+        // fetchSystemStatus called below after definition
     }, [])
 
     useEffect(() => {
@@ -155,7 +134,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [isCoolingDown, setIsCoolingDown] = useState(false);
     const [cooldownTimeLeft, setCooldownTimeLeft] = useState(0);
     const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+
     const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+    const [aiMode, setAiMode] = useState<'UNKNOWN' | 'GPU' | 'CPU' | 'SAFE_MODE'>('UNKNOWN');
+    const [vlmEnabled, setVlmEnabled] = useState(false);
 
     const fetchSystemStatus = async () => {
         try {
@@ -164,10 +146,40 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             if (result && result.type === 'system_status_result') {
                 setSystemStatus(result.status);
             }
+            // Also check ping for live mode
+            // @ts-ignore
+            const ping = await window.ipcRenderer.invoke('ai:command', { type: 'ping' });
+            if (ping) {
+                if (ping.aiMode) setAiMode(ping.aiMode);
+                if (ping.vlmEnabled !== undefined) setVlmEnabled(ping.vlmEnabled);
+            }
         } catch (error) {
             console.error("Failed to fetch system status:", error);
         }
     };
+
+    // Status Polling Effect
+    useEffect(() => {
+        let intervalId: NodeJS.Timeout;
+
+        const pollStatus = async () => {
+            // If we already have a mode, stop polling (unless we want to detect crashes?)
+            // For now, just poll until we get out of UNKNOWN
+            await fetchSystemStatus();
+        };
+
+        // Initial fetch
+        pollStatus();
+
+        // Start polling if UNKNOWN
+        if (aiMode === 'UNKNOWN') {
+            intervalId = setInterval(pollStatus, 2000);
+        }
+
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [aiMode]);
 
     // Blur Calculation State
     const [calculatingBlur, setCalculatingBlur] = useState(false);
@@ -188,14 +200,28 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     await window.ipcRenderer.invoke('ai:scanImage', { photoId: res.photoIds[i] });
                     setBlurProgress({ current: i + 1, total });
                 }
-                alert(`Finished calculating blur scores for ${total} photos.`);
+                showAlert({
+                    title: 'Blur Calculation Complete',
+                    description: `Finished calculating blur scores for ${total} photos.`
+                });
             } else if (res.success) {
-                alert("No photos found missing blur scores.");
+                showAlert({
+                    title: 'No Action Required',
+                    description: 'No photos found missing blur scores.'
+                });
             } else {
-                alert("Failed to find photos: " + res.error);
+                showAlert({
+                    title: 'Error',
+                    description: "Failed to find photos: " + res.error,
+                    variant: 'danger'
+                });
             }
         } catch (e) {
-            alert("Error: " + e);
+            showAlert({
+                title: 'Error',
+                description: "Error: " + e,
+                variant: 'danger'
+            });
         } finally {
             setCalculatingBlur(false);
             setBlurProgress({ current: 0, total: 0 });
@@ -238,6 +264,26 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
         if (error) {
             console.error(`[AIContext] Error for ${photoId}:`, error);
+
+            // Check for Safe Mode fallback success implicitly via ping or update?
+            // If error is CRITICAL, we alert.
+            // If error is just one photo fail, we might not want to kill everything.
+
+            if (error === 'AI_CRITICAL_FAILURE' || error === 'AI_MODELS_MISSING') {
+                // Determine severity
+                const isCritical = error === 'AI_CRITICAL_FAILURE';
+
+                showAlert({
+                    title: isCritical ? 'AI Engine Critical Failure' : 'AI Runtime Issue',
+                    description: `Face Analysis failed. ${payload.details || ''}`,
+                    variant: 'danger',
+                    confirmLabel: 'Settings',
+                    onConfirm: () => { window.location.hash = '#/settings'; }
+                });
+
+                // Pause Queue to prevent spam if critical
+                setIsPaused(true);
+            }
         }
 
         try {
@@ -264,10 +310,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 await window.ipcRenderer.invoke('db:addTags', { photoId, tags });
             }
 
-            // Handle VLM description specifically if present
-            // if (payload.description) {
-            //      window.ipcRenderer.invoke('db:addTags', { photoId, tags: [`AI Description`] }); 
-            // }
+            // Since mode might change during runtime (fallback), maybe refresh status occasionally?
+            if (aiMode === 'UNKNOWN') {
+                fetchSystemStatus();
+            }
 
         } catch (err) {
             console.error('Failed to save AI results to DB:', err);
@@ -403,7 +449,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             calculateBlurScores,
             clusterFaces,
             systemStatus,
-            fetchSystemStatus
+            fetchSystemStatus,
+            aiMode,
+            vlmEnabled
         }}>
             {children}
         </AIContext.Provider>

@@ -206,6 +206,20 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                     <p className="text-gray-400 text-xs break-all">{photo.file_path}</p>
                 </div>
 
+                {/* Enhance Button */}
+                <div className="pb-4 border-b border-gray-800">
+                    <button
+                        onClick={() => {
+                            onClose();
+                            navigate(`/enhance/${photo.id}`, { state: { photo } });
+                        }}
+                        className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded font-bold shadow-lg flex items-center justify-center gap-2"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /></svg>
+                        Enhance Photo
+                    </button>
+                </div>
+
                 {metadata && (
                     <div className="space-y-4">
                         <h4 className="text-gray-500 text-xs font-bold uppercase tracking-wider">EXIF Data</h4>
@@ -361,19 +375,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                         </button>
                     </div>
 
-                    {/* Enhance Button */}
-                    <div className="mt-4 pt-4 border-t border-gray-800">
-                        <button
-                            onClick={() => {
-                                onClose();
-                                navigate(`/enhance/${photo.id}`, { state: { photo } });
-                            }}
-                            className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded font-bold shadow-lg flex items-center justify-center gap-2"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /></svg>
-                            Enhance Photo
-                        </button>
-                    </div>
+
                 </div>
 
                 {/* Fallback if no metadata */}

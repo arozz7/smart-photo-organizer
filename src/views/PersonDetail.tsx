@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PersonFaceItem from '../components/PersonFaceItem';
 import BlurryFacesModal from '../components/BlurryFacesModal';
+import { useAlert } from '../context/AlertContext';
 
 interface Face {
     id: number;
@@ -26,11 +27,12 @@ const PersonDetail = () => {
     const navigate = useNavigate();
     const [person, setPerson] = useState<Person | null>(null);
     const [faces, setFaces] = useState<Face[]>([]);
-    const [selectedFaces, setSelectedFaces] = useState<Set<number>>(new Set());
-    const [loading, setLoading] = useState(true);
-    const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     const [isBlurryModalOpen, setIsBlurryModalOpen] = useState(false);
     const [isNameEditOpen, setIsNameEditOpen] = useState(false);
+    const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [selectedFaces, setSelectedFaces] = useState<Set<number>>(new Set());
+    const { showAlert, showConfirm } = useAlert();
 
     useEffect(() => {
         loadData();
@@ -84,11 +86,19 @@ const PersonDetail = () => {
                 setIsRenameModalOpen(false);
                 loadData();
             } else {
-                alert('Failed to move faces: ' + result.error);
+                showAlert({
+                    title: 'Move Failed',
+                    description: result.error,
+                    variant: 'danger'
+                });
             }
         } catch (err) {
             console.error(err);
-            alert('Failed to move faces');
+            showAlert({
+                title: 'Error',
+                description: 'Failed to move faces',
+                variant: 'danger'
+            });
         }
     };
 
@@ -113,11 +123,19 @@ const PersonDetail = () => {
                     // Also refresh global people list if we had context... but here we just show this person.
                 }
             } else {
-                alert('Failed to rename: ' + result.error);
+                showAlert({
+                    title: 'Rename Failed',
+                    description: result.error,
+                    variant: 'danger'
+                });
             }
         } catch (err) {
             console.error(err);
-            alert('Failed to rename person');
+            showAlert({
+                title: 'Error',
+                description: 'Failed to rename person',
+                variant: 'danger'
+            });
         }
     };
 
@@ -128,20 +146,28 @@ const PersonDetail = () => {
 
     const handleUnassign = async () => {
         if (selectedFaces.size === 0) return;
-        const confirmed = confirm(`Remove ${selectedFaces.size} faces from ${person?.name}?`);
-        setTimeout(() => window.focus(), 100);
-        if (!confirmed) return;
 
-        try {
-            // @ts-ignore
-            await window.ipcRenderer.invoke('db:unassignFaces', Array.from(selectedFaces));
-            setSelectedFaces(new Set());
-            loadData(); // Refresh
-        } catch (err) {
-            console.error(err);
-            alert('Failed to remove faces');
-            setTimeout(() => window.focus(), 100);
-        }
+        showConfirm({
+            title: 'Remove Faces',
+            description: `Remove ${selectedFaces.size} faces from ${person?.name}?`,
+            confirmLabel: 'Remove Faces',
+            variant: 'danger',
+            onConfirm: async () => {
+                try {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:unassignFaces', Array.from(selectedFaces));
+                    setSelectedFaces(new Set());
+                    loadData(); // Refresh
+                } catch (err) {
+                    console.error(err);
+                    showAlert({
+                        title: 'Error',
+                        description: 'Failed to remove faces',
+                        variant: 'danger'
+                    });
+                }
+            }
+        });
     };
 
     if (loading) return <div className="p-8 text-white">Loading...</div>;

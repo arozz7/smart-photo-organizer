@@ -4,17 +4,20 @@ import App from './App.tsx'
 import { ScanProvider } from './context/ScanContext'
 import { AIProvider } from './context/AIContext'
 import { PeopleProvider } from './context/PeopleContext'
+import { AlertProvider } from './context/AlertContext'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <AIProvider>
-      <ScanProvider>
-        <PeopleProvider>
-          <App />
-        </PeopleProvider>
-      </ScanProvider>
-    </AIProvider>
+    <AlertProvider>
+      <AIProvider>
+        <ScanProvider>
+          <PeopleProvider>
+            <App />
+          </PeopleProvider>
+        </ScanProvider>
+      </AIProvider>
+    </AlertProvider>
   </React.StrictMode>,
 )
 

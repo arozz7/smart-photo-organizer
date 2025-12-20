@@ -29,6 +29,7 @@ interface PeopleContextType {
     ignoreFace: (faceId: number) => Promise<void>
     ignoreFaces: (faceIds: number[]) => Promise<void>
     autoNameFaces: (faceIds: number[], name: string) => Promise<void>
+    rebuildIndex: () => Promise<{ success: boolean; count?: number; error?: string }>
 }
 
 const PeopleContext = createContext<PeopleContextType | undefined>(undefined)
@@ -98,20 +99,15 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         }
     }
 
-    const cosineDistance = (desc1: number[], desc2: number[]) => {
-        if (desc1.length !== desc2.length) return 1.0;
-        let dot = 0;
-        let mag1 = 0;
-        let mag2 = 0;
-        for (let i = 0; i < desc1.length; i++) {
-            dot += desc1[i] * desc2[i];
-            mag1 += desc1[i] * desc1[i];
-            mag2 += desc2[i] * desc2[i];
+
+    const rebuildIndex = async () => {
+        // @ts-ignore
+        const res = await window.ipcRenderer.invoke('ai:rebuildIndex');
+        if (res.success) {
+            console.log(`[PeopleContext] Index rebuilt with ${res.count} vectors.`);
         }
-        const magnitude = Math.sqrt(mag1) * Math.sqrt(mag2);
-        if (magnitude === 0) return 1.0;
-        return 1.0 - (dot / magnitude);
-    }
+        return res;
+    };
 
     const assignPerson = async (faceId: number, name: string) => {
         try {
@@ -129,20 +125,37 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
 
                 // 2. Smart Naming: Find similar faces
                 if (namedFace && namedFace.descriptor) {
-                    // Fetch ALL unassigned descriptors from backend
-                    // @ts-ignore
-                    const candidates = await window.ipcRenderer.invoke('db:getAllUnassignedFaceDescriptors')
+                    try {
+                        // Use highly performance FAISS search via Python
+                        // @ts-ignore
+                        const searchResult = await window.ipcRenderer.invoke('ai:command', {
+                            type: 'search_index',
+                            payload: {
+                                descriptor: namedFace.descriptor,
+                                k: 50,
+                                threshold: 0.5 // L2 distance threshold (normalized). 0.5 is fairly inclusive.
+                            }
+                        });
 
-                    const matches = candidates.filter((c: any) => {
-                        const dist = cosineDistance(namedFace.descriptor, c.descriptor);
-                        // console.log('Distance:', dist);
-                        return dist < 0.4 // Cosine Distance Threshold (0.4 means > 60% similarity)
-                    }).map((c: any) => c.id)
 
-                    console.log(`[PeopleContext] Found ${matches.length} similar faces.`);
+                        if (searchResult && searchResult.matches && searchResult.matches.length > 0) {
+                            const matchIds = searchResult.matches
+                                .filter((m: any) => m.id !== faceId) // Don't match self
+                                .map((m: any) => m.id);
 
-                    if (matches.length > 0) {
-                        return { similarFound: true, count: matches.length, matchIds: matches, name }
+                            if (matchIds.length > 0) {
+                                console.log(`[PeopleContext] FAISS found ${matchIds.length} similar faces.`);
+                                return {
+                                    similarFound: true,
+                                    count: matchIds.length,
+                                    matchIds: matchIds,
+                                    name
+                                };
+                            }
+                        }
+                    } catch (err) {
+                        console.error("[PeopleContext] FAISS Search Failed:", err);
+                        // Fallback logic could go here, but better to fix search.
                     }
                 }
             }
@@ -155,7 +168,8 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         <PeopleContext.Provider value={{
             people, faces, loading,
             loadPeople, loadFaces, assignPerson,
-            ignoreFace, ignoreFaces, autoNameFaces
+            ignoreFace, ignoreFaces, autoNameFaces,
+            rebuildIndex
         }}>
             {children}
         </PeopleContext.Provider>

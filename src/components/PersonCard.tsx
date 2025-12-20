@@ -1,5 +1,4 @@
 
-import { useState } from 'react'
 import FaceThumbnail from './FaceThumbnail'
 
 export default function PersonCard({ person, onClick }: { person: any, onClick: () => void }) {

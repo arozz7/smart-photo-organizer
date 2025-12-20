@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ExifTool } from 'exiftool-vendored';
 import { getDB } from './db';
 import sharp from 'sharp';
+import logger from './logger';
 
 // Lazy load ExifTool
 let _exiftool: ExifTool | null = null;
@@ -15,7 +16,7 @@ async function getExifTool(): Promise<ExifTool | null> {
 
     _exiftoolInitPromise = (async () => {
         try {
-            console.log('Initializing ExifTool...');
+            logger.info('Initializing ExifTool...');
             // Create instance with timeout
             const tool = new ExifTool({
                 taskTimeoutMillis: 5000,
@@ -31,11 +32,11 @@ async function getExifTool(): Promise<ExifTool | null> {
             });
 
             const version = await initCheck;
-            console.log(`ExifTool started successfully. Version: ${version}`);
+            logger.info(`ExifTool started successfully. Version: ${version}`);
             _exiftool = tool;
             return tool;
         } catch (err) {
-            console.error('FAILED to initialize ExifTool. RAW support will be disabled.', err);
+            logger.error('FAILED to initialize ExifTool. RAW support will be disabled.', err);
             return null;
         }
     })();
@@ -82,6 +83,38 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                 const ext = path.extname(filePath).toLowerCase();
                 const isRaw = !['.jpg', '.jpeg', '.png'].includes(ext);
 
+                // EXPLICIT ORIENTATION HANDLING
+                // Sharp's .rotate() (auto-rotate) can be flaky with some metadata.
+                // We use ExifTool to be the source of truth.
+                let rotationDegrees = 0;
+                let shouldRotate = false;
+
+                try {
+                    const tool = await getExifTool();
+                    if (tool) {
+                        const tags = await tool.read(filePath, ['Orientation']);
+
+                        // Map Exif Orientation to Degrees
+                        // 1 = Horizontal (normal)
+                        // 3 = Rotate 180
+                        // 6 = Rotate 90 CW
+                        // 8 = Rotate 270 CW (or 90 CCW)
+                        // Default to 0 if missing or unknown
+                        if (tags?.Orientation) {
+                            const val = tags.Orientation as any; // Cast to any because runtime value can be string despite TS type
+
+                            if (val === 1 || val === 'Horizontal (normal)') { rotationDegrees = 0; shouldRotate = false; }
+                            else if (val === 3 || val === 'Rotate 180') { rotationDegrees = 180; shouldRotate = true; }
+                            else if (val === 6 || val === 'Rotate 90 CW') { rotationDegrees = 90; shouldRotate = true; }
+                            else if (val === 8 || val === 'Rotate 270 CW') { rotationDegrees = 270; shouldRotate = true; }
+                            // Note: We ignore mirrored orientations (2, 4, 5, 7) for now as they are rare in photos
+                        }
+                    }
+                } catch (e) {
+                    logger.warn(`Failed to read orientation for ${fileName}, assuming upright.`);
+                }
+
+
                 if (isRaw) {
                     // Try ExifTool first for RAWs (fast extraction of embedded preview)
                     // But for TIFs, ExifTool often fails if no embedded preview, so we might skip to Sharp or try/catch
@@ -103,9 +136,11 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                                 // Check if file was created
                                 await fs.access(tempPreviewPath);
 
-                                // Normalize with Sharp (Auto-rotate and resize)
-                                await sharp(tempPreviewPath)
-                                    .rotate()
+                                // Normalize with Sharp
+                                const pipeline = sharp(tempPreviewPath);
+                                if (shouldRotate) pipeline.rotate(rotationDegrees);
+
+                                await pipeline
                                     .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
                                     .jpeg({ quality: 80 })
                                     .toFile(previewPath);
@@ -113,7 +148,7 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                                 // Cleanup temp file
                                 try { await fs.unlink(tempPreviewPath); } catch { }
 
-                                console.log(`Extracted and normalized preview for ${fileName}`);
+                                logger.info(`Extracted and normalized preview for ${fileName}`);
                                 extracted = true;
                             }
                         } catch (e) {
@@ -125,24 +160,42 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
 
                     if (!extracted) {
                         try {
-                            console.log(`Generating preview with Sharp for ${fileName}...`);
-                            await sharp(filePath)
-                                .rotate() // Auto-rotate based on EXIF
+                            logger.info(`Generating preview with Sharp for ${fileName}...`);
+                            const pipeline = sharp(filePath);
+                            if (shouldRotate) pipeline.rotate(rotationDegrees);
+
+                            await pipeline
                                 .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true }) // Reasonable preview size
                                 .jpeg({ quality: 80 })
                                 .toFile(previewPath);
-                            console.log(`Generated preview with Sharp for ${fileName}`);
+                            logger.info(`Generated preview with Sharp for ${fileName}`);
                             extracted = true;
                         } catch (sharpErr) {
-                            console.error(`Sharp conversion failed for ${fileName}:`, sharpErr);
+                            logger.error(`Sharp conversion failed for ${fileName}:`, sharpErr);
                         }
                     }
 
                     if (extracted) return previewPath;
+                } else {
+                    // NON-RAW (JPG, PNG)
+                    try {
+                        // For standard images, we also apply our explicit rotation logic
+                        // bypassing sharp().rotate() which is auto-only
+                        const pipeline = sharp(filePath);
+                        if (shouldRotate) pipeline.rotate(rotationDegrees);
+
+                        await pipeline
+                            .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+                            .jpeg({ quality: 80 })
+                            .toFile(previewPath);
+                        return previewPath;
+                    } catch (e) {
+                        logger.error(`Failed to generate preview for image ${fileName}`, e);
+                    }
                 }
             }
         } catch (e) {
-            console.error(`Failed to extract/generate preview for ${filePath}`, e);
+            logger.error(`Failed to extract/generate preview for ${filePath}`, e);
         }
         return null;
     }
@@ -153,9 +206,9 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
 
     async function scan(currentPath: string) {
         try {
-            console.log(`Scanning directory: ${currentPath}`);
+            logger.info(`Scanning directory: ${currentPath}`);
             const entries = await fs.readdir(currentPath, { withFileTypes: true });
-            console.log(`Found ${entries.length} entries in ${currentPath}`);
+            logger.info(`Found ${entries.length} entries in ${currentPath}`);
 
             for (const entry of entries) {
                 const fullPath = path.join(currentPath, entry.name);
@@ -217,14 +270,14 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                                         needsUpdate = true;
                                     }
                                 } catch (e) {
-                                    console.error(`Failed to backfill metadata for ${fullPath}`, e);
+                                    logger.error(`Failed to backfill metadata for ${fullPath}`, e);
                                 }
                             }
                         }
 
                         if (!photo) {
                             // New file found
-                            console.log(`[Scanner] New photo found: ${entry.name}`);
+                            logger.info(`[Scanner] New photo found: ${entry.name}`);
                             const previewPath = await extractPreview(fullPath);
 
                             try {
@@ -236,7 +289,7 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                                         metadata = await tool.read(fullPath);
                                     }
                                 } catch (e) {
-                                    console.error(`Failed to read metadata for ${fullPath}`, e);
+                                    logger.error(`Failed to read metadata for ${fullPath}`, e);
                                 }
 
                                 insertStmt.run({
@@ -247,7 +300,7 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                                 });
                                 photo = selectStmt.get(fullPath); // Re-fetch the newly inserted photo
                             } catch (e) {
-                                console.error('Insert failed', e);
+                                logger.error('Insert failed', e);
                             }
                         }
 
@@ -265,12 +318,12 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                 }
             }
         } catch (err) {
-            console.error(`Error scanning ${currentPath}:`, err);
+            logger.error(`Error scanning ${currentPath}:`, err);
         }
     }
 
     await scan(dirPath);
-    console.log(`[Scanner] Total files: ${totalFiles}, Processed: ${count}, Returned: ${photos.length}`);
-    console.log(`[Scanner] Skipped Extensions:`, skippedStats);
+    logger.info(`[Scanner] Total files: ${totalFiles}, Processed: ${count}, Returned: ${photos.length}`);
+    logger.info(`[Scanner] Skipped Extensions:`, skippedStats);
     return photos;
 }

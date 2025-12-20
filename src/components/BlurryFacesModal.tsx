@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Slider from '@radix-ui/react-slider';
 import { Cross2Icon, TrashIcon } from '@radix-ui/react-icons';
+import { useAlert } from '../context/AlertContext';
 import { Face } from '../types/index';
 import { useAI } from '../context/AIContext';
 import FaceThumbnail from './FaceThumbnail';
@@ -25,6 +26,7 @@ interface BlurryFace extends Face {
 
 const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange, personId, onDeleteComplete }) => {
     const { calculateBlurScores, calculatingBlur, blurProgress } = useAI();
+    const { showAlert, showConfirm } = useAlert();
     const [threshold, setThreshold] = useState(25);
     const [faces, setFaces] = useState<BlurryFace[]>([]);
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -95,23 +97,32 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
 
     const handleDelete = async () => {
         if (selectedIds.size === 0) return;
-        const shouldDiscard = confirm(`Are you sure you want to discard ${selectedIds.size} blurry face(s)? They will be removed from recognition.`);
-        window.focus();
-        if (!shouldDiscard) return;
 
-        setLoading(true);
-        try {
-            // @ts-ignore
-            await window.ipcRenderer.invoke('face:deleteFaces', Array.from(selectedIds));
-            setFaces(prev => prev.filter(f => !selectedIds.has(f.id)));
-            setSelectedIds(new Set());
-            if (onDeleteComplete) onDeleteComplete();
-        } catch (e) {
-            console.error("Failed to delete faces:", e);
-            alert("Failed to delete faces");
-        } finally {
-            setLoading(false);
-        }
+        showConfirm({
+            title: 'Discard Blurry Faces',
+            description: `Are you sure you want to discard ${selectedIds.size} blurry face(s)? They will be removed from recognition.`,
+            confirmLabel: 'Discard',
+            variant: 'danger',
+            onConfirm: async () => {
+                setLoading(true);
+                try {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('face:deleteFaces', Array.from(selectedIds));
+                    setFaces(prev => prev.filter(f => !selectedIds.has(f.id)));
+                    setSelectedIds(new Set());
+                    if (onDeleteComplete) onDeleteComplete();
+                } catch (e) {
+                    console.error("Failed to delete faces:", e);
+                    showAlert({
+                        title: 'Error',
+                        description: 'Failed to delete faces',
+                        variant: 'danger'
+                    });
+                } finally {
+                    setLoading(false);
+                }
+            }
+        });
     };
 
     return (

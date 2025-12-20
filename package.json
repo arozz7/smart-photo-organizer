@@ -6,7 +6,9 @@
   "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
+    "build:python": "node scripts/build-python.js",
+    "build:runtime": "node scripts/build-runtime.js",
+    "build": "npm run build:python && tsc && vite build && electron-builder",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
     "preview": "vite preview"
   },
@@ -33,6 +35,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
     "@typescript-eslint/eslint-plugin": "^7.1.1",

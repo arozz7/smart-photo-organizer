@@ -1,10 +1,9 @@
-import { app, BrowserWindow, ipcMain, protocol, net, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol, net, dialog, shell } from 'electron'
 import { spawn, ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url'
 import { initDB } from './db'
 import { scanDirectory } from './scanner'
-import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import {
@@ -13,6 +12,7 @@ import {
 } from './store';
 import * as fs from 'node:fs/promises';
 import Store from 'electron-store';
+import logger from './logger';
 
 const store = new Store();
 
@@ -20,7 +20,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const LIBRARY_PATH = getLibraryPath();
-console.log(`[Main] Library Path: ${LIBRARY_PATH}`);
+logger.info(`[Main] Library Path: ${LIBRARY_PATH}`);
 
 // The built directory structure
 //
@@ -46,17 +46,31 @@ let pythonProcess: ChildProcess | null = null;
 const scanPromises = new Map<number, { resolve: (v: any) => void, reject: (err: any) => void }>();
 
 function startPythonBackend() {
-  const pythonPath = path.join(process.env.APP_ROOT, 'src', 'python', '.venv', 'Scripts', 'python.exe');
-  const scriptPath = path.join(process.env.APP_ROOT, 'src', 'python', 'main.py');
+  let pythonPath: string;
+  let args: string[];
 
-  console.log(`[Main] Starting Python Backend: ${pythonPath} ${scriptPath}`);
+  if (app.isPackaged) {
+    // In production, use the bundled executable
+    // Note: 'python-bin' is the folder name in extraResources
+    pythonPath = path.join(process.resourcesPath, 'python-bin', 'smart-photo-ai', 'smart-photo-ai.exe');
+    args = [];
+    logger.info(`[Main] Starting Bundled Python Backend (Prod): ${pythonPath}`);
+  } else {
+    // In development, use the venv
+    pythonPath = path.join(process.env.APP_ROOT, 'src', 'python', '.venv', 'Scripts', 'python.exe');
+    const scriptPath = path.join(process.env.APP_ROOT, 'src', 'python', 'main.py');
+    args = [scriptPath];
+    logger.info(`[Main] Starting Python Backend (Dev): ${pythonPath} ${scriptPath}`);
+  }
 
-  pythonProcess = spawn(pythonPath, [scriptPath], {
+  pythonProcess = spawn(pythonPath, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
       HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
-      LIBRARY_PATH: LIBRARY_PATH
+      LIBRARY_PATH: LIBRARY_PATH,
+      LOG_PATH: path.join(app.getPath('userData'), 'logs'),
+      PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True'
     }
   });
 
@@ -69,7 +83,7 @@ function startPythonBackend() {
     reader.on('line', async (line) => {
       try {
         const message = JSON.parse(line);
-        console.log('[Python]', message);
+        logger.info('[Python]', message);
         if (win && (message.type === 'scan_result' || message.type === 'tags_result')) {
           win.webContents.send('ai:scan-result', message);
         }
@@ -79,8 +93,12 @@ function startPythonBackend() {
         }
 
 
-        // Shared Promise Resolution (works for scan_result, tags_result, cluster_result, system_status_result)
+        // Shared Promise Resolution
         const resId = message.photoId || message.reqId || (message.payload && message.payload.reqId);
+
+        if (win && (message.type === 'download_progress' || message.type === 'download_result')) {
+          win.webContents.send('ai:model-progress', message);
+        }
 
         if (resId && scanPromises.has(resId)) {
           const promise = scanPromises.get(resId);
@@ -100,13 +118,13 @@ function startPythonBackend() {
             const logError = db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, (SELECT file_path FROM photos WHERE id = ?), ?, ?)');
             const stage = message.type === 'scan_result' ? 'Face Scan' : 'Smart Tags';
             logError.run(message.photoId, message.photoId, message.error, stage);
-            console.log(`[Main] Logged scan error for ${message.photoId}`);
+            logger.info(`[Main] Logged scan error for ${message.photoId}`);
           } catch (err) {
-            console.error("[Main] Failed to log auto-error:", err);
+            logger.error("[Main] Failed to log auto-error:", err);
           }
         }
       } catch (e) {
-        console.log('[Python Raw]', line);
+        logger.info('[Python Raw]', line);
       }
     });
   }
@@ -115,15 +133,15 @@ function startPythonBackend() {
     pythonProcess.stderr.on('data', (data) => {
       const msg = data.toString();
       if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('exception')) {
-        console.error(`[Python Error]: ${msg}`);
+        logger.error(`[Python Error]: ${msg}`);
       } else {
-        console.log(`[Python Log]: ${msg}`);
+        logger.info(`[Python Log]: ${msg}`);
       }
     });
   }
 
   pythonProcess.on('close', (code) => {
-    console.log(`[Main] Python process exited with code ${code}`);
+    logger.info(`[Main] Python process exited with code ${code}`);
     pythonProcess = null;
   });
 }
@@ -132,7 +150,7 @@ function sendToPython(command: any) {
   if (pythonProcess && pythonProcess.stdin) {
     pythonProcess.stdin.write(JSON.stringify(command) + '\n');
   } else {
-    console.error('[Main] Python process not running. Queuing or dropping command.', command.type);
+    logger.error('[Main] Python process not running. Queuing or dropping command.', command.type);
   }
 }
 
@@ -224,20 +242,37 @@ app.whenReady().then(async () => {
   try {
     await fs.mkdir(LIBRARY_PATH, { recursive: true });
   } catch (e) {
-    console.error(`[Main] Failed to create library path: ${LIBRARY_PATH}`, e);
+    logger.error(`[Main] Failed to create library path: ${LIBRARY_PATH}`, e);
   }
 
   initDB(LIBRARY_PATH)
   startPythonBackend()
 
   protocol.handle('local-resource', (request) => {
-    const filePath = request.url.replace('local-resource://', '')
+    let filePath = request.url.replace('local-resource://', '')
+
+    // Fix: Strip query string (e.g. ?t=...)
+    const queryIndex = filePath.indexOf('?');
+    if (queryIndex !== -1) {
+      filePath = filePath.substring(0, queryIndex);
+    }
+
     const decodedPath = decodeURIComponent(filePath)
+    // console.log(`[Protocol] Request: ${request.url} -> ${decodedPath}`);
     return net.fetch(pathToFileURL(decodedPath).toString())
   })
 
   createSplashWindow()
   createWindow()
+
+  ipcMain.handle('app:focusWindow', () => {
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+      return true;
+    }
+    return false;
+  });
 
   ipcMain.handle('scan-directory', async (event, dirPath) => {
     return await scanDirectory(dirPath, LIBRARY_PATH, (count) => {
@@ -262,7 +297,7 @@ app.whenReady().then(async () => {
       const buffer = await fs.readFile(filePath);
       return buffer;
     } catch (error) {
-      console.error('Failed to read file:', filePath, error);
+      logger.error('Failed to read file:', filePath, error);
       throw error;
     }
   })
@@ -272,7 +307,7 @@ app.whenReady().then(async () => {
     return getAISettings();
   });
 
-  ipcMain.handle('ai:saveSettings', (event, settings) => {
+  ipcMain.handle('ai:saveSettings', (_event, settings) => {
     setAISettings(settings);
     // Propagate to Python
     if (pythonProcess && pythonProcess.stdin) {
@@ -282,9 +317,58 @@ app.whenReady().then(async () => {
     return true;
   });
 
+  ipcMain.handle('ai:downloadModel', async (_event, { modelName }) => {
+    logger.info(`[Main] Requesting model download: ${modelName}`);
+    return new Promise((resolve, reject) => {
+      const requestId = Math.floor(Math.random() * 1000000);
+      scanPromises.set(requestId, {
+        resolve: (res: any) => resolve(res),
+        reject
+      });
+
+      sendToPython({
+        type: 'download_model',
+        payload: {
+          reqId: requestId,
+          modelName
+        }
+      });
+
+      // Long timeout for downloads (30 minutes)
+      setTimeout(() => {
+        if (scanPromises.has(requestId)) {
+          scanPromises.delete(requestId);
+          reject('Model download timed out');
+        }
+      }, 1800000);
+    });
+  });
+
+  ipcMain.handle('ai:getSystemStatus', async () => {
+    return new Promise((resolve, reject) => {
+      const requestId = Math.floor(Math.random() * 1000000);
+      scanPromises.set(requestId, {
+        resolve: (res: any) => resolve(res.status || {}),
+        reject
+      });
+
+      sendToPython({
+        type: 'get_system_status',
+        payload: { reqId: requestId }
+      });
+
+      setTimeout(() => {
+        if (scanPromises.has(requestId)) {
+          scanPromises.delete(requestId);
+          reject('Get system status timed out');
+        }
+      }, 10000);
+    });
+  });
+
   // Handle Face Blur
-  // Handle Face Blur
-  ipcMain.handle('face:getBlurry', async (event, { personId, threshold, scope }) => {
+
+  ipcMain.handle('face:getBlurry', async (_event, { personId, threshold, scope }) => {
     const { getDB } = await import('./db');
     const db = getDB();
 
@@ -404,7 +488,7 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle('settings:cleanupPreviews', async (event, { days }) => {
+  ipcMain.handle('settings:cleanupPreviews', async (_event, { days }) => {
     try {
       const previewDir = path.join(getLibraryPath(), 'previews');
       try { await fs.access(previewDir); } catch { return { success: true, deletedCount: 0, deletedSize: 0 }; }
@@ -434,7 +518,7 @@ app.whenReady().then(async () => {
   });
 
 
-  ipcMain.handle('face:deleteFaces', async (event, faceIds) => {
+  ipcMain.handle('face:deleteFaces', async (_event, faceIds) => {
     const { getDB } = await import('./db');
     const db = getDB();
     const deleteParams = faceIds.map(() => '?').join(',');
@@ -446,7 +530,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('ai:scanImage', async (_, { photoId }) => {
     const { getDB } = await import('./db');
     const db = getDB();
-    console.log(`[Main] Requesting AI scan for ${photoId}`);
+    logger.info(`[Main] Requesting AI scan for ${photoId}`);
 
     try {
       const stmt = db.prepare('SELECT file_path FROM photos WHERE id = ?');
@@ -479,11 +563,11 @@ app.whenReady().then(async () => {
           }, 300000);
         });
       } else {
-        console.error('[Main] Photo not found or no path:', photoId);
+        logger.error('[Main] Photo not found or no path:', photoId);
         return { success: false, error: 'Photo not found' };
       }
     } catch (e) {
-      console.error('[Main] Failed to lookup photo for AI:', e);
+      logger.error('[Main] Failed to lookup photo for AI:', e);
       return { success: false, error: e };
     }
   })
@@ -491,7 +575,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('ai:generateTags', async (_, { photoId }) => {
     const { getDB } = await import('./db');
     const db = getDB();
-    console.log(`[Main] Requesting Tags (VLM) for ${photoId}`);
+    logger.info(`[Main] Requesting Tags (VLM) for ${photoId}`);
 
     try {
       const stmt = db.prepare('SELECT file_path FROM photos WHERE id = ?');
@@ -504,7 +588,7 @@ app.whenReady().then(async () => {
         return { success: false, error: 'Photo not found' };
       }
     } catch (e) {
-      console.error('[Main] Failed to lookup photo for VLM:', e);
+      logger.error('[Main] Failed to lookup photo for VLM:', e);
       return { success: false, error: e };
     }
   })
@@ -513,7 +597,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('ai:enhanceImage', async (_, { photoId, task, modelName }) => {
     const { getDB } = await import('./db');
     const db = getDB();
-    console.log(`[Main] Enhance Request: ${photoId} [${task}]`);
+    logger.info(`[Main] Enhance Request: ${photoId} [${task}]`);
 
     try {
       const stmt = db.prepare('SELECT file_path FROM photos WHERE id = ?');
@@ -559,31 +643,46 @@ app.whenReady().then(async () => {
       });
 
     } catch (e) {
-      console.error('Enhance failed:', e);
+      logger.error('Enhance failed:', e);
       return { success: false, error: String(e) };
     }
   })
 
-  ipcMain.handle('ai:downloadModel', async (_, { modelName }) => {
-    console.log(`[Main] Requesting model download: ${modelName}`);
-    return new Promise((resolve, reject) => {
-      const requestId = Math.floor(Math.random() * 1000000);
-      scanPromises.set(requestId, {
-        resolve: (res: any) => resolve(res),
-        reject
-      });
+  ipcMain.handle('ai:rebuildIndex', async () => {
+    const { getDB } = await import('./db');
+    const db = getDB();
+    logger.info('[Main] Rebuilding Vector Index...');
+    try {
+      // Get all faces that have a descriptor
+      const rows = db.prepare('SELECT id, descriptor_json FROM faces WHERE descriptor_json IS NOT NULL').all();
+      const descriptors = rows.map((r: any) => JSON.parse(r.descriptor_json));
+      const ids = rows.map((r: any) => r.id);
 
-      sendToPython({
-        type: 'download_model',
-        payload: {
-          reqId: requestId,
-          modelName
-        }
-      });
+      if (descriptors.length === 0) {
+        return { success: true, count: 0 };
+      }
 
-      // No timeout or very long timeout for download
-    });
-  })
+      return new Promise((resolve, reject) => {
+        const requestId = Math.floor(Math.random() * 1000000);
+        scanPromises.set(requestId, {
+          resolve: (res: any) => resolve({ success: true, count: res.count }),
+          reject
+        });
+
+        sendToPython({
+          type: 'rebuild_index',
+          payload: {
+            reqId: requestId,
+            descriptors,
+            ids
+          }
+        });
+      });
+    } catch (e) {
+      logger.error('Failed to rebuild index:', e);
+      return { success: false, error: String(e) };
+    }
+  });
 
   // Generic AI Command Handler (Request-Response)
   ipcMain.handle('ai:command', async (_, command) => {
@@ -644,7 +743,7 @@ app.whenReady().then(async () => {
         }, 30000);
       });
     } catch (e) {
-      console.error('AI Command Failed:', e);
+      logger.error('AI Command Failed:', e);
       return { error: e };
     }
   });
@@ -710,7 +809,7 @@ app.whenReady().then(async () => {
       });
 
     } catch (e) {
-      console.error('Failed to cluster faces:', e);
+      logger.error('Failed to cluster faces:', e);
       return { success: false, error: e };
     }
   })
@@ -743,7 +842,7 @@ app.whenReady().then(async () => {
       transaction(photoId, tags);
       return { success: true };
     } catch (error) {
-      console.error('Failed to add tags:', error);
+      logger.error('Failed to add tags:', error);
       return { success: false, error };
     }
   })
@@ -760,12 +859,12 @@ app.whenReady().then(async () => {
       const tags = stmt.all(photoId);
       return tags.map((t: any) => t.name);
     } catch (error) {
-      console.error('Failed to get tags:', error);
+      logger.error('Failed to get tags:', error);
       return [];
     }
   })
 
-  ipcMain.handle('db:clearAITags', async () => {
+  ipcMain.handle('db:clearAITags', async (_event) => {
     const { getDB } = await import('./db');
     const db = getDB();
     try {
@@ -773,11 +872,23 @@ app.whenReady().then(async () => {
         DELETE FROM photo_tags WHERE source = 'AI';
         DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM photo_tags);
       `);
-      console.log('Cleared all AI tags.');
+      logger.info('Cleared all AI tags.');
       return { success: true };
     } catch (error) {
-      console.error('Failed to clear AI tags:', error);
+      logger.error('Failed to clear AI tags:', error);
       return { success: false, error };
+    }
+  })
+
+  ipcMain.handle('db:getPhoto', async (_, photoId: number) => {
+    const { getDB } = await import('./db');
+    const db = getDB();
+    try {
+      const photo = db.prepare('SELECT * FROM photos WHERE id = ?').get(photoId);
+      return photo || null;
+    } catch (error) {
+      logger.error('Failed to get photo:', error);
+      return null;
     }
   })
 
@@ -1430,7 +1541,7 @@ app.whenReady().then(async () => {
       transaction();
       return { success: true };
     } catch (error) {
-      console.error('Failed to delete faces:', error);
+      logger.error('Failed to delete faces:', error);
       return { success: false, error };
     }
   })
@@ -1444,8 +1555,7 @@ app.whenReady().then(async () => {
     // ... rest of implementation ...
     // Note: The file cut off here in previous view, so I will append the new handlers at the end of the file or after a known block.
     // Actually, I should probably read the end of the file first to be safe, but I can append to the `ipcMain` block if I find a good anchor.
-    // I'll use the last known handler `db:reassignFaces` as anchor? No, that was cut off.
-    // I will use `ipcMain.handle('db:deleteFaces'` as anchor.
+    // I will use the last known handler `db:deleteFaces` as anchor.
 
     const getPerson = db.prepare('SELECT id FROM people WHERE name = ?');
 
@@ -2018,3 +2128,23 @@ ipcMain.handle('db:getUnprocessedItems', async () => {
 
 
 
+ipcMain.handle('os:getLogPath', () => {
+  return logger.getLogPath();
+});
+
+ipcMain.handle('os:showInFolder', (_, path) => {
+  shell.showItemInFolder(path);
+});
+
+ipcMain.handle('os:openFolder', (_, path) => {
+  shell.openPath(path);
+});
+
+// Global Error Handlers
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Rejection:', reason);
+});

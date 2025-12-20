@@ -1,14 +1,142 @@
 import sys
 import json
 import logging
-import torch
 import time
 import os
 import cv2
 import numpy as np
 import rawpy
-import rawpy
 import imageio
+import pickle
+import re
+import types
+from sklearn.cluster import DBSCAN
+import requests
+
+# --- RUNTIME LOADING ---
+# If an external AI runtime (torch, cuda, etc) is downloaded, we inject it into the path
+LIBRARY_PATH = os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer'))
+AI_RUNTIME_PATH = os.path.join(LIBRARY_PATH, 'ai-runtime')
+
+# --- RUNTIME LOADING ---
+# If an external AI runtime (torch, cuda, etc) is downloaded, we inject it into the path
+LIBRARY_PATH = os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer'))
+AI_RUNTIME_PATH = os.path.join(LIBRARY_PATH, 'ai-runtime')
+
+def inject_runtime():
+    """
+    Scans for the AI Runtime and injects it into sys.path.
+    Returns True if injected, False otherwise.
+    """
+    print(f"[AI_INIT] Checking for AI Runtime at: {AI_RUNTIME_PATH}", file=sys.stderr)
+    
+    if os.path.exists(AI_RUNTIME_PATH):
+        # Search for site-packages (handle potential nesting from zip extraction)
+        found_site_packages = None
+        found_bin = None
+        
+        # Strat 1: Check standard location
+        possible_site = os.path.join(AI_RUNTIME_PATH, 'lib', 'site-packages')
+        if os.path.exists(possible_site):
+            found_site_packages = possible_site
+            found_bin = os.path.join(AI_RUNTIME_PATH, 'bin')
+        else:
+            # Strat 2: Search subdirectories (max depth 2)
+            print("[AI_INIT] Runtime not found in root, searching subdirectories...", file=sys.stderr)
+            for root, dirs, files in os.walk(AI_RUNTIME_PATH):
+                 if 'site-packages' in dirs:
+                     found_site_packages = os.path.join(root, 'site-packages')
+                     parent = os.path.dirname(root) 
+                     found_bin = os.path.join(parent, 'bin')
+                     break
+                 
+                 # Limit depth
+                 current_depth = root[len(AI_RUNTIME_PATH):].count(os.sep)
+                 if current_depth > 2:
+                     del dirs[:]
+
+        if found_site_packages:
+            if found_site_packages not in sys.path:
+                print(f"[AI_INIT] Injecting runtime libraries from: {found_site_packages}", file=sys.stderr)
+                sys.path.insert(0, found_site_packages)
+            else:
+                print(f"[AI_INIT] Runtime already in path: {found_site_packages}", file=sys.stderr)
+            
+            # --- DEBUG: CHECK MODULES ---
+            try:
+                # LIST SITE-PACKAGES
+                # print(f"[AI_INIT] site-packages contents: {os.listdir(found_site_packages)}", file=sys.stderr)
+                
+                # CHECK TORCHGEN
+                tgen_path = os.path.join(found_site_packages, 'torchgen')
+                if os.path.exists(tgen_path):
+                     print(f"[AI_INIT] torchgen folder found at {tgen_path}", file=sys.stderr)
+                     if os.path.exists(os.path.join(tgen_path, '__init__.py')):
+                         print("[AI_INIT] torchgen/__init__.py exists", file=sys.stderr)
+                     else:
+                         print("[AI_INIT] ERROR: torchgen/__init__.py MISSING!", file=sys.stderr)
+                else:
+                     print("[AI_INIT] ERROR: torchgen folder NOT found!", file=sys.stderr)
+
+                # ATTEMPT EXPLICIT IMPORT
+                print("[AI_INIT] Attempting explicit 'import torchgen'...", file=sys.stderr)
+                import torchgen
+                print(f"[AI_INIT] 'import torchgen' SUCCESS. Path: {torchgen.__file__}", file=sys.stderr)
+                
+                print("[AI_INIT] Attempting explicit 'import yaml'...", file=sys.stderr)
+                import yaml
+                print(f"[AI_INIT] 'import yaml' SUCCESS. Path: {yaml.__file__}", file=sys.stderr)
+                
+            except ImportError as ie:
+                print(f"[AI_INIT] Explicit import failed: {ie}", file=sys.stderr)
+            except Exception as e:
+                print(f"[AI_INIT] Debug check failed: {e}", file=sys.stderr)
+            # ----------------------------
+
+            # INSPECT TORCH VERSION
+            try:
+                torch_dir = os.path.join(found_site_packages, 'torch')
+                if os.path.exists(torch_dir):
+                    pyd_files = [f for f in os.listdir(torch_dir) if f.endswith('.pyd')]
+                    print(f"[AI_INIT] Found torch .pyd files: {pyd_files}", file=sys.stderr)
+                    
+                    # Check for torch/lib
+                    torch_lib_dir = os.path.join(torch_dir, 'lib')
+                    if os.path.exists(torch_lib_dir):
+                         dlls = [f for f in os.listdir(torch_lib_dir) if f.endswith('.dll')]
+                         print(f"[AI_INIT] Found torch/lib DLLs: {len(dlls)} files", file=sys.stderr)
+                         # Add torch/lib to DLL search path explicitly (just in case)
+                         if os.name == 'nt':
+                             try:
+                                 os.add_dll_directory(torch_lib_dir)
+                                 print(f"[AI_INIT] Added torch/lib to DLL directory", file=sys.stderr)
+                             except: pass
+                else:
+                    print(f"[AI_INIT] Warning: 'torch' directory not found in {found_site_packages}", file=sys.stderr)
+            except Exception as e:
+                 print(f"[AI_INIT] Error inspecting torch: {e}", file=sys.stderr)
+
+            # Also add DLL directory for CUDA
+            if os.name == 'nt' and found_bin and os.path.exists(found_bin):
+                try:
+                    os.add_dll_directory(found_bin)
+                    print(f"[AI_INIT] Added DLL directory: {found_bin}", file=sys.stderr)
+                except Exception as e:
+                    print(f"[AI_INIT] Failed to add DLL directory: {e}", file=sys.stderr)
+                    
+            return True
+        else:
+            print(f"[AI_INIT] AI Runtime folder exists at {AI_RUNTIME_PATH} but 'site-packages' could not be found.", file=sys.stderr)
+            try:
+                 print(f"[AI_INIT] Directory listing: {os.listdir(AI_RUNTIME_PATH)}", file=sys.stderr)
+            except: pass
+    else:
+        print("[AI_INIT] AI Runtime folder not found. Using system environment or fallback.", file=sys.stderr)
+    
+    return False
+
+# Initial Check
+inject_runtime()
 
 
 # Ensure CUDA DLLs are found if installed via pip
@@ -51,41 +179,81 @@ if os.name == 'nt':
     except ImportError:
         pass
 
-from insightface.app import FaceAnalysis
-import faiss
-import pickle
-import torch
-from transformers import AutoProcessor, AutoModelForVision2Seq
-
-# PATCH: Basicsr/Torchvision compatibility
-# basicsr tries to import from 'torchvision.transforms.functional_tensor' which was removed in torchvision 0.18+
-import torchvision
-if hasattr(torchvision.transforms, 'functional_tensor'):
-    pass # All good
-else:
+# --- LAZY IMPORTS ---
+def get_torch():
     try:
-        import torchvision.transforms.functional as F
-        import sys
-        import types
-        # Create a mock module
-        mod = types.ModuleType("torchvision.transforms.functional_tensor")
-        mod.rgb_to_grayscale = F.rgb_to_grayscale
-        # Inject into sys.modules
-        sys.modules["torchvision.transforms.functional_tensor"] = mod
-        # Also inject into torchvision.transforms for good measure
-        torchvision.transforms.functional_tensor = mod
+        import torch
+        return torch
+    except ImportError as e:
+        print(f"[AI_INIT] Failed to import torch: {e}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"[AI_INIT] Unexpected error importing torch: {e}", file=sys.stderr)
+        return None
+
+def get_transformers():
+    try:
+        from transformers import AutoProcessor, AutoModelForVision2Seq
+        return AutoProcessor, AutoModelForVision2Seq
     except ImportError:
-        pass
+        return None, None
+
+def get_faiss():
+    try:
+        import faiss
+        return faiss
+    except ImportError:
+        return None
+
+# Initial cleanup of global scope to avoid early import failures
+torch_lib = get_torch()
+faiss_lib = get_faiss()
+
+if torch_lib:
+    # PATCH: Basicsr/Torchvision compatibility
+    import torchvision
+    if not hasattr(torchvision.transforms, 'functional_tensor'):
+        try:
+            import torchvision.transforms.functional as F
+            import types
+            mod = types.ModuleType("torchvision.transforms.functional_tensor")
+            mod.rgb_to_grayscale = F.rgb_to_grayscale
+            sys.modules["torchvision.transforms.functional_tensor"] = mod
+            torchvision.transforms.functional_tensor = mod
+        except ImportError:
+            pass
+
+    # AUTO-DETECT MODE
+    if torch_lib.cuda.is_available():
+        AI_MODE = "GPU"
+        print("[AI_INIT] Torch detected CUDA. Setting initial mode to GPU.", file=sys.stderr)
+    else:
+        AI_MODE = "CPU"
+        print("[AI_INIT] Torch did not detect CUDA. Setting initial mode to CPU.", file=sys.stderr)
+else:
+    AI_MODE = "SAFE_MODE"
+    print("[AI_INIT] Torch not loaded. Setting initial mode to SAFE_MODE.", file=sys.stderr)
 
 import enhance # Local module
 
 # Configure logging
+LOG_PATH = os.environ.get('LOG_PATH')
+handlers = [logging.StreamHandler(sys.stderr)]
+
+if LOG_PATH:
+    if not os.path.exists(LOG_PATH):
+        os.makedirs(LOG_PATH, exist_ok=True)
+    from logging.handlers import RotatingFileHandler
+    handlers.append(RotatingFileHandler(
+        os.path.join(LOG_PATH, 'python.log'),
+        maxBytes=5*1024*1024, # 5MB
+        backupCount=1
+    ))
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stderr)
-    ]
+    handlers=handlers
 )
 logger = logging.getLogger('ai_engine')
 
@@ -108,35 +276,67 @@ VLM_MAX_TOKENS = 100
 vlm_processor = None # SmolVLM
 vlm_model = None
 
+# AI STATUS TRACKING
+# AI_MODE initialized above
+CURRENT_PROVIDERS = None
+ALLOWED_MODULES = None
+VLM_ENABLED = False
+
 # --- INITIALIZATION ---
 
-def init_insightface():
-    global app
-    logger.info("Initializing InsightFace (Buffalo_L)...")
+def init_insightface(providers=None, ctx_id=0, allowed_modules=None):
+    global app, AI_MODE, CURRENT_PROVIDERS, ALLOWED_MODULES
+    
+    # OPTIMIZATION: Default to only essential modules to prevent GPU crashes in auxiliary models (3d landmarks)
+    if allowed_modules is None:
+        allowed_modules = ['detection', 'recognition']
+
+    logger.info(f"Initializing InsightFace (Buffalo_L) with ctx_id={ctx_id}, modules={allowed_modules}...")
     try:
         from contextlib import redirect_stdout
+        from insightface.app import FaceAnalysis
         with redirect_stdout(sys.stderr):
-             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-             # Check if TensorRT is actually available to avoid spamming errors
-             try:
-                 import ctypes
-                 # Try to find nvinfer_10.dll (standard for TRT 10.x)
-                 # Since we added it to PATH/DLL_DIR above, this should succeed if correct
-                 ctypes.CDLL('nvinfer_10.dll')
-                 providers.insert(0, 'TensorrtExecutionProvider')
-                 logger.info("TensorRT libraries found. enabling TensorrtExecutionProvider.")
-             except Exception:
-                 logger.info("TensorRT not found. Skipping TensorrtExecutionProvider.")
-                 
-             app = FaceAnalysis(name='buffalo_l', providers=providers)
+             if providers is None:
+                 providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+                 # Check if TensorRT is actually available to avoid spamming errors
+                 try:
+                     import ctypes
+                     # Try to find nvinfer_10.dll (standard for TRT 10.x)
+                     # Since we added it to PATH/DLL_DIR above, this should succeed if correct
+                     ctypes.CDLL('nvinfer_10.dll')
+                     logger.info("TensorRT libraries found. enabling TensorrtExecutionProvider.")
+                     providers.insert(0, 'TensorrtExecutionProvider')
+                 except Exception:
+                     logger.info("TensorRT not found. Skipping TensorrtExecutionProvider.")
+             
+             logger.info(f"Using Providers: {providers}")
+             app = FaceAnalysis(name='buffalo_l', providers=providers, allowed_modules=allowed_modules)
              # Using dynamic threshold
-             app.prepare(ctx_id=0, det_size=(1280, 1280), det_thresh=DET_THRESH)
+             app.prepare(ctx_id=ctx_id, det_size=(1280, 1280), det_thresh=DET_THRESH)
+             
+             # Update Status Globals
+             CURRENT_PROVIDERS = providers
+             ALLOWED_MODULES = allowed_modules
+             
+             # Determine Mode String
+             if 'CUDAExecutionProvider' in providers and ctx_id >= 0:
+                 AI_MODE = "GPU"
+             elif allowed_modules is not None:
+                 AI_MODE = "SAFE_MODE"
+             else:
+                 AI_MODE = "CPU"
+                 
+        logger.info(f"InsightFace initialized. Mode: {AI_MODE}")
+    except Exception as e:
+        logger.error(f"Failed to init InsightFace: {e}")
+        raise e
         logger.info("InsightFace initialized.")
     except Exception as e:
         logger.error(f"Failed to init InsightFace: {e}")
         raise e
 
-# ... (init_faiss, save_faiss, init_vlm... no changes)
+
+# --- HELPER FUNCTIONS ---
 
 def smart_crop_landmarks(bbox, kps, img_width, img_height):
     """
@@ -144,105 +344,56 @@ def smart_crop_landmarks(bbox, kps, img_width, img_height):
     kps: 5x2 array [RightEye, LeftEye, Nose, RightMouth, LeftMouth]
     bbox: [x1, y1, x2, y2]
     """
-    # 1. Calculate Face Center from landmarks
-    # kps order in insightface (usually): [left_eye, right_eye, nose, left_mouth, right_mouth]
-    # Check shape: kps is numpy array
-    
     if kps is None or len(kps) == 0:
-         # Fallback to simple box expansion if no landmarks
          return expand_box(bbox, img_width, img_height, 0.4)
-
-    # Centroid of keypoints
-    center_x = np.mean(kps[:, 0])
-    center_y = np.mean(kps[:, 1])
     
-    # 2. Determine Scale/Box Size
-    # Use the bounding box size as a baseline
-    x1, y1, x2, y2 = bbox
-    raw_w = x2 - x1
-    raw_h = y2 - y1
-    raw_size = max(raw_w, raw_h)
+    # Calculate crop center and size
+    eye_center = np.mean(kps[:2], axis=0)
+    mouth_center = np.mean(kps[3:], axis=0)
+    face_center = (eye_center + mouth_center) / 2
     
-    # Expansion Factor: 
-    # Faces are approx 50-60% of the head height. 
-    # We want to include hair (top) and neck (bottom).
-    # 1.5x is a safer bet to avoid "huge" boxes while getting the hair.
-    final_size = raw_size * 1.5
+    # Heuristic for face size based on landmarks
+    face_size = np.linalg.norm(eye_center - mouth_center) * 2.5
+    final_size = face_size * 1.5
+    
     half_size = final_size / 2
+    center_x, center_y = face_center
     
-    # 3. Apply Offset
-    # Center of landmarks is usually the nose/mid-face.
-    # We want the distinct "Center" of the image to be slightly higher (eyes at 1/3 or 1/2 line).
-    # Shift center_y up slightly (8% instead of 10% since box is smaller)
+    # Shift center_y up slightly
     center_y_shifted = center_y - (final_size * 0.08)
     
-    # 4. Calculate coordinates
-    new_x1 = center_x - half_size
-    new_y1 = center_y_shifted - half_size
-    new_x2 = center_x + half_size
-    new_y2 = center_y_shifted + half_size
-    
-    # 5. Square enforcement? (Already square from half_size).
-    # Just clamp.
-    
-    new_x1 = max(0, new_x1)
-    new_y1 = max(0, new_y1)
-    new_x2 = min(img_width, new_x2)
-    new_y2 = min(img_height, new_y2)
+    new_x1 = max(0, center_x - half_size)
+    new_y1 = max(0, center_y_shifted - half_size)
+    new_x2 = min(img_width, center_x + half_size)
+    new_y2 = min(img_height, center_y_shifted + half_size)
     
     return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)]
-
-def expand_box(bbox, img_width, img_height, expansion_factor=0.25):
-    """
-    Fallback: Expands the bounding box by a factor to include more context.
-    """
-    x1, y1, x2, y2 = bbox
-    w = x2 - x1
-    h = y2 - y1
-    
-    pad_w = w * expansion_factor * 0.5
-    pad_h = h * expansion_factor * 0.5
-    
-    new_x1 = max(0, x1 - pad_w)
-    new_y1 = max(0, y1 - pad_h)
-    new_x2 = min(img_width, x2 + pad_w)
-    new_y2 = min(img_height, y2 + pad_h)
-    
-    return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)]
-
-# ... (ensure we match indentation for helper functions if any, but expand_box can be top level or helper)
-# Actually, I'll place it before generate_captions or inside helpers section.
-# Since I am replacing a block, I will just insert it effectively or ensure context is right.
-# Wait, replacing a huge block is risky if I get lines wrong. 
-# `scan_image` is inside `handle_command`. 
-# calculated `det_size` change is in `init_insightface`.
-# usage is in `handle_command`.
-# I should probably split this into two edits if the blocks are far apart.
-# init_insightface is around line 62.
-# handle_command is around line 229.
-# I will use multi_replace.
 
 
 def init_faiss():
     global index, id_map
     logger.info("Initializing FAISS...")
+    if not faiss_lib:
+        logger.warning("FAISS library not loaded. Vector search will be disabled.")
+        return
+
     try:
         if os.path.exists(index_file):
-            index = faiss.read_index(index_file)
+            index = faiss_lib.read_index(index_file)
             if os.path.exists(id_map_file):
                 with open(id_map_file, 'rb') as f:
                     id_map = pickle.load(f)
             logger.info(f"Loaded existing index with {index.ntotal} vectors.")
         else:
-            index = faiss.IndexFlatL2(512)
+            index = faiss_lib.IndexFlatL2(512)
             logger.info("Created new FAISS index (512d).")
     except Exception as e:
         logger.error(f"Failed to init FAISS: {e}")
-        index = faiss.IndexFlatL2(512)
+        index = faiss_lib.IndexFlatL2(512)
 
 def save_faiss():
-    if index:
-        faiss.write_index(index, index_file)
+    if index and faiss_lib:
+        faiss_lib.write_index(index, index_file)
         with open(id_map_file, 'wb') as f:
             pickle.dump(id_map, f)
 
@@ -253,28 +404,40 @@ def init_vlm():
 
     logger.info("Initializing SmolVLM...")
     try:
+        import torch
+    except ImportError:
+        logger.warning("Torch not found. VLM (Smart Tagging) will be disabled.")
+        vlm_model = None
+        global VLM_ENABLED
+        VLM_ENABLED = False
+        return
+
+    try:
+        # Select device/dtype
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype = torch.float16 if device == "cuda" else torch.float32
+        logger.info(f"VLM using device: {device}, dtype: {dtype}")
+
         from contextlib import redirect_stdout
+        from transformers import AutoProcessor
         with redirect_stdout(sys.stderr):
             vlm_processor = AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM-Instruct")
             try:
                 from transformers import AutoModelForImageTextToText
                 vlm_model = AutoModelForImageTextToText.from_pretrained(
                     "HuggingFaceTB/SmolVLM-Instruct",
-                    torch_dtype=torch.float16, 
-                    # device_map="cpu", 
+                    torch_dtype=dtype, 
                     _attn_implementation="eager" 
                 )
             except ImportError:
                  # Fallback for older transformers
                  vlm_model = AutoModelForVision2Seq.from_pretrained(
                     "HuggingFaceTB/SmolVLM-Instruct",
-                    torch_dtype=torch.float16,
-                    # device_map="cpu",
+                    torch_dtype=dtype,
                     _attn_implementation="eager"
                 )
             
-            # Manually move to CUDA to avoid Accelerate's dispatch overhead on Windows
-            if torch.cuda.is_available():
+            if device == "cuda":
                logger.info("Moving SmolVLM to CUDA...")
                vlm_model.to("cuda")
                 
@@ -282,9 +445,9 @@ def init_vlm():
     except Exception as e:
         logger.error(f"Failed to init SmolVLM: {e}")
         vlm_model = None
-        raise e
+        # Don't raise, just disable VLM
 
-# --- HELPER FUNCTIONS ---
+
 
 def expand_box(bbox, img_width, img_height, expansion_factor=0.4):
     """
@@ -325,6 +488,7 @@ def generate_captions(image_path):
     if not vlm_model:
         init_vlm()
         
+    import torch
     logger.info(f"Generating tags for {image_path}...")
 
     # Robust Image Loading (Same as scan_image)
@@ -349,12 +513,6 @@ def generate_captions(image_path):
         except Exception as raw_e:
             logger.warning(f"PIL and RawPy read failed: {e} | {raw_e}")
             raise ValueError(f"Could not read image: {e} | {raw_e}")
-
-    # No need for OpenCV conversion for VLM, it takes PIL
-    # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) 
-    # pil_image = Image.fromarray(image)
-    # We already have pil_img
-
 
     # Updated Prompt for Tagging
     prompt = "Analyze this image. Provide a detailed description. Then, provide 5-10 descriptive tags separated by commas. Start the list of tags with the word 'Tags:'."
@@ -506,6 +664,7 @@ def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2):
 # --- COMMAND HANDLER ---
 
 def handle_command(command):
+    global torch_lib, app, AI_MODE
     cmd_type = command.get('type')
     payload = command.get('payload', {})
     req_id = payload.get('reqId')
@@ -517,7 +676,12 @@ def handle_command(command):
          response['reqId'] = req_id
 
     if cmd_type == 'ping':
-        response = {"type": "pong", "timestamp": time.time()}
+        response = {
+            "type": "pong", 
+            "timestamp": time.time(),
+            "aiMode": AI_MODE,
+            "vlmEnabled": (torch_lib is not None) # Available if Torch is loaded
+        }
 
     elif cmd_type == 'update_config':
         global DET_THRESH, BLUR_THRESH, VLM_TEMP, VLM_MAX_TOKENS
@@ -616,7 +780,77 @@ def handle_command(command):
             # InsightFace expects BGR (cv2 default) 
             # but let's double check if FaceAnalysis handles it. Yes, it uses cv2 internally.
             
-            faces = app.get(img)
+            if not app:
+                init_insightface()
+
+
+            try:
+                faces = app.get(img)
+            except Exception as e:
+                # RETRY LOGIC FOR CPU FALLBACK
+                logger.warning(f"Face Analysis failed with error: {e}")
+                
+                # Check for the specific NoneType shape error often associated with GPU failure or model loading issues
+                is_shape_error = "NoneType" in str(e) and "shape" in str(e)
+                
+                # If we are potentially on GPU, try falling back to CPU
+                current_providers = app.providers if hasattr(app, 'providers') else []
+                # Checking for specific known errors that indicate model failure (often 3D landmark related)
+                is_shape_error = "NoneType" in str(e) and "shape" in str(e)
+                
+                # STAGE 2: CPU FALLBACK
+                if 'CUDAExecutionProvider' in current_providers:
+                     logger.warning("Attempting fallback to CPU-only mode (Stage 2)...")
+                     try:
+                         # Force re-init with CPU only and ctx_id=-1
+                         init_insightface(providers=['CPUExecutionProvider'], ctx_id=-1)
+                         if app is None: raise RuntimeError("App is None after CPU init")
+                         faces = app.get(img)
+                         logger.info("CPU Fallback successful. Staying in CPU mode.")
+                     except Exception as retry_e:
+                        logger.error(f"CPU Fallback failed: {retry_e}")
+                        # Fallthrough to Stage 3 or exit
+                        
+                # STAGE 3: SAFE MODE (Restricted Models)
+                # If we are already displaying shape errors, or if Stage 2 failed
+                if is_shape_error or 'NoneType' in str(e):
+                    logger.warning("Attempting fallback to SAFE MODE (Detection/Recognition only)...")
+                    try: 
+                        init_insightface(
+                            providers=['CPUExecutionProvider'], 
+                            ctx_id=-1, 
+                            allowed_modules=['detection', 'recognition']
+                        )
+                        if app is None: raise RuntimeError("App is None after Safe Mode init")
+                        faces = app.get(img)
+                        logger.info("Safe Mode Fallback successful. Keeping restricted modules.")
+                    except Exception as final_e:
+                        logger.error(f"Safe Mode also failed: {final_e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        # Final Failure
+                        response = {
+                             "type": "scan_result", 
+                             "photoId": photo_id, 
+                             "error": "AI_CRITICAL_FAILURE", 
+                             "details": f"All fallbacks failed. Last error: {final_e}"
+                        }
+                        print(json.dumps(response))
+                        sys.stdout.flush()
+                        return
+                
+                # If we didn't recover faces by now, we must return error (unless Stage 2 succeeded and we didn't enter Stage 3 block)
+                if 'faces' not in locals(): # Simple check if we successfully got faces in a retry block
+                     response = {
+                         "type": "scan_result", 
+                         "photoId": photo_id, 
+                         "error": "AI_MODELS_MISSING", 
+                         "details": str(e)
+                    }
+                     print(json.dumps(response))
+                     sys.stdout.flush()
+                     return 
+
             
             img_height, img_width = img.shape[:2]
             logger.info(f"Image Dimensions: {img_width}x{img_height}")
@@ -727,13 +961,30 @@ def handle_command(command):
         file_path = payload.get('filePath')
         logger.info(f"Generating tags for {photo_id}...")
         try:
-             description, tags = generate_captions(file_path)
-             response = {
-                 "type": "tags_result",
-                 "photoId": photo_id,
-                 "description": description,
-                 "tags": tags
-             }
+             # Check VLM availability (Lazy Init)
+             if not vlm_model:
+                 init_vlm()
+             
+             if vlm_model is None:
+                 logger.warning("VLM is unavailable. Skipping tagging.")
+                 response = {
+                     "type": "tags_result",
+                     "photoId": photo_id,
+                     "tags": [],
+                     "description": "",
+                     "error": "VLM_UNAVAILABLE" 
+                 }
+                 # Allow execution to fall through or return immediately? 
+                 # We must assign to response, but the code below tries to do 'response = ...' inside try.
+                 # Let's verify structure.
+             else:
+                 description, tags = generate_captions(file_path)
+                 response = {
+                     "type": "tags_result",
+                     "photoId": photo_id,
+                     "description": description,
+                     "tags": tags
+                 }
         except Exception as e:
             logger.exception("VLM Error")
             # Return error so we can log it in DB
@@ -779,51 +1030,261 @@ def handle_command(command):
         out_path = payload.get('outPath')
         task = payload.get('task', 'upscale') # upscale | restore_faces
         model_name = payload.get('modelName', 'RealESRGAN_x4plus')
+        face_enhance = payload.get('faceEnhance', False) # New flag
         
-        logger.info(f"Enhancing image: {file_path} -> {out_path} [{task}/{model_name}]")
+        logger.info(f"Enhancing image: {file_path} -> {out_path} [{task}/{model_name}] (FaceEnhance: {face_enhance})")
         try:
             # Check if model exists first? enhance.py handles it
-            result_path = enhance.enhancer.enhance(file_path, out_path, task, model_name)
+            result_path = enhance.enhancer.enhance(file_path, out_path, task, model_name, face_enhance)
             response = {
                 "type": "enhance_result",
                 "success": True,
-                "outPath": result_path
+                "outPath": result_path,
+                "reqId": req_id
             }
         except Exception as e:
             logger.exception("Enhancement Error")
             response = {
                 "type": "enhance_result",
                 "success": False,
-                "error": str(e)
+                "error": str(e),
+                "reqId": req_id
             }
 
     elif cmd_type == 'download_model':
         model_name = payload.get('modelName')
         logger.info(f"Downloading model: {model_name}")
         try:
-            path = enhance.enhancer._download_model(model_name)
+            def progress_callback(current, total):
+                if total > 0:
+                    pct = (current / total) * 100
+                    print(json.dumps({
+                        "type": "download_progress",
+                        "modelName": model_name,
+                        "current": current,
+                        "total": total,
+                        "percent": pct,
+                        "reqId": req_id
+                    }))
+                    sys.stdout.flush()
+
+            if "AI GPU Runtime" in model_name:
+                import zipfile
+                temp_zip = os.path.join(LIBRARY_PATH, "runtime_download.zip")
+                # Ensure we start fresh by deleting any previous failed download
+                if os.path.exists(temp_zip):
+                    try: os.remove(temp_zip)
+                    except: pass
+
+                base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.2.0-beta/ai-runtime-win-x64.zip"
+                
+                # Check if multi-part exists (.001)
+                parts = []
+                total_estimated_size = 0
+                part_idx = 1
+                while True:
+                    part_url = f"{base_url}.{str(part_idx).zfill(3)}"
+                    try:
+                        logger.info(f"Checking for part: {part_url}")
+                        r = requests.head(part_url, allow_redirects=True)
+                        if r.status_code == 200:
+                            logger.info(f"Examples found part {part_idx}")
+                            parts.append(part_url)
+                            total_estimated_size += int(r.headers.get('content-length', 0))
+                            part_idx += 1
+                        else:
+                            logger.warning(f"Part {part_idx} check failed with status: {r.status_code}")
+                            break
+                    except Exception as e:
+                        logger.warning(f"Part check exception: {e}")
+                        break
+                
+                if not parts:
+                    # Fallback to single zip
+                    logger.info("No multi-part runtime found, trying single zip...")
+                    save_path = enhance.enhancer.download_model_at_url(
+                        base_url,
+                        temp_zip,
+                        progress_callback
+                    )
+                else:
+                    logger.info(f"Found {len(parts)} parts for AI Runtime. Downloading...")
+                    bytes_so_far = 0
+                    with open(temp_zip, 'wb') as f_out:
+                        for p_url in parts:
+                            logger.info(f"Downloading part: {p_url}")
+                            r = requests.get(p_url, stream=True)
+                            r.raise_for_status()
+                            for chunk in r.iter_content(chunk_size=16384):
+                                if chunk:
+                                    f_out.write(chunk)
+                                    bytes_so_far += len(chunk)
+                                    if progress_callback:
+                                        # Use estimated total if possible, otherwise use bytes_so_far
+                                        progress_callback(bytes_so_far, total_estimated_size or bytes_so_far)
+                    save_path = temp_zip
+                
+                logger.info("Extracting AI Runtime...")
+                with zipfile.ZipFile(save_path, 'r') as zip_ref:
+                    zip_ref.extractall(AI_RUNTIME_PATH)
+                
+                if os.path.exists(save_path):
+                    os.remove(save_path) # Cleanup zip
+                save_path = AI_RUNTIME_PATH
+                
+                # --- DYNAMIC RE-INJECTION ---
+                logger.info("Attempting to inject new runtime...")
+                if inject_runtime():
+                    logger.info("Runtime injected. Re-initializing Global Modules...")
+                    
+                    # 1. Reload Torch
+                    torch_lib = get_torch()
+                    if torch_lib:
+                        logger.info(f"Torch re-loaded: {torch_lib.__version__}")
+                        # Apply patches
+                        try:
+                            import torchvision.transforms.functional as F
+                            import types
+                            mod = types.ModuleType("torchvision.transforms.functional_tensor")
+                            mod.rgb_to_grayscale = F.rgb_to_grayscale
+                            sys.modules["torchvision.transforms.functional_tensor"] = mod
+                        except: pass
+                        
+                        # UPDATE STATUS
+                        # global AI_MODE (Removed nested global)
+                        if torch_lib.cuda.is_available():
+                            AI_MODE = "GPU"
+                        else:
+                            AI_MODE = "CPU"
+                    else:
+                         logger.error("Failed to reload torch after injection")
+
+                    # 2. Re-Init VLM (if enabled/requested)
+                    # We won't auto-init to save mem, but set flag?
+                    # The get_torch() above is key for next calls.
+                    
+                    # 3. Reload InsightFace if it was in safe mode?
+                    # If we were in SAFE_MODE/CPU, we might want to switch to GPU
+                    # But re-initing app is expensive. Let's just reset app and let next call re-init.
+                    app = None 
+                    logger.info("Backend re-init complete. Ready for GPU tasks.")
+                else:
+                    logger.warning("Runtime injection failed after download.")
+            else:
+                save_path = enhance.enhancer.download_model_with_progress(model_name, progress_callback)
+            
             response = {
-                "type": "download_model_result",
+                "type": "download_result",
                 "success": True,
-                "path": path
+                "modelName": model_name,
+                "savePath": save_path,
+                "reqId": req_id
             }
         except Exception as e:
             logger.exception("Download Error")
+            error_msg = str(e)
+            if isinstance(e, requests.exceptions.HTTPError):
+                if e.response.status_code == 404:
+                    error_msg = "Download resource not found (404). Please ensure the AI Runtime is uploaded to the GitHub release 'v0.2.0'."
+                else:
+                    error_msg = f"Server returned error {e.response.status_code}: {e}"
+            
             response = {
-                "type": "download_model_result",
+                "type": "download_result",
                 "success": False,
-                "error": str(e)
+                "error": error_msg,
+                "reqId": req_id
             }
+
+    elif cmd_type == 'rebuild_index':
+        descriptors = payload.get('descriptors', [])
+        ids = payload.get('ids', [])
+        logger.info(f"Rebuilding FAISS index with {len(descriptors)} vectors...")
+        try:
+            global index, id_map
+            index = faiss.IndexFlatL2(512)
+            id_map = {}
+            if descriptors:
+                X = np.array(descriptors).astype('float32')
+                faiss.normalize_L2(X)
+                index.add(X)
+                for i, face_id in enumerate(ids):
+                    id_map[i] = face_id
+            save_faiss()
+            response = {"type": "rebuild_index_result", "count": index.ntotal, "success": True, "reqId": req_id}
+        except Exception as e:
+            logger.exception("Index rebuild failed")
+            response = {"error": str(e), "reqId": req_id}
+
+    elif cmd_type == 'search_index':
+        descriptor = payload.get('descriptor')
+        k = payload.get('k', 10)
+        threshold = payload.get('threshold', 0.6)
+        if not descriptor or index is None or index.ntotal == 0:
+            response = {"type": "search_result", "matches": [], "reqId": req_id}
+        else:
+            try:
+                X = np.array([descriptor]).astype('float32')
+                faiss.normalize_L2(X)
+                distances, indices = index.search(X, k)
+                matches = []
+                for dist, idx in zip(distances[0], indices[0]):
+                    if idx == -1: continue
+                    if dist > threshold: continue
+                    face_id = id_map.get(int(idx))
+                    if face_id is not None:
+                        matches.append({"id": face_id, "distance": float(dist)})
+                response = {"type": "search_result", "matches": matches, "reqId": req_id}
+            except Exception as e:
+                logger.exception("Search failed")
+                response = {"error": str(e), "reqId": req_id}
 
     elif cmd_type == 'get_system_status':
         status = {}
         try:
-            # 1. InsightFace Status
+            # 1. Models Status (Transparent listing)
+            models_info = {}
+            
+            # Special markers for core libraries
+            runtime_exists = os.path.exists(AI_RUNTIME_PATH)
+            models_info["AI GPU Runtime (Torch/CUDA)"] = {
+                "exists": runtime_exists,
+                "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.2.0-beta/ai-runtime-win-x64.zip",
+                "size": 5800000000, # Approx 5.8GB
+                "localPath": AI_RUNTIME_PATH,
+                "isRuntime": True
+            }
+
+            for name, url in enhance.MODEL_URLS.items():
+                m_path = os.path.join(enhance.WEIGHTS_DIR, f"{name}.pth")
+                exists = os.path.exists(m_path)
+                models_info[name] = {
+                    "exists": exists,
+                    "url": url,
+                    "size": os.path.getsize(m_path) if exists else 0,
+                    "localPath": m_path
+                }
+            
+            # Special markers for core models
+            models_info["Buffalo_L (InsightFace)"] = {
+                "exists": os.path.exists(os.path.expanduser('~/.insightface/models/buffalo_l')),
+                "url": "InsightFace Internal (Buffalo_L)",
+                "size": os.path.getsize(os.path.expanduser('~/.insightface/models/buffalo_l/model-0000.params')) if os.path.exists(os.path.expanduser('~/.insightface/models/buffalo_l/model-0000.params')) else 0,
+                "localPath": os.path.expanduser('~/.insightface/models/buffalo_l')
+            }
+            models_info["SmolVLM-Instruct"] = {
+                "exists": os.path.exists(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')),
+                "url": "HuggingFace (SmolVLM-Instruct)",
+                "size": os.path.getsize(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct/snapshots/f919106093554181f2113202970119100232491a/model.safetensors')) if os.path.exists(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct/snapshots/f919106093554181f2113202970119100232491a/model.safetensors')) else 0,
+                "localPath": os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')
+            }
+            status['models'] = models_info
+
+            # 2. InsightFace Status
             insightface_status = {'loaded': False}
             if app:
                 providers = []
                 try:
-                    # Attempt to get providers from the detection model (usually active)
                     if hasattr(app, 'models') and 'detection' in app.models:
                         det_model = app.models['detection']
                         if hasattr(det_model, 'session'):
@@ -832,76 +1293,60 @@ def handle_command(command):
                             providers = det_model.net.session.get_providers()
                 except Exception:
                     providers = ["Unknown"]
-
-                insightface_status = {
-                    'loaded': True,
-                    'providers': providers,
-                    'det_thresh': DET_THRESH,
-                    'blur_thresh': BLUR_THRESH
-                }
+                insightface_status = {'loaded': True, 'providers': providers, 'det_thresh': DET_THRESH, 'blur_thresh': BLUR_THRESH}
             status['insightface'] = insightface_status
 
-            # 2. FAISS Status
-            faiss_status = {'loaded': False}
-            if index:
-                 faiss_status = {
-                     'loaded': True,
-                     'count': index.ntotal,
-                     'dim': index.d
-                 }
-            status['faiss'] = faiss_status
+            # 3. FAISS Status
+            status['faiss'] = {'loaded': index is not None, 'count': index.ntotal if index else 0}
 
-            # 3. VLM Status
-            vlm_status = {
+            # 4. VLM Status
+            status['vlm'] = {
                 'loaded': vlm_model is not None,
-                'device': str(vlm_model.device) if vlm_model else 'N/A',
-                'model': 'SmolVLM',
-                'config': {
-                    'temp': VLM_TEMP,
-                    'max_tokens': VLM_MAX_TOKENS
-                }
+                'model': 'SmolVLM-Instruct', # Static name for now
+                'device': str(vlm_model.device) if vlm_model else None
             }
-            status['vlm'] = vlm_status
 
-            # 4. Libraries & System
-            import onnxruntime
+            # 5. Libraries Debug Info
+            try:
+                import onnxruntime
+                onnx_info = onnxruntime.__version__
+            except ImportError:
+                onnx_info = "Not Found"
+                
+            runtime_dirs = []
+            if os.path.exists(AI_RUNTIME_PATH):
+                try:
+                    runtime_dirs = os.listdir(AI_RUNTIME_PATH)
+                except:
+                    runtime_dirs = ["<Error listing dirs>"]
+
             status['system'] = {
                 'python': sys.version.split()[0],
-                'torch': torch.__version__,
-                'cuda_available': torch.cuda.is_available(),
-                'cuda_device': torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None',
-                'onnxruntime': onnxruntime.__version__,
-                'opencv': cv2.__version__
+                'torch': torch_lib.__version__ if torch_lib else "Missing/Download Required",
+                'cuda': torch_lib.cuda.is_available() if torch_lib else False,
+                'onnx': onnx_info,
+                'ai_runtime_exists': os.path.exists(AI_RUNTIME_PATH),
+                'ai_runtime_path': AI_RUNTIME_PATH,
+                'sys_path_head': sys.path[:3], # Show first few paths to verify injection
+                'runtime_contents': runtime_dirs[:10] # Limit to 10 items
             }
 
-            response = {
-                "type": "system_status_result",
-                "status": status
-            }
+            response = {"type": "system_status_result", "status": status, "reqId": req_id}
         except Exception as e:
             logger.error(f"Error getting status: {e}")
-            response = {"error": str(e)}
+            response = {"error": str(e), "reqId": req_id}
     else:
-        response = {"error": f"Unknown command: {cmd_type}"}
+        response = {"error": f"Unknown command: {cmd_type}", "reqId": req_id}
         
     # Inject request ID if present so Electron can map the promise
-    if req_id is not None:
+    if req_id is not None and "reqId" not in response: # Only add if not already present
         response['reqId'] = req_id
         
     return response
 
 # --- MAIN LOOP ---
 
-def main():
-    try:
-        init_insightface()
-        init_faiss()
-        # init_vlm() # Lazy load to save startup time? Or eager?
-        # Let's eager load if it's fast enough, but it's big. Keep lazy for now.
-    except Exception:
-        logger.critical("Model initialization failed. Exiting.")
-        sys.exit(1)
-
+def main_loop():
     logger.info("AI Engine started. Waiting for commands...")
     
     while True:
@@ -911,19 +1356,32 @@ def main():
             line = line.strip()
             if not line: continue
             
-            try:
-                command = json.loads(line)
-                response = handle_command(command)
-                print(json.dumps(response))
-                sys.stdout.flush()
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON: {e}")
-                print(json.dumps({"error": "Invalid JSON"}))
+            command = json.loads(line)
+            result = handle_command(command)
+            # handle_command might have already printed progress messages
+            # but it MUST return the final response object.
+            if result:
+                print(json.dumps(result))
                 sys.stdout.flush()
         except Exception as e:
-            logger.exception("Critical loop error")
-            print(json.dumps({"error": str(e)}))
-            sys.stdout.flush()
+            logger.error(f"Loop error: {e}")
+            try:
+                print(json.dumps({"error": str(e)}))
+                sys.stdout.flush()
+            except: pass
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    try:
+        # Move initialization to the background or lazy-load to avoid long startup delay
+        # We always try to init FAISS as it is small
+        try:
+             init_faiss()
+        except Exception as e:
+             logger.error(f"FAISS init failed: {e}")
+
+        main_loop()
+    except Exception as e:
+        logger.critical(f"FATAL ERROR in Python Backend: {e}")
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)

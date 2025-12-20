@@ -111,21 +111,38 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     }
 
 
+    const isFilterComplete = (f: any) => {
+        if (f.initial) return false
+        if (!f || Object.keys(f).length === 0) return true // "All Photos" mode
+        if (f.untagged) return true
+
+        // Completion check for explicit filter modes
+        const hasTag = 'tag' in f && !!f.tag
+        const hasTags = 'tags' in f && Array.isArray(f.tags) && f.tags.length > 0
+        const hasFolder = 'folder' in f && !!f.folder
+        const hasPeople = 'people' in f && Array.isArray(f.people) && f.people.length > 0
+        const hasSearch = 'search' in f && !!f.search
+
+        // If any criteria is set, the filter is "complete" and ready to fetch
+        return hasTag || hasTags || hasFolder || hasPeople || hasSearch
+    }
+
     // Reload photos when filter changes
     useEffect(() => {
-        if (filter.initial) {
+        if (!isFilterComplete(filter)) {
             setPhotos([])
             setHasMore(false)
             setLoadingPhotos(false)
+            // Still load metadata for selection dropdowns
+            loadTags()
+            loadFolders()
+            loadPeople()
             return
         }
 
         setPhotos([])
         setOffset(0)
         setHasMore(true)
-        loadTags()
-        loadFolders()
-        loadPeople()
 
         const initialLoad = async () => {
             try {
@@ -152,8 +169,8 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     }
 
     const loadMorePhotos = async () => {
-        if (scanning || loadingPhotos || filter.initial) {
-            console.log(`[ScanContext] loadMorePhotos skipped: scanning=${scanning}, loading=${loadingPhotos}, initial=${filter.initial}`);
+        if (scanning || loadingPhotos || !isFilterComplete(filter)) {
+            console.log(`[ScanContext] loadMorePhotos skipped: scanning=${scanning}, loading=${loadingPhotos}, complete=${isFilterComplete(filter)}`);
             return
         }
 

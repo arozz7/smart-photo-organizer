@@ -1,5 +1,7 @@
 import { useAI } from '../context/AIContext'
 import { useState } from 'react'
+import { usePeople } from '../context/PeopleContext'
+import { useAlert } from '../context/AlertContext'
 
 export default function Queues() {
     const {
@@ -12,10 +14,14 @@ export default function Queues() {
         cooldownTimeLeft,
         skipCooldown,
         addToQueue,
-        systemStatus
+        systemStatus,
+        fetchSystemStatus
     } = useAI()
+    const { rebuildIndex } = usePeople()
+    const { showAlert } = useAlert()
 
     const [recovering, setRecovering] = useState(false);
+    const [syncing, setSyncing] = useState(false);
 
     const handleBatchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = parseInt(e.target.value) || 0
@@ -222,9 +228,46 @@ export default function Queues() {
                                             <span className="text-gray-400">Vectors</span>
                                             <span className="text-gray-200">{systemStatus.faiss.count?.toLocaleString() || 0}</span>
                                         </div>
-                                        <div className="flex justify-between">
+                                        <div className="flex justify-between items-center">
                                             <span className="text-gray-400">Dimensions</span>
                                             <span className="text-gray-200">{systemStatus.faiss.dim || 0}</span>
+                                        </div>
+                                        <div className="pt-2">
+                                            <button
+                                                disabled={syncing}
+                                                onClick={async () => {
+                                                    setSyncing(true)
+                                                    try {
+                                                        const res = await rebuildIndex();
+                                                        if (res.success) {
+                                                            showAlert({
+                                                                title: 'Index Synced',
+                                                                description: `Successfully indexed ${res.count} face vectors.`
+                                                            });
+                                                            await fetchSystemStatus();
+                                                        } else {
+                                                            showAlert({
+                                                                title: 'Sync Failed',
+                                                                description: res.error || 'Unknown error',
+                                                                variant: 'danger'
+                                                            });
+                                                        }
+                                                    } finally {
+                                                        setSyncing(false)
+                                                    }
+                                                }}
+                                                className="w-full py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs transition-colors flex items-center justify-center gap-2"
+                                            >
+                                                {syncing ? (
+                                                    <>
+                                                        <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                                        </svg>
+                                                        Syncing...
+                                                    </>
+                                                ) : 'Sync FAISS with Database'}
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
@@ -235,17 +278,17 @@ export default function Queues() {
                                     <div className="space-y-1">
                                         <div className="flex justify-between">
                                             <span className="text-gray-400">Model</span>
-                                            <span className="text-gray-200">{systemStatus.vlm.model || 'None'}</span>
+                                            <span className="text-gray-200">{systemStatus.vlm?.model || 'None'}</span>
                                         </div>
                                         <div className="flex justify-between">
                                             <span className="text-gray-400">State</span>
-                                            <span className={systemStatus.vlm.loaded ? "text-green-400" : "text-gray-500"}>
-                                                {systemStatus.vlm.loaded ? "Loaded" : "Lazy Loading..."}
+                                            <span className={systemStatus.vlm?.loaded ? "text-green-400" : "text-gray-500"}>
+                                                {systemStatus.vlm?.loaded ? "Loaded" : "Lazy Loading..."}
                                             </span>
                                         </div>
                                         <div className="flex justify-between">
                                             <span className="text-gray-400">Device</span>
-                                            <span className="text-gray-200">{systemStatus.vlm.device || 'N/A'}</span>
+                                            <span className="text-gray-200">{systemStatus.vlm?.device || 'N/A'}</span>
                                         </div>
                                     </div>
                                 </div>
