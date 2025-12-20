@@ -1,3 +1,13 @@
+## Implemented Features
+
+### Phase 2: User Interface Polish & Responsiveness
+- **Goal:** Professional and consistent look across all states.
+- **Status:** Complete (v0.2.1)
+- **Implemented:**
+    - **Clean Layouts:** Debloated configuration screens (tabbed interface for 'Configure AI Models').
+    - **Responsive Controls:** Fixed UI control layout for flexible window sizing (Grid Layout).
+    - **State Persistence:** Window size and position are saved and restored on startup.
+
 ## AI Enhancements
 
 ### 1. Hardware Compatibility & Performance
@@ -75,15 +85,6 @@
 - **Plan:**
     - Generate static HTML site of an album.
     - Ready for GitHub Pages / S3.
-
-## User Interface Improvements
-
-### 12. UI Polish & Responsiveness
-- **Goal:** Professional and consistent look across all states.
-- **Plan:**
-    - **Clean Layouts:** Debloat configuration screens (e.g., 'Configure AI Models').
-    - **Responsive Controls:** Fix UI control layout during window resizing.
-    - **State Persistence:** Save and restore window size and position on startup.
 
 ## Cross-Platform
 
