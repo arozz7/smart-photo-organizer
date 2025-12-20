@@ -95,18 +95,12 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
                 <div className={`absolute inset-0 bg-black/20 transition-colors ${isSelected ? 'bg-transparent' : 'group-hover:bg-transparent'}`} />
 
                 {/* Debug Button - Solid Red, Top Left */}
+                {/* Debug Button - Only show if specifically enabled or dev mode (currently removed for prod) */}
+                {/* 
                 <button
-                    className="absolute top-2 left-2 p-1.5 bg-red-600 text-white rounded-full z-40 shadow-lg hover:bg-red-700 transition-all"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        setShowDebug(true);
-                    }}
-                    title="Debug Face Crop"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                </button>
+                   ...
+                />
+                */}
 
                 {/* Ignore Button */}
                 {!isSelected && (

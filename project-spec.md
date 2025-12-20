@@ -57,6 +57,7 @@ To support heavy AI workloads, the app bundles a standalone Python environment.
 *Sourced from `docs/future_features.md`*
 
 ### High Priority
+- **Smart Face Storage:** Optimization to reduce DB size (Binary vectors + Pruning).
 - **Hardware Compatibility & Performance:** 
   - **Force Mode:** User selection for Enhanced (GPU) / Standard (CPU) / Safe Mode.
   - **Multi-GPU:** Parallel processing across multiple video cards.
@@ -68,6 +69,10 @@ To support heavy AI workloads, the app bundles a standalone Python environment.
 - **Background Batch Processing:** Queue system for batch enhancement.
 
 ### Creative & Organization
+- **Duplicate Detection:** Safe, user-controlled deduplication (Exact & Visual) with RAW stacking.
+- **Batch Tagging:** Apply tags to multiple photos at once (Context menu & Filtered Views).
+- **Metadata Injection:** Write tags back to standard file EXIF/IPTC/XMP headers.
+- **Batch Renaming:** Template-based renaming and cleanup.
 - **Collage Creator:** Auto-layout generator for photo collages.
 - **Dataset Export:** Export aligned/cropped faces for training custom AI models (LoRAs).
 - **Smart Albums:** Save search queries as persistent albums.

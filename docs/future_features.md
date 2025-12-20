@@ -10,27 +10,36 @@
 
 ## AI Enhancements
 
-### 1. Hardware Compatibility & Performance
+### 1. Smart Face Storage (Optimization)
+- **Goal:** Minimize database size and avoid saving unnecessary face data.
+- **Plan:**
+    - Store vectors as Binary (BLOB) instead of JSON (5x space savings).
+    - **Vector Pruning:** Only save face vectors for "Unknown" faces and "Reference" examples. Discard vectors for confirmed matches (saving only the Person ID).
+    - **On-Demand Crops:** Ensure no face thumbnails are written to disk; extract on-the-fly for UI.
+
+### 2. Hardware Compatibility & Performance
 - **Goal:** Support generic PCs and maximize high-end hardware.
 - **Plan:**
     - **Force Mode Selection:** Allow users to force "Enhanced (GPU)", "Standard (CPU)", or "Safe Mode".
     - **Multi-GPU Support:** Leverage multiple video cards for parallel processing if available.
     - **Generic PC Support:** Support `FP32` mode and explore ONNX Runtime for AMD/Intel support.
 
-### 2. Face Restoration Configuration
+### 3. Face Restoration Configuration
 - **Goal:** Allow users to control the "aggressiveness" of the face restoration.
 - **Plan:**
     - Expose the `GFPGAN` blending weight parameter.
     - Add a "Restoration Strength" slider (0-100%) in the Enhance Lab UI.
+    - **Filter Update:** Filter by "Is Enhanced" or "Has Restored Face".
 
-### 3. Custom Models
+### 4. Custom Models
 - **Goal:** Allow advanced users to bring their own upscaling models.
 - **Plan:**
     - Scan a user-accessible `models/` directory for `.pth` files.
     - Auto-detect model architecture (RealESRGAN vs GFPGAN) or allow manual selection.
     - Dropdown selection in Enhance Lab.
+    - Provide link to model repository in 'Configure AI Models' card for source review.
 
-### 4. Batch Enhancement
+### 5. Batch Enhancement
 - **Goal:** Enhance multiple photos in the background.
 - **Plan:**
     - "Add to Enhance Queue" context menu action.
@@ -38,49 +47,79 @@
 
 ## Creative Tools
 
-### 5. Collage Creator
+### 6. Collage Creator
 - **Goal:** Turn a set of photos into a single composition.
 - **Plan:**
     - Auto-Layout: Masonry or Grid.
     - Face-Aware: Prevent cropping faces (using AI box).
     - Export as high-res JPG/PNG.
 
-### 6. Face Dataset Export
+### 7. Face Dataset Export
 - **Goal:** Export clean, cropped face images for training LORAs or contact photos.
 - **Plan:**
+    - **On-the-Fly Extraction:** Generate high-res crops from source images using stored coordinates (since we don't save crops).
     - Export face region + padding.
     - Filter by resolution and blur score (only high quality).
     - Organize folders by Person Name.
 
 ## Organization & Management
 
-### 7. Batch Renaming & Cleanup
+### 8. Batch Renaming & Cleanup
 - **Goal:** Clean up the actual file system.
 - **Plan:**
     - Rename using templates: `{YYYY}-{MM}-{DD}_{Location}_{OriginalName}`.
     - AI Renaming: `Dog_Playing_2024.jpg` using generated tags.
     - Deduplication: Find duplicates via perceptual hash.
 
-### 8. Saved Smart Searches (Albums)
+### 9. Duplicate Photo Detection
+- **Goal:** Find and manage exact duplicates and similar photos.
+- **Design:** [Design Document](design_duplicates.md)
+- **Plan:**
+    - **Safe Deduplication:** Zero auto-delete policy.
+    - **Methods:** SHA-256 for exact matches, pHash for visual similarity.
+    - **Workflow:** Background scanning queue -> User Review UI.
+    - **Stacking:** Group RAW+JPG versions instead of deleting.
+    - **Filter Update:** Add "Is Duplicate" and "Is Stacked" filters.
+
+### 10. Saved Smart Searches (Albums)
 - **Goal:** Make "Create" view persistent.
 - **Plan:**
     - Save filters (e.g., "Family in 2024") as "Smart Albums".
     - Auto-update as new photos are scanned.
 
-### 9. Location Heatmap
+### 11. Batch Tagging
+- **Goal:** Quickly organize large sets of photos (e.g., "Trip to Paris").
+- **Plan:**
+    - Multi-select photos or use "Select All" in a Filtered View.
+    - Context Menu: "Add Tags".
+    - Batch remove tags.
+    - **Filter Update:** Ensure "Has Tag" / "Missing Tag" filters are robust.
+
+### 12. Exif Metadata Injection
+- **Goal:** Write application tags back to the file headers (EXIF/IPTC/XMP) for interoperability.
+- **Plan:**
+    - "Write Tags to File" action (Individual & Bulk).
+    - Support standard fields (IPTC Keywords, XMP Subject).
+    - Sync filtered views to file metadata in bulk.
+    - Context Menu: "Add Tags".
+    - Batch remove tags.
+    - **Filter Update:** Filter by "Metadata Sync Status" (Synced/Pending).
+
+### 13. Location Heatmap
 - **Goal:** Visualize library on a map.
 - **Plan:**
     - Show clusters on world map.
     - Auto-group into "Trips".
+    - **Filter Update:** filtering by "Map Bounds" (Visible Region).
 
-### 10. Library Analytics
+### 14. Library Analytics
 - **Goal:** Visualize data.
 - **Plan:**
     - Graphs: Photos per year/month.
     - Gear: Top Cameras/Lenses.
     - People: Who is photographed most?
 
-### 11. Static Gallery Generator
+### 15. Static Gallery Generator
 - **Goal:** Share without cloud.
 - **Plan:**
     - Generate static HTML site of an album.
@@ -88,7 +127,7 @@
 
 ## Cross-Platform
 
-### 13. Mac & Linux Support
+### 16. Mac & Linux Support
 - **Goal:** Run the application on non-Windows OS.
 - **Plan:**
     - Research options for agnostic AI Runtime (e.g., Docker, Python venv management on *nix).

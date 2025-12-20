@@ -288,7 +288,23 @@ app.whenReady().then(async () => {
     logger.error(`[Main] Failed to create library path: ${LIBRARY_PATH}`, e);
   }
 
-  initDB(LIBRARY_PATH)
+  createSplashWindow()
+
+  // Initialize DB (Async with Progress)
+  try {
+    await initDB(LIBRARY_PATH, (status: string) => {
+      if (splash) {
+        const safeStatus = status.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+        splash.webContents.executeJavaScript(`
+              var el = document.getElementById('status');
+              if(el) el.innerText = '${safeStatus}';
+          `).catch(() => { });
+      }
+    })
+  } catch (e) {
+    logger.error("DB Init Failed", e);
+  }
+
   startPythonBackend()
 
   protocol.handle('local-resource', (request) => {
@@ -305,7 +321,6 @@ app.whenReady().then(async () => {
     return net.fetch(pathToFileURL(decodedPath).toString())
   })
 
-  createSplashWindow()
   createWindow()
 
   ipcMain.handle('app:focusWindow', () => {
@@ -699,8 +714,11 @@ app.whenReady().then(async () => {
     logger.info('[Main] Rebuilding Vector Index...');
     try {
       // Get all faces that have a descriptor
-      const rows = db.prepare('SELECT id, descriptor_json FROM faces WHERE descriptor_json IS NOT NULL').all();
-      const descriptors = rows.map((r: any) => JSON.parse(r.descriptor_json));
+      const rows = db.prepare('SELECT id, descriptor FROM faces WHERE descriptor IS NOT NULL').all();
+      const descriptors = rows.map((r: any) => {
+        if (!r.descriptor) return [];
+        return Array.from(new Float32Array(r.descriptor.buffer, r.descriptor.byteOffset, r.descriptor.byteLength / 4));
+      });
       const ids = rows.map((r: any) => r.id);
 
       if (descriptors.length === 0) {
@@ -801,15 +819,18 @@ app.whenReady().then(async () => {
       if (faceIds && faceIds.length > 0) {
         // Specific faces
         const placeholders = faceIds.map(() => '?').join(',');
-        const stmt = db.prepare(`SELECT id, descriptor_json FROM faces WHERE id IN (${placeholders})`);
+        const stmt = db.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders})`);
         rows = stmt.all(...faceIds);
       } else {
-        // All unnamed, non-ignored faces
-        const stmt = db.prepare('SELECT id, descriptor_json FROM faces WHERE person_id IS NULL AND is_ignored = 0');
+        // All unnamed, non-ignored faces (Unknowns ALWAYS have descriptors)
+        const stmt = db.prepare('SELECT id, descriptor FROM faces WHERE person_id IS NULL AND is_ignored = 0 AND descriptor IS NOT NULL');
         rows = stmt.all();
       }
 
-      const descriptors = rows.map((r: any) => JSON.parse(r.descriptor_json));
+      const descriptors = rows.map((r: any) => {
+        if (!r.descriptor) return [];
+        return Array.from(new Float32Array(r.descriptor.buffer, r.descriptor.byteOffset, r.descriptor.byteLength / 4));
+      });
       const ids = rows.map((r: any) => r.id);
 
       if (descriptors.length === 0) return { success: true, clusters: [] };
@@ -1269,13 +1290,19 @@ app.whenReady().then(async () => {
 
     try {
       const getOldFaces = db.prepare('SELECT id, box_json, person_id FROM faces WHERE photo_id = ?');
-      const updateFace = db.prepare('UPDATE faces SET box_json = ?, descriptor_json = ?, blur_score = ? WHERE id = ?');
-      const insertFace = db.prepare('INSERT INTO faces (photo_id, box_json, descriptor_json, person_id, blur_score) VALUES (?, ?, ?, ?, ?)');
+      // Update: Handle descriptor as BLOB, add is_reference
+      const updateFace = db.prepare('UPDATE faces SET box_json = ?, descriptor = ?, blur_score = ?, is_reference = ? WHERE id = ?');
+      const insertFace = db.prepare('INSERT INTO faces (photo_id, box_json, descriptor, person_id, blur_score, is_reference) VALUES (?, ?, ?, ?, ?, ?)');
 
       const deleteFace = db.prepare('DELETE FROM faces WHERE id = ?');
       const getAllKnownPeople = db.prepare('SELECT id, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL');
       // Fallback for people without mean yet
-      const getAllKnownFaces = db.prepare('SELECT person_id, descriptor_json FROM faces WHERE person_id IS NOT NULL');
+      const getAllKnownFaces = db.prepare('SELECT person_id, descriptor FROM faces WHERE person_id IS NOT NULL AND descriptor IS NOT NULL');
+
+      // Helpers for Reference Management
+      const getPersonRefCount = db.prepare('SELECT count(*) as count FROM faces WHERE person_id = ? AND is_reference = 1');
+      const getWorstReference = db.prepare('SELECT id, blur_score FROM faces WHERE person_id = ? AND is_reference = 1 ORDER BY blur_score ASC LIMIT 1');
+      const downgradeReference = db.prepare('UPDATE faces SET is_reference = 0, descriptor = NULL WHERE id = ?');
 
       const updatePhotoPreview = db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?');
       const updatePhotoDims = db.prepare('UPDATE photos SET width = ?, height = ? WHERE id = ?');
@@ -1322,7 +1349,6 @@ app.whenReady().then(async () => {
               const boxBArea = oldBox.width * oldBox.height;
               const iou = interArea / (boxAArea + boxBArea - interArea);
 
-              // Lower IoU threshold to 0.25 to account for different cropping styles between old/new models
               if (iou > 0.25 && iou > maxIoU) {
                 maxIoU = iou;
                 // @ts-ignore
@@ -1331,30 +1357,60 @@ app.whenReady().then(async () => {
             }
           }
 
+          // Prepare Descriptor Buffer
+          const descArr = new Float32Array(newFace.descriptor);
+          const descBuf = Buffer.from(descArr.buffer);
+
           if (bestMatchId) {
             // UPDATE existing face (keep person_id)
-            updateFace.run(JSON.stringify(newBox), JSON.stringify(newFace.descriptor), newFace.blur_score || null, bestMatchId);
-            usedOldFaceIds.add(bestMatchId);
-            // We should update the person's mean if we updated their descriptor? 
-            // Yes, checking if they have a person_id
             // @ts-ignore
             const oldFace = oldFaces.find(f => f.id === bestMatchId);
-            // @ts-ignore
-            if (oldFace && oldFace.person_id) peopleToUpdate.add(oldFace.person_id);
+            const personId = (oldFace as any).person_id;
+
+            let isRef = 0;
+            let finalDesc: Buffer | null = descBuf;
+
+            if (personId) {
+              // Check Ref Logic
+              const countObj = getPersonRefCount.get(personId) as { count: number };
+              if (countObj.count < 100) {
+                isRef = 1;
+              } else {
+                const worst = getWorstReference.get(personId) as { id: number, blur_score: number };
+                if (worst && (newFace.blur_score || 0) > (worst.blur_score || 0)) {
+                  // Upgrade new, Downgrade old
+                  downgradeReference.run(worst.id);
+                  isRef = 1;
+                } else {
+                  // Prune this new one
+                  isRef = 0;
+                  finalDesc = null;
+                }
+              }
+              peopleToUpdate.add(personId);
+            } else {
+              // Unknown faces ALWAYS keep vector and are NOT references (until named)
+              // Actually, Unknowns implicitly need vector for clustering.
+              // We'll treat them as is_reference=0 but Descriptor PRESENT.
+              isRef = 0;
+              finalDesc = descBuf;
+            }
+
+            updateFace.run(JSON.stringify(newBox), finalDesc, newFace.blur_score || null, isRef, bestMatchId);
+            usedOldFaceIds.add(bestMatchId);
 
           } else {
             // INSERT new face (Auto-recognize)
             let matchedPersonId = null;
-            let bestDistance = 0.45; // Cosine Distance Threshold (Approx Sim > 0.55)
+            let bestDistance = 0.45; // Cosine Distance Threshold
 
-            // A. Try matching against People Means (Fast & Robust)
+            // A. Try matching against People Means
             const knownPeople = getAllKnownPeople.all();
             for (const person of knownPeople) {
               // @ts-ignore
               const meanDesc = JSON.parse(person.descriptor_mean_json);
 
               let dot = 0, mag1 = 0, mag2 = 0;
-              // vector length check
               if (newFace.descriptor.length !== meanDesc.length) continue;
 
               for (let i = 0; i < newFace.descriptor.length; i++) {
@@ -1372,20 +1428,26 @@ app.whenReady().then(async () => {
               }
             }
 
-            // B. Fallback: If no match found yet, try matching against ALL faces 
-            // (for people who don't have a mean yet, e.g. imported before migration)
+            // B. Fallback: Match against known face VECTORS (if valid)
             if (!matchedPersonId) {
               const knownFaces = getAllKnownFaces.all();
               for (const known of knownFaces) {
                 // @ts-ignore
-                const knownDesc = JSON.parse(known.descriptor_json);
+                // Reader BLOB to Float32Array
+                const knownBuf = known.descriptor;
+                if (!knownBuf) continue;
+
+                // Assuming stored as bytes of float32
+                const knownArr = new Float32Array(knownBuf.buffer, knownBuf.byteOffset, knownBuf.byteLength / 4);
+
                 let dot = 0, mag1 = 0, mag2 = 0;
-                if (newFace.descriptor.length !== knownDesc.length) continue;
+                // newFace.descriptor is array
+                if (newFace.descriptor.length !== knownArr.length) continue;
 
                 for (let i = 0; i < newFace.descriptor.length; i++) {
-                  dot += newFace.descriptor[i] * knownDesc[i];
+                  dot += newFace.descriptor[i] * knownArr[i];
                   mag1 += newFace.descriptor[i] ** 2;
-                  mag2 += knownDesc[i] ** 2;
+                  mag2 += knownArr[i] ** 2;
                 }
                 const magnitude = Math.sqrt(mag1) * Math.sqrt(mag2);
                 const dist = magnitude === 0 ? 1.0 : 1.0 - (dot / magnitude);
@@ -1398,12 +1460,32 @@ app.whenReady().then(async () => {
               }
             }
 
-            insertFace.run(photoId, JSON.stringify(newBox), JSON.stringify(newFace.descriptor), matchedPersonId, newFace.blur_score || null);
-            if (matchedPersonId) peopleToUpdate.add(matchedPersonId);
+            // Logic for Saving
+            let isRef = 0;
+            let finalDesc: Buffer | null = descBuf;
+
+            if (matchedPersonId) {
+              const countObj = getPersonRefCount.get(matchedPersonId) as { count: number };
+              if (countObj.count < 100) {
+                isRef = 1;
+              } else {
+                const worst = getWorstReference.get(matchedPersonId) as { id: number, blur_score: number };
+                if (worst && (newFace.blur_score || 0) > (worst.blur_score || 0)) {
+                  downgradeReference.run(worst.id);
+                  isRef = 1;
+                } else {
+                  isRef = 0;
+                  finalDesc = null;
+                }
+              }
+              peopleToUpdate.add(matchedPersonId);
+            }
+
+            insertFace.run(photoId, JSON.stringify(newBox), finalDesc, matchedPersonId, newFace.blur_score || null, isRef);
           }
         }
 
-        // 2. Delete Unmatched Old Faces (Ghost faces removal)
+        // 2. Delete Unmatched Old Faces
         for (const oldFace of oldFaces) {
           // @ts-ignore
           if (!usedOldFaceIds.has(oldFace.id)) {
@@ -1415,8 +1497,9 @@ app.whenReady().then(async () => {
         }
 
         // 3. Update Means
+        // 3. Update Means
         for (const pid of peopleToUpdate) {
-          recalculatePersonMean(db, pid);
+          scheduleMeanRecalc(db, pid);
         }
       });
 
@@ -1442,7 +1525,8 @@ app.whenReady().then(async () => {
       return faces.map((f: any) => ({
         ...f,
         box: JSON.parse(f.box_json),
-        descriptor: JSON.parse(f.descriptor_json)
+        descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : null,
+        is_reference: !!f.is_reference
       }));
     } catch (error) {
       console.error('Failed to get faces:', error);
@@ -1532,7 +1616,8 @@ app.whenReady().then(async () => {
       return faces.map((f: any) => ({
         ...f,
         box: JSON.parse(f.box_json),
-        descriptor: JSON.parse(f.descriptor_json)
+        descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : null,
+        is_reference: !!f.is_reference
       }));
     } catch (error) {
       console.error('Failed to get all faces:', error);
@@ -1544,6 +1629,12 @@ app.whenReady().then(async () => {
     const { getDB } = await import('./db');
     const db = getDB();
 
+    // Normalize Name: Title Case (e.g. "john doe" -> "John Doe")
+    const normalizedName = personName
+      .trim()
+      .toLowerCase()
+      .replace(/\b\w/g, (c: string) => c.toUpperCase());
+
     const insertPerson = db.prepare('INSERT INTO people (name) VALUES (?) ON CONFLICT(name) DO NOTHING');
     const getPerson = db.prepare('SELECT id FROM people WHERE name = ?');
     const getOldPersonId = db.prepare('SELECT person_id FROM faces WHERE id = ?');
@@ -1554,13 +1645,15 @@ app.whenReady().then(async () => {
       const oldFace = getOldPersonId.get(faceId) as { person_id: number };
       const oldPersonId = oldFace ? oldFace.person_id : null;
 
-      insertPerson.run(personName);
-      const person = getPerson.get(personName) as { id: number };
+      insertPerson.run(normalizedName);
+      const person = getPerson.get(normalizedName) as { id: number };
       updateFace.run(person.id, faceId);
 
-      recalculatePersonMean(db, person.id);
+
+
+      scheduleMeanRecalc(db, person.id);
       if (oldPersonId) {
-        recalculatePersonMean(db, oldPersonId);
+        scheduleMeanRecalc(db, oldPersonId);
       }
 
       return person;
@@ -1743,39 +1836,6 @@ app.whenReady().then(async () => {
     }
   })
 
-  // Helper for recalculating mean (duplicate logic but useful)
-  const recalculatePersonMean = (db: any, personId: number) => {
-    try {
-      const faces = db.prepare('SELECT descriptor_json FROM faces WHERE person_id = ? AND is_ignored = 0').all(personId);
-      if (faces.length === 0) {
-        // No faces left? Nullify mean? Keep it? Nullify.
-        db.prepare('UPDATE people SET descriptor_mean_json = NULL WHERE id = ?').run(personId);
-        return;
-      }
-
-      const descriptors = faces.map((f: any) => JSON.parse(f.descriptor_json));
-      if (descriptors.length === 0) return;
-
-      const dim = descriptors[0].length;
-      const mean = new Array(dim).fill(0);
-
-      for (const desc of descriptors) {
-        for (let i = 0; i < dim; i++) {
-          mean[i] += desc[i];
-        }
-      }
-
-      for (let i = 0; i < dim; i++) {
-        mean[i] /= descriptors.length;
-      }
-
-      db.prepare('UPDATE people SET descriptor_mean_json = ? WHERE id = ?').run(JSON.stringify(mean), personId);
-
-    } catch (e) {
-      console.error('Mean recalc failed', e);
-    }
-  }
-
 })
 
 
@@ -1931,8 +1991,9 @@ ipcMain.handle('db:ignoreFace', async (_, faceId) => {
 
     const transaction = db.transaction(() => {
       stmt.run(faceId);
+
       if (face && face.person_id) {
-        recalculatePersonMean(db, face.person_id);
+        scheduleMeanRecalc(db, face.person_id);
       }
     });
     transaction();
@@ -1955,8 +2016,9 @@ ipcMain.handle('db:ignoreFaces', async (_, faceIds: number[]) => {
 
     const transaction = db.transaction(() => {
       stmt.run(...faceIds);
+
       for (const pid of personsToUpdate) {
-        recalculatePersonMean(db, pid);
+        scheduleMeanRecalc(db, pid);
       }
     });
     transaction();
@@ -1967,19 +2029,45 @@ ipcMain.handle('db:ignoreFaces', async (_, faceIds: number[]) => {
   }
 })
 
+// Helper to separate Mean Calculation from critical path
+const pendingMeanRecalcs = new Map<number, NodeJS.Timeout>();
+
+const scheduleMeanRecalc = (db: any, personId: number) => {
+  if (pendingMeanRecalcs.has(personId)) {
+    clearTimeout(pendingMeanRecalcs.get(personId)!);
+  }
+
+  const timeout = setTimeout(() => {
+    pendingMeanRecalcs.delete(personId);
+    try {
+      console.log(`[Main] Running scheduled mean recalc for person ${personId}`);
+      recalculatePersonMean(db, personId);
+    } catch (e) {
+      console.error(`[Main] Scheduled mean recalc failed for ${personId}`, e);
+    }
+  }, 2000); // 2 second debounce
+
+  pendingMeanRecalcs.set(personId, timeout);
+};
+
 // Helper to recalculate mean
 const recalculatePersonMean = (db: any, personId: number) => {
   // Re-calculate mean for this person, excluding ignored faces
-  const allDescriptors = db.prepare('SELECT descriptor_json FROM faces WHERE person_id = ? AND is_ignored = 0').all(personId);
+  // descriptor_json column is dropped after migration, so we only use descriptor (BLOB)
+  const allDescriptors = db.prepare('SELECT descriptor FROM faces WHERE person_id = ? AND is_ignored = 0').all(personId);
 
   if (allDescriptors.length === 0) {
-    // Even if 0 faces, we should probably clear the mean or leave it? 
-    // If no faces, mean is undefined. Set to NULL.
     db.prepare('UPDATE people SET descriptor_mean_json = NULL WHERE id = ?').run(personId);
     return;
   }
 
-  const vectors = allDescriptors.map((d: any) => JSON.parse(d.descriptor_json));
+  const vectors: number[][] = [];
+  for (const row of allDescriptors) {
+    if (row.descriptor) {
+      vectors.push(Array.from(new Float32Array(row.descriptor.buffer, row.descriptor.byteOffset, row.descriptor.byteLength / 4)));
+    }
+  }
+
   if (vectors.length === 0) return;
 
   const dim = vectors[0].length;
@@ -2127,7 +2215,7 @@ ipcMain.handle('db:getAllUnassignedFaceDescriptors', async () => {
   try {
     // Get all unassigned and not ignored faces efficiently
     const stmt = db.prepare(`
-        SELECT id, descriptor_json, photo_id 
+        SELECT id, descriptor, photo_id 
         FROM faces 
         WHERE person_id IS NULL AND is_ignored = 0
       `);
@@ -2135,7 +2223,7 @@ ipcMain.handle('db:getAllUnassignedFaceDescriptors', async () => {
     return rows.map((r: any) => ({
       id: r.id,
       photoId: r.photo_id,
-      descriptor: JSON.parse(r.descriptor_json)
+      descriptor: r.descriptor ? Array.from(new Float32Array(r.descriptor.buffer, r.descriptor.byteOffset, r.descriptor.byteLength / 4)) : null
     }));
   } catch (e) {
     console.error('Failed to get unassigned descriptors:', e);
