@@ -10,6 +10,12 @@ interface StoreSchema {
         vlmTemperature: number;
         vlmMaxTokens: number;
     }
+    windowBounds: {
+        width: number;
+        height: number;
+        x?: number;
+        y?: number;
+    }
 }
 
 const store = new Store<StoreSchema>({
@@ -19,10 +25,25 @@ const store = new Store<StoreSchema>({
             faceDetectionThreshold: 0.6,
             faceBlurThreshold: 20.0,
             vlmTemperature: 0.2,
+
             vlmMaxTokens: 100
+        },
+        windowBounds: {
+            width: 1200,
+            height: 800,
+            x: undefined,
+            y: undefined
         }
     }
 });
+
+export function getWindowBounds() {
+    return store.get('windowBounds');
+}
+
+export function setWindowBounds(bounds: any) {
+    store.set('windowBounds', bounds);
+}
 
 export function getLibraryPath(): string {
     return store.get('libraryPath');

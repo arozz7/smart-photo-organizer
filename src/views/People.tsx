@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePeople } from '../context/PeopleContext'
 import PersonCard from '../components/PersonCard'
@@ -27,9 +27,40 @@ export default function People() {
     const [namingGroup, setNamingGroup] = useState<{ faces: any[], name: string } | null>(null)
 
 
+    // Track previous faces to detect if we can just filter locally instead of re-clustering
+    const prevFacesRef = useRef(faces);
+
     // Run clustering when faces are loaded
     useEffect(() => {
         if (activeTab === 'unnamed' && faces.length > 0) {
+
+            // OPTIMIZATION: If faces are a SUBSET of previous faces (just removals), 
+            // we can update local state without re-running heavy clustering.
+            const prevFaces = prevFacesRef.current;
+            const currentIds = new Set(faces.map(f => f.id));
+
+            const isSubset = faces.length < prevFaces.length && faces.every(f => prevFaces.find((p: any) => p.id === f.id));
+
+            if (isSubset) {
+                console.log("[People] Faces removed. Updating clusters locally without re-running AI.");
+
+                // 1. Filter Singles
+                setSingles(prev => prev.filter(f => currentIds.has(f.id)));
+
+                // 2. Filter Clusters
+                setClusters(prev => {
+                    return prev.map(c => ({
+                        ...c,
+                        faces: c.faces.filter(f => currentIds.has(f.id))
+                    })).filter(c => c.faces.length > 0);
+                });
+
+                prevFacesRef.current = faces;
+                return;
+            }
+
+            prevFacesRef.current = faces;
+
             // Debounce clustering to avoid CPU thrashing during heavy scans
             const timeout = setTimeout(() => {
                 runClustering()
@@ -145,7 +176,6 @@ export default function People() {
         if (!name || selectedIds.length === 0) return
         await autoNameFaces(selectedIds, name)
         setNamingGroup(null)
-        loadFaces({ unnamed: true })
     }
 
     useEffect(() => {

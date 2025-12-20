@@ -48,17 +48,31 @@ To support heavy AI workloads, the app bundles a standalone Python environment.
 - **PDF Creator:** Built-in tool to merge images into PDFs, extract pages, and compress documents.
 - **Privacy First:** zero cloud dependencies; all processing happens on `localhost`.
 
+### 🖥️ User Experience
+- **Responsive Design:** Optimized layouts for various screen sizes (Laptop/PC).
+- **State Persistence:** Automatically saves window size and position.
+- **Modern UI:** Tabbed configuration screens and clean, clutter-free interfaces.
+
 ## 4. Future Roadmap & Backlog
 *Sourced from `docs/future_features.md`*
 
 ### High Priority
-- **Hardware Compatibility:** Add "Force CPU" mode and ONNX Runtime support for wider hardware compatibility (AMD/Intel).
+- **Smart Face Storage:** Optimization to reduce DB size (Binary vectors + Pruning).
+- **Hardware Compatibility & Performance:** 
+  - **Force Mode:** User selection for Enhanced (GPU) / Standard (CPU) / Safe Mode.
+  - **Multi-GPU:** Parallel processing across multiple video cards.
+  - **Generic Support:** ONNX Runtime for non-NVIDIA hardware (AMD/Intel).
+- **Cross-Platform:** Support for Mac OS and Linux.
 - **Advanced Enhancement Control:**
   - Adjustable "Restoration Strength" (0-100%).
   - Custom Model support (load user provided `.pth` files).
 - **Background Batch Processing:** Queue system for batch enhancement.
 
 ### Creative & Organization
+- **Duplicate Detection:** Safe, user-controlled deduplication (Exact & Visual) with RAW stacking.
+- **Batch Tagging:** Apply tags to multiple photos at once (Context menu & Filtered Views).
+- **Metadata Injection:** Write tags back to standard file EXIF/IPTC/XMP headers.
+- **Batch Renaming:** Template-based renaming and cleanup.
 - **Collage Creator:** Auto-layout generator for photo collages.
 - **Dataset Export:** Export aligned/cropped faces for training custom AI models (LoRAs).
 - **Smart Albums:** Save search queries as persistent albums.
