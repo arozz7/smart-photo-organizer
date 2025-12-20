@@ -198,199 +198,203 @@ export default function Settings() {
                 onOpenChange={setShowSettingsModal}
             />
 
-            <div className="space-y-12 max-w-2xl">
-                {/* Library Storage Config */}
-                <section className="space-y-4">
-                    <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Library Storage</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl w-full">
+                {/* Left Column */}
+                <div className="space-y-8">
+                    {/* Library Storage Config */}
+                    <section className="space-y-4">
+                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Library Storage</h3>
 
-                    <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
-                        <div>
-                            <h4 className="font-medium text-white">Current Location</h4>
-                            <p className="text-sm text-gray-400 mt-1 mb-2 break-all bg-black/30 p-2 rounded font-mono">
-                                {libraryPath || 'Loading...'}
-                            </p>
-                            <p className="text-xs text-gray-500 mb-4">
-                                This folder contains your database, generated previews, and AI indices.
-                            </p>
-                        </div>
-
-                        <div className="flex gap-4">
-                            <button
-                                onClick={async () => {
-                                    // @ts-ignore
-                                    const path = await window.ipcRenderer.invoke('dialog:openDirectory')
-                                    if (path) {
-                                        showConfirm({
-                                            title: 'Move Library',
-                                            description: `Move library to:\n${path}\n\nThe application will restart automatically.`,
-                                            confirmLabel: 'Move & Restart',
-                                            onConfirm: async () => {
-                                                // @ts-ignore
-                                                const res = await window.ipcRenderer.invoke('settings:moveLibrary', path)
-                                                if (!res.success) {
-                                                    showAlert({
-                                                        title: 'Move Failed',
-                                                        description: res.error,
-                                                        variant: 'danger'
-                                                    });
-                                                }
-                                            }
-                                        });
-                                    }
-                                }}
-                                className="px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
-                            >
-                                Move Library
-                            </button>
-                        </div>
-                    </div>
-                </section>
-
-                {/* AI Performance Profile */}
-                <section className="space-y-4">
-                    <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">AI Performance Profile</h3>
-
-                    <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
-                        <div className="flex justify-between items-center">
+                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
                             <div>
-                                <h4 className="font-medium text-white">Model Selection</h4>
-                                <p className="text-sm text-gray-400 mt-1">
-                                    Choose the balance between speed and accuracy.
+                                <h4 className="font-medium text-white">Current Location</h4>
+                                <p className="text-sm text-gray-400 mt-1 mb-2 break-all bg-black/30 p-2 rounded font-mono">
+                                    {libraryPath || 'Loading...'}
+                                </p>
+                                <p className="text-xs text-gray-500 mb-4">
+                                    This folder contains your database, generated previews, and AI indices.
                                 </p>
                             </div>
-                            <select
-                                className="bg-gray-700 text-white text-sm px-3 py-2 rounded focus:ring-1 focus:ring-indigo-500 outline-none border border-gray-600"
-                                value={localStorage.getItem('ai_profile') || 'balanced'}
-                                onChange={(e) => {
-                                    localStorage.setItem('ai_profile', e.target.value)
-                                    showConfirm({
-                                        title: 'Reload Required',
-                                        description: 'Changing the AI profile requires a reload to load the new models. Reload now?',
-                                        confirmLabel: 'Reload Now',
-                                        onConfirm: () => window.location.reload()
-                                    });
-                                }}
-                            >
-                                <option value="balanced">Balanced (Faster)</option>
-                                <option value="high">High Accuracy (Requires ~2GB+ VRAM/RAM)</option>
-                            </select>
-                        </div>
-                        <div className="text-xs text-gray-500 bg-black/20 p-3 rounded">
-                            <ul className="list-disc list-inside space-y-1">
-                                <li><strong>Balanced:</strong> Uses standard models. Good for most users. Fast scanning.</li>
-                                <li><strong>High Accuracy:</strong> Uses <code>clip-vit-large</code> for superior tagging. Scanning will be slower.</li>
-                            </ul>
-                        </div>
-                    </div>
-                </section>
 
-                {/* Preview Cache Management */}
-                <section className="space-y-4">
-                    <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Preview Cache</h3>
-                    <PreviewManager />
-                </section>
-
-                {/* Database Management Section */}
-                <section className="space-y-4">
-                    <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Database Management</h3>
-
-                    <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <h4 className="font-medium text-white">Clear AI Tags</h4>
-                                <p className="text-sm text-gray-400 mt-1">
-                                    Removes all tags generated by the AI model. User-added tags are preserved.
-                                    Use this if you want to re-scan with a new model.
-                                </p>
-                            </div>
-                            <button
-                                onClick={handleClearAITags}
-                                disabled={clearing}
-                                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${clearing
-                                    ? 'bg-gray-600 cursor-not-allowed opacity-50'
-                                    : 'bg-red-600 hover:bg-red-700 text-white'
-                                    }`}
-                            >
-                                {clearing ? 'Clearing...' : 'Clear Tags'}
-                            </button>
-                        </div>
-
-                        {message && (
-                            <div className={`p-3 rounded text-sm ${message.includes('Success') ? 'bg-green-900/50 text-green-200' : 'bg-red-900/50 text-red-200'}`}>
-                                {message}
-                            </div>
-                        )}
-
-                        <div className="flex justify-between items-center border-t border-gray-700 pt-4 mt-4">
-                            <div>
-                                <h4 className="font-medium text-white">Maintenance</h4>
-                            </div>
-                            <div className="flex gap-3">
+                            <div className="flex gap-4">
                                 <button
                                     onClick={async () => {
-                                        showConfirm({
-                                            title: 'Deduplicate Faces',
-                                            description: 'Find and remove duplicate faces? This will keep named faces and remove duplicates.',
-                                            confirmLabel: 'Start Cleanup',
-                                            onConfirm: async () => {
-                                                try {
+                                        // @ts-ignore
+                                        const path = await window.ipcRenderer.invoke('dialog:openDirectory')
+                                        if (path) {
+                                            showConfirm({
+                                                title: 'Move Library',
+                                                description: `Move library to:\n${path}\n\nThe application will restart automatically.`,
+                                                confirmLabel: 'Move & Restart',
+                                                onConfirm: async () => {
                                                     // @ts-ignore
-                                                    const res = await window.ipcRenderer.invoke('db:removeDuplicateFaces')
-                                                    showAlert({
-                                                        title: 'Cleanup Complete',
-                                                        description: `Removed ${res.removedCount} duplicate faces.`
-                                                    });
-                                                } catch (e) {
-                                                    showAlert({
-                                                        title: 'Cleanup Failed',
-                                                        description: String(e),
-                                                        variant: 'danger'
-                                                    });
+                                                    const res = await window.ipcRenderer.invoke('settings:moveLibrary', path)
+                                                    if (!res.success) {
+                                                        showAlert({
+                                                            title: 'Move Failed',
+                                                            description: res.error,
+                                                            variant: 'danger'
+                                                        });
+                                                    }
                                                 }
-                                            }
+                                            });
+                                        }
+                                    }}
+                                    className="px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                                >
+                                    Move Library
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* AI Performance Profile */}
+                    <section className="space-y-4">
+                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">AI Performance Profile</h3>
+
+                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <div className="flex justify-between items-center gap-4 flex-wrap">
+                                <div>
+                                    <h4 className="font-medium text-white">Model Selection</h4>
+                                    <p className="text-sm text-gray-400 mt-1">
+                                        Choose the balance between speed and accuracy.
+                                    </p>
+                                </div>
+                                <select
+                                    className="bg-gray-700 text-white text-sm px-3 py-2 rounded focus:ring-1 focus:ring-indigo-500 outline-none border border-gray-600"
+                                    value={localStorage.getItem('ai_profile') || 'balanced'}
+                                    onChange={(e) => {
+                                        localStorage.setItem('ai_profile', e.target.value)
+                                        showConfirm({
+                                            title: 'Reload Required',
+                                            description: 'Changing the AI profile requires a reload to load the new models. Reload now?',
+                                            confirmLabel: 'Reload Now',
+                                            onConfirm: () => window.location.reload()
                                         });
                                     }}
-                                    className="px-4 py-2 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white border border-gray-600"
                                 >
-                                    Deduplicate Faces
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setResetInput('')
-                                        setShowResetConfirm(true)
-                                    }}
-                                    className="px-4 py-2 rounded-md text-sm font-medium bg-red-900/80 hover:bg-red-800 text-red-100 border border-red-700"
-                                >
-                                    Factory Reset
-                                </button>
+                                    <option value="balanced">Balanced (Faster)</option>
+                                    <option value="high">High Accuracy (Requires ~2GB+ VRAM/RAM)</option>
+                                </select>
+                            </div>
+                            <div className="text-xs text-gray-500 bg-black/20 p-3 rounded">
+                                <ul className="list-disc list-inside space-y-1">
+                                    <li><strong>Balanced:</strong> Uses standard models. Good for most users. Fast scanning.</li>
+                                    <li><strong>High Accuracy:</strong> Uses <code>clip-vit-large</code> for superior tagging. Scanning will be slower.</li>
+                                </ul>
                             </div>
                         </div>
+                    </section>
+                </div>
 
-                        <div className="flex justify-between items-center border-t border-gray-700 pt-4 mt-4">
-                            <div>
-                                <h4 className="font-medium text-white">Blur Scores</h4>
-                                <p className="text-sm text-gray-400 mt-1">
-                                    Calculate blur scores for existing faces (if missing).
-                                    Required for the "Cleanup Blurry" feature to work on old scans.
-                                </p>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                {calculatingBlur && (
-                                    <span className="text-sm text-blue-400 font-mono">
-                                        {blurProgress.current} / {blurProgress.total}
-                                    </span>
-                                )}
+                {/* Right Column */}
+                <div className="space-y-8">
+                    {/* Preview Cache Management */}
+                    <section className="space-y-4">
+                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Preview Cache</h3>
+                        <PreviewManager />
+                    </section>
+
+                    {/* Database Management Section */}
+                    <section className="space-y-4">
+                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Database Management</h3>
+
+                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <div className="flex justify-between items-center gap-4 flex-wrap">
+                                <div>
+                                    <h4 className="font-medium text-white">Clear AI Tags</h4>
+                                    <p className="text-sm text-gray-400 mt-1">
+                                        Remove all AI-generated tags.
+                                    </p>
+                                </div>
                                 <button
-                                    onClick={calculateBlurScores}
-                                    disabled={calculatingBlur}
-                                    className="px-4 py-2 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:opacity-50"
+                                    onClick={handleClearAITags}
+                                    disabled={clearing}
+                                    className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${clearing
+                                        ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                                        : 'bg-red-600 hover:bg-red-700 text-white'
+                                        }`}
                                 >
-                                    {calculatingBlur ? 'Calculated...' : 'Calculate Scores'}
+                                    {clearing ? 'Clearing...' : 'Clear Tags'}
                                 </button>
                             </div>
+
+                            {message && (
+                                <div className={`p-3 rounded text-sm ${message.includes('Success') ? 'bg-green-900/50 text-green-200' : 'bg-red-900/50 text-red-200'}`}>
+                                    {message}
+                                </div>
+                            )}
+
+                            <div className="flex justify-between items-center border-t border-gray-700 pt-4 mt-4 flex-wrap gap-4">
+                                <div>
+                                    <h4 className="font-medium text-white">Maintenance</h4>
+                                </div>
+                                <div className="flex gap-3 flex-wrap">
+                                    <button
+                                        onClick={async () => {
+                                            showConfirm({
+                                                title: 'Deduplicate Faces',
+                                                description: 'Find and remove duplicate faces? This will keep named faces and remove duplicates.',
+                                                confirmLabel: 'Start Cleanup',
+                                                onConfirm: async () => {
+                                                    try {
+                                                        // @ts-ignore
+                                                        const res = await window.ipcRenderer.invoke('db:removeDuplicateFaces')
+                                                        showAlert({
+                                                            title: 'Cleanup Complete',
+                                                            description: `Removed ${res.removedCount} duplicate faces.`
+                                                        });
+                                                    } catch (e) {
+                                                        showAlert({
+                                                            title: 'Cleanup Failed',
+                                                            description: String(e),
+                                                            variant: 'danger'
+                                                        });
+                                                    }
+                                                }
+                                            });
+                                        }}
+                                        className="px-4 py-2 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white border border-gray-600"
+                                    >
+                                        Deduplicate Faces
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setResetInput('')
+                                            setShowResetConfirm(true)
+                                        }}
+                                        className="px-4 py-2 rounded-md text-sm font-medium bg-red-900/80 hover:bg-red-800 text-red-100 border border-red-700"
+                                    >
+                                        Factory Reset
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-between items-center border-t border-gray-700 pt-4 mt-4 flex-wrap gap-4">
+                                <div>
+                                    <h4 className="font-medium text-white">Blur Scores</h4>
+                                    <p className="text-sm text-gray-400 mt-1 max-w-xs">
+                                        Calculate blur scores for existing faces.
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    {calculatingBlur && (
+                                        <span className="text-sm text-blue-400 font-mono">
+                                            {blurProgress.current} / {blurProgress.total}
+                                        </span>
+                                    )}
+                                    <button
+                                        onClick={calculateBlurScores}
+                                        disabled={calculatingBlur}
+                                        className="px-4 py-2 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:opacity-50"
+                                    >
+                                        {calculatingBlur ? 'Calculated...' : 'Calculate Scores'}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                </section>
+                    </section>
+                </div>
             </div>
 
             {/* Factory Reset Modal */}

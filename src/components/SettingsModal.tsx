@@ -1,7 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Slider from '@radix-ui/react-slider';
 import * as Tooltip from '@radix-ui/react-tooltip';
+import * as Tabs from '@radix-ui/react-tabs';
 import { InfoCircledIcon, DownloadIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { useAlert } from '../context/AlertContext';
 import ModelDownloader from './ModelDownloader';
@@ -90,135 +92,165 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
             <Dialog.Portal>
                 <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" />
-                <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-gray-900 border border-gray-700 p-6 rounded-lg shadow-xl z-50">
-                    <Dialog.Title className="text-xl font-bold mb-4 text-white">Settings</Dialog.Title>
+                <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-gray-900 border border-gray-700 p-0 rounded-lg shadow-xl z-50 overflow-hidden flex flex-col max-h-[90vh]">
 
-                    <div className="space-y-6">
-                        <div className="flex items-center justify-between border-b border-gray-700 pb-2">
-                            <h3 className="text-lg font-semibold text-blue-400">AI Configuration</h3>
-                            <button
-                                onClick={() => setDownloaderOpen(true)}
-                                className="flex items-center gap-2 px-3 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-xs transition-colors font-medium border border-blue-500/30"
-                            >
-                                <DownloadIcon className="w-3 h-3" />
-                                Manage Models
+                    {/* Header */}
+                    <div className="px-6 py-4 border-b border-gray-800 flex justify-between items-center bg-gray-900">
+                        <Dialog.Title className="text-xl font-bold text-white">Settings</Dialog.Title>
+                        <Dialog.Close asChild>
+                            <button className="text-gray-400 hover:text-white" aria-label="Close">
+                                <Cross2Icon />
                             </button>
-                        </div>
-
-                        {/* Face Detection Threshold */}
-                        <SettingSlider
-                            label="Face Detection Confidence"
-                            value={settings.faceDetectionThreshold}
-                            min={0.1} max={0.99} step={0.01}
-                            onChange={(v) => handleChange('faceDetectionThreshold', v)}
-                            tooltip="Minimum confidence score (0.0 - 1.0) to detect a face. Higher values reduce false positives (like trees seeing valid faces) but might miss difficult faces."
-                        />
-
-                        {/* Face Blur Threshold */}
-                        <SettingSlider
-                            label="Face Blur Threshold"
-                            value={settings.faceBlurThreshold}
-                            min={0} max={100} step={1}
-                            onChange={(v) => handleChange('faceBlurThreshold', v)}
-                            tooltip="Minimum sharpness score. Faces below this score will be prevented from being captured entirely (Prevent mode). Typical blurry photos are < 20. Sharp photos are > 100."
-                        />
-
-                        {/* VLM Temperature */}
-                        <SettingSlider
-                            label="Tagging Creativity (Temperature)"
-                            value={settings.vlmTemperature}
-                            min={0.0} max={1.5} step={0.1}
-                            onChange={(v) => handleChange('vlmTemperature', v)}
-                            tooltip="Controls randomness in tag generation. Lower (0.1) is more factual/deterministic. Higher (0.8+) is more creative but can hallucinate."
-                        />
-
-                        {/* VLM Tokens */}
-                        <div className="flex flex-col space-y-2">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <label className="text-sm font-medium text-gray-300">Max Tagging Tokens</label>
-                                    <InfoTooltip text="Maximum length of the generated description/tags. 100 is usually enough." />
-                                </div>
-                                <span className="text-xs text-blue-400 font-mono">{settings.vlmMaxTokens}</span>
-                            </div>
-                            <input
-                                type="number"
-                                className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm w-full focus:outline-none focus:border-blue-500"
-                                value={settings.vlmMaxTokens}
-                                onChange={(e) => handleChange('vlmMaxTokens', parseInt(e.target.value))}
-                            />
-                        </div>
-
-                        <div className="flex flex-col space-y-3 pt-2">
-                            <div className="flex items-center justify-between border-b border-gray-700 pb-2">
-                                <h3 className="text-lg font-semibold text-orange-400">Diagnostics</h3>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                                <button
-                                    onClick={async () => {
-                                        // @ts-ignore
-                                        const path = await window.ipcRenderer.invoke('os:getLogPath');
-                                        // @ts-ignore
-                                        window.ipcRenderer.invoke('os:showInFolder', path);
-                                    }}
-                                    className="flex flex-col items-center justify-center gap-2 p-3 bg-gray-800 border border-gray-700 rounded hover:bg-gray-750 transition-colors group"
-                                >
-                                    <span className="text-xs font-semibold text-gray-300 group-hover:text-white">View Logs</span>
-                                    <span className="text-[10px] text-gray-500">Troubleshooting</span>
-                                </button>
-
-                                <button
-                                    onClick={async () => {
-                                        // @ts-ignore
-                                        const path = await window.ipcRenderer.invoke('settings:getLibraryPath');
-                                        // @ts-ignore
-                                        window.ipcRenderer.invoke('os:openFolder', path);
-                                    }}
-                                    className="flex flex-col items-center justify-center gap-2 p-3 bg-gray-800 border border-gray-700 rounded hover:bg-gray-750 transition-colors group"
-                                >
-                                    <span className="text-xs font-semibold text-gray-300 group-hover:text-white">Open App Data</span>
-                                    <span className="text-[10px] text-gray-500">Database & Assets</span>
-                                </button>
-                            </div>
-                        </div>
-
+                        </Dialog.Close>
                     </div>
 
-                    <div className="mt-8 flex gap-3">
-                        <button
-                            onClick={handleReset}
-                            className="px-4 py-2 bg-gray-800 border border-gray-600 hover:bg-gray-700 rounded text-sm transition-colors text-gray-300 mr-auto"
-                        >
-                            Defaults
-                        </button>
+                    <Tabs.Root defaultValue="general" className="flex-1 flex flex-col min-h-0">
+                        <div className="px-6 border-b border-gray-800 bg-gray-900/50">
+                            <Tabs.List className="flex gap-6">
+                                <TabTrigger value="general">General</TabTrigger>
+                                <TabTrigger value="tagging">Tagging</TabTrigger>
+                                <TabTrigger value="maintenance">Maintenance</TabTrigger>
+                            </Tabs.List>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-6">
+                            <Tabs.Content value="general" className="space-y-6 focus:outline-none">
+                                <div className="space-y-6">
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="text-lg font-semibold text-blue-400">Detection & Recognition</h3>
+                                        <button
+                                            onClick={() => setDownloaderOpen(true)}
+                                            className="flex items-center gap-2 px-3 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-xs transition-colors font-medium border border-blue-500/30"
+                                        >
+                                            <DownloadIcon className="w-3 h-3" />
+                                            Manage Models
+                                        </button>
+                                    </div>
+
+                                    <SettingSlider
+                                        label="Face Detection Confidence"
+                                        value={settings.faceDetectionThreshold}
+                                        min={0.1} max={0.99} step={0.01}
+                                        onChange={(v) => handleChange('faceDetectionThreshold', v)}
+                                        tooltip="Minimum confidence score (0.0 - 1.0) to detect a face. Higher values reduce false positives (like trees seeing valid faces) but might miss difficult faces."
+                                    />
+
+                                    <SettingSlider
+                                        label="Blur Rejection Threshold"
+                                        value={settings.faceBlurThreshold}
+                                        min={0} max={100} step={1}
+                                        onChange={(v) => handleChange('faceBlurThreshold', v)}
+                                        tooltip="Faces below this sharpness score will be IGNORED during scanning. Use this to prevent blurry faces from cluttering your People list. Typical blurry photos are < 20."
+                                    />
+                                </div>
+                            </Tabs.Content>
+
+                            <Tabs.Content value="tagging" className="space-y-6 focus:outline-none">
+                                <div className="space-y-6">
+                                    <h3 className="text-lg font-semibold text-purple-400">AI Tagging (VLM)</h3>
+
+                                    <SettingSlider
+                                        label="Creativity (Temperature)"
+                                        value={settings.vlmTemperature}
+                                        min={0.0} max={1.5} step={0.1}
+                                        onChange={(v) => handleChange('vlmTemperature', v)}
+                                        tooltip="Controls randomness in tag generation. Lower (0.1) is more factual/deterministic. Higher (0.8+) is more creative but can hallucinate."
+                                    />
+
+                                    <div className="flex flex-col space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <label className="text-sm font-medium text-gray-300">Max Tagging Tokens</label>
+                                                <InfoTooltip text="Maximum length of the generated description/tags. 100 is usually enough for concise tags." />
+                                            </div>
+                                            <span className="text-xs text-blue-400 font-mono bg-blue-900/30 px-2 py-0.5 rounded border border-blue-500/20">{settings.vlmMaxTokens}</span>
+                                        </div>
+                                        <input
+                                            type="number"
+                                            className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm w-full focus:outline-none focus:border-purple-500"
+                                            value={settings.vlmMaxTokens}
+                                            onChange={(e) => handleChange('vlmMaxTokens', parseInt(e.target.value))}
+                                        />
+                                    </div>
+                                </div>
+                            </Tabs.Content>
+
+                            <Tabs.Content value="maintenance" className="space-y-6 focus:outline-none">
+                                <div className="space-y-4">
+                                    <h3 className="text-lg font-semibold text-orange-400">Troubleshooting</h3>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            onClick={async () => {
+                                                // @ts-ignore
+                                                const path = await window.ipcRenderer.invoke('os:getLogPath');
+                                                // @ts-ignore
+                                                window.ipcRenderer.invoke('os:showInFolder', path);
+                                            }}
+                                            className="flex flex-col items-center justify-center gap-2 p-4 bg-gray-800 border border-gray-700 rounded hover:bg-gray-750 transition-colors group"
+                                        >
+                                            <span className="text-sm font-semibold text-gray-300 group-hover:text-white">View Logs</span>
+                                            <span className="text-xs text-gray-500">Open Log Folder</span>
+                                        </button>
+
+                                        <button
+                                            onClick={async () => {
+                                                // @ts-ignore
+                                                const path = await window.ipcRenderer.invoke('settings:getLibraryPath');
+                                                // @ts-ignore
+                                                window.ipcRenderer.invoke('os:openFolder', path);
+                                            }}
+                                            className="flex flex-col items-center justify-center gap-2 p-4 bg-gray-800 border border-gray-700 rounded hover:bg-gray-750 transition-colors group"
+                                        >
+                                            <span className="text-sm font-semibold text-gray-300 group-hover:text-white">Open App Data</span>
+                                            <span className="text-xs text-gray-500">Database & Assets</span>
+                                        </button>
+                                    </div>
+
+                                    <div className="border-t border-gray-800 pt-6 mt-2">
+                                        <button
+                                            onClick={handleReset}
+                                            className="w-full px-4 py-3 bg-gray-800 border border-gray-600 hover:bg-red-900/30 hover:border-red-800 hover:text-red-200 rounded text-sm transition-all text-gray-400"
+                                        >
+                                            Reset All Settings to Defaults
+                                        </button>
+                                    </div>
+                                </div>
+                            </Tabs.Content>
+                        </div>
+                    </Tabs.Root>
+
+                    {/* Footer */}
+                    <div className="p-6 border-t border-gray-800 bg-gray-900 flex justify-end gap-3">
                         <button
                             onClick={() => onOpenChange(false)}
-                            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors text-white"
+                            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-sm transition-colors text-white"
                         >
                             Cancel
                         </button>
                         <button
                             onClick={handleSave}
-                            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium transition-colors text-white"
+                            className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium transition-colors text-white"
                         >
                             {loading ? 'Saving...' : 'Save Changes'}
                         </button>
                     </div>
 
-                    <Dialog.Close asChild>
-                        <button
-                            className="absolute top-4 right-4 text-gray-400 hover:text-white"
-                            aria-label="Close"
-                        >
-                            <Cross2Icon />
-                        </button>
-                    </Dialog.Close>
                     <ModelDownloader open={downloaderOpen} onOpenChange={setDownloaderOpen} />
                 </Dialog.Content>
             </Dialog.Portal>
         </Dialog.Root>
     );
 };
+
+const TabTrigger: React.FC<{ value: string, children: React.ReactNode }> = ({ value, children }) => (
+    <Tabs.Trigger
+        value={value}
+        className="px-1 py-3 text-sm font-medium text-gray-400 hover:text-gray-200 border-b-2 border-transparent data-[state=active]:text-blue-400 data-[state=active]:border-blue-500 transition-all outline-none"
+    >
+        {children}
+    </Tabs.Trigger>
+);
 
 const SettingSlider: React.FC<{
     label: string;
@@ -236,7 +268,7 @@ const SettingSlider: React.FC<{
                     <label className="text-sm font-medium text-gray-300">{label}</label>
                     <InfoTooltip text={tooltip} />
                 </div>
-                <span className="text-xs text-blue-400 font-mono">{value.toFixed(2)}</span>
+                <span className="text-xs text-blue-400 font-mono bg-blue-900/30 px-2 py-0.5 rounded border border-blue-500/20">{value.toFixed(2)}</span>
             </div>
 
             <Slider.Root

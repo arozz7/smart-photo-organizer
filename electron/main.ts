@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import {
   getLibraryPath, setLibraryPath,
-  getAISettings, setAISettings
+  getAISettings, setAISettings,
+  getWindowBounds, setWindowBounds
 } from './store';
 import * as fs from 'node:fs/promises';
 import Store from 'electron-store';
@@ -183,11 +184,39 @@ function createSplashWindow() {
   splash.on('closed', () => (splash = null));
 }
 
-function createWindow() {
+async function createWindow() {
+  const savedBounds = getWindowBounds();
+  const defaults: { width: number; height: number; x?: number; y?: number } = { width: 1200, height: 800 };
+
+  // Validate bounds
+  let bounds = defaults;
+  if (savedBounds && savedBounds.width && savedBounds.height) {
+    // Check if the saved bounds are still actionable (on a screen)
+    const { screen } = await import('electron');
+    const display = screen.getDisplayMatching({
+      x: savedBounds.x || 0,
+      y: savedBounds.y || 0,
+      width: savedBounds.width,
+      height: savedBounds.height
+    });
+
+    // Simple check: does the display bounds intersection overlap significantly?
+    // For now we just check if we got a valid display.
+    if (display) {
+      if (savedBounds.x !== undefined && savedBounds.y !== undefined) {
+        bounds = { ...defaults, ...savedBounds };
+      } else {
+        bounds = { ...defaults, width: savedBounds.width, height: savedBounds.height };
+      }
+    }
+  }
+
   win = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, 'icon.png'),
-    width: 1200,
-    height: 800,
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
     show: false, // Hide initially
     backgroundColor: '#111827', // Set dark background
     webPreferences: {
@@ -195,6 +224,17 @@ function createWindow() {
       webSecurity: false,
     },
   })
+
+  // Save bounds on resize/move
+  const saveBounds = () => {
+    if (!win) return;
+    const { x, y, width, height } = win.getBounds();
+    setWindowBounds({ x, y, width, height });
+  };
+
+  win.on('resized', saveBounds);
+  win.on('moved', saveBounds);
+  win.on('close', saveBounds);
 
   // Remove the file menu
   win.setMenu(null);

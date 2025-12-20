@@ -15962,9 +15962,21 @@ const store$1 = new ElectronStore({
       faceBlurThreshold: 20,
       vlmTemperature: 0.2,
       vlmMaxTokens: 100
+    },
+    windowBounds: {
+      width: 1200,
+      height: 800,
+      x: void 0,
+      y: void 0
     }
   }
 });
+function getWindowBounds() {
+  return store$1.get("windowBounds");
+}
+function setWindowBounds(bounds) {
+  store$1.set("windowBounds", bounds);
+}
 function getLibraryPath() {
   return store$1.get("libraryPath");
 }
@@ -16104,11 +16116,32 @@ function createSplashWindow() {
   splash.loadFile(path.join(process.env.VITE_PUBLIC, "splash.html"));
   splash.on("closed", () => splash = null);
 }
-function createWindow() {
+async function createWindow() {
+  const savedBounds = getWindowBounds();
+  const defaults2 = { width: 1200, height: 800 };
+  let bounds = defaults2;
+  if (savedBounds && savedBounds.width && savedBounds.height) {
+    const { screen } = await import("electron");
+    const display = screen.getDisplayMatching({
+      x: savedBounds.x || 0,
+      y: savedBounds.y || 0,
+      width: savedBounds.width,
+      height: savedBounds.height
+    });
+    if (display) {
+      if (savedBounds.x !== void 0 && savedBounds.y !== void 0) {
+        bounds = { ...defaults2, ...savedBounds };
+      } else {
+        bounds = { ...defaults2, width: savedBounds.width, height: savedBounds.height };
+      }
+    }
+  }
   win = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, "icon.png"),
-    width: 1200,
-    height: 800,
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
     show: false,
     // Hide initially
     backgroundColor: "#111827",
@@ -16118,6 +16151,14 @@ function createWindow() {
       webSecurity: false
     }
   });
+  const saveBounds = () => {
+    if (!win) return;
+    const { x, y, width, height } = win.getBounds();
+    setWindowBounds({ x, y, width, height });
+  };
+  win.on("resized", saveBounds);
+  win.on("moved", saveBounds);
+  win.on("close", saveBounds);
   win.setMenu(null);
   win.once("ready-to-show", () => {
     win == null ? void 0 : win.show();

@@ -1,13 +1,11 @@
-# Future Features & Roadmap
-
 ## AI Enhancements
 
-### 1. Hardware Compatibility Options
-- **Goal:** Support generic PCs without dedicated NVIDIA GPUs.
+### 1. Hardware Compatibility & Performance
+- **Goal:** Support generic PCs and maximize high-end hardware.
 - **Plan:**
-    - Add "Force CPU" toggle in settings.
-    - Support `FP32` mode (disable half-precision) for better compatibility with older hardware.
-    - Explore ONNX Runtime execution for broader hardware support (AMD/Intel).
+    - **Force Mode Selection:** Allow users to force "Enhanced (GPU)", "Standard (CPU)", or "Safe Mode".
+    - **Multi-GPU Support:** Leverage multiple video cards for parallel processing if available.
+    - **Generic PC Support:** Support `FP32` mode and explore ONNX Runtime for AMD/Intel support.
 
 ### 2. Face Restoration Configuration
 - **Goal:** Allow users to control the "aggressiveness" of the face restoration.
@@ -77,4 +75,21 @@
 - **Plan:**
     - Generate static HTML site of an album.
     - Ready for GitHub Pages / S3.
+
+## User Interface Improvements
+
+### 12. UI Polish & Responsiveness
+- **Goal:** Professional and consistent look across all states.
+- **Plan:**
+    - **Clean Layouts:** Debloat configuration screens (e.g., 'Configure AI Models').
+    - **Responsive Controls:** Fix UI control layout during window resizing.
+    - **State Persistence:** Save and restore window size and position on startup.
+
+## Cross-Platform
+
+### 13. Mac & Linux Support
+- **Goal:** Run the application on non-Windows OS.
+- **Plan:**
+    - Research options for agnostic AI Runtime (e.g., Docker, Python venv management on *nix).
+    - ensure Electron build pipelines for Mac/Linux.
 
