@@ -199,8 +199,8 @@ export default function Queues() {
                                     <div className="space-y-1">
                                         <div className="flex justify-between">
                                             <span className="text-gray-400">Status</span>
-                                            <span className={systemStatus.insightface.loaded ? "text-green-400" : "text-red-400"}>
-                                                {systemStatus.insightface.loaded ? "Active" : "Failed"}
+                                            <span className={systemStatus.insightface.loaded ? "text-green-400" : "text-gray-400"}>
+                                                {systemStatus.insightface.loaded ? "Active" : "Standby"}
                                             </span>
                                         </div>
                                         <div className="flex justify-between">

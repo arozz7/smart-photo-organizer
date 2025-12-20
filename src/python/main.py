@@ -268,7 +268,7 @@ index_file = os.path.join(LIBRARY_PATH, 'vectors.index')
 id_map_file = os.path.join(LIBRARY_PATH, 'id_map.pkl')
 
 # --- CONFIGURATION (Dynamic) ---
-DET_THRESH = 0.6
+DET_THRESH = 0.5
 BLUR_THRESH = 20.0
 VLM_TEMP = 0.2
 VLM_MAX_TOKENS = 100
@@ -284,14 +284,17 @@ VLM_ENABLED = False
 
 # --- INITIALIZATION ---
 
-def init_insightface(providers=None, ctx_id=0, allowed_modules=None):
+def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1280, 1280), det_thresh=None):
     global app, AI_MODE, CURRENT_PROVIDERS, ALLOWED_MODULES
+    
+    if det_thresh is None:
+        det_thresh = DET_THRESH
     
     # OPTIMIZATION: Default to only essential modules to prevent GPU crashes in auxiliary models (3d landmarks)
     if allowed_modules is None:
         allowed_modules = ['detection', 'recognition']
 
-    logger.info(f"Initializing InsightFace (Buffalo_L) with ctx_id={ctx_id}, modules={allowed_modules}...")
+    logger.info(f"Initializing InsightFace with ctx_id={ctx_id}, modules={allowed_modules}, det_size={det_size}...")
     try:
         from contextlib import redirect_stdout
         from insightface.app import FaceAnalysis
@@ -312,7 +315,7 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None):
              logger.info(f"Using Providers: {providers}")
              app = FaceAnalysis(name='buffalo_l', providers=providers, allowed_modules=allowed_modules)
              # Using dynamic threshold
-             app.prepare(ctx_id=ctx_id, det_size=(1280, 1280), det_thresh=DET_THRESH)
+             app.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=det_thresh)
              
              # Update Status Globals
              CURRENT_PROVIDERS = providers
@@ -482,6 +485,32 @@ def estimate_blur(image, target_size=None):
         
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     return cv2.Laplacian(gray, cv2.CV_64F).var()
+
+def estimate_sharpness_tenengrad(image, target_size=None):
+    """
+    Estimates sharpness using the Tenengrad (Sobel gradient magnitude) method.
+    Robust to noise and background blur. Returns mean squared magnitude.
+    """
+    if image is None or image.size == 0: return 0.0
+
+    if target_size:
+        h, w = image.shape[:2]
+        if h > target_size or w > target_size:
+            scale = target_size / max(h, w)
+            new_w, new_h = int(w * scale), int(h * scale)
+            image = cv2.resize(image, (new_w, new_h))
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    # Sobel Gradients
+    gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    
+    # Gradient Magnitude
+    mag = cv2.magnitude(gx, gy)
+    
+    # Mean of squares (energy)
+    return np.mean(mag * mag)
 
 
 def generate_captions(image_path):
@@ -785,7 +814,40 @@ def handle_command(command):
 
 
             try:
+                scan_mode = payload.get('scanMode', 'FAST') # FAST, BALANCED, MACRO
+                
+                # Determine Parameters based on Mode
+                # FAST: 1280x1280, 0.5 (Default)
+                # BALANCED: 640x640, 0.4 coverage
+                # MACRO: 320x320, 0.4 coverage
+                
+                target_size = (1280, 1280)
+                target_thresh = DET_THRESH # 0.5
+                
+                if scan_mode == 'BALANCED':
+                    target_size = (640, 640)
+                    target_thresh = 0.4
+                elif scan_mode == 'MACRO':
+                    target_size = (320, 320)
+                    target_thresh = 0.4
+                    
+                # Ensure InsightFace is initialized with these params
+                # We must force init to ensure the model resizes
+                init_insightface(
+                    providers=CURRENT_PROVIDERS, 
+                    allowed_modules=ALLOWED_MODULES, 
+                    det_size=target_size, 
+                    det_thresh=target_thresh
+                )
+                
                 faces = app.get(img)
+
+                # Log results (helpful for debugging modes)
+                if len(faces) == 0:
+                    logger.info(f"No faces found in {scan_mode} mode.")
+                else:
+                    logger.info(f"Found {len(faces)} faces in {scan_mode} mode.")
+
             except Exception as e:
                 # RETRY LOGIC FOR CPU FALLBACK
                 logger.warning(f"Face Analysis failed with error: {e}")
@@ -855,8 +917,9 @@ def handle_command(command):
             img_height, img_width = img.shape[:2]
             logger.info(f"Image Dimensions: {img_width}x{img_height}")
             
-            # Global Blur Score (Resize to max 2048 for speed/consistency)
+            # Global Blur/Sharpness Score
             global_blur_score = 0.0
+            global_tenengrad_score = 0.0
             try:
                 max_dim = 2048
                 h, w = img.shape[:2]
@@ -865,10 +928,13 @@ def handle_command(command):
                     scale = max_dim / max(h, w)
                     new_w, new_h = int(w * scale), int(h * scale)
                     resized_for_blur = cv2.resize(img, (new_w, new_h))
-                    global_blur_score = estimate_blur(resized_for_blur)
                 else:
-                    global_blur_score = estimate_blur(img)
-                logger.info(f"Global Blur Score: {global_blur_score:.2f}")
+                    resized_for_blur = img
+                    
+                global_blur_score = estimate_blur(resized_for_blur)
+                global_tenengrad_score = estimate_sharpness_tenengrad(resized_for_blur)
+                
+                logger.info(f"Global Sharpness: VoL={global_blur_score:.2f}, Ten={global_tenengrad_score:.2f}")
             except Exception as e:
                 logger.error(f"Failed to calc global blur: {e}")
 
@@ -897,22 +963,31 @@ def handle_command(command):
                 bx1, by1 = max(0, bx1), max(0, by1)
                 bx2, by2 = min(img_width, bx2), min(img_height, by2)
                 face_crop = img[by1:by2, bx1:bx2]
-                blur_score = estimate_blur(face_crop, target_size=112)
                 
-                # Filter out extremely blurry faces (Prevention)
-                if blur_score < BLUR_THRESH:
-                    logger.info(f"Skipping face with low blur score: {blur_score:.2f} < {BLUR_THRESH}")
-                    # Optionally we could still return it but mark it as ignored?
-                    # The requirement says "not capture". So we skip adding to results.
-                    # check if it is REALLY garbage. 
-                    # If we skip here, it never enters the DB.
+                blur_score = estimate_blur(face_crop, target_size=112)
+                tenengrad_score = estimate_sharpness_tenengrad(face_crop, target_size=112)
+                
+                # Dynamic Thresholds
+                vol_thresh = BLUR_THRESH # Default 20.0 (Global Config)
+                ten_thresh = 100.0       # Default Tenengrad
+                
+                if scan_mode == 'MACRO':
+                    vol_thresh = 5.0
+                    ten_thresh = 25.0
+                    
+                # Filter logic: Pass if EITHER metric is good
+                is_blurry = (blur_score < vol_thresh) and (tenengrad_score < ten_thresh)
+                
+                if is_blurry:
+                    logger.info(f"Skipping blur face. VoL:{blur_score:.2f}/{vol_thresh}, Ten:{tenengrad_score:.2f}/{ten_thresh}")
                     continue
 
                 results.append({
                     "box": {"x": x, "y": y, "width": w, "height": h},
                     "descriptor": embedding,
                     "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
-                    "blurScore": float(blur_score)
+                    "blurScore": float(blur_score),
+                    "tenengradScore": float(tenengrad_score)
                 })
                 
             logger.info(f"Found {len(results)} faces.")
@@ -949,7 +1024,9 @@ def handle_command(command):
                 "previewPath": preview_path,
                 "width": img_width,
                 "height": img_height,
-                "globalBlurScore": float(global_blur_score)
+                "globalBlurScore": float(global_blur_score),
+                "scanMode": scan_mode,
+                "globalTenengradScore": float(global_tenengrad_score)
             }
             
         except Exception as e:
@@ -1202,11 +1279,11 @@ def handle_command(command):
         logger.info(f"Rebuilding FAISS index with {len(descriptors)} vectors...")
         try:
             global index, id_map
-            index = faiss.IndexFlatL2(512)
+            index = faiss_lib.IndexFlatL2(512)
             id_map = {}
             if descriptors:
                 X = np.array(descriptors).astype('float32')
-                faiss.normalize_L2(X)
+                faiss_lib.normalize_L2(X)
                 index.add(X)
                 for i, face_id in enumerate(ids):
                     id_map[i] = face_id
@@ -1225,7 +1302,7 @@ def handle_command(command):
         else:
             try:
                 X = np.array([descriptor]).astype('float32')
-                faiss.normalize_L2(X)
+                faiss_lib.normalize_L2(X)
                 distances, indices = index.search(X, k)
                 matches = []
                 for dist, idx in zip(distances[0], indices[0]):
@@ -1323,8 +1400,10 @@ def handle_command(command):
             status['system'] = {
                 'python': sys.version.split()[0],
                 'torch': torch_lib.__version__ if torch_lib else "Missing/Download Required",
-                'cuda': torch_lib.cuda.is_available() if torch_lib else False,
-                'onnx': onnx_info,
+                'cuda_available': torch_lib.cuda.is_available() if torch_lib else False,
+                'cuda_device': torch_lib.cuda.get_device_name(0) if (torch_lib and torch_lib.cuda.is_available()) else "N/A",
+                'onnxruntime': onnx_info,
+                'opencv': cv2.__version__,
                 'ai_runtime_exists': os.path.exists(AI_RUNTIME_PATH),
                 'ai_runtime_path': AI_RUNTIME_PATH,
                 'sys_path_head': sys.path[:3], # Show first few paths to verify injection

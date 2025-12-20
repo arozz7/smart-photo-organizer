@@ -196,6 +196,9 @@ function createWindow() {
     },
   })
 
+  // Remove the file menu
+  win.setMenu(null);
+
   win.once('ready-to-show', () => {
     win?.show();
     if (splash) {
@@ -527,10 +530,10 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  ipcMain.handle('ai:scanImage', async (_, { photoId }) => {
+  ipcMain.handle('ai:scanImage', async (_, { photoId, scanMode, debug }) => {
     const { getDB } = await import('./db');
     const db = getDB();
-    logger.info(`[Main] Requesting AI scan for ${photoId}`);
+    logger.info(`[Main] Requesting AI scan for ${photoId} (Mode: ${scanMode || 'FAST'})`);
 
     try {
       const stmt = db.prepare('SELECT file_path FROM photos WHERE id = ?');
@@ -546,7 +549,9 @@ app.whenReady().then(async () => {
           payload: {
             photoId,
             filePath: photo.file_path,
-            previewStorageDir: previewsDir
+            previewStorageDir: previewsDir,
+            scanMode,
+            debug
           }
         });
 
@@ -1050,16 +1055,41 @@ app.whenReady().then(async () => {
       const params: any[] = [];
       const conditions: string[] = [];
 
+      // Filter: Untagged (No AI tags)
       if (filter.untagged) {
         conditions.push(`p.id NOT IN (SELECT photo_id FROM photo_tags)`);
       }
 
+      // Filter: Folder path
       if (filter.folder) {
         conditions.push(`p.file_path LIKE ?`);
         params.push(`${filter.folder}%`);
       }
 
-      if (filter.tag) {
+      // Filter: Tags (Advanced Logic)
+      if (filter.tags && Array.isArray(filter.tags) && filter.tags.length > 0) {
+        const matchAll = filter.tagsMatchAll; // boolean
+        if (matchAll) {
+          const placeholders = filter.tags.map(() => '?').join(',');
+          conditions.push(`p.id IN (
+             SELECT pt.photo_id FROM photo_tags pt
+             JOIN tags t ON pt.tag_id = t.id
+             WHERE t.name IN (${placeholders})
+             GROUP BY pt.photo_id
+             HAVING COUNT(DISTINCT t.name) = ?
+           )`);
+          params.push(...filter.tags);
+          params.push(filter.tags.length);
+        } else {
+          const placeholders = filter.tags.map(() => '?').join(',');
+          conditions.push(`p.id IN (
+             SELECT pt.photo_id FROM photo_tags pt
+             JOIN tags t ON pt.tag_id = t.id
+             WHERE t.name IN (${placeholders})
+           )`);
+          params.push(...filter.tags);
+        }
+      } else if (filter.tag) {
         conditions.push(`p.id IN (
           SELECT pt.photo_id FROM photo_tags pt
           JOIN tags t ON pt.tag_id = t.id
@@ -1068,14 +1098,38 @@ app.whenReady().then(async () => {
         params.push(filter.tag);
       }
 
+      // Filter: Text Search (Semantic/Tag Search)
+      if (filter.search) {
+        const searchTerm = `%${filter.search}%`;
+        conditions.push(`p.id IN (
+            SELECT pt.photo_id FROM photo_tags pt
+            JOIN tags t ON pt.tag_id = t.id
+            WHERE t.name LIKE ?
+        )`);
+        params.push(searchTerm);
+      }
+
       // Filter: Specific People (Array of IDs)
       if (filter.people && Array.isArray(filter.people) && filter.people.length > 0) {
+        const matchAll = filter.peopleMatchAll;
         const placeholders = filter.people.map(() => '?').join(',');
-        conditions.push(`p.id IN (
-          SELECT f.photo_id FROM faces f
-          WHERE f.person_id IN (${placeholders})
-        )`);
-        params.push(...filter.people);
+
+        if (matchAll) {
+          conditions.push(`p.id IN (
+              SELECT f.photo_id FROM faces f
+              WHERE f.person_id IN (${placeholders})
+              GROUP BY f.photo_id
+              HAVING COUNT(DISTINCT f.person_id) = ?
+            )`);
+          params.push(...filter.people);
+          params.push(filter.people.length);
+        } else {
+          conditions.push(`p.id IN (
+              SELECT f.photo_id FROM faces f
+              WHERE f.person_id IN (${placeholders})
+            )`);
+          params.push(...filter.people);
+        }
       }
 
       if (conditions.length > 0) {

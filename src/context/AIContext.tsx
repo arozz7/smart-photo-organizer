@@ -245,6 +245,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     // Track pending operations for each photo (scan vs tags) to avoid premature completion
     const pendingOperations = useRef<Map<number, Set<string>>>(new Map());
 
+    // Cache for results to allow multi-step decision making
+    const resultCache = useRef<Map<string, any>>(new Map());
+
     // Listen for AI results from Main Process
     useEffect(() => {
         // @ts-ignore
@@ -321,25 +324,98 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             // Check if we are done with this photo
             const ops = pendingOperations.current.get(photoId);
             if (ops) {
-                if (type === 'scan_result') ops.delete('scan');
-                if (type === 'tags_result') ops.delete('tags');
+                if (type === 'scan_result') {
+                    ops.delete('scan');
+                    // Cache scan result for decision making
+                    resultCache.current.set(`${photoId}_scan_data`, { faces: faces || [], mode: payload.scanMode || 'FAST' });
+                }
+                if (type === 'tags_result') {
+                    ops.delete('tags');
+                    // Cache tags for decision making
+                    resultCache.current.set(`${photoId}_tags_data`, tags || []);
+                }
 
                 if (ops.size === 0) {
+                    // BOTH SCAN + TAGS ARE DONE -> Make Decision
+                    const scanData = resultCache.current.get(`${photoId}_scan_data`);
+                    const tagsData = resultCache.current.get(`${photoId}_tags_data`) || [];
+
                     pendingOperations.current.delete(photoId);
-                    completeProcessing(photoId);
+                    resultCache.current.delete(`${photoId}_scan_data`);
+                    resultCache.current.delete(`${photoId}_tags_data`);
+
+                    if (scanData) {
+                        handleRetryDecision(photoId, scanData, tagsData);
+                    }
+
+                    // Critical Fix: If this was triggered by tags_result, payload.scanMode is undefined.
+                    // We must use the mode from the cached scanData to ensure we remove the correct item (e.g. BALANCED)
+                    const removalMode = scanData?.mode || payload.scanMode || 'FAST';
+                    completeProcessing(photoId, removalMode);
                 }
             } else {
-                completeProcessing(photoId);
+                // If operation was not tracked in pending ops (maybe a solitary event?), use payload mode
+                completeProcessing(photoId, payload.scanMode || 'FAST');
             }
         }
     };
 
-    const completeProcessing = (photoId: number) => {
+    const handleRetryDecision = (photoId: number, scanData: any, tags: string[]) => {
+        const { faces, mode } = scanData;
+
+
+
+
+        // Strategy: 
+        // 1. FAST (Default) -> If 0 faces AND (Has Person Tags OR No Tags) -> Retry BALANCED
+        // 2. BALANCED -> If 0 faces -> Retry MACRO
+        // 3. MACRO -> Done
+
+        if (faces.length > 0) return; // Found faces, we are good.
+
+        const PERSON_KEYWORDS = ['man', 'woman', 'person', 'face', 'girl', 'boy', 'child', 'human', 'portrait', 'smile', 'selfie', 'people', 'couple', 'beard', 'hair'];
+
+        // Heuristic: Does the image likely contain a person?
+        // If tags are empty, we assume YES (safe fallback).
+        // If tags exist, we check for keywords.
+        const hasPersonTags = tags.length === 0 || tags.some(t => PERSON_KEYWORDS.some(k => t.toLowerCase().includes(k)));
+
+
+
+        // --- SETTINGS AWARE DECISION ---
+        const aiProfile = localStorage.getItem('ai_profile') || 'balanced';
+        const isGPU = aiMode === 'GPU';
+
+        // HIGH PERFORMANCE PATH (GPU or High Profile selected)
+        const highPerformance = isGPU || aiProfile === 'high';
+
+
+
+        // 1. FAST/STANDARD (1280x1280) - Initial Scan
+        if (mode === 'FAST') {
+            if (!hasPersonTags && !highPerformance) {
+                // In Balanced/CPU mode, we trust the tags aggressivey to save time
+                return;
+            }
+
+            // If High Performance OR Has Person Tags -> Retry
+            addToQueue([{ id: photoId, scanMode: 'BALANCED' }]);
+        }
+
+        // 2. BALANCED/PORTRAIT (640x640)
+        else if (mode === 'BALANCED') {
+            // If we are significantly powerful, we continue.
+            addToQueue([{ id: photoId, scanMode: 'MACRO' }]);
+        }
+        // 3. MACRO (320x320) -> End of line.
+    };
+
+    const completeProcessing = (photoId: number, scanMode: string = 'FAST') => {
         // Notify listeners
         processedCallbacks.current.forEach(cb => cb(photoId));
 
-        // Update state
-        setProcessingQueue(prev => prev.filter(p => p.id !== photoId));
+        // Update state - Only remove the item that matches ID AND Mode
+        setProcessingQueue(prev => prev.filter(p => !(p.id === photoId && (p.scanMode || 'FAST') === scanMode)));
         setIsProcessing(false);
         setCurrentBatchCount(prev => prev + 1);
     };
@@ -351,11 +427,21 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setCurrentBatchCount(0);
     };
 
-    // Add items to queue (deduplicate)
+    // Add items to queue (deduplicate based on ID + Mode)
     const addToQueue = useCallback((newPhotos: any[]) => {
         setProcessingQueue(prev => {
-            const existingIds = new Set(prev.map(p => p.id));
-            const unique = newPhotos.filter(p => !existingIds.has(p.id));
+            // Create a set of composite keys "ID:MODE" for existing items
+            const existingKeys = new Set(prev.map(p => `${p.id}:${p.scanMode || 'FAST'}`));
+
+            const unique = newPhotos.filter(p => {
+                const key = `${p.id}:${p.scanMode || 'FAST'}`;
+                return !existingKeys.has(key);
+            });
+
+            if (unique.length > 0) {
+
+            }
+
             return [...prev, ...unique];
         });
     }, []);
@@ -407,7 +493,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
             try {
                 // @ts-ignore
-                await window.ipcRenderer.invoke('ai:scanImage', { photoId: photo.id });
+                await window.ipcRenderer.invoke('ai:scanImage', { photoId: photo.id, scanMode: photo.scanMode });
 
                 // Trigger Smart Tag Generation (VLM)
                 // @ts-ignore
@@ -416,7 +502,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             } catch (err) {
                 console.error(`Failed to request scan for ${photo.id}:`, err);
                 pendingOperations.current.delete(photo.id);
-                completeProcessing(photo.id);
+                completeProcessing(photo.id, photo.scanMode || 'FAST');
             }
         };
 
