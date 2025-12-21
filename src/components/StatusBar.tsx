@@ -3,8 +3,7 @@ import { useScan } from '../context/ScanContext';
 
 export default function StatusBar() {
     const { calculatingBlur, blurProgress, isModelLoading, isCoolingDown, cooldownTimeLeft, processingQueue } = useAI();
-    // @ts-ignore
-    const { scanning } = useScan ? useScan() : { scanning: false };
+    const { scanning } = useScan();
 
     // Show if ANY activity is happening
     const isActive = calculatingBlur || isModelLoading || isCoolingDown || processingQueue.length > 0 || scanning;

@@ -1,5 +1,7 @@
 # Phase 2: UI Polish & Configuration
 
+## Status: Released (v0.3.0) 🚀
+
 ## Diff Narrative
 
 ### Files Modified
@@ -15,6 +17,8 @@
     - Async/Chunked `initDB` migration.
 - `src/views/People.tsx`: Client-side clustering updates for instant UI response.
 - `public/splash.html`: Added status text for migration progress.
+- `scripts/bump-version.ps1`: Added release automation script.
+- `package.json`: Version bumped to 0.3.0.
 
 ### Behavior Changes
 - Application window now remembers its size and position across restarts.
@@ -31,6 +35,7 @@
 - Manual verification of settings layout on resize.
 - Verified successful DB migration of 2000+ faces.
 - Verified scanning performance and UI responsiveness.
+- Passed Linting checks (Fixed 30+ lint errors).
 
 ## Completed Tasks
 - [x] Implement Window State Persistence (electron-store)
@@ -41,3 +46,5 @@
 - [x] Splash Screen Migration Progress
 - [x] Performance: Debounced Mean Recalculation
 - [x] Performance: Client-Side Clustering Updates
+- [x] Fix Linting Errors & Code Quality
+- [x] Release Preparation & Version Bump (v0.3.0)

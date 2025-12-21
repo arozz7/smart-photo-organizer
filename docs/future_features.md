@@ -8,6 +8,13 @@
     - **Responsive Controls:** Fixed UI control layout for flexible window sizing (Grid Layout).
     - **State Persistence:** Window size and position are saved and restored on startup.
 
+### Phase 2b: Organization Tools
+- **Implemented:**
+     - **Manual Image Rotation:**
+          - "Rotate Left/Right" buttons in Photo Detail view.
+          - Updates file metadata (removes EXIF Orientation tag after baking rotation).
+          - Updates cached previews and thumbnails immediately.
+
 ## AI Enhancements
 
 ### 1. Smart Face Storage (Optimization)
@@ -64,14 +71,16 @@
 
 ## Organization & Management
 
-### 8. Batch Renaming & Cleanup
+
+
+### 9. Batch Renaming & Cleanup
 - **Goal:** Clean up the actual file system.
 - **Plan:**
     - Rename using templates: `{YYYY}-{MM}-{DD}_{Location}_{OriginalName}`.
     - AI Renaming: `Dog_Playing_2024.jpg` using generated tags.
     - Deduplication: Find duplicates via perceptual hash.
 
-### 9. Duplicate Photo Detection
+### 10. Duplicate Photo Detection
 - **Goal:** Find and manage exact duplicates and similar photos.
 - **Design:** [Design Document](design_duplicates.md)
 - **Plan:**
@@ -81,13 +90,13 @@
     - **Stacking:** Group RAW+JPG versions instead of deleting.
     - **Filter Update:** Add "Is Duplicate" and "Is Stacked" filters.
 
-### 10. Saved Smart Searches (Albums)
+### 11. Saved Smart Searches (Albums)
 - **Goal:** Make "Create" view persistent.
 - **Plan:**
     - Save filters (e.g., "Family in 2024") as "Smart Albums".
     - Auto-update as new photos are scanned.
 
-### 11. Batch Tagging
+### 12. Batch Tagging
 - **Goal:** Quickly organize large sets of photos (e.g., "Trip to Paris").
 - **Plan:**
     - Multi-select photos or use "Select All" in a Filtered View.
@@ -95,7 +104,7 @@
     - Batch remove tags.
     - **Filter Update:** Ensure "Has Tag" / "Missing Tag" filters are robust.
 
-### 12. Exif Metadata Injection
+### 13. Exif Metadata Injection
 - **Goal:** Write application tags back to the file headers (EXIF/IPTC/XMP) for interoperability.
 - **Plan:**
     - "Write Tags to File" action (Individual & Bulk).
@@ -105,21 +114,21 @@
     - Batch remove tags.
     - **Filter Update:** Filter by "Metadata Sync Status" (Synced/Pending).
 
-### 13. Location Heatmap
+### 14. Location Heatmap
 - **Goal:** Visualize library on a map.
 - **Plan:**
     - Show clusters on world map.
     - Auto-group into "Trips".
     - **Filter Update:** filtering by "Map Bounds" (Visible Region).
 
-### 14. Library Analytics
+### 15. Library Analytics
 - **Goal:** Visualize data.
 - **Plan:**
     - Graphs: Photos per year/month.
     - Gear: Top Cameras/Lenses.
     - People: Who is photographed most?
 
-### 15. Static Gallery Generator
+### 16. Static Gallery Generator
 - **Goal:** Share without cloud.
 - **Plan:**
     - Generate static HTML site of an album.
@@ -127,7 +136,7 @@
 
 ## Cross-Platform
 
-### 16. Mac & Linux Support
+### 17. Mac & Linux Support
 - **Goal:** Run the application on non-Windows OS.
 - **Plan:**
     - Research options for agnostic AI Runtime (e.g., Docker, Python venv management on *nix).

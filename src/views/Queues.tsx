@@ -15,7 +15,9 @@ export default function Queues() {
         skipCooldown,
         addToQueue,
         systemStatus,
-        fetchSystemStatus
+        fetchSystemStatus,
+        scanMetrics,
+        performanceStats
     } = useAI()
     const { rebuildIndex } = usePeople()
     const { showAlert } = useAlert()
@@ -172,6 +174,67 @@ export default function Queues() {
                         <p>
                             Use <strong>Cooldown</strong> to specify how long the system should wait between batches to allow your GPU to cool down.
                         </p>
+                    </div>
+
+                    {/* Performance Metrics */}
+                    <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
+                        <div className="flex justify-between items-center">
+                            <h3 className="text-lg font-medium text-white flex items-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-400" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                                </svg>
+                                Performance Metrics
+                            </h3>
+                            {scanMetrics && (
+                                <span className="text-xs text-gray-400">
+                                    Last: {new Date(scanMetrics.lastUpdate).toLocaleTimeString()}
+                                </span>
+                            )}
+                        </div>
+
+                        {!scanMetrics ? (
+                            <div className="text-sm text-gray-500 italic p-4 text-center border border-dashed border-gray-700 rounded">
+                                Waiting for scan data...
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-gray-900/50 p-3 rounded">
+                                        <div className="text-xs text-gray-400">Avg Time</div>
+                                        <div className="text-xl font-bold text-white tracking-tight">
+                                            {(performanceStats.averageTime / 1000).toFixed(2)}s
+                                        </div>
+                                        <div className="text-[10px] text-gray-500 mt-1">
+                                            Curr: {(scanMetrics.total / 1000).toFixed(2)}s | Best: {(performanceStats.bestTime / 1000).toFixed(2)}s
+                                        </div>
+                                    </div>
+                                    <div className="bg-gray-900/50 p-3 rounded">
+                                        <div className="text-xs text-gray-400">Total Processed</div>
+                                        <div className="text-xl font-bold text-white tracking-tight">
+                                            {performanceStats.photosProcessed}
+                                        </div>
+                                        <div className="text-[10px] text-gray-500 mt-1">
+                                            Avg Per Face: {performanceStats.averagePerFace.toFixed(0)}ms
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2 text-xs border-t border-gray-700/50 pt-2">
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-400">Load & Decode</span>
+                                        <span className="text-gray-200">{(scanMetrics.load).toFixed(0)} ms</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-400">Face Scan (Total)</span>
+                                        <span className="text-gray-200">{(scanMetrics.scan).toFixed(0)} ms</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-400">Smart Tags</span>
+                                        <span className="text-gray-200">{(scanMetrics.tag).toFixed(0)} ms</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">

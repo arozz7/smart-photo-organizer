@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom' // Added
+import { useNavigate } from 'react-router-dom'
 import { useAI } from '../context/AIContext'
 import { useScan } from '../context/ScanContext'
+import { useAlert } from '../context/AlertContext'
 
 interface PhotoDetailProps {
     photo: any
@@ -11,24 +12,16 @@ interface PhotoDetailProps {
 }
 
 export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDetailProps) {
-    const navigate = useNavigate() // Added
+    const navigate = useNavigate()
+    const { loadTags, setFilter, refreshPhoto } = useScan()
+    const { onPhotoProcessed } = useAI()
+    const { showConfirm } = useAlert()
+
     const [metadata, setMetadata] = useState<any>(null)
     const [imagePath, setImagePath] = useState<string>('')
+    const [visualRotation, setVisualRotation] = useState(0)
     const [tags, setTags] = useState<string[]>([])
-    const { onPhotoProcessed } = useAI()
     const [faces, setFaces] = useState<any[]>([])
-    const { loadTags, setFilter } = useScan()
-
-    // We need access to navigation or just close and set filter
-    // If we want to navigate to Library with filter:
-    // Ideally we use a router hook, but simplistic:
-    // We already have setFilter from context.
-
-    // We need access to navigation or just close and set filter
-    // If we want to navigate to Library with filter:
-    // Ideally we use a router hook, but simplistic:
-    // We already have setFilter from context.
-
     const [newTag, setNewTag] = useState('')
 
     useEffect(() => {
@@ -181,7 +174,8 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                             <img
                                 src={imagePath}
                                 alt={photo.file_path.split(/[\\/]/).pop()}
-                                className="max-w-full max-h-full object-contain shadow-2xl"
+                                className="max-w-full max-h-full object-contain shadow-2xl transition-transform duration-300"
+                                style={{ transform: `rotate(${visualRotation}deg)` }}
                             />
                         )
                     })()}
@@ -207,7 +201,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                 </div>
 
                 {/* Enhance Button */}
-                <div className="pb-4 border-b border-gray-800">
+                <div className="pb-4 border-b border-gray-800 space-y-3">
                     <button
                         onClick={() => {
                             onClose();
@@ -218,6 +212,55 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /></svg>
                         Enhance Photo
                     </button>
+
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            onClick={() => setVisualRotation(prev => prev - 90)}
+                            className="py-2 bg-gray-800 hover:bg-gray-700 text-white rounded text-sm font-medium flex items-center justify-center gap-2"
+                            title="Rotate Left (Preview)"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                            </svg>
+                            Left
+                        </button>
+                        <button
+                            onClick={() => setVisualRotation(prev => prev + 90)}
+                            className="py-2 bg-gray-800 hover:bg-gray-700 text-white rounded text-sm font-medium flex items-center justify-center gap-2"
+                            title="Rotate Right (Preview)"
+                        >
+                            Right
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6" />
+                            </svg>
+                        </button>
+                        {visualRotation % 360 !== 0 && (
+                            <button
+                                onClick={() => {
+                                    showConfirm({
+                                        title: 'Save Rotation',
+                                        description: `Save rotation of ${visualRotation} degrees? This will modify the original file.`,
+                                        confirmLabel: 'Save',
+                                        onConfirm: async () => {
+                                            try {
+                                                await window.ipcRenderer.invoke('ai:rotateImage', { photoId: photo.id, rotation: visualRotation });
+                                                await refreshPhoto(photo.id);
+                                                onClose();
+                                            } catch (e) {
+                                                alert("Rotation failed: " + e);
+                                            }
+                                        }
+                                    });
+                                }}
+                                className="col-span-2 w-full py-2 bg-green-600 hover:bg-green-500 text-white rounded font-bold shadow-lg flex items-center justify-center gap-2 animate-pulse"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                Save Rotation
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {metadata && (
@@ -290,7 +333,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                 onClick={async () => {
                                     try {
                                         // @ts-ignore
-                                        await window.ipcRenderer.invoke('ai:scanImage', { photoId: photo.id, scanMode: 'MACRO', debug: true })
+                                        await window.ipcRenderer.invoke('ai:analyzeImage', { photoId: photo.id, scanMode: 'MACRO', enableVLM: false, debug: true })
                                     } catch (e) {
                                         console.error(e)
                                     }
@@ -331,7 +374,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                     onClick={async () => {
                                         try {
                                             // @ts-ignore
-                                            await window.ipcRenderer.invoke('ai:scanImage', { photoId: photo.id, scanMode: 'MACRO', debug: true })
+                                            await window.ipcRenderer.invoke('ai:analyzeImage', { photoId: photo.id, scanMode: 'MACRO', enableVLM: false, debug: true })
                                         } catch (e) {
                                             console.error(e)
                                         }

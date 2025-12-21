@@ -146,14 +146,14 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                                     .toFile(previewPath);
 
                                 // Cleanup temp file
-                                try { await fs.unlink(tempPreviewPath); } catch { }
+                                try { await fs.unlink(tempPreviewPath); } catch { /* ignore */ }
 
                                 logger.info(`Extracted and normalized preview for ${fileName}`);
                                 extracted = true;
                             }
                         } catch (e) {
                             // Clean up temp if it exists
-                            try { await fs.unlink(`${previewPath}.tmp`); } catch { }
+                            try { await fs.unlink(`${previewPath}.tmp`); } catch { /* ignore */ }
                             // console.log(`ExifTool extraction failed for ${fileName}, trying Sharp fallback...`, e);
                         }
                     }

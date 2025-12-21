@@ -85,7 +85,7 @@ function startPythonBackend() {
       try {
         const message = JSON.parse(line);
         logger.info('[Python]', message);
-        if (win && (message.type === 'scan_result' || message.type === 'tags_result')) {
+        if (win && (message.type === 'scan_result' || message.type === 'tags_result' || message.type === 'analysis_result')) {
           win.webContents.send('ai:scan-result', message);
         }
 
@@ -251,6 +251,9 @@ async function createWindow() {
     win?.webContents.send('main-process-message', (new Date).toLocaleString())
   })
 
+  // Force DevTools for debugging blank screen
+  win.webContents.openDevTools();
+
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
@@ -308,17 +311,29 @@ app.whenReady().then(async () => {
   startPythonBackend()
 
   protocol.handle('local-resource', (request) => {
-    let filePath = request.url.replace('local-resource://', '')
+    try {
+      // 1. Strip protocol
+      const rawPath = request.url.replace(/^local-resource:\/\//, '');
 
-    // Fix: Strip query string (e.g. ?t=...)
-    const queryIndex = filePath.indexOf('?');
-    if (queryIndex !== -1) {
-      filePath = filePath.substring(0, queryIndex);
+      // 2. Decode the path (converts %3A to :, %5C to \, %3F to ?)
+      let decodedPath = decodeURIComponent(rawPath);
+
+      // 3. Strip query string (now it will be a literal '?')
+      const queryIndex = decodedPath.indexOf('?');
+      if (queryIndex !== -1) {
+        decodedPath = decodedPath.substring(0, queryIndex);
+      }
+
+      // 4. Strip trailing slash (Windows cleanup)
+      if (decodedPath.endsWith('/') || decodedPath.endsWith('\\')) {
+        decodedPath = decodedPath.slice(0, -1);
+      }
+
+      return net.fetch(pathToFileURL(decodedPath).toString());
+    } catch (e) {
+      logger.error(`[Protocol] Failed to handle request: ${request.url}`, e);
+      return new Response('Not Found', { status: 404 });
     }
-
-    const decodedPath = decodeURIComponent(filePath)
-    // console.log(`[Protocol] Request: ${request.url} -> ${decodedPath}`);
-    return net.fetch(pathToFileURL(decodedPath).toString())
   })
 
   createWindow()
@@ -538,7 +553,7 @@ app.whenReady().then(async () => {
             count++;
             size += stats.size;
           }
-        } catch (e) { }
+        } catch (e) { /* ignore */ }
       }
       return { success: true, count, size };
     } catch (error) {
@@ -567,7 +582,7 @@ app.whenReady().then(async () => {
             deletedCount++;
             deletedSize += stats.size;
           }
-        } catch (e) { }
+        } catch (e) { /* ignore */ }
       }
       return { success: true, deletedCount, deletedSize };
     } catch (error) {
@@ -585,10 +600,12 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  ipcMain.handle('ai:scanImage', async (_, { photoId, scanMode, debug }) => {
+
+
+  ipcMain.handle('ai:rotateImage', async (_, { photoId, rotation }) => {
     const { getDB } = await import('./db');
     const db = getDB();
-    logger.info(`[Main] Requesting AI scan for ${photoId} (Mode: ${scanMode || 'FAST'})`);
+    logger.info(`[Main] Requesting Rotation for ${photoId} (${rotation} deg)`);
 
     try {
       const stmt = db.prepare('SELECT file_path FROM photos WHERE id = ?');
@@ -596,41 +613,44 @@ app.whenReady().then(async () => {
 
       if (photo && photo.file_path) {
         const previewsDir = path.join(LIBRARY_PATH, 'previews');
-        // const fs = await import('node:fs/promises'); // Already imported at top
         await fs.mkdir(previewsDir, { recursive: true });
 
         sendToPython({
-          type: 'scan_image',
+          type: 'rotate_image',
           payload: {
             photoId,
             filePath: photo.file_path,
             previewStorageDir: previewsDir,
-            scanMode,
-            debug
+            rotation
           }
         });
 
         // Wait for result
-        return new Promise((resolve, reject) => {
+        const result: any = await new Promise((resolve, reject) => {
           scanPromises.set(photoId, { resolve, reject });
 
-          // Timeout safety (5 minutes - AI on CPU can be slow)
           setTimeout(() => {
             if (scanPromises.has(photoId)) {
               scanPromises.delete(photoId);
-              reject('Scan timed out');
+              reject('Rotation timed out');
             }
-          }, 300000);
+          }, 30000);
         });
-      } else {
-        logger.error('[Main] Photo not found or no path:', photoId);
-        return { success: false, error: 'Photo not found' };
+
+        if (result.success) {
+          // Update DB with new dims and preview path
+          const previewPath = path.join(previewsDir, `preview_${photoId}.jpg`);
+          db.prepare('UPDATE photos SET width = ?, height = ?, preview_cache_path = ? WHERE id = ?')
+            .run(result.width, result.height, previewPath, photoId);
+        }
+
+        return result;
       }
     } catch (e) {
-      logger.error('[Main] Failed to lookup photo for AI:', e);
+      logger.error('[Main] Failed to rotate:', e);
       return { success: false, error: e };
     }
-  })
+  });
 
   ipcMain.handle('ai:generateTags', async (_, { photoId }) => {
     const { getDB } = await import('./db');
@@ -651,7 +671,80 @@ app.whenReady().then(async () => {
       logger.error('[Main] Failed to lookup photo for VLM:', e);
       return { success: false, error: e };
     }
-  })
+  });
+
+
+
+
+
+
+  // Unified Analysis (Scan + Tag)
+  ipcMain.handle('ai:analyzeImage', async (_, { photoId, scanMode, enableVLM }) => {
+    const { getDB } = await import('./db');
+    const db = getDB();
+    logger.info(`[Main] Requesting Analysis for ${photoId} (Mode: ${scanMode}, VLM: ${enableVLM})`);
+
+    try {
+      const stmt = db.prepare('SELECT file_path FROM photos WHERE id = ?');
+      const photo = stmt.get(photoId) as { file_path: string };
+
+      if (photo && photo.file_path) {
+        sendToPython({
+          type: 'analyze_image',
+          payload: {
+            photoId,
+            filePath: photo.file_path,
+            scanMode,
+            enableVLM
+          }
+        });
+
+        // Wait for result
+        return new Promise((resolve, reject) => {
+          scanPromises.set(photoId, { resolve, reject });
+          setTimeout(() => {
+            if (scanPromises.has(photoId)) {
+              scanPromises.delete(photoId);
+              reject('Analysis timed out');
+            }
+          }, 300000);
+        });
+
+      } else {
+        return { success: false, error: 'Photo not found' };
+      }
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  });
+
+  ipcMain.handle('ai:addFacesToVectorIndex', async (_, { vectors, ids }) => {
+    return new Promise((resolve, reject) => {
+      const reqId = Math.floor(Math.random() * 1000000);
+      scanPromises.set(reqId, { resolve: (r: any) => resolve(r), reject });
+
+      sendToPython({
+        type: 'add_to_index',
+        payload: { vectors, ids, reqId }
+      });
+
+      setTimeout(() => {
+        if (scanPromises.has(reqId)) { scanPromises.delete(reqId); reject('Add to index timed out'); }
+      }, 10000);
+    });
+  });
+
+  ipcMain.handle('ai:saveVectorIndex', async () => {
+    // Create a fire-and-forget or wait? Wait is checking confirmation.
+    return new Promise((resolve, reject) => {
+      const reqId = Math.floor(Math.random() * 1000000);
+      scanPromises.set(reqId, { resolve: (r: any) => resolve(r), reject });
+      sendToPython({ type: 'save_index', payload: { reqId } });
+      setTimeout(() => {
+        if (scanPromises.has(reqId)) { scanPromises.delete(reqId); reject('Save index timed out'); }
+      }, 15000);
+    });
+  });
 
   // AI Enhancement
   ipcMain.handle('ai:enhanceImage', async (_, { photoId, task, modelName }) => {
@@ -1308,6 +1401,7 @@ app.whenReady().then(async () => {
       const updatePhotoDims = db.prepare('UPDATE photos SET width = ?, height = ? WHERE id = ?');
       const updatePhotoBlur = db.prepare('UPDATE photos SET blur_score = ? WHERE id = ?');
 
+      const insertedIds: number[] = [];
       const transaction = db.transaction(() => {
         if (previewPath) {
           updatePhotoPreview.run(previewPath, photoId);
@@ -1322,6 +1416,7 @@ app.whenReady().then(async () => {
         const oldFaces = getOldFaces.all(photoId);
         const usedOldFaceIds = new Set<number>();
         const peopleToUpdate = new Set<number>();
+
 
         // 1. Process New Faces
         for (const newFace of faces) {
@@ -1398,6 +1493,7 @@ app.whenReady().then(async () => {
 
             updateFace.run(JSON.stringify(newBox), finalDesc, newFace.blur_score || null, isRef, bestMatchId);
             usedOldFaceIds.add(bestMatchId);
+            insertedIds.push(bestMatchId as number);
 
           } else {
             // INSERT new face (Auto-recognize)
@@ -1481,7 +1577,8 @@ app.whenReady().then(async () => {
               peopleToUpdate.add(matchedPersonId);
             }
 
-            insertFace.run(photoId, JSON.stringify(newBox), finalDesc, matchedPersonId, newFace.blur_score || null, isRef);
+            const result = insertFace.run(photoId, JSON.stringify(newBox), finalDesc, matchedPersonId, newFace.blur_score || null, isRef);
+            insertedIds.push(Number(result.lastInsertRowid));
           }
         }
 
@@ -1504,10 +1601,10 @@ app.whenReady().then(async () => {
       });
 
       transaction();
-      return { success: true };
+      return { success: true, count: faces.length, ids: insertedIds };
     } catch (error) {
       console.error('Failed to update faces:', error);
-      return { success: false, error };
+      return { success: false, error: String(error) };
     }
   })
 

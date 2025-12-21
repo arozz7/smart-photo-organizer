@@ -23,11 +23,20 @@ interface ScanContextType {
     retryErrors: () => Promise<void>
     clearErrors: () => Promise<void>
     loadingPhotos: boolean
+    refreshPhoto: (photoId: number) => Promise<void>
 }
 
 const ScanContext = createContext<ScanContextType | undefined>(undefined)
 
 export function ScanProvider({ children }: { children: ReactNode }) {
+    // ... lines 31-240 ...
+    // Note: I cannot replace the middle lines easily without re-stating them if I use huge block.
+    // I will target the Return statement to add refreshPhoto to value.
+    // But first I must update interface at the top.
+
+    // Actually, I can do this in two chunks with multi_replace if needed, or just carefully target.
+    // I will replace the Interface definition first.
+
     const [scanning, setScanning] = useState(false)
     const [scanCount, setScanCount] = useState(0)
     const [scanPath, setScanPath] = useState('')
@@ -170,16 +179,14 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
     const loadMorePhotos = async () => {
         if (scanning || loadingPhotos || !isFilterComplete(filter)) {
-            console.log(`[ScanContext] loadMorePhotos skipped: scanning=${scanning}, loading=${loadingPhotos}, complete=${isFilterComplete(filter)}`);
+            // console.log(`[ScanContext] loadMorePhotos skipped...`);
             return
         }
 
         try {
-            console.log(`[ScanContext] Loading photos... Offset: ${offset}, Filter:`, filter);
             setLoadingPhotos(true)
             // @ts-ignore
             const newPhotos = await window.ipcRenderer.invoke('db:getPhotos', { limit: 50, offset, filter })
-            console.log(`[ScanContext] Loaded ${newPhotos.length} photos.`);
 
             if (newPhotos.length < 50) {
                 setHasMore(false)
@@ -187,14 +194,31 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
             setPhotos(prev => [...prev, ...newPhotos])
             setOffset(prev => prev + 50)
-
-            if (newPhotos.length > 0) {
-                // addToQueue(newPhotos); // FIX: Do not auto-queue on scroll
-            }
         } catch (err) {
             console.error('Load photos error:', err)
         } finally {
             setLoadingPhotos(false)
+        }
+    }
+
+    const refreshPhoto = async (photoId: number) => {
+        try {
+            console.log(`[ScanContext] Refreshing photo ${photoId}`);
+            // @ts-ignore
+            const newPhoto = await window.ipcRenderer.invoke('db:getPhoto', photoId);
+            if (newPhoto) {
+                const timestamp = new Date().getTime();
+                newPhoto.preview_cache_path = newPhoto.preview_cache_path ? `${newPhoto.preview_cache_path}?t=${timestamp}` : null;
+
+                setPhotos(prev => prev.map(p => {
+                    if (p.id === photoId) {
+                        return { ...newPhoto, _cacheBust: timestamp };
+                    }
+                    return p;
+                }));
+            }
+        } catch (e) {
+            console.error('Failed to refresh photo', e);
         }
     }
 
@@ -242,7 +266,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         <ScanContext.Provider value={{
             scanning, scanCount, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter,
             availableTags, loadTags, availableFolders, loadFolders, availablePeople, loadPeople,
-            scanErrors, loadScanErrors, retryErrors, clearErrors, loadingPhotos
+            scanErrors, loadScanErrors, retryErrors, clearErrors, loadingPhotos, refreshPhoto
         }}>
             {children}
         </ScanContext.Provider>
