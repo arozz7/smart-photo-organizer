@@ -9,7 +9,9 @@ const __dirname = path.dirname(__filename);
 const pythonRoot = path.join(__dirname, '../src/python');
 const venvPath = path.join(pythonRoot, '.venv');
 const sitePackages = path.join(venvPath, 'Lib', 'site-packages');
-const releaseDir = path.join(__dirname, '../release/0.2.0');
+const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
+const version = packageJson.version;
+const releaseDir = path.join(__dirname, `../release/${version}`);
 const stagingDir = path.join(__dirname, '../build-temp/runtime-staging');
 const zipPath = path.join(releaseDir, 'ai-runtime-win-x64.zip');
 
@@ -101,9 +103,14 @@ if (!fs.existsSync(releaseDir)) {
 // Using PowerShell Compress-Archive for native Windows zipping
 // Note: We zip the CONTENTS of stagingDir
 try {
-    const powershellCmd = `powershell -Command "Compress-Archive -Path '${stagingDir}/*' -DestinationPath '${zipPath}' -Force"`;
-    console.log(`Executing: ${powershellCmd}`);
-    execSync(powershellCmd, { stdio: 'inherit' });
+    // Using native tar (Windows 10/11 includes bsdtar) which is much faster and more reliable than Compress-Archive
+    // -a: Auto-compress (detects .zip)
+    // -c: Create
+    // -f: File
+    // -C: Change directory (so zip structure starts at root of stagingDir)
+    const tarCmd = `tar -a -c -f "${zipPath}" -C "${stagingDir}" .`;
+    console.log(`Executing: ${tarCmd}`);
+    execSync(tarCmd, { stdio: 'inherit' });
     console.log(`Success! Runtime packaged at: ${zipPath}`);
 
     // 5. Split into chunks for GitHub (2GB limit)

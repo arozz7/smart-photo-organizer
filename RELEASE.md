@@ -1,4 +1,4 @@
-# Release v0.2.0-beta - AI Powerhouse Update
+# Release v0.3.0 - AI Powerhouse Update
 
 This release introduces significant AI capabilities and architectural improvements to the Smart Photo Organizer.
 
@@ -24,3 +24,4 @@ This release introduces significant AI capabilities and architectural improvemen
 ## Known Issues
 - Large installer size due to bundled AI models.
 - First launch may take longer while assets are initialized.
+- AI Runtime download requires manual download of multi-part zip if automatic download fails.
