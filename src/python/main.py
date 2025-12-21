@@ -28,6 +28,10 @@ def inject_runtime():
     Scans for the AI Runtime and injects it into sys.path.
     Returns True if injected, False otherwise.
     """
+    if os.environ.get('IS_DEV') == 'true':
+        print("[AI_INIT] Dev Mode detected. Skipping AI Runtime injection.", file=sys.stderr)
+        return False
+
     print(f"[AI_INIT] Checking for AI Runtime at: {AI_RUNTIME_PATH}", file=sys.stderr)
     
     if os.path.exists(AI_RUNTIME_PATH):
@@ -1019,6 +1023,7 @@ def handle_command(command):
             
             # Overwrite original
             rotated_img.save(file_path, quality=95, exif=exif)
+            full_w, full_h = rotated_img.size
             
             logger.info(f"Successfully rotated {file_path}")
             
@@ -1029,17 +1034,20 @@ def handle_command(command):
                  preview_path = os.path.join(preview_dir, preview_filename)
                  # Resize
                  max_dim = 1280
-                 w, h = rotated_img.size
-                 if w > max_dim or h > max_dim:
-                     rotated_img.thumbnail((max_dim, max_dim))
-                 rotated_img.save(preview_path, quality=80)
+                 if full_w > max_dim or full_h > max_dim:
+                     # Create a copy for thumbnailing to avoid modifying full size returned in response
+                     preview_img = rotated_img.copy()
+                     preview_img.thumbnail((max_dim, max_dim))
+                     preview_img.save(preview_path, quality=80)
+                 else:
+                     rotated_img.save(preview_path, quality=80)
 
             response = {
                 "type": "rotate_result",
                 "photoId": photo_id,
                 "success": True,
-                "width": rotated_img.width,
-                "height": rotated_img.height
+                "width": full_w,
+                "height": full_h
             }
             
         except Exception as e:
@@ -1388,8 +1396,11 @@ def handle_command(command):
                 'cuda_device': torch_lib.cuda.get_device_name(0) if (torch_lib and torch_lib.cuda.is_available()) else "N/A",
                 'onnxruntime': onnx_info,
                 'opencv': cv2.__version__,
-                'ai_runtime_exists': os.path.exists(AI_RUNTIME_PATH),
-                'ai_runtime_path': AI_RUNTIME_PATH,
+                'onnxruntime': onnx_info,
+                'opencv': cv2.__version__,
+                'ai_runtime_exists': os.path.exists(AI_RUNTIME_PATH) if os.environ.get('IS_DEV') != 'true' else False,
+                'ai_runtime_path': AI_RUNTIME_PATH if os.environ.get('IS_DEV') != 'true' else f"{AI_RUNTIME_PATH} (Ignored in Dev Mode)",
+                'is_dev_mode': os.environ.get('IS_DEV') == 'true',
                 'sys_path_head': sys.path[:3], # Show first few paths to verify injection
                 'runtime_contents': runtime_dirs[:10] # Limit to 10 items
             }
