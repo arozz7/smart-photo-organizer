@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, protocol, net, dialog, shell } from 'elect
 import { spawn, ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url'
-import { initDB } from './db'
+import { initDB, getDB, closeDB } from './db'
 import { scanDirectory } from './scanner'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -68,6 +68,7 @@ function startPythonBackend() {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      IS_DEV: app.isPackaged ? 'false' : 'true',
       HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
       LIBRARY_PATH: LIBRARY_PATH,
       LOG_PATH: path.join(app.getPath('userData'), 'logs'),
@@ -95,7 +96,7 @@ function startPythonBackend() {
 
 
         // Shared Promise Resolution
-        const resId = message.photoId || message.reqId || (message.payload && message.payload.reqId);
+        const resId = message.reqId || message.photoId || (message.payload && message.payload.reqId);
 
         if (win && (message.type === 'download_progress' || message.type === 'download_result')) {
           win.webContents.send('ai:model-progress', message);
@@ -442,7 +443,6 @@ app.whenReady().then(async () => {
   // Handle Face Blur
 
   ipcMain.handle('face:getBlurry', async (_event, { personId, threshold, scope }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
 
     // Determine the query based on scope or personId
@@ -501,7 +501,6 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('debug:getBlurStats', async () => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       const stats = db.prepare(`
@@ -520,7 +519,6 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('db:getPhotosMissingBlurScores', async () => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       const stmt = db.prepare('SELECT DISTINCT photo_id FROM faces WHERE blur_score IS NULL');
@@ -592,7 +590,6 @@ app.whenReady().then(async () => {
 
 
   ipcMain.handle('face:deleteFaces', async (_event, faceIds) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     const deleteParams = faceIds.map(() => '?').join(',');
     const stmt = db.prepare(`DELETE FROM faces WHERE id IN (${deleteParams})`);
@@ -603,7 +600,6 @@ app.whenReady().then(async () => {
 
 
   ipcMain.handle('ai:rotateImage', async (_, { photoId, rotation }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     logger.info(`[Main] Requesting Rotation for ${photoId} (${rotation} deg)`);
 
@@ -642,6 +638,136 @@ app.whenReady().then(async () => {
           const previewPath = path.join(previewsDir, `preview_${photoId}.jpg`);
           db.prepare('UPDATE photos SET width = ?, height = ?, preview_cache_path = ? WHERE id = ?')
             .run(result.width, result.height, previewPath, photoId);
+
+          // Update Face Coordinates via Re-Scan (with ID Preservation)
+          try {
+            const faces = db.prepare('SELECT id, box_json, person_id FROM faces WHERE photo_id = ?').all(photoId) as { id: number, box_json: string, person_id: number | null }[];
+            logger.info(`[Rotate] Found ${faces.length} faces for photo ${photoId} to preserve IDs.`);
+
+            if (faces.length > 0) {
+              // 1. Transform Old Faces (so we can match them to new scan results)
+              const rot = Number(rotation);
+              // Logic: 90 -> CCW Transform (as verified by user screenshots)
+              const transform = (x: number, y: number) => {
+                if (rot === 90 || rot === -270) return [y, srcW - x];
+                if (rot === 180 || rot === -180) return [srcW - x, srcH - y];
+                if (rot === 270 || rot === -90) return [srcH - y, x];
+                return [x, y];
+              };
+              const clamp = (v: number, max: number) => Math.max(0, Math.min(v, max));
+
+              // Use original image dims for transformation logic source
+              // Wait, srcW/srcH were calculated based on rotation result.
+              // If rot=90, Result is (H, W). Source was (W, H).
+              // So if result.width is the NEW width, then srcW (old width) was result.height.
+              let srcW = 0, srcH = 0;
+              const absRot = Math.abs(rotation) % 360;
+              if (absRot === 90 || absRot === 270) {
+                srcW = result.height;
+                srcH = result.width;
+              } else {
+                srcW = result.width;
+                srcH = result.height;
+              }
+
+              const transformedOldFaces = faces.map(face => {
+                try {
+                  const box = JSON.parse(face.box_json);
+                  let x1, y1, x2, y2;
+
+                  if (Array.isArray(box) && box.length === 4) { [x1, y1, x2, y2] = box; }
+                  else if (box && typeof box.x === 'number') { x1 = box.x; y1 = box.y; x2 = box.x + box.width; y2 = box.y + box.height; }
+                  else return null;
+
+                  const p1 = transform(x1, y1);
+                  const p2 = transform(x2, y2);
+
+                  // New Box in New Coordinates
+                  const nx1 = clamp(Math.min(p1[0], p2[0]), result.width);
+                  const ny1 = clamp(Math.min(p1[1], p2[1]), result.height);
+                  const nx2 = clamp(Math.max(p1[0], p2[0]), result.width);
+                  const ny2 = clamp(Math.max(p1[1], p2[1]), result.height);
+
+                  return {
+                    id: face.id, // Keep the face ID
+                    person_id: face.person_id,
+                    box: { x: nx1, y: ny1, width: nx2 - nx1, height: ny2 - ny1 }
+                  };
+                } catch (e) { return null; }
+              }).filter(f => f !== null);
+
+              // 2. Trigger Re-Scan
+              logger.info(`[Rotate] Triggering Re-Scan for ${photoId}...`);
+              const scanReqId = Date.now() + Math.random();
+              sendToPython({
+                type: 'analyze_image',
+                payload: { photoId, filePath: photo.file_path, scanMode: 'BALANCED', enableVLM: false, reqId: scanReqId }
+              });
+
+              // 3. Wait for Scan Result
+              const scanResult: any = await new Promise((resolve, reject) => {
+                scanPromises.set(scanReqId, { resolve, reject });
+                setTimeout(() => { if (scanPromises.has(scanReqId)) { scanPromises.delete(scanReqId); reject('Timeout'); } }, 300000); // 5 minutes
+              });
+
+              if (scanResult.success && scanResult.faces) {
+                // 4. Overwrite Faces
+                db.prepare('DELETE FROM faces WHERE photo_id = ?').run(photoId);
+                const insert = db.prepare('INSERT INTO faces (photo_id, box_json, descriptor, score, blur_score, person_id) VALUES (?, ?, ?, ?, ?, ?)');
+
+                let migratedCount = 0;
+                const usedOldFaceIds = new Set<number>();
+
+                // Sort new faces by size (largest first) to prioritize main subjects? Or just iterate.
+                // Better: find global best matches. 
+                // Simple Greedy: For each new face, find best match. If matched, mark old used.
+                // But wait, order matters. Ideally compute all distances then pair up.
+                // Let's stick to Greedy with tighter threshold and distinctness.
+
+                for (const newFace of scanResult.faces) {
+                  let matchedPid: number | null = null;
+                  let bestDist = Infinity;
+                  let bestOldFaceIndex = -1;
+
+                  if (transformedOldFaces.length > 0) {
+                    const cx = newFace.box.x + newFace.box.width / 2;
+                    const cy = newFace.box.y + newFace.box.height / 2;
+
+                    transformedOldFaces.forEach((old) => {
+                      if (!old || old.person_id === null || usedOldFaceIds.has(old.id)) return;
+
+                      const ocx = old.box.x + old.box.width / 2;
+                      const ocy = old.box.y + old.box.height / 2;
+                      const dist = Math.sqrt(Math.pow(cx - ocx, 2) + Math.pow(cy - ocy, 2));
+
+                      // Stricter Threshold: 8% of min dimension
+                      const threshold = Math.min(result.width, result.height) * 0.08;
+
+                      if (dist < bestDist && dist < threshold) {
+                        bestDist = dist;
+                        matchedPid = old.person_id;
+                        bestOldFaceIndex = old.id; // Use ID to track usage
+                      }
+                    });
+                  }
+
+                  if (matchedPid !== null && bestOldFaceIndex !== -1) {
+                    usedOldFaceIds.add(bestOldFaceIndex);
+                    migratedCount++;
+                  }
+
+                  insert.run(photoId, JSON.stringify(newFace.box), newFace.descriptor ? Buffer.from(newFace.descriptor) : null, newFace.score, newFace.blur_score, matchedPid);
+                }
+                logger.info(`[Rotate] Re-scan complete. ${scanResult.faces.length} faces found. Migrated IDs: ${migratedCount}`);
+              }
+            } else {
+              // No faces existed, just run a scan? Or do nothing?
+              // User might want new faces found even if none existed.
+              // But usually we only care if faces were there.
+            }
+          } catch (e) {
+            logger.error('Failed to update face coordinates (Re-Scan) after rotation:', e);
+          }
         }
 
         return result;
@@ -653,7 +779,6 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('ai:generateTags', async (_, { photoId }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     logger.info(`[Main] Requesting Tags (VLM) for ${photoId}`);
 
@@ -680,7 +805,6 @@ app.whenReady().then(async () => {
 
   // Unified Analysis (Scan + Tag)
   ipcMain.handle('ai:analyzeImage', async (_, { photoId, scanMode, enableVLM }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     logger.info(`[Main] Requesting Analysis for ${photoId} (Mode: ${scanMode}, VLM: ${enableVLM})`);
 
@@ -748,7 +872,6 @@ app.whenReady().then(async () => {
 
   // AI Enhancement
   ipcMain.handle('ai:enhanceImage', async (_, { photoId, task, modelName }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     logger.info(`[Main] Enhance Request: ${photoId} [${task}]`);
 
@@ -802,7 +925,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('ai:rebuildIndex', async () => {
-    const { getDB } = await import('./db');
     const db = getDB();
     logger.info('[Main] Rebuilding Vector Index...');
     try {
@@ -905,7 +1027,6 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('ai:clusterFaces', async (_, { faceIds, eps, min_samples } = {}) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       let rows;
@@ -976,7 +1097,6 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:addTags', async (_, { photoId, tags }: { photoId: number, tags: string[] }) => {
     // We need to import db helper here or move it to a shared place.
     // For now we can import getDB from ./db
-    const { getDB } = await import('./db');
     const db = getDB();
 
     const insertTag = db.prepare('INSERT INTO tags (name) VALUES (?) ON CONFLICT(name) DO NOTHING');
@@ -1007,7 +1127,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:getTags', async (_, photoId: number) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     const stmt = db.prepare(`
       SELECT t.name FROM tags t
@@ -1024,7 +1143,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:clearAITags', async (_event) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       db.exec(`
@@ -1040,7 +1158,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:getPhoto', async (_, photoId: number) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       const photo = db.prepare('SELECT * FROM photos WHERE id = ?').get(photoId);
@@ -1052,7 +1169,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:getPhotos', async (_, { limit = 50, offset = 0, filter = {} } = {}) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       // console.log(`[Main] db:getPhotos request: limit=${limit}, offset=${offset}, filter=`, filter);
@@ -1160,7 +1276,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('os:createAlbum', async (_, { photoIds, targetDir }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     console.log(`[Main] Creating album with ${photoIds?.length} photos in ${targetDir}`);
 
@@ -1202,7 +1317,6 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('db:getPhotosForRescan', async (_, { filter = {} } = {}) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       let query = 'SELECT p.id, p.file_path, p.preview_cache_path FROM photos p';
@@ -1302,7 +1416,6 @@ app.whenReady().then(async () => {
 
   // Replaces db:storeFace with a smart merge strategy
   ipcMain.handle('db:getAllTags', async () => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       // Get tags with counts
@@ -1321,7 +1434,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:removeTag', async (_, { photoId, tag }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       const stmt = db.prepare(`
@@ -1337,7 +1449,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:renamePerson', async (_, { personId, newName }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     const cleanName = newName.trim();
     if (!cleanName) return { success: false, error: 'Name cannot be empty' };
@@ -1378,7 +1489,6 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('db:updateFaces', async (_, { photoId, faces, previewPath, width, height, globalBlurScore }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
 
     try {
@@ -1609,7 +1719,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:getFaces', async (_, photoId: number) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       const stmt = db.prepare(`
@@ -1632,7 +1741,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:getPeople', async () => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       const stmt = db.prepare(`
@@ -1674,7 +1782,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:getAllFaces', async (_, { limit = 100, offset = 0, filter = {} } = {}) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       let query = `
@@ -1723,7 +1830,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:assignPerson', async (_, { faceId, personName }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
 
     // Normalize Name: Title Case (e.g. "john doe" -> "John Doe")
@@ -1766,7 +1872,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:getLibraryStats', async () => {
-    const { getDB } = await import('./db');
     const db = getDB();
     const path = await import('node:path');
 
@@ -1805,7 +1910,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:deleteFaces', async (_, faceIds: number[]) => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       if (!faceIds || faceIds.length === 0) return { success: true };
@@ -1831,7 +1935,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:reassignFaces', async (_, { faceIds, personName }: { faceIds: number[], personName: string }) => {
-    const { getDB } = await import('./db');
     const db = getDB();
 
     // Reuse logic: Find or Create person, then update faces
@@ -1886,7 +1989,6 @@ app.whenReady().then(async () => {
   // --- Scan Error Tracking ---
 
   ipcMain.handle('db:getScanErrors', async () => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       const stmt = db.prepare('SELECT * FROM scan_errors ORDER BY timestamp DESC');
@@ -1898,7 +2000,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('db:clearScanErrors', async () => {
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       db.exec('DELETE FROM scan_errors');
@@ -1910,7 +2011,6 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('db:retryScanErrors', async () => {
     // Return list of photos to retry
-    const { getDB } = await import('./db');
     const db = getDB();
     try {
       const stmt = db.prepare('SELECT photo_id FROM scan_errors');
@@ -1953,10 +2053,7 @@ ipcMain.handle('settings:moveLibrary', async (_, newPath: string) => {
     return { success: false, error: 'Target directory does not exist' };
   }
 
-  const { closeDB } = await import('./db');
-
   try {
-    // 1. Close Database
     closeDB();
     if (pythonProcess) pythonProcess.kill();
 
@@ -2024,7 +2121,6 @@ ipcMain.handle('settings:moveLibrary', async (_, newPath: string) => {
 });
 
 ipcMain.handle('db:unassignFaces', async (_, faceIds: number[]) => {
-  const { getDB } = await import('./db');
   const db = getDB();
   try {
     if (!faceIds || faceIds.length === 0) return { success: true };
@@ -2039,7 +2135,6 @@ ipcMain.handle('db:unassignFaces', async (_, faceIds: number[]) => {
 })
 
 ipcMain.handle('db:getPerson', async (_, personId: number) => {
-  const { getDB } = await import('./db');
   const db = getDB();
   try {
     const stmt = db.prepare('SELECT * FROM people WHERE id = ?');
@@ -2077,7 +2172,6 @@ ipcMain.handle('db:getFolders', async () => {
   }
 })
 ipcMain.handle('db:ignoreFace', async (_, faceId) => {
-  const { getDB } = await import('./db');
   const db = getDB();
   try {
     // Get person_id before ignoring
@@ -2101,7 +2195,6 @@ ipcMain.handle('db:ignoreFace', async (_, faceId) => {
 })
 
 ipcMain.handle('db:ignoreFaces', async (_, faceIds: number[]) => {
-  const { getDB } = await import('./db');
   const db = getDB();
   try {
     if (!faceIds || faceIds.length === 0) return { success: true };
@@ -2194,7 +2287,6 @@ const recalculatePersonMean = (db: any, personId: number) => {
 };
 
 ipcMain.handle('db:removeDuplicateFaces', async () => {
-  const { getDB } = await import('./db');
   const db = getDB();
   try {
     // 1. Get photos with multiple faces
@@ -2307,7 +2399,6 @@ ipcMain.handle('db:removeDuplicateFaces', async () => {
 })
 
 ipcMain.handle('db:getAllUnassignedFaceDescriptors', async () => {
-  const { getDB } = await import('./db');
   const db = getDB();
   try {
     // Get all unassigned and not ignored faces efficiently
@@ -2387,7 +2478,6 @@ ipcMain.handle('settings:setQueueConfig', async (_, config) => {
 });
 
 ipcMain.handle('db:getUnprocessedItems', async () => {
-  const { getDB } = await import('./db');
   const db = getDB();
   try {
     // Find photos that have NO AI tags. This assumes every processed photo gets at least one tag or a marker.

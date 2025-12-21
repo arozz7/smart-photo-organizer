@@ -74,6 +74,39 @@ sequenceDiagram
     Main->>DB: db:updateFaces (Transaction)
     DB->>DB: Merge/Update Faces
     Main-->>UI: ai:scan-result (Event)
+
+## Data Flow: Image Rotation
+
+```mermaid
+sequenceDiagram
+    participant UI as React UI
+    participant Main as Electron Main
+    participant DB as SQLite
+    participant Py as Python AI
+
+    UI->>Main: IPC ai:rotateImage(photoId, angle)
+    
+    activate Main
+    Main->>DB: Fetch existing faces
+    Main->>Py: { type: "rotate_image", ... }
+    Py-->>Main: Success (and new dims)
+    
+    rect rgb(20, 20, 20)
+        note right of Main: **Re-Scan Strategy**
+        Main->>Main: Transform old face coords (for matching keys)
+        Main->>Py: { type: "analyze_image", ... }
+        activate Py
+        Py-->>Main: { faces: [NewBoxes...] }
+        deactivate Py
+        
+        Main->>Main: Match NewBoxes to OldBoxes (Heuristic)
+        Main->>DB: DELETE old faces
+        Main->>DB: INSERT new faces (with preserved PersonIDs)
+    end
+    
+    Main-->>UI: Success
+    deactivate Main
+```
 ```
 
 ## Data Schema
