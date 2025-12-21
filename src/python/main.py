@@ -1136,7 +1136,7 @@ def handle_command(command):
                     try: os.remove(temp_zip)
                     except: pass
 
-                base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.2.0-beta/ai-runtime-win-x64.zip"
+                base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.3.0/ai-runtime-win-x64.zip"
                 
                 # Check if multi-part exists (.001)
                 parts = []
@@ -1245,7 +1245,7 @@ def handle_command(command):
             error_msg = str(e)
             if isinstance(e, requests.exceptions.HTTPError):
                 if e.response.status_code == 404:
-                    error_msg = "Download resource not found (404). Please ensure the AI Runtime is uploaded to the GitHub release 'v0.2.0'."
+                    error_msg = "Download resource not found (404). Please ensure the AI Runtime is uploaded to the GitHub release 'v0.3.0'."
                 else:
                     error_msg = f"Server returned error {e.response.status_code}: {e}"
             
@@ -1318,7 +1318,7 @@ def handle_command(command):
             runtime_exists = os.path.exists(AI_RUNTIME_PATH)
             models_info["AI GPU Runtime (Torch/CUDA)"] = {
                 "exists": runtime_exists,
-                "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.2.0-beta/ai-runtime-win-x64.zip",
+                "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.3.0/ai-runtime-win-x64.zip",
                 "size": 5800000000, # Approx 5.8GB
                 "localPath": AI_RUNTIME_PATH,
                 "isRuntime": True

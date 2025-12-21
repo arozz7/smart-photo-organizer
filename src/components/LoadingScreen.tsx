@@ -71,7 +71,7 @@ export default function LoadingScreen({ onReady }: { onReady: () => void }) {
             </div>
 
             <div className="absolute bottom-4 text-gray-600 text-[10px]">
-                v0.2.0-beta
+                v0.3.0
             </div>
         </div>
     )
