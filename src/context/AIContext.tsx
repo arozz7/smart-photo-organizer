@@ -61,6 +61,13 @@ interface AIContextType {
     fetchSystemStatus: () => Promise<void>;
     aiMode: 'UNKNOWN' | 'GPU' | 'CPU' | 'SAFE_MODE';
     vlmEnabled: boolean;
+    scanMetrics: { load: number; scan: number; tag: number; total: number; lastUpdate: number } | null;
+    performanceStats: {
+        averageTime: number;
+        bestTime: number;
+        photosProcessed: number;
+        averagePerFace: number;
+    };
 }
 
 const AIContext = createContext<AIContextType>({
@@ -83,7 +90,9 @@ const AIContext = createContext<AIContextType>({
     systemStatus: null,
     fetchSystemStatus: async () => { },
     aiMode: 'UNKNOWN',
-    vlmEnabled: false
+    vlmEnabled: false,
+    scanMetrics: null,
+    performanceStats: { averageTime: 0, bestTime: 0, photosProcessed: 0, averagePerFace: 0 }
 });
 
 export const useAI = () => useContext(AIContext);
@@ -138,8 +147,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
     const [aiMode, setAiMode] = useState<'UNKNOWN' | 'GPU' | 'CPU' | 'SAFE_MODE'>('UNKNOWN');
     const [vlmEnabled, setVlmEnabled] = useState(false);
+    const [scanMetrics, setScanMetrics] = useState<{ load: number; scan: number; tag: number; total: number; lastUpdate: number } | null>(null);
+    const [performanceStats, setPerformanceStats] = useState({ averageTime: 0, bestTime: 0, photosProcessed: 0, averagePerFace: 0 });
+    const statsHistory = useRef<{ total: number; faceTime?: number }[]>([]);
 
-    const fetchSystemStatus = async () => {
+    const fetchSystemStatus = useCallback(async () => {
         try {
             // @ts-ignore
             const result = await window.ipcRenderer.invoke('ai:command', { type: 'get_system_status' });
@@ -156,7 +168,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } catch (error) {
             console.error("Failed to fetch system status:", error);
         }
-    };
+    }, []);
 
     // Status Polling Effect
     useEffect(() => {
@@ -179,7 +191,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return () => {
             if (intervalId) clearInterval(intervalId);
         };
-    }, [aiMode]);
+    }, [aiMode, fetchSystemStatus]);
 
     // Blur Calculation State
     const [calculatingBlur, setCalculatingBlur] = useState(false);
@@ -257,28 +269,53 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
         return () => {
             if (typeof cleanup === 'function') {
-                (cleanup as unknown as Function)();
+                (cleanup as unknown as () => void)();
             }
         };
     }, []);
 
     const handleScanResult = async (payload: any) => {
-        const { photoId, faces, tags, error, type, previewPath, width, height } = payload;
+        const { photoId, faces, tags, error, type, previewPath, width, height, metrics } = payload;
+
+        if (metrics) {
+            setScanMetrics({ ...metrics, lastUpdate: Date.now() });
+
+            // Update Statistics
+            const history = statsHistory.current;
+            const faceCount = faces ? faces.length : 0;
+            const faceTime = faceCount > 0 ? metrics.scan / faceCount : undefined;
+
+            history.push({ total: metrics.total, faceTime });
+            if (history.length > 50) history.shift();
+
+            // Calculate Aggregates
+            const avgTime = history.reduce((sum, item) => sum + item.total, 0) / history.length;
+            const bestTime = Math.min(...history.map(h => h.total));
+
+            // Calc Per Face Avg (only for photos that had faces)
+            const faceSamples = history.filter(h => h.faceTime !== undefined);
+            const avgPerFace = faceSamples.length > 0
+                ? faceSamples.reduce((sum, item) => sum + (item.faceTime || 0), 0) / faceSamples.length
+                : 0;
+
+            setPerformanceStats(prev => ({
+                averageTime: avgTime,
+                bestTime: bestTime,
+                photosProcessed: prev.photosProcessed + 1,
+                averagePerFace: avgPerFace
+            }));
+        }
 
         if (error) {
             console.error(`[AIContext] Error for ${photoId}:`, error);
 
-            // Check for Safe Mode fallback success implicitly via ping or update?
-            // If error is CRITICAL, we alert.
-            // If error is just one photo fail, we might not want to kill everything.
-
-            if (error === 'AI_CRITICAL_FAILURE' || error === 'AI_MODELS_MISSING') {
+            if (error.includes('AI_CRITICAL_FAILURE') || error.includes('AI_MODELS_MISSING')) {
                 // Determine severity
-                const isCritical = error === 'AI_CRITICAL_FAILURE';
+                const isCritical = error.includes('AI_CRITICAL_FAILURE');
 
                 showAlert({
                     title: isCritical ? 'AI Engine Critical Failure' : 'AI Runtime Issue',
-                    description: `Face Analysis failed. ${payload.details || ''}`,
+                    description: `Face Analysis failed. ${payload.details || error}`,
                     variant: 'danger',
                     confirmLabel: 'Settings',
                     onConfirm: () => { window.location.hash = '#/settings'; }
@@ -290,6 +327,53 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         try {
+            // Handle Analysis Result (Unified)
+            if (type === 'analysis_result') {
+                // 1. Save Faces
+                if (faces && faces.length > 0) {
+                    // @ts-ignore
+                    const dbFaces = await window.ipcRenderer.invoke('db:updateFaces', {
+                        photoId,
+                        previewPath,
+                        width,
+                        height,
+                        globalBlurScore: payload.globalBlurScore,
+                        faces: faces.map((f: any) => ({
+                            box: f.box,
+                            descriptor: f.descriptor,
+                            blur_score: f.blurScore
+                        }))
+                    });
+
+                    // 2. Add to Vector Index (Immediate)
+                    if (dbFaces.success && dbFaces.ids && dbFaces.ids.length === faces.length) {
+                        const newVectors = faces.map((f: any) => f.descriptor);
+                        const newIds = dbFaces.ids;
+
+                        // @ts-ignore
+                        window.ipcRenderer.invoke('ai:addFacesToVectorIndex', {
+                            vectors: newVectors,
+                            ids: newIds
+                        }).then(() => {
+                            // Refresh status to show updated count immediately
+                            fetchSystemStatus();
+                        }).catch((err: any) => console.error("Failed to update in-memory index:", err));
+                    }
+
+
+                }
+
+                // 3. Save Tags
+                if (tags && tags.length > 0) {
+                    // @ts-ignore
+                    const curTags = await window.ipcRenderer.invoke('db:addTags', { photoId, tags });
+                }
+
+                completeProcessing(photoId, payload.scanMode || 'FAST');
+                return;
+            }
+
+            // Legacy Handling (scan_image / generate_tags)
             // Store faces (and preview if available)
             if (faces && faces.length > 0) {
                 // @ts-ignore
@@ -320,23 +404,22 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
         } catch (err) {
             console.error('Failed to save AI results to DB:', err);
+            completeProcessing(photoId, payload.scanMode || 'FAST'); // Release queue even on error context
         } finally {
             // Check if we are done with this photo
             const ops = pendingOperations.current.get(photoId);
             if (ops) {
+                // Legacy tracking
                 if (type === 'scan_result') {
                     ops.delete('scan');
-                    // Cache scan result for decision making
                     resultCache.current.set(`${photoId}_scan_data`, { faces: faces || [], mode: payload.scanMode || 'FAST' });
                 }
                 if (type === 'tags_result') {
                     ops.delete('tags');
-                    // Cache tags for decision making
                     resultCache.current.set(`${photoId}_tags_data`, tags || []);
                 }
 
                 if (ops.size === 0) {
-                    // BOTH SCAN + TAGS ARE DONE -> Make Decision
                     const scanData = resultCache.current.get(`${photoId}_scan_data`);
                     const tagsData = resultCache.current.get(`${photoId}_tags_data`) || [];
 
@@ -347,15 +430,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     if (scanData) {
                         handleRetryDecision(photoId, scanData, tagsData);
                     }
-
-                    // Critical Fix: If this was triggered by tags_result, payload.scanMode is undefined.
-                    // We must use the mode from the cached scanData to ensure we remove the correct item (e.g. BALANCED)
                     const removalMode = scanData?.mode || payload.scanMode || 'FAST';
                     completeProcessing(photoId, removalMode);
                 }
             } else {
-                // If operation was not tracked in pending ops (maybe a solitary event?), use payload mode
-                completeProcessing(photoId, payload.scanMode || 'FAST');
+                // For types that are not tracked (like analysis_result which clears itself above, or untracked legacy)
+                if (type !== 'analysis_result') { // analysis_result handled above
+                    completeProcessing(photoId, payload.scanMode || 'FAST');
+                }
             }
         }
     };
@@ -410,12 +492,28 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         // 3. MACRO (320x320) -> End of line.
     };
 
+
+
     const completeProcessing = (photoId: number, scanMode: string = 'FAST') => {
         // Notify listeners
         processedCallbacks.current.forEach(cb => cb(photoId));
 
         // Update state - Only remove the item that matches ID AND Mode
-        setProcessingQueue(prev => prev.filter(p => !(p.id === photoId && (p.scanMode || 'FAST') === scanMode)));
+        setProcessingQueue(prev => {
+            const next = prev.filter(p => !(p.id === photoId && (p.scanMode || 'FAST') === scanMode));
+
+            // Check if queue empty (Auto-Save Index)
+            if (next.length === 0 && prev.length > 0) {
+                console.log("[AI] Queue empty. Saving Vector Index...");
+                // @ts-ignore
+                window.ipcRenderer.invoke('ai:saveVectorIndex').then(res => {
+                    if (res.success) console.log("[AI] Vector Index Saved.");
+                    else console.error("[AI] Failed to save Vector Index:", res.error);
+                });
+            }
+            return next;
+        });
+
         setIsProcessing(false);
         setCurrentBatchCount(prev => prev + 1);
     };
@@ -439,7 +537,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             });
 
             if (unique.length > 0) {
-
+                console.log(`[AI] Added ${unique.length} items to queue`);
             }
 
             return [...prev, ...unique];
@@ -489,19 +587,32 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setIsProcessing(true);
             const photo = processingQueue[0];
 
-            pendingOperations.current.set(photo.id, new Set(['scan', 'tags']));
+            // Unified Analysis
+            // Check if we want VLM based on user settings or mode?
+            // For now, enable VLM if available AND not in FAST mode?
+            // Actually, FAST mode skipping VLM is a good optimization. 
+            // The prompt said "High Accuracy scanning is very slow". 
+            // So sticking to user intent:
+            // - FAST: Faces Only
+            // - BALANCED: Faces + Tags (Maybe?)
+            // - HIGH: Faces + Tags
+
+            const isHighAccuracy = photo.scanMode === 'BALANCED' || photo.scanMode === 'MACRO' || aiMode === 'GPU';
+            const enableVLM = vlmEnabled && isHighAccuracy && photo.scanMode !== 'FAST';
+
+            // If explicit "FORCE TAGS" task, we might need a separate mode.
+            // For now, follow the heuristic.
 
             try {
                 // @ts-ignore
-                await window.ipcRenderer.invoke('ai:scanImage', { photoId: photo.id, scanMode: photo.scanMode });
-
-                // Trigger Smart Tag Generation (VLM)
-                // @ts-ignore
-                await window.ipcRenderer.invoke('ai:generateTags', { photoId: photo.id });
+                await window.ipcRenderer.invoke('ai:analyzeImage', {
+                    photoId: photo.id,
+                    scanMode: photo.scanMode || 'FAST',
+                    enableVLM
+                });
 
             } catch (err) {
-                console.error(`Failed to request scan for ${photo.id}:`, err);
-                pendingOperations.current.delete(photo.id);
+                console.error(`Failed to request analysis for ${photo.id}:`, err);
                 completeProcessing(photo.id, photo.scanMode || 'FAST');
             }
         };
@@ -537,7 +648,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             systemStatus,
             fetchSystemStatus,
             aiMode,
-            vlmEnabled
+            vlmEnabled,
+            scanMetrics,
+            performanceStats
         }}>
             {children}
         </AIContext.Provider>

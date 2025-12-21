@@ -100,8 +100,8 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
   // --- MIGRATION: Smart Face Storage (BLOBs + Pruning) ---
   try {
     // 1. Add new columns
-    try { db.exec('ALTER TABLE faces ADD COLUMN descriptor BLOB'); } catch (e) { }
-    try { db.exec('ALTER TABLE faces ADD COLUMN is_reference BOOLEAN DEFAULT 0'); } catch (e) { }
+    try { db.exec('ALTER TABLE faces ADD COLUMN descriptor BLOB'); } catch (e) { /* ignore */ }
+    try { db.exec('ALTER TABLE faces ADD COLUMN is_reference BOOLEAN DEFAULT 0'); } catch (e) { /* ignore */ }
 
     // 2. Check if migration is needed (if we have descriptor_json but no descriptor)
     let hasJson = { count: 0 };
