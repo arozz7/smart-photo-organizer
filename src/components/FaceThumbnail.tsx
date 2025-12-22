@@ -82,7 +82,7 @@ export default function FaceThumbnail({ src, fallbackSrc, box, originalImageWidt
                 src={hasRetried ? (fallbackSrc || src) : src}
                 alt={alt || "face"}
                 onLoad={handleLoad}
-                onError={(e) => {
+                onError={(_e) => {
                     if (fallbackSrc && !hasRetried) {
                         // console.debug(`[FaceThumbnail] Primary failed, retrying fallback. Primary: ${src}`);
                         setHasRetried(true);
