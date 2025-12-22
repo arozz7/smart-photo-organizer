@@ -149,7 +149,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [vlmEnabled, setVlmEnabled] = useState(false);
     const [scanMetrics, setScanMetrics] = useState<{ load: number; scan: number; tag: number; total: number; lastUpdate: number } | null>(null);
     const [performanceStats, setPerformanceStats] = useState({ averageTime: 0, bestTime: 0, photosProcessed: 0, averagePerFace: 0 });
-    const statsHistory = useRef<{ total: number; faceTime?: number }[]>([]);
 
     const fetchSystemStatus = useCallback(async () => {
         try {
@@ -280,30 +279,31 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (metrics) {
             setScanMetrics({ ...metrics, lastUpdate: Date.now() });
 
-            // Update Statistics
-            const history = statsHistory.current;
-            const faceCount = faces ? faces.length : 0;
-            const faceTime = faceCount > 0 ? metrics.scan / faceCount : undefined;
+            // Fetch Aggregate DB Stats
+            // We use the DB for the long-term averages to be more accurate across restarts
+            try {
+                // @ts-ignore
+                const historyRes = await window.ipcRenderer.invoke('db:getMetricsHistory', 50); // Fetch recent for debugging? Not needed here.
+                // Actually the stats property is what we want
+                if (historyRes.success && historyRes.stats) {
+                    const { total_scans, total_processing_time, total_faces } = historyRes.stats;
 
-            history.push({ total: metrics.total, faceTime });
-            if (history.length > 50) history.shift();
+                    // Avg Total Time per Photo
+                    const avgTime = total_scans > 0 ? (total_processing_time / total_scans) : 0;
 
-            // Calculate Aggregates
-            const avgTime = history.reduce((sum, item) => sum + item.total, 0) / history.length;
-            const bestTime = Math.min(...history.map(h => h.total));
+                    // Avg Per Face (Total Time / Total Faces) - Just for reference
+                    const avgPerFace = total_faces > 0 ? (total_processing_time / total_faces) : 0;
 
-            // Calc Per Face Avg (only for photos that had faces)
-            const faceSamples = history.filter(h => h.faceTime !== undefined);
-            const avgPerFace = faceSamples.length > 0
-                ? faceSamples.reduce((sum, item) => sum + (item.faceTime || 0), 0) / faceSamples.length
-                : 0;
-
-            setPerformanceStats(prev => ({
-                averageTime: avgTime,
-                bestTime: bestTime,
-                photosProcessed: prev.photosProcessed + 1,
-                averagePerFace: avgPerFace
-            }));
+                    setPerformanceStats(prev => ({
+                        averageTime: avgTime,
+                        bestTime: Math.min(prev.bestTime || 999999, metrics.total), // Keep session best for "Record" feeling
+                        photosProcessed: total_scans, // All time
+                        averagePerFace: avgPerFace
+                    }));
+                }
+            } catch (e) {
+                console.error("Failed to update stats", e);
+            }
         }
 
         if (error) {

@@ -78,9 +78,15 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
 
     const ignoreFaces = async (faceIds: number[]) => {
         try {
+            console.log(`[PeopleContext] Ignoring ${faceIds.length} faces:`, faceIds);
             // @ts-ignore
             await window.ipcRenderer.invoke('db:ignoreFaces', faceIds)
-            setFaces(prev => prev.filter(f => !faceIds.includes(f.id)))
+            setFaces(prev => {
+                const next = prev.filter(f => !faceIds.includes(f.id));
+                console.log(`[PeopleContext] Local faces update: Prev=${prev.length}, Next=${next.length}`);
+                if (next.length === prev.length) return prev; // No change, keep reference
+                return next;
+            })
         } catch (e) {
             console.error("Failed to ignore faces", e)
         }

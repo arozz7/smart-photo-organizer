@@ -107,7 +107,8 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                 setLoading(true);
                 try {
                     // @ts-ignore
-                    await window.ipcRenderer.invoke('face:deleteFaces', Array.from(selectedIds));
+                    // Use ignoreFaces (soft delete) so they don't reappear on next scan
+                    await window.ipcRenderer.invoke('db:ignoreFaces', Array.from(selectedIds));
                     setFaces(prev => prev.filter(f => !selectedIds.has(f.id)));
                     setSelectedIds(new Set());
                     if (onDeleteComplete) onDeleteComplete();
@@ -234,6 +235,7 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                                         >
                                             <FaceThumbnail
                                                 src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
+                                                fallbackSrc={`local-resource://${encodeURIComponent(face.file_path || '')}`}
                                                 box={face.box}
                                                 originalImageWidth={face.original_width}
                                                 className="w-full h-full object-cover"
