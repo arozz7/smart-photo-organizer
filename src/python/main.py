@@ -1054,25 +1054,7 @@ def handle_command(command):
             logger.error(f"Rotation Error: {e}")
             response = {"error": str(e), "photoId": photo_id}
 
-    elif cmd_type == 'cluster_faces':
-        photo_id = payload.get('photoId')
-        descriptors = payload.get('descriptors', [])
-        ids = payload.get('ids', [])
-        eps = payload.get('eps', 0.75)
-        min_samples = payload.get('min_samples', 2)
-        
-        logger.info(f"Clustering {len(descriptors)} faces... (ReqID: {photo_id})")
-        try:
-            clusters = cluster_faces_dbscan(descriptors, ids, eps, min_samples)
-            logger.info(f"Found {len(clusters)} clusters.")
-            response = {
-                "type": "cluster_result",
-                "photoId": photo_id,
-                "clusters": clusters
-            }
-        except Exception as e:
-            logger.exception("Clustering Error")
-            response = {"error": str(e)}
+
 
     elif cmd_type == 'get_mean_embedding':
         descriptors = payload.get('descriptors', [])
@@ -1185,6 +1167,18 @@ def handle_command(command):
                     save_path = temp_zip
                 
                 logger.info("Extracting AI Runtime...")
+                # Emit Extraction Status
+                print(json.dumps({
+                    "type": "download_progress",
+                    "modelName": model_name,
+                    "status": "extracting",
+                    "current": total_estimated_size,
+                    "total": total_estimated_size,
+                    "percent": 100,
+                    "reqId": req_id
+                }))
+                sys.stdout.flush()
+
                 with zipfile.ZipFile(save_path, 'r') as zip_ref:
                     zip_ref.extractall(AI_RUNTIME_PATH)
                 
@@ -1396,8 +1390,6 @@ def handle_command(command):
                 'cuda_device': torch_lib.cuda.get_device_name(0) if (torch_lib and torch_lib.cuda.is_available()) else "N/A",
                 'onnxruntime': onnx_info,
                 'opencv': cv2.__version__,
-                'onnxruntime': onnx_info,
-                'opencv': cv2.__version__,
                 'ai_runtime_exists': os.path.exists(AI_RUNTIME_PATH) if os.environ.get('IS_DEV') != 'true' else False,
                 'ai_runtime_path': AI_RUNTIME_PATH if os.environ.get('IS_DEV') != 'true' else f"{AI_RUNTIME_PATH} (Ignored in Dev Mode)",
                 'is_dev_mode': os.environ.get('IS_DEV') == 'true',
@@ -1406,6 +1398,92 @@ def handle_command(command):
             }
 
             response = {"type": "system_status_result", "status": status, "reqId": req_id}
+        except Exception as e:
+            logger.error(f"Failed to get system status: {e}")
+            response = {"type": "system_status_result", "error": str(e), "reqId": req_id}
+
+    elif cmd_type == 'cluster_faces':
+        # payload: { faces: [...] } OR { dataPath: '...' }
+        faces_data = payload.get('faces', [])
+        
+        if 'dataPath' in payload:
+            dpath = payload['dataPath']
+            if os.path.exists(dpath):
+                try:
+                    with open(dpath, 'r') as f:
+                        file_payload = json.load(f)
+                        faces_data = file_payload.get('faces', [])
+                    
+                    # Cleanup
+                    try: os.remove(dpath)
+                    except: pass
+                except Exception as e:
+                    logger.error(f"[Cluster] File Read Error: {e}")
+        
+        # Ensure req_id is preserved if passed
+        if req_id is None:
+            req_id = payload.get('reqId')
+
+        logger.info(f"Clustering {len(faces_data)} faces... (ReqID: {req_id})")
+
+        try:
+            if not faces_data:
+                response = {"type": "cluster_result", "clusters": [], "singles": [], "reqId": req_id}
+            else:
+                # import numpy as np # Global import used
+                from sklearn.cluster import DBSCAN
+
+                # Extract vectors
+                descriptors = [f['descriptor'] for f in faces_data]
+                ids = [f['id'] for f in faces_data]
+                
+                X = np.array(descriptors, dtype=np.float32)
+                
+                # DBSCAN
+                # eps=0.45 -> 0.55 (Looser threshold to group more faces)
+                # min_samples=3 -> 2 (Allow smaller groups to form)
+                clustering = DBSCAN(eps=0.55, min_samples=2, metric="euclidean", n_jobs=-1).fit(X)
+                
+                labels = clustering.labels_
+                
+                clusters = {}
+                singles = []
+
+                for idx, label in enumerate(labels):
+                    face_id = ids[idx]
+                    lbl = int(label)
+                    
+                    if lbl == -1:
+                        singles.append(face_id)
+                    else:
+                        if lbl not in clusters: clusters[lbl] = []
+                        clusters[lbl].append(face_id)
+
+                # Format as list of groups
+                # Sort clusters by size (descending)
+                cluster_list = []
+                for lbl in clusters:
+                    cluster_list.append(clusters[lbl])
+                
+                cluster_list.sort(key=len, reverse=True)
+
+                response = {
+                    "type": "cluster_result", 
+                    "clusters": cluster_list, 
+                    "singles": singles,
+                    "reqId": req_id
+                }
+
+        except ImportError:
+            logger.error("sklearn not found. Clustering unavailable.")
+            # Fallback: All singles?
+            # Or implement simple greedy clustering?
+            # For now return error
+            response = {"type": "cluster_result", "error": "AI Runtime Missing sklearn", "reqId": req_id}
+        except Exception as e:
+            logger.error(f"Clustering error: {e}")
+            response = {"type": "cluster_result", "error": str(e), "reqId": req_id}
+
         except Exception as e:
             logger.error(f"Error getting status: {e}")
             response = {"error": str(e), "reqId": req_id}

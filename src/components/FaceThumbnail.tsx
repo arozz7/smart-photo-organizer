@@ -9,7 +9,7 @@ interface FaceThumbnailProps {
     className?: string;
 }
 
-export default function FaceThumbnail({ src, box, originalImageWidth, alt, className }: FaceThumbnailProps) {
+export default function FaceThumbnail({ src, fallbackSrc, box, originalImageWidth, alt, className }: FaceThumbnailProps & { fallbackSrc?: string }) {
     const [style, setStyle] = useState<React.CSSProperties>({
         opacity: 0, // Hide until loaded and positioned
         transition: 'opacity 0.2s',
@@ -17,6 +17,16 @@ export default function FaceThumbnail({ src, box, originalImageWidth, alt, class
         height: '100%',
         objectFit: 'cover' // Default fallback
     });
+
+    // Fallback state
+    const [currentSrc, setCurrentSrc] = useState(src);
+    const [hasRetried, setHasRetried] = useState(false);
+
+    // Update src if prop changes (reset retry)
+    if (src !== currentSrc) {
+        setCurrentSrc(src);
+        setHasRetried(false);
+    }
 
     const handleLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
         if (!box) {
@@ -34,7 +44,11 @@ export default function FaceThumbnail({ src, box, originalImageWidth, alt, class
 
         // Calculate Scale Factor if using a preview (smaller/larger than original)
         let scale = 1.0;
-        if (originalImageWidth && originalImageWidth > 0 && originalImageWidth !== naturalW) {
+
+        // If we fell back to the original image, force scale to 1.0 (assuming box is based on original)
+        const isUsingFallback = hasRetried && fallbackSrc;
+
+        if (!isUsingFallback && originalImageWidth && originalImageWidth > 0 && originalImageWidth !== naturalW) {
             scale = naturalW / originalImageWidth;
             // console.log(`[FaceThumbnail] Rescaling box: Original=${originalImageWidth}, Actual=${naturalW}, Scale=${scale}`);
         }
@@ -65,9 +79,23 @@ export default function FaceThumbnail({ src, box, originalImageWidth, alt, class
     return (
         <div className={`overflow-hidden relative ${className || ''}`}>
             <img
-                src={src}
+                src={hasRetried ? (fallbackSrc || src) : src}
                 alt={alt || "face"}
                 onLoad={handleLoad}
+                onError={(_e) => {
+                    if (fallbackSrc && !hasRetried) {
+                        // console.debug(`[FaceThumbnail] Primary failed, retrying fallback. Primary: ${src}`);
+                        setHasRetried(true);
+                        // Trigger re-render with fallback logic
+                        return;
+                    }
+                    console.error('[FaceThumbnail] Failed to load:', src);
+                    if (hasRetried) {
+                        console.error('[FaceThumbnail] Fallback also failed (or was invalid):', fallbackSrc);
+                    }
+                    // Make it visible so we see it failed
+                    setStyle({ ...style, opacity: 1, border: '2px solid red' });
+                }}
                 style={style}
             />
         </div>

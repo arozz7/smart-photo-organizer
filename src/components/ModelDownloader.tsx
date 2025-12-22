@@ -50,6 +50,19 @@ export default function ModelDownloader({ open, onOpenChange }: { open: boolean,
                 fetchStatus();
                 if (!message.success) {
                     setError(message.error || 'Download failed');
+                } else {
+                    // Success!
+                    // Check if it was a runtime download (heuristic via progress or just generic listener)
+                    // Currently 'downloading' state holds the model name being downloaded.
+                    const isRuntime = downloading?.includes('Runtime') || message.modelName?.includes('Runtime');
+
+                    if (isRuntime) {
+                        // @ts-ignore
+                        if (confirm("AI Runtime Installed Successfully!\n\nThe application needs to restart to initialize the new runtime.\n\nRestart now?")) {
+                            // @ts-ignore
+                            window.ipcRenderer.invoke('app:relaunch');
+                        }
+                    }
                 }
             }
         });
@@ -137,7 +150,8 @@ export default function ModelDownloader({ open, onOpenChange }: { open: boolean,
                                                     {downloading === name ? (
                                                         <>
                                                             <div className="animate-spin h-3 w-3 border-2 border-blue-400 border-t-transparent rounded-full"></div>
-                                                            Downloading...
+                                                            {/* @ts-ignore */}
+                                                            {progress?.status === 'extracting' ? 'Extracting...' : 'Downloading...'}
                                                         </>
                                                     ) : (
                                                         <>
@@ -151,15 +165,27 @@ export default function ModelDownloader({ open, onOpenChange }: { open: boolean,
 
                                         {downloading === name && progress && (
                                             <div className="space-y-1 mt-1">
-                                                <div className="w-full bg-gray-800 rounded-full h-1.5">
-                                                    <div
-                                                        className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
-                                                        style={{ width: `${progress.percent}%` }}
-                                                    ></div>
+                                                <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                                                    {/* @ts-ignore */}
+                                                    {progress.status === 'extracting' ? (
+                                                        <div className="bg-indigo-500 h-1.5 rounded-full w-full animate-pulse"></div>
+                                                    ) : (
+                                                        <div
+                                                            className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                                                            style={{ width: `${progress.percent}%` }}
+                                                        ></div>
+                                                    )}
                                                 </div>
                                                 <div className="flex justify-between text-[10px] text-gray-500">
-                                                    <span>{progress.percent.toFixed(1)}%</span>
-                                                    <span>{formatSize(progress.current)} / {formatSize(progress.total)}</span>
+                                                    {/* @ts-ignore */}
+                                                    {progress.status === 'extracting' ? (
+                                                        <span className="text-indigo-400 font-semibold animate-pulse">Extracting files... (This may take a minute)</span>
+                                                    ) : (
+                                                        <>
+                                                            <span>{progress.percent.toFixed(1)}%</span>
+                                                            <span>{formatSize(progress.current)} / {formatSize(progress.total)}</span>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         )}

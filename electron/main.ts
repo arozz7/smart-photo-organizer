@@ -88,6 +88,36 @@ function startPythonBackend() {
         logger.info('[Python]', message);
         if (win && (message.type === 'scan_result' || message.type === 'tags_result' || message.type === 'analysis_result')) {
           win.webContents.send('ai:scan-result', message);
+
+          // Log to History
+          const isSuccess = (message.type === 'scan_result' && message.success) ||
+            (message.type === 'analysis_result' && !message.error);
+
+          if (isSuccess) {
+            try {
+              const { getDB } = await import('./db');
+              const db = getDB();
+              // Check if history already exists for this scan? Ideally unique scan ID?
+              // Just log it.
+              // message: { type, photoId, faces: [], metrics: { load, scan, total }, ... }
+              const metrics = message.metrics || {};
+              const faceCount = message.faces ? message.faces.length : 0;
+
+              db.prepare(`
+                  INSERT INTO scan_history (photo_id, file_path, scan_ms, tag_ms, face_count, status, timestamp)
+                  VALUES (?, (SELECT file_path FROM photos WHERE id = ?), ?, ?, ?, 'success', ?)
+                `).run(
+                message.photoId,
+                message.photoId,
+                Math.round(metrics.scan || 0),
+                Math.round(metrics.tag || 0), // tag_ms
+                faceCount,
+                Date.now()
+              );
+            } catch (e) {
+              logger.error("[Main] Failed to log scan history:", e);
+            }
+          }
         }
 
         if (message.type === 'cluster_result') {
@@ -311,7 +341,9 @@ app.whenReady().then(async () => {
 
   startPythonBackend()
 
-  protocol.handle('local-resource', (request) => {
+
+
+  protocol.handle('local-resource', async (request) => {
     try {
       // 1. Strip protocol
       const rawPath = request.url.replace(/^local-resource:\/\//, '');
@@ -330,9 +362,23 @@ app.whenReady().then(async () => {
         decodedPath = decodedPath.slice(0, -1);
       }
 
-      return net.fetch(pathToFileURL(decodedPath).toString());
-    } catch (e) {
-      logger.error(`[Protocol] Failed to handle request: ${request.url}`, e);
+      // 5. Check if file exists (Optional safety for debugging)
+      // try {
+      //   await fs.access(decodedPath);
+      // } catch {
+      //   console.warn(`[Protocol] File not found: ${decodedPath}`);
+      //   return new Response('Not Found', { status: 404 });
+      // }
+
+      return await net.fetch(pathToFileURL(decodedPath).toString());
+    } catch (e: any) {
+      const msg = e.message || String(e);
+      // Suppress noisy logs for expected missing files (fallback handles this)
+      if (msg.includes('ERR_FILE_NOT_FOUND') || msg.includes('ENOENT')) {
+        logger.info(`[Protocol] File missing (using fallback): ${request.url}`);
+      } else {
+        logger.error(`[Protocol] Failed to handle request: ${request.url}`, e);
+      }
       return new Response('Not Found', { status: 404 });
     }
   })
@@ -379,6 +425,11 @@ app.whenReady().then(async () => {
   // Handle Settings
   ipcMain.handle('ai:getSettings', () => {
     return getAISettings();
+  });
+
+  ipcMain.handle('db:getMetricsHistory', async () => {
+    const { getMetricsHistory } = await import('./db');
+    return getMetricsHistory();
   });
 
   ipcMain.handle('ai:saveSettings', (_event, settings) => {
@@ -596,6 +647,91 @@ app.whenReady().then(async () => {
     stmt.run(...faceIds);
     return true;
   });
+
+  ipcMain.handle('ai:getClusteredFaces', async () => {
+    const { getUnclusteredFaces } = await import('./db');
+    const dbRes = getUnclusteredFaces();
+
+    if (!dbRes.success || !dbRes.faces || dbRes.faces.length === 0) {
+      return { clusters: [], singles: [], blurry: [] };
+    }
+
+    // Separate Clean vs Blurry
+    const BLUR_THRESHOLD = 25; // TODO: Get from settings?
+    const cleanFaces = dbRes.faces.filter((f: any) => (f.blur_score || 0) >= BLUR_THRESHOLD);
+    const blurryFaces = dbRes.faces.filter((f: any) => (f.blur_score || 0) < BLUR_THRESHOLD);
+
+    // If no clean faces, return early
+    if (cleanFaces.length === 0) {
+      return { clusters: [], singles: [], blurry: blurryFaces.map((f: any) => { const { descriptor, ...rest } = f; return rest; }) };
+    }
+
+    // Send to Python
+    return new Promise((resolve, reject) => {
+      const requestId = Math.floor(Math.random() * 1000000);
+      scanPromises.set(requestId, {
+        resolve: (res: any) => {
+          // res: { clusters: [[id, ...], ...], singles: [id, ...] }
+
+          if (!res.clusters && !res.singles) {
+            resolve({ clusters: [], singles: [], blurry: [] });
+            return;
+          }
+
+          const faceMap = new Map();
+          dbRes.faces.forEach((f: any) => faceMap.set(f.id, f));
+
+          // Remove descriptor from UI payload
+          const cleanFace = (id: number) => {
+            const f = faceMap.get(id);
+            if (!f) return null;
+            const { descriptor, ...rest } = f;
+            return rest;
+          };
+
+          const clusters = (res.clusters || []).map((clusterIds: number[]) => {
+            const faces = clusterIds.map(cleanFace).filter(Boolean);
+            return { faces };
+          }).filter((c: any) => c.faces.length > 0);
+
+          const singles = (res.singles || []).map(cleanFace).filter(Boolean);
+          const blurry = blurryFaces.map((f: any) => { const { descriptor, ...rest } = f; return rest; });
+
+          resolve({ clusters, singles, blurry });
+        },
+        reject
+      });
+
+      // Send minimal data to Python (descriptors of CLEAN faces only)
+      const pythonPayload = cleanFaces.map((f: any) => ({ id: f.id, descriptor: f.descriptor }));
+
+      // Use Temp File for Large Payloads to avoid STDIN buffer limits
+      const tempFile = path.join(app.getPath('temp'), `cluster_payload_${requestId}.json`);
+
+      fs.writeFile(tempFile, JSON.stringify({ faces: pythonPayload }))
+        .then(() => {
+          sendToPython({
+            type: 'cluster_faces',
+            payload: {
+              dataPath: tempFile,
+              reqId: requestId
+            }
+          });
+        })
+        .catch(err => {
+          console.error('[Clustering] Failed to start cluster job:', err);
+          reject(err);
+        });
+
+      setTimeout(() => {
+        if (scanPromises.has(requestId)) {
+          scanPromises.delete(requestId);
+          reject('Clustering timed out');
+        }
+      }, 60000);
+    });
+  });
+
 
 
 
@@ -2480,10 +2616,11 @@ ipcMain.handle('settings:setQueueConfig', async (_, config) => {
 ipcMain.handle('db:getUnprocessedItems', async () => {
   const db = getDB();
   try {
-    // Find photos that have NO AI tags. This assumes every processed photo gets at least one tag or a marker.
+    // Use scan_history as the source of truth for "Processed"
+    // This allows resuming scans and ensuring everything gets a history entry.
     const stmt = db.prepare(`
             SELECT id, file_path FROM photos 
-            WHERE id NOT IN (SELECT photo_id FROM photo_tags WHERE source = 'AI')
+            WHERE id NOT IN (SELECT photo_id FROM scan_history WHERE status = 'success')
             ORDER BY created_at DESC
         `);
     const photos = stmt.all();

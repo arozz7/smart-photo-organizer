@@ -70,6 +70,18 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
       timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS scan_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_id INTEGER,
+      file_path TEXT,
+      scan_ms INTEGER,
+      tag_ms INTEGER,
+      face_count INTEGER,
+      status TEXT,
+      error TEXT,
+      timestamp INTEGER
+    );
   `);
 
   // Migration for existing databases
@@ -253,10 +265,96 @@ export function getDB() {
   return db;
 }
 
+
+
+export function getUnclusteredFaces() {
+  const db = getDB();
+  try {
+    // Fetch ALL faces that are not assigned to a person, joined with photos for display info
+    // Return data needed for clustering AND display: id, descriptor, face info, photo info
+    const faces = db.prepare(`
+      SELECT f.id, f.descriptor, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
+      FROM faces f
+      JOIN photos p ON f.photo_id = p.id
+      WHERE f.person_id IS NULL 
+        AND f.descriptor IS NOT NULL
+        AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
+        AND (f.blur_score IS NULL OR f.blur_score >= 10)  -- Basic quality filter for clustering (User request)
+    `).all();
+
+    // Convert Buffer to Array for JSON IPC
+    const formatted = faces.map((f: any) => ({
+      id: f.id,
+      descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : [],
+      blur_score: f.blur_score,
+      box: JSON.parse(f.box_json),
+      file_path: f.file_path,
+      preview_cache_path: f.preview_cache_path,
+      width: f.width,
+      height: f.height
+    }));
+
+    // Filter invalid descriptors
+    const valid = formatted.filter((f: any) => f.descriptor.length === 512);
+
+    return { success: true, faces: valid };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+
 export function closeDB() {
   if (db) {
     logger.info('Closing Database connection.');
     db.close();
     db = undefined!;
+  }
+}
+
+// Add IPC manually since this file is imported by main.ts which registers handlers?
+// No, existing pattern is handlers are in db.ts or main.ts?
+// Wait, `db.ts` exports `initDB` and `getDB`. It does NOT register IPC usually unless I see `ipcMain`.
+// Ah, `db.ts` DOES contain `ipcMain` calls in the view I saw earlier? 
+// Let's check line 257 in `db.ts` from previous views.
+// In Step 112/117, I REMOVED `ipcMain` from `getUnclusteredFaces`.
+// But `main.ts` handles IPC registration mostly.
+// However, `db.ts` did have `ipcMain.handle` calls in the file I edited?
+// Let's re-verify `db.ts` imports. If it imports `ipcMain`, it might register them on load? 
+// BUT `db.ts` is imported by `main.ts`. 
+// Best practice: Export the function here, register IPC in `main.ts`.
+// BUT looking at `db.ts` lines 1-10 in step 167, it only imports `Database`, `path`, `logger`.
+// It does NOT import `ipcMain` anymore (I removed it or it wasn't there in the top 20 lines).
+// It seems `main.ts` registers handlers. 
+// Wait, `ipcMain.handle` calls WERE inside `db.ts` in Step 92/102?
+// Step 102 showed `ipcMain.handle` being added. 
+// Step 117 showed removing `ipcMain.handle` and replacing with export `getUnclusteredFaces`.
+// So currently `db.ts` is pure logic?
+// No, `main.ts` Step 118 calls `const { getUnclusteredFaces } = await import('./db');`
+// So `db.ts` should just export the function.
+
+export function getMetricsHistory(limit = 1000) {
+  const db = getDB();
+  try {
+    // Stats:
+    // 1. Recent History
+    // 2. Aggregate Stats (Average Scan Time per Face, Total Processed)
+
+    const history = db.prepare('SELECT * FROM scan_history ORDER BY timestamp DESC LIMIT ?').all(limit);
+
+    // Aggregate: Calculate avg time per photo (Total Processing Time)
+    const stats = db.prepare(`
+            SELECT 
+                COUNT(*) as total_scans,
+                SUM(CASE WHEN face_count > 0 THEN 1 ELSE 0 END) as face_scans,
+                SUM(scan_ms + COALESCE(tag_ms, 0)) as total_processing_time,
+                SUM(face_count) as total_faces
+            FROM scan_history
+            WHERE status = 'success'
+        `).get();
+
+    return { success: true, history, stats };
+  } catch (e) {
+    return { success: false, error: String(e) };
   }
 }

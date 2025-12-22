@@ -19,8 +19,10 @@
 
 ### 1. Smart Face Storage (Optimization)
 - **Goal:** Minimize database size and avoid saving unnecessary face data.
+- **Status:** Partially Implemented (v0.2.2)
+- **Implemented:**
+    - Store vectors as Binary (BLOB).
 - **Plan:**
-    - Store vectors as Binary (BLOB) instead of JSON (5x space savings).
     - **Vector Pruning:** Only save face vectors for "Unknown" faces and "Reference" examples. Discard vectors for confirmed matches (saving only the Person ID).
     - **On-Demand Crops:** Ensure no face thumbnails are written to disk; extract on-the-fly for UI.
 
@@ -38,7 +40,31 @@
     - Add a "Restoration Strength" slider (0-100%) in the Enhance Lab UI.
     - **Filter Update:** Filter by "Is Enhanced" or "Has Restored Face".
 
-### 4. Custom Models
+## Performance & Reliability (v0.3.0)
+
+### 1. High-Performance Face Clustering
+- **Goal:** Handle large libraries (10k+ faces) without UI freezes.
+- **Status:** Complete (v0.3.0)
+- **Implemented:**
+    - Moved clustering logic from Frontend (CPU-bound JS) to Backend (Python).
+    - Uses DBSCAN algorithm for efficient grouping.
+    - Optimized SQL queries to fetch only necessary descriptors.
+
+### 2. Processing Metrics & History
+- **Goal:** Provide visibility into system performance and scan history.
+- **Status:** Complete (v0.3.0)
+- **Implemented:**
+    - `scan_history` table tracks per-photo processing stats (scan time, tag time).
+    - "Recent Activity" dashboard in Queues view.
+    - "Average Time per Item" calculation based on actual historical data.
+
+### 3. AI Runtime Polish
+- **Goal:** Improve the first-run experience.
+- **Status:** Complete (v0.3.0)
+- **Implemented:**
+    - Clearer validation feedback during download & extraction.
+    - "Restart Required" prompt after runtime installation.
+    - Robust protocol handling for loading images during active scans.
 - **Goal:** Allow advanced users to bring their own upscaling models.
 - **Plan:**
     - Scan a user-accessible `models/` directory for `.pth` files.
@@ -123,6 +149,10 @@
 
 ### 15. Library Analytics
 - **Goal:** Visualize data.
+- **Status:** Partially Implemented (v0.3.0)
+- **Implemented:**
+  - **Scanning History:** Database now tracks performance metrics per photo.
+  - **Performance Dashboard:** `Queues` view now displays "Recent Activity" and detailed stats.
 - **Plan:**
     - Graphs: Photos per year/month.
     - Gear: Top Cameras/Lenses.

@@ -11,7 +11,7 @@ import { useAlert } from '../context/AlertContext'
 export default function People() {
     const navigate = useNavigate()
     const { people, faces, loadPeople, loadFaces, loading, autoNameFaces, ignoreFaces } = usePeople()
-    const { clusterFaces } = useAI()
+    const { onPhotoProcessed } = useAI()
     const { showAlert, showConfirm } = useAlert()
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
     const [showBlurryModal, setShowBlurryModal] = useState(false)
@@ -39,7 +39,12 @@ export default function People() {
             const prevFaces = prevFacesRef.current;
             const currentIds = new Set(faces.map(f => f.id));
 
-            const isSubset = faces.length < prevFaces.length && faces.every(f => prevFaces.find((p: any) => p.id === f.id));
+            // Debug Logic
+            const removedCount = prevFaces.length - faces.length;
+            const allExistInPrev = faces.every(f => prevFaces.find((p: any) => p.id === f.id));
+            const isSubset = faces.length < prevFaces.length && allExistInPrev;
+
+            console.log(`[People] Face update check: Count=${faces.length}, Prev=${prevFaces.length}, Removed=${removedCount}, AllExistInPrev=${allExistInPrev}, IsSubset=${isSubset}`);
 
             if (isSubset) {
                 console.log("[People] Faces removed. Updating clusters locally without re-running AI.");
@@ -49,10 +54,12 @@ export default function People() {
 
                 // 2. Filter Clusters
                 setClusters(prev => {
-                    return prev.map(c => ({
+                    const next = prev.map(c => ({
                         ...c,
                         faces: c.faces.filter(f => currentIds.has(f.id))
                     })).filter(c => c.faces.length > 0);
+                    // console.log(`[People] Clusters updated locally. PrevGroups=${prev.length}, NextGroups=${next.length}`);
+                    return next;
                 });
 
                 prevFacesRef.current = faces;
@@ -73,7 +80,6 @@ export default function People() {
         }
     }, [faces, activeTab])
 
-    const { onPhotoProcessed } = useAI()
 
     useEffect(() => {
         // Refresh faces when AI finishing processing, if we are on unnamed tab
@@ -101,68 +107,42 @@ export default function People() {
     }, [hasNewFaces, activeTab])
     */
 
+    // Server-side clustering
     const runClustering = async () => {
         if (isClustering) return
         setIsClustering(true)
-        console.log("Running clustering on", faces.length, "faces")
+        console.log("Fetching clustered faces from server...")
 
         try {
-            // Filter out faces that shouldn't be clustered? No, backend handles descriptors.
-            // We need to pass IDs, but better to pass nothing and let backend query the vectors 
-            // OR pass specific IDs if we only want to cluster visible ones.
-            // 1. Separate Blurry Faces First
-            // Threshold: use user setting or default 25? Let's assume 25 for now to match modal default.
-            // Ideally we get this from settings.
-            const BLUR_THRESHOLD = 25;
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('ai:getClusteredFaces');
 
-            const cleanFaces = []
-            const blurry = []
-
-            for (const f of faces) {
-                // @ts-ignore
-                if ((f.blur_score || 0) < BLUR_THRESHOLD) {
-                    blurry.push(f)
-                } else {
-                    cleanFaces.push(f)
-                }
+            if (res.error) {
+                console.error("Clustering error:", res.error);
+                return;
             }
 
-            setBlurryFaces(blurry)
+            // res structure: { clusters: [{ faces: [] }], singles: [face, ...], blurry: [face, ...] }
+            // Note: Update main.ts to return 'blurry' as well.
 
-            if (cleanFaces.length === 0) {
-                setClusters([])
-                setSingles([])
-                return
-            }
 
-            // Cluster only clean faces
-            const faceIds = cleanFaces.map(f => f.id)
-            const res = await clusterFaces(faceIds)
 
-            if (res.success && res.clusters) {
-                const clusterGroups: { id: number; faces: any[] }[] = []
-                const clusteredIds = new Set<number>()
-
-                res.clusters.forEach((clusterIds, idx) => {
-                    // Filter faces that are in this cluster
-                    const clusterFaces = faces.filter(f => clusterIds.includes(f.id))
-                    if (clusterFaces.length > 0) {
-                        clusterGroups.push({ id: idx, faces: clusterFaces })
-                        clusterIds.forEach(id => clusteredIds.add(id))
-                    }
-                })
-
-                // Identify singles
-                const singleFaces = faces.filter(f => !clusteredIds.has(f.id))
-
-                setClusters(clusterGroups)
-                setSingles(singleFaces)
+            if (res.clusters) {
+                // Map ID-based groups to match state structure
+                const formattedClusters = res.clusters.map((c: any, idx: number) => ({
+                    id: idx,
+                    faces: c.faces
+                }));
+                setClusters(formattedClusters);
             } else {
-                setSingles(cleanFaces)
+                setClusters([]);
             }
+
+            setSingles(res.singles || []);
+            setBlurryFaces(res.blurry || []);
+
         } catch (e) {
             console.error("Clustering failed", e)
-            setSingles(faces) // Fallback to all if fail
         } finally {
             setIsClustering(false)
         }
@@ -346,6 +326,15 @@ export default function People() {
                         ) : (
 
                             <div className="flex flex-col gap-8 pb-20">
+                                {!hasNewFaces && !loading && faces.length === 0 && (
+                                    <div className="flex flex-col items-center justify-center p-20 text-gray-500 border border-dashed border-gray-800 rounded-2xl">
+                                        <span className="text-6xl mb-4">✨</span>
+                                        <h3 className="text-xl font-medium mb-2">All faces organized!</h3>
+                                        <p className="max-w-md text-center">
+                                            Great job! There are no unnamed faces requiring attention right now.
+                                        </p>
+                                    </div>
+                                )}
                                 {isClustering && (
                                     <div className="px-6 py-2 text-sm text-indigo-300 animate-pulse">
                                         Organizing faces...
@@ -372,6 +361,11 @@ export default function People() {
                                                                     onConfirm: async () => {
                                                                         const ids = group.faces.map(f => f.id);
                                                                         await ignoreFaces(ids);
+
+                                                                        // Manual Local Update (Optimistic)
+                                                                        // Because these faces might not be in the global 'faces' context (limit 2000),
+                                                                        // we must remove them from the view state manually.
+                                                                        setClusters(prev => prev.filter(c => c.id !== group.id));
                                                                     }
                                                                 });
                                                             }}

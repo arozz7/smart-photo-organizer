@@ -92,6 +92,7 @@ export default function FaceGrid({ faces }: { faces: any[] }) {
                                     >
                                         <FaceThumbnail
                                             src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
+                                            fallbackSrc={`local-resource://${encodeURIComponent(face.file_path)}`}
                                             box={face.box}
                                             originalImageWidth={face.width}
                                             className="w-full h-full pointer-events-none"

@@ -1,5 +1,5 @@
 import { useAI } from '../context/AIContext'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { usePeople } from '../context/PeopleContext'
 import { useAlert } from '../context/AlertContext'
 
@@ -23,7 +23,25 @@ export default function Queues() {
     const { showAlert } = useAlert()
 
     const [recovering, setRecovering] = useState(false);
+
     const [syncing, setSyncing] = useState(false);
+    const [scanHistory, setScanHistory] = useState([]);
+
+    const reloadHistory = async () => {
+        try {
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('db:getMetricsHistory', 10);
+            if (res.success && res.history) {
+                setScanHistory(res.history);
+            }
+        } catch (e) {
+            console.error("Failed to load history", e);
+        }
+    };
+
+    useEffect(() => {
+        reloadHistory();
+    }, [scanMetrics?.lastUpdate]);
 
     const handleBatchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = parseInt(e.target.value) || 0
@@ -237,6 +255,62 @@ export default function Queues() {
                         )}
                     </div>
 
+
+                    {/* Scan Summary / Recent Activity */}
+                    <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
+                        <div className="flex justify-between items-center">
+                            <h3 className="text-lg font-medium text-white flex items-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                                </svg>
+                                Activity Summary
+                            </h3>
+                            <button
+                                onClick={() => reloadHistory()}
+                                className="text-xs text-indigo-400 hover:text-indigo-300"
+                            >
+                                Refresh
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            {/* Session Stats */}
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div className="bg-gray-900/30 p-3 rounded">
+                                    <div className="text-gray-400 text-xs">Items this Session</div>
+                                    <div className="text-white font-medium">{scanHistory.filter((i: any) => i.timestamp > Date.now() - 3600000).length} <span className="text-gray-500 text-xs">(Last 1h)</span></div>
+                                </div>
+                                <div className="bg-gray-900/30 p-3 rounded">
+                                    <div className="text-gray-400 text-xs">Last Scanned</div>
+                                    <div className="text-white font-medium truncate" title={(scanHistory as any[])[0]?.file_path}>
+                                        {scanHistory.length > 0 ? ((scanHistory as any[])[0].file_path?.split(/[/\\]/).pop() || `Photo #${(scanHistory as any[])[0].photo_id}`) : 'None'}
+                                    </div>
+                                    <div className="text-[10px] text-gray-500">
+                                        {scanHistory.length > 0 ? new Date((scanHistory as any[])[0].timestamp).toLocaleTimeString() : '-'}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Condensed Visual History (Last 5 as dots/mini-bars?) Or just compact list */}
+                            <div className="space-y-1 pt-2 border-t border-gray-700/30">
+                                <div className="text-xs text-gray-500 font-medium">Recent Items</div>
+                                {(scanHistory as any[]).slice(0, 5).map((item: any) => (
+                                    <div key={item.id} className="flex justify-between items-center text-[10px] text-gray-400">
+                                        <div className="truncate w-2/3">
+                                            {item.status === 'success' ? (
+                                                <span className="text-green-500 mr-1">✓</span>
+                                            ) : (
+                                                <span className="text-red-500 mr-1">✗</span>
+                                            )}
+                                            {item.file_path ? item.file_path.split(/[/\\]/).pop() : `Item ${item.photo_id}`}
+                                        </div>
+                                        <div>{((item.scan_ms + (item.tag_ms || 0)) / 1000).toFixed(1)}s</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
                         <div className="flex justify-between items-center">
                             <h3 className="text-lg font-medium text-white">System Status</h3>
@@ -408,6 +482,7 @@ export default function Queues() {
                 </div>
 
             </div>
+
         </div>
     )
 }
