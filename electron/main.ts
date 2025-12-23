@@ -23,6 +23,9 @@ const __dirname = path.dirname(__filename)
 const LIBRARY_PATH = getLibraryPath();
 logger.info(`[Main] Library Path: ${LIBRARY_PATH}`);
 
+// Base64 for 1x1 transparent PNG
+const TRANSPARENT_1X1_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+
 // The built directory structure
 //
 // ├─┬─┬ dist
@@ -344,12 +347,13 @@ app.whenReady().then(async () => {
 
 
   protocol.handle('local-resource', async (request) => {
+    let decodedPath = '';
     try {
       // 1. Strip protocol
       const rawPath = request.url.replace(/^local-resource:\/\//, '');
 
       // 2. Decode the path (converts %3A to :, %5C to \, %3F to ?)
-      let decodedPath = decodeURIComponent(rawPath);
+      decodedPath = decodeURIComponent(rawPath);
 
       // 3. Strip query string (now it will be a literal '?')
       const queryIndex = decodedPath.indexOf('?');
@@ -373,8 +377,22 @@ app.whenReady().then(async () => {
       return await net.fetch(pathToFileURL(decodedPath).toString());
     } catch (e: any) {
       const msg = e.message || String(e);
+
+      // Check for silent 404 request (from FaceThumbnail)
+      const isSilent404 = request.url.includes('silent_404=true');
+
       // Suppress noisy logs for expected missing files (fallback handles this)
       if (msg.includes('ERR_FILE_NOT_FOUND') || msg.includes('ENOENT')) {
+        if (isSilent404) {
+          logger.info(`[Protocol] Silent fallback served (1x1 PNG): ${decodedPath}`);
+          return new Response(TRANSPARENT_1X1_PNG, {
+            status: 200,
+            headers: {
+              'Content-Type': 'image/png',
+              'Cache-Control': 'no-cache'
+            }
+          });
+        }
         logger.info(`[Protocol] File missing (using fallback): ${request.url}`);
       } else {
         logger.error(`[Protocol] Failed to handle request: ${request.url}`, e);

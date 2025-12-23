@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 
 interface FaceThumbnailProps {
     src: string;
@@ -9,7 +9,7 @@ interface FaceThumbnailProps {
     className?: string;
 }
 
-export default function FaceThumbnail({ src, fallbackSrc, box, originalImageWidth, alt, className }: FaceThumbnailProps & { fallbackSrc?: string }) {
+const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(function FaceThumbnail({ src, fallbackSrc, box, originalImageWidth, alt, className }: FaceThumbnailProps & { fallbackSrc?: string }) {
     const [style, setStyle] = useState<React.CSSProperties>({
         opacity: 0, // Hide until loaded and positioned
         transition: 'opacity 0.2s',
@@ -79,28 +79,38 @@ export default function FaceThumbnail({ src, fallbackSrc, box, originalImageWidt
     return (
         <div className={`overflow-hidden relative ${className || ''}`}>
             <img
-                src={hasRetried ? (fallbackSrc || src) : src}
+                src={hasRetried ? (fallbackSrc || src) : `${src}?silent_404=true`}
                 alt={alt || "face"}
-                onLoad={handleLoad}
+                onLoad={(e) => {
+                    const img = e.currentTarget;
+                    if (img.naturalWidth === 1 && img.naturalHeight === 1) {
+                        if (fallbackSrc && !hasRetried) {
+                            setHasRetried(true);
+                            return;
+                        }
+                        setStyle({ ...style, opacity: 1, border: '2px solid red' });
+                        return;
+                    }
+                    handleLoad(e);
+                }}
                 onError={(_e) => {
                     if (fallbackSrc && !hasRetried) {
-                        // console.debug(`[FaceThumbnail] Primary failed, retrying fallback. Primary: ${src}`);
                         setHasRetried(true);
-                        // Trigger re-render with fallback logic
                         return;
                     }
                     console.error('[FaceThumbnail] Failed to load:', src);
                     if (hasRetried) {
-                        console.error('[FaceThumbnail] Fallback also failed (or was invalid):', fallbackSrc);
+                        console.error('[FaceThumbnail] Fallback also failed:', fallbackSrc);
                     }
-                    // Make it visible so we see it failed
                     setStyle({ ...style, opacity: 1, border: '2px solid red' });
                 }}
                 style={style}
             />
         </div>
     );
-}
+});
+
+export default FaceThumbnail;
 
 export function FaceDebugOverlay({ src, box, onClose }: { src: string, box?: { x: number, y: number, width: number, height: number }, onClose: () => void }) {
     return (

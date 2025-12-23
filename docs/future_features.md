@@ -172,3 +172,25 @@
     - Research options for agnostic AI Runtime (e.g., Docker, Python venv management on *nix).
     - ensure Electron build pipelines for Mac/Linux.
 
+
+## Integration & APIs
+
+### 18. External Agent API
+- **Goal:** Allow external agents (e.g. folder watchers, automations) to programmatically control the library.
+- **Plan:**
+    - **Local API Server:** Optional background REST server (configurable port).
+    - **Authentication:** Localhost-only binding with optional API Key.
+    - **Endpoints:**
+        - `POST /api/v1/scan`: Trigger a scan for a specific file or folder.
+        - `POST /api/v1/tag`: Apply specific tags to a photo ID.
+        - `GET /api/v1/status`: Check if the system is busy (scanning/processing).
+        - `POST /api/v1/capture`: Register a new file into the database (without full scan).
+
+### 19. Containerized Backend (Docker)
+- **Goal:** Decouple the backend to run in Docker, enabling remote agents and consistent environments.
+- **Plan:**
+    - Dockerize the Python backend (FastAPI/Flask).
+    - Expose API port for Frontend and Agents.
+    - **Performance Considerations:**
+        - **GPU Access:** Critical dependency. Requires NVIDIA Container Toolkit on host.
+        - **Filesystem:** Volume mounts must be optimized for random read access to large photo libraries.
