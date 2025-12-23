@@ -10,7 +10,7 @@ var __privateAdd = (obj, member, value) => member.has(obj) ? __typeError("Cannot
 var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "write to private field"), setter ? setter.call(obj, value) : member.set(obj, value), value);
 var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "access private method"), method);
 var _validator, _encryptionKey, _options, _defaultValues, _isInMigration, _watcher, _watchFile, _debouncedChangeHandler, _Conf_instances, prepareOptions_fn, setupValidator_fn, captureSchemaDefaults_fn, applyDefaultValues_fn, configureSerialization_fn, resolvePath_fn, initializeStore_fn, runMigrations_fn;
-import electron, { app as app$1, BrowserWindow, protocol, net, ipcMain as ipcMain$1, dialog, shell as shell$1 } from "electron";
+import electron, { app as app$1, BrowserWindow, protocol, net, ipcMain as ipcMain$1, dialog, shell as shell$1, globalShortcut } from "electron";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16482,6 +16482,14 @@ async function createWindow() {
   win.on("moved", saveBounds);
   win.on("close", saveBounds);
   win.setMenu(null);
+  win.on("focus", () => {
+    globalShortcut.register("CommandOrControl+Shift+I", () => {
+      win == null ? void 0 : win.webContents.toggleDevTools();
+    });
+  });
+  win.on("blur", () => {
+    globalShortcut.unregister("CommandOrControl+Shift+I");
+  });
   win.once("ready-to-show", () => {
     win == null ? void 0 : win.show();
     if (splash) {
@@ -16491,7 +16499,6 @@ async function createWindow() {
   win.webContents.on("did-finish-load", () => {
     win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
   });
-  win.webContents.openDevTools();
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
   } else {

@@ -31,6 +31,10 @@
 ### Fixed
 - Fixed issue where "Force Deep Scan" would fail to find rotated faces even when manually triggered.
 - Fixed bounding box misplacement for rotated faces by correcting geometric inversion formulas.
+- Fixed scroll position loss on "People" page when returning from detail view (implemented robust `localStorage` backup with multi-retry restoration).
+
+### Added
+- Re-enabled Developer Tools via `Ctrl+Shift+I` global shortcut (only when window is focused).
 
 ### Risks & Assumptions
 - **Risk:** Scaling face boxes in `PhotoDetail.tsx` might be tricky due to `object-fit: contain` and varying image aspect ratios.

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePeople } from '../context/PeopleContext'
 import PersonCard from '../components/PersonCard'
@@ -172,6 +172,52 @@ export default function People() {
         }
     }, [activeTab])
 
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+    // Robust restoration with multiple retries
+    useLayoutEffect(() => {
+        if (activeTab === 'identified' && people.length > 0) {
+            const savedPosition = localStorage.getItem('peopleScrollPosition_v2') // Changed key to force fresh start
+
+            if (savedPosition && scrollContainerRef.current) {
+                const target = parseInt(savedPosition);
+
+                const restore = () => {
+                    if (scrollContainerRef.current) {
+                        // Only restore if we are not already there (approx)
+                        if (Math.abs(scrollContainerRef.current.scrollTop - target) > 5) {
+                            scrollContainerRef.current.scrollTop = target;
+                        }
+                    }
+                };
+
+                // Immediate
+                restore();
+
+                // Frame 1
+                requestAnimationFrame(() => {
+                    restore();
+                    // Frame 2
+                    requestAnimationFrame(restore);
+                });
+
+                // Fail-safe timeouts for slow rendering
+                setTimeout(restore, 50);
+                setTimeout(restore, 150);
+                setTimeout(restore, 300);
+            }
+        }
+    }, [people.length, activeTab])
+
+    const handlePersonClick = (personId: number) => {
+        // Explicitly save scroll position before navigation
+        if (scrollContainerRef.current) {
+            const scrollPos = scrollContainerRef.current.scrollTop;
+            localStorage.setItem('peopleScrollPosition_v2', scrollPos.toString())
+        }
+        navigate(`/people/${personId}`)
+    }
+
     return (
         <div className="flex flex-col h-full bg-gray-950 text-white overflow-hidden">
             {/* Header / Tabs */}
@@ -311,7 +357,10 @@ export default function People() {
             </div >
 
             {/* Content */}
-            < div className="flex-1 overflow-y-auto min-h-0" >
+            < div
+                ref={scrollContainerRef}
+                className="flex-1 overflow-y-auto min-h-0"
+            >
                 {activeTab === 'identified' ? (
                     <div className="p-6">
                         {loading && people.length === 0 ? (
@@ -332,7 +381,7 @@ export default function People() {
                                     <PersonCard
                                         key={person.id}
                                         person={person}
-                                        onClick={() => navigate(`/people/${person.id}`)}
+                                        onClick={() => handlePersonClick(person.id)}
                                     />
                                 ))}
                             </div>

@@ -1,4 +1,8 @@
-import { app, BrowserWindow, ipcMain, protocol, net, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol, net, dialog, shell, globalShortcut } from 'electron'
+
+// ... (existing code)
+
+
 import { spawn, ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url'
@@ -307,6 +311,18 @@ async function createWindow() {
   // Remove the file menu
   win.setMenu(null);
 
+  // Register DevTools shortcut on focus
+  win.on('focus', () => {
+    globalShortcut.register('CommandOrControl+Shift+I', () => {
+      win?.webContents.toggleDevTools();
+    });
+  });
+
+  // Unregister on blur to avoid capturing it globally
+  win.on('blur', () => {
+    globalShortcut.unregister('CommandOrControl+Shift+I');
+  });
+
   win.once('ready-to-show', () => {
     win?.show();
     if (splash) {
@@ -320,7 +336,7 @@ async function createWindow() {
   })
 
   // Force DevTools for debugging blank screen
-  win.webContents.openDevTools();
+  // win.webContents.openDevTools();
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
