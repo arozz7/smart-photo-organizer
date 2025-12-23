@@ -24,6 +24,10 @@ interface ScanContextType {
     clearErrors: () => Promise<void>
     loadingPhotos: boolean
     refreshPhoto: (photoId: number) => Promise<void>
+    viewingPhoto: any | null
+    viewPhoto: (photoId: number) => Promise<void>
+    setViewingPhoto: (photo: any | null) => void
+    navigateToPhoto: (direction: number) => void
 }
 
 const ScanContext = createContext<ScanContextType | undefined>(undefined)
@@ -49,6 +53,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     const [availableFolders, setAvailableFolders] = useState<any[]>([])
     const [availablePeople, setAvailablePeople] = useState<any[]>([])
     const [scanErrors, setScanErrors] = useState<any[]>([])
+    const [viewingPhoto, setViewingPhoto] = useState<any | null>(null)
     const { addToQueue } = useAI()
 
     useEffect(() => {
@@ -138,6 +143,8 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
     // Reload photos when filter changes
     useEffect(() => {
+        let didCancel = false;
+
         if (!isFilterComplete(filter)) {
             setPhotos([])
             setHasMore(false)
@@ -158,19 +165,24 @@ export function ScanProvider({ children }: { children: ReactNode }) {
                 setLoadingPhotos(true)
                 // @ts-ignore
                 const newPhotos = await window.ipcRenderer.invoke('db:getPhotos', { limit: 50, offset: 0, filter })
-                setPhotos(newPhotos)
-                setOffset(50)
-                setHasMore(newPhotos.length >= 50)
-                if (newPhotos.length > 0) {
-                    // addToQueue(newPhotos); // FIX: Do not auto-queue on load
+
+                if (!didCancel) {
+                    setPhotos(newPhotos)
+                    setOffset(50)
+                    setHasMore(newPhotos.length >= 50)
+                    if (newPhotos.length > 0) {
+                        // addToQueue(newPhotos); // FIX: Do not auto-queue on load
+                    }
                 }
             } catch (e) {
-                console.error("Filter load failed", e)
+                if (!didCancel) console.error("Filter load failed", e)
             } finally {
-                setLoadingPhotos(false)
+                if (!didCancel) setLoadingPhotos(false)
             }
         }
         initialLoad()
+
+        return () => { didCancel = true; }
     }, [filter])
 
     const setFilter = (newFilter: any) => {
@@ -179,14 +191,16 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
     const loadMorePhotos = async () => {
         if (scanning || loadingPhotos || !isFilterComplete(filter)) {
-            // console.log(`[ScanContext] loadMorePhotos skipped...`);
+            console.log(`[ScanContext] loadMorePhotos skipped: scanning=${scanning}, loading=${loadingPhotos}, filterComplete=${isFilterComplete(filter)}`);
             return
         }
 
         try {
+            console.log(`[ScanContext] Loading more photos... Offset: ${offset}`);
             setLoadingPhotos(true)
             // @ts-ignore
             const newPhotos = await window.ipcRenderer.invoke('db:getPhotos', { limit: 50, offset, filter })
+            console.log(`[ScanContext] Loaded ${newPhotos.length} photos.`);
 
             if (newPhotos.length < 50) {
                 setHasMore(false)
@@ -216,9 +230,38 @@ export function ScanProvider({ children }: { children: ReactNode }) {
                     }
                     return p;
                 }));
+
+                // Also update viewing photo if it's the same one
+                if (viewingPhoto && viewingPhoto.id === photoId) {
+                    setViewingPhoto({ ...newPhoto, _cacheBust: timestamp });
+                }
             }
         } catch (e) {
             console.error('Failed to refresh photo', e);
+        }
+    }
+
+    const viewPhoto = async (photoId: number) => {
+        try {
+            // @ts-ignore
+            const p = await window.ipcRenderer.invoke('db:getPhoto', photoId)
+            if (p) {
+                setViewingPhoto(p)
+            }
+        } catch (e) {
+            console.error('Failed to view photo', e)
+        }
+    }
+
+    const navigateToPhoto = (direction: number) => {
+        if (!viewingPhoto || photos.length === 0) return;
+
+        const index = photos.findIndex(p => p.id === viewingPhoto.id);
+        if (index !== -1) {
+            const nextIndex = index + direction;
+            if (nextIndex >= 0 && nextIndex < photos.length) {
+                setViewingPhoto(photos[nextIndex]);
+            }
         }
     }
 
@@ -266,7 +309,8 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         <ScanContext.Provider value={{
             scanning, scanCount, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter,
             availableTags, loadTags, availableFolders, loadFolders, availablePeople, loadPeople,
-            scanErrors, loadScanErrors, retryErrors, clearErrors, loadingPhotos, refreshPhoto
+            scanErrors, loadScanErrors, retryErrors, clearErrors, loadingPhotos, refreshPhoto,
+            viewingPhoto, viewPhoto, setViewingPhoto, navigateToPhoto
         }}>
             {children}
         </ScanContext.Provider>

@@ -2,7 +2,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PersonFaceItem from '../components/PersonFaceItem';
 import BlurryFacesModal from '../components/BlurryFacesModal';
+import TargetedScanModal from '../components/TargetedScanModal';
 import { useAlert } from '../context/AlertContext';
+import { useAI } from '../context/AIContext';
 
 interface Face {
     id: number;
@@ -33,6 +35,9 @@ const PersonDetail = () => {
     const [loading, setLoading] = useState(false);
     const [selectedFaces, setSelectedFaces] = useState<Set<number>>(new Set());
     const { showAlert, showConfirm } = useAlert();
+    const { addToQueue } = useAI();
+    const [isScanning, setIsScanning] = useState(false);
+    const [isScanModalOpen, setIsScanModalOpen] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -170,6 +175,33 @@ const PersonDetail = () => {
         });
     };
 
+    const handleTargetedScan = async (options: { folderPath?: string, onlyWithFaces?: boolean }) => {
+        if (!person) return;
+        setIsScanModalOpen(false);
+        setIsScanning(true);
+        try {
+            // @ts-ignore
+            const candidates = await window.ipcRenderer.invoke('db:getPhotosForTargetedScan', options);
+            if (candidates && candidates.length > 0) {
+                const photosToScan = candidates.map((p: any) => ({ ...p, scanMode: 'MACRO' }));
+                addToQueue(photosToScan);
+                showAlert({
+                    title: 'Scan Started',
+                    description: `${candidates.length} photos added to the AI queue.`
+                });
+            } else {
+                showAlert({
+                    title: 'No Photos Found',
+                    description: 'No photos match the selected criteria for a targeted scan.'
+                });
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setIsScanning(false);
+        }
+    };
+
     if (loading) return <div className="p-8 text-white">Loading...</div>;
     if (!person) return <div className="p-8 text-white">Person not found</div>;
 
@@ -206,6 +238,18 @@ const PersonDetail = () => {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
                         Cleanup Blurry
+                    </button>
+
+                    <button
+                        onClick={() => setIsScanModalOpen(true)}
+                        disabled={isScanning}
+                        className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
+                        title="Scan all photos with high accuracy to find more of this person"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        {isScanning ? 'Preparing...' : `Scan Library for ${person.name}`}
                     </button>
 
                     {selectedFaces.size > 0 && (
@@ -261,7 +305,16 @@ const PersonDetail = () => {
                 currentName={person.name}
                 onRename={handleRenamePerson}
             />
-        </div>
+
+            <TargetedScanModal
+                isOpen={isScanModalOpen}
+                onClose={() => setIsScanModalOpen(false)}
+                onStart={(options) => handleTargetedScan(options)}
+                onSuccess={loadData}
+                personName={person?.name}
+                personId={person?.id}
+            />
+        </div >
     );
 };
 

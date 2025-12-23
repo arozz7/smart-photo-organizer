@@ -1,8 +1,11 @@
 import { Outlet, NavLink } from 'react-router-dom'
 import StatusBar from './StatusBar'
 import { AIStatusIndicator } from './AIStatusIndicator'
+import { useScan } from '../context/ScanContext'
+import PhotoDetail from './PhotoDetail'
 
 export default function Layout() {
+    const { viewingPhoto, setViewingPhoto, navigateToPhoto } = useScan()
     return (
         <div className="flex h-screen bg-gray-900 text-gray-100 overflow-hidden font-sans">
             {/* Sidebar */}
@@ -80,6 +83,15 @@ export default function Layout() {
                     <Outlet />
                 </div>
                 <StatusBar />
+
+                {viewingPhoto && (
+                    <PhotoDetail
+                        photo={viewingPhoto}
+                        onClose={() => setViewingPhoto(null)}
+                        onNext={() => navigateToPhoto(1)}
+                        onPrev={() => navigateToPhoto(-1)}
+                    />
+                )}
             </main>
         </div>
     )

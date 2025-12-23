@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, protocol, net, dialog, shell } from 'elect
 import { spawn, ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url'
-import { initDB, getDB, closeDB } from './db'
+import { initDB, getDB, closeDB, recalculatePersonMean } from './db'
 import { scanDirectory } from './scanner'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -100,6 +100,39 @@ function startPythonBackend() {
             try {
               const { getDB } = await import('./db');
               const db = getDB();
+
+              // NEW: Persist analysis results (Force Scan)
+              if (message.type === 'analysis_result' && message.faces && message.faces.length > 0) {
+                const insertFace = db.prepare(`
+                    INSERT INTO faces (photo_id, person_id, descriptor, box_json, blur_score, is_reference)
+                    VALUES (?, ?, ?, ?, ?, 0)
+                 `);
+
+                const processFaces = db.transaction(() => {
+                  for (const face of message.faces) {
+                    // serialize descriptor if present
+                    let descriptorBuffer = null;
+                    if (face.descriptor && Array.isArray(face.descriptor)) {
+                      descriptorBuffer = Buffer.from(new Float32Array(face.descriptor).buffer);
+                    }
+
+                    insertFace.run(
+                      message.photoId,
+                      null, // person_id (unknown initially)
+                      descriptorBuffer,
+                      JSON.stringify(face.box),
+                      face.blurScore
+                    );
+                  }
+                });
+                processFaces();
+                logger.info(`[Main] Persisted ${message.faces.length} faces from analysis_result.`);
+              }
+
+              // associateMatchedFaces removed (not available)
+              // Just logging/persistence for now. User can name them manually or rely on future scans.
+
+              // ... (log history) ...
               // Check if history already exists for this scan? Ideally unique scan ID?
               // Just log it.
               // message: { type, photoId, faces: [], metrics: { load, scan, total }, ... }
@@ -107,14 +140,15 @@ function startPythonBackend() {
               const faceCount = message.faces ? message.faces.length : 0;
 
               db.prepare(`
-                  INSERT INTO scan_history (photo_id, file_path, scan_ms, tag_ms, face_count, status, timestamp)
-                  VALUES (?, (SELECT file_path FROM photos WHERE id = ?), ?, ?, ?, 'success', ?)
+                  INSERT INTO scan_history (photo_id, file_path, scan_ms, tag_ms, face_count, scan_mode, status, timestamp)
+                  VALUES (?, (SELECT file_path FROM photos WHERE id = ?), ?, ?, ?, ?, 'success', ?)
                 `).run(
                 message.photoId,
                 message.photoId,
                 Math.round(metrics.scan || 0),
-                Math.round(metrics.tag || 0), // tag_ms
+                Math.round(metrics.tag || 0),
                 faceCount,
+                message.scanMode || 'FAST',
                 Date.now()
               );
             } catch (e) {
@@ -505,7 +539,7 @@ app.whenReady().then(async () => {
           scanPromises.delete(requestId);
           reject('Get system status timed out');
         }
-      }, 10000);
+      }, 30000); // 30s timeout
     });
   });
 
@@ -596,6 +630,30 @@ app.whenReady().then(async () => {
     } catch (e) {
       return { success: false, error: String(e) };
     }
+  });
+
+  ipcMain.handle('db:getPhotosForTargetedScan', async (_event, options?: { folderPath?: string, onlyWithFaces?: boolean }) => {
+    const db = getDB();
+    let query = `
+      SELECT id, file_path FROM photos 
+      WHERE id NOT IN (
+        SELECT DISTINCT photo_id FROM scan_history 
+        WHERE status = 'success' AND scan_mode = 'MACRO'
+      )
+    `;
+    const params: any[] = [];
+
+    if (options?.folderPath) {
+      query += ` AND file_path LIKE ?`;
+      params.push(`${options.folderPath}%`);
+    }
+
+    if (options?.onlyWithFaces) {
+      query += ` AND id IN (SELECT DISTINCT photo_id FROM faces)`;
+    }
+
+    const rows = db.prepare(query).all(...params);
+    return rows;
   });
 
   // --- IPC Handlers: Settings / Previews ---
@@ -1008,7 +1066,7 @@ app.whenReady().then(async () => {
 
       setTimeout(() => {
         if (scanPromises.has(reqId)) { scanPromises.delete(reqId); reject('Add to index timed out'); }
-      }, 10000);
+      }, 60000); // 60s timeout
     });
   });
 
@@ -1020,7 +1078,7 @@ app.whenReady().then(async () => {
       sendToPython({ type: 'save_index', payload: { reqId } });
       setTimeout(() => {
         if (scanPromises.has(reqId)) { scanPromises.delete(reqId); reject('Save index timed out'); }
-      }, 15000);
+      }, 60000); // 60s timeout
     });
   });
 
@@ -1172,7 +1230,7 @@ app.whenReady().then(async () => {
             scanPromises.delete(requestId);
             reject('Command timed out');
           }
-        }, 30000);
+        }, 60000); // 60s timeout
       });
     } catch (e) {
       logger.error('AI Command Failed:', e);
@@ -1879,7 +1937,7 @@ app.whenReady().then(async () => {
         SELECT f.*, p.name as person_name 
         FROM faces f
         LEFT JOIN people p ON f.person_id = p.id
-        WHERE f.photo_id = ?
+        WHERE f.photo_id = ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
       `);
       const faces = stmt.all(photoId);
       return faces.map((f: any) => ({
@@ -1986,16 +2044,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:assignPerson', async (_, { faceId, personName }) => {
     const db = getDB();
 
-    // Normalize Name: Title Case (e.g. "john doe" -> "John Doe")
-    const normalizedName = personName
-      .trim()
-      .toLowerCase()
-      .replace(/\b\w/g, (c: string) => c.toUpperCase());
+    // Trim but keep case
+    const normalizedName = personName.trim();
 
     const insertPerson = db.prepare('INSERT INTO people (name) VALUES (?) ON CONFLICT(name) DO NOTHING');
-    const getPerson = db.prepare('SELECT id FROM people WHERE name = ?');
+    const getPerson = db.prepare('SELECT id FROM people WHERE name = ? COLLATE NOCASE');
     const getOldPersonId = db.prepare('SELECT person_id FROM faces WHERE id = ?');
     const updateFace = db.prepare('UPDATE faces SET person_id = ? WHERE id = ?');
+    const updatePersonName = db.prepare('UPDATE people SET name = ? WHERE id = ?');
 
     const transaction = db.transaction(() => {
       // Check old person (if any) to update their mean later
@@ -2004,6 +2060,10 @@ app.whenReady().then(async () => {
 
       insertPerson.run(normalizedName);
       const person = getPerson.get(normalizedName) as { id: number };
+
+      // Allow case correction
+      updatePersonName.run(normalizedName, person.id);
+
       updateFace.run(person.id, faceId);
 
 
@@ -2077,7 +2137,7 @@ app.whenReady().then(async () => {
       const transaction = db.transaction(() => {
         stmt.run(...faceIds);
         for (const pid of personsToUpdate) {
-          recalculatePersonMean(db, pid);
+          scheduleMeanRecalc(db, pid);
         }
       });
       transaction();
@@ -2098,7 +2158,8 @@ app.whenReady().then(async () => {
     // Actually, I should probably read the end of the file first to be safe, but I can append to the `ipcMain` block if I find a good anchor.
     // I will use the last known handler `db:deleteFaces` as anchor.
 
-    const getPerson = db.prepare('SELECT id FROM people WHERE name = ?');
+    const getPerson = db.prepare('SELECT id FROM people WHERE name = ? COLLATE NOCASE');
+    const updatePersonName = db.prepare('UPDATE people SET name = ? WHERE id = ?');
 
     // Check if we need to insert person first
     if (personName) {
@@ -2109,6 +2170,9 @@ app.whenReady().then(async () => {
     if (!person) {
       return { success: false, error: 'Target person could not be created' };
     }
+
+    // Allow case correction
+    updatePersonName.run(personName, person.id);
 
     try {
       if (!faceIds || faceIds.length === 0) return { success: true };
@@ -2124,11 +2188,11 @@ app.whenReady().then(async () => {
         updateFaces.run(person.id, ...faceIds);
 
         // Recalculate new person mean
-        recalculatePersonMean(db, person.id);
+        scheduleMeanRecalc(db, person.id);
 
         // Recalculate old people means
         for (const oldPid of oldPersonIds) {
-          recalculatePersonMean(db, oldPid);
+          scheduleMeanRecalc(db, oldPid);
         }
       });
 
@@ -2279,8 +2343,25 @@ ipcMain.handle('db:unassignFaces', async (_, faceIds: number[]) => {
   try {
     if (!faceIds || faceIds.length === 0) return { success: true };
     const placeholders = faceIds.map(() => '?').join(',');
-    const stmt = db.prepare(`UPDATE faces SET person_id = NULL WHERE id IN (${placeholders})`);
-    stmt.run(...faceIds);
+
+    // 1. Identify affected people
+    const affectedPeople = db.prepare(`SELECT DISTINCT person_id FROM faces WHERE id IN (${placeholders}) AND person_id IS NOT NULL`).all(...faceIds) as { person_id: number }[];
+    const personIds = affectedPeople.map(p => p.person_id);
+
+    logger.info(`[Main] Unassigning ${faceIds.length} faces. Affecting ${personIds.length} people: ${personIds.join(', ')}`);
+
+    // 2. Perform Update in transaction
+    const transaction = db.transaction(() => {
+      const stmt = db.prepare(`UPDATE faces SET person_id = NULL WHERE id IN (${placeholders})`);
+      stmt.run(...faceIds);
+
+      // 3. Recalculate Means
+      for (const pid of personIds) {
+        scheduleMeanRecalc(db, pid);
+      }
+    });
+
+    transaction();
     return { success: true };
   } catch (e) {
     console.error('Failed to unassign faces:', e);
@@ -2299,6 +2380,112 @@ ipcMain.handle('db:getPerson', async (_, personId: number) => {
     return null;
   }
 })
+
+ipcMain.handle('db:getPersonMeanDescriptor', async (_, personId: number) => {
+  const db = getDB();
+  try {
+    const person = db.prepare('SELECT descriptor_mean_json FROM people WHERE id = ?').get(personId) as { descriptor_mean_json: string };
+    if (person?.descriptor_mean_json) {
+      return JSON.parse(person.descriptor_mean_json);
+    }
+    return null;
+  } catch (e) {
+    console.error('Failed to get person mean descriptor:', e);
+    return null;
+  }
+});
+
+ipcMain.handle('db:getPeopleWithDescriptors', async () => {
+  const db = getDB();
+  try {
+    const rows = db.prepare('SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL').all();
+    return rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      descriptor: JSON.parse(r.descriptor_mean_json)
+    }));
+  } catch (e) {
+    console.error('Failed to get people with descriptors:', e);
+    return [];
+  }
+});
+
+ipcMain.handle('db:associateMatchedFaces', async (_, { personId, faceIds }: { personId: number, faceIds: number[] }) => {
+  const db = getDB();
+  try {
+    if (!faceIds || faceIds.length === 0) return { success: true };
+    const placeholders = faceIds.map(() => '?').join(',');
+
+    // Get old person IDs for mean recalcs
+    const getOldPersonIds = db.prepare(`SELECT DISTINCT person_id FROM faces WHERE id IN (${placeholders}) AND person_id IS NOT NULL`);
+    const oldPersonIds = getOldPersonIds.all(...faceIds).map((p: any) => p.person_id);
+
+    const updateFaces = db.prepare(`UPDATE faces SET person_id = ? WHERE id IN (${placeholders})`);
+
+    const transaction = db.transaction(() => {
+      updateFaces.run(personId, ...faceIds);
+      scheduleMeanRecalc(db, personId);
+      for (const opid of oldPersonIds) {
+        scheduleMeanRecalc(db, opid);
+      }
+    });
+    transaction();
+    return { success: true };
+  } catch (e) {
+    console.error('Failed to associate matched faces:', e);
+    return { success: false, error: e };
+  }
+});
+
+ipcMain.handle('db:associateBulkMatchedFaces', async (_, associations: { personId: number, faceId: number }[]) => {
+  const db = getDB();
+  try {
+    if (!associations || associations.length === 0) return { success: true };
+
+    const updateFace = db.prepare('UPDATE faces SET person_id = ? WHERE id = ?');
+    const getOldPersonId = db.prepare('SELECT person_id FROM faces WHERE id = ?');
+
+    const transaction = db.transaction(() => {
+      const affectedPersonIds = new Set<number>();
+      for (const { personId, faceId } of associations) {
+        const oldFace = getOldPersonId.get(faceId) as { person_id: number };
+        if (oldFace?.person_id) {
+          affectedPersonIds.add(oldFace.person_id);
+        }
+        updateFace.run(personId, faceId);
+        affectedPersonIds.add(personId);
+      }
+
+      for (const pid of affectedPersonIds) {
+        scheduleMeanRecalc(db, pid);
+      }
+    });
+
+    transaction();
+    return { success: true };
+  } catch (e) {
+    console.error('Failed bulk association:', e);
+    return { success: false, error: e };
+  }
+});
+
+ipcMain.handle('db:getFaceMetadata', async (_, faceIds: number[]) => {
+  const db = getDB();
+  try {
+    if (!faceIds || faceIds.length === 0) return [];
+    const placeholders = faceIds.map(() => '?').join(',');
+    const stmt = db.prepare(`
+        SELECT f.id, f.person_id, p.file_path 
+        FROM faces f 
+        JOIN photos p ON f.photo_id = p.id 
+        WHERE f.id IN (${placeholders})
+      `);
+    return stmt.all(...faceIds);
+  } catch (e) {
+    console.error('Failed to get face metadata:', e);
+    return [];
+  }
+});
 
 ipcMain.handle('db:getFolders', async () => {
   const { getDB } = await import('./db');
@@ -2394,51 +2581,6 @@ const scheduleMeanRecalc = (db: any, personId: number) => {
   pendingMeanRecalcs.set(personId, timeout);
 };
 
-// Helper to recalculate mean
-const recalculatePersonMean = (db: any, personId: number) => {
-  // Re-calculate mean for this person, excluding ignored faces
-  // descriptor_json column is dropped after migration, so we only use descriptor (BLOB)
-  const allDescriptors = db.prepare('SELECT descriptor FROM faces WHERE person_id = ? AND is_ignored = 0').all(personId);
-
-  if (allDescriptors.length === 0) {
-    db.prepare('UPDATE people SET descriptor_mean_json = NULL WHERE id = ?').run(personId);
-    return;
-  }
-
-  const vectors: number[][] = [];
-  for (const row of allDescriptors) {
-    if (row.descriptor) {
-      vectors.push(Array.from(new Float32Array(row.descriptor.buffer, row.descriptor.byteOffset, row.descriptor.byteLength / 4)));
-    }
-  }
-
-  if (vectors.length === 0) return;
-
-  const dim = vectors[0].length;
-  const mean = new Array(dim).fill(0);
-
-  for (const vec of vectors) {
-    for (let i = 0; i < dim; i++) {
-      mean[i] += vec[i];
-    }
-  }
-
-  let mag = 0;
-  for (let i = 0; i < dim; i++) {
-    mean[i] /= vectors.length;
-    mag += mean[i] ** 2;
-  }
-
-  // L2 Normalize
-  mag = Math.sqrt(mag);
-  if (mag > 0) {
-    for (let i = 0; i < dim; i++) {
-      mean[i] /= mag;
-    }
-  }
-
-  db.prepare('UPDATE people SET descriptor_mean_json = ? WHERE id = ?').run(JSON.stringify(mean), personId);
-};
 
 ipcMain.handle('db:removeDuplicateFaces', async () => {
   const db = getDB();

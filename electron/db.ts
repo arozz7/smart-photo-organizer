@@ -44,7 +44,7 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
 
     CREATE TABLE IF NOT EXISTS people (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT UNIQUE NOT NULL,
+      name TEXT UNIQUE NOT NULL COLLATE NOCASE,
       descriptor_mean_json TEXT
     );
 
@@ -78,10 +78,14 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
       scan_ms INTEGER,
       tag_ms INTEGER,
       face_count INTEGER,
+      scan_mode TEXT,
       status TEXT,
       error TEXT,
       timestamp INTEGER
     );
+
+    CREATE INDEX IF NOT EXISTS idx_faces_person_id ON faces(person_id);
+    CREATE INDEX IF NOT EXISTS idx_faces_photo_id ON faces(photo_id);
   `);
 
   // Migration for existing databases
@@ -105,6 +109,12 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
 
   try {
     db.exec('ALTER TABLE photos ADD COLUMN blur_score REAL');
+  } catch (e) {
+    // Column likely already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE scan_history ADD COLUMN scan_mode TEXT');
   } catch (e) {
     // Column likely already exists
   }
@@ -239,6 +249,72 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     logger.error('Smart Face Storage Migration Failed:', e);
   }
 
+  // --- MIGRATION: Case-Insensitive People Uniqueness ---
+  try {
+    const getCollate = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='people'").get();
+    if (getCollate && !getCollate.sql.includes('COLLATE NOCASE')) {
+      if (onProgress) onProgress('Upgrading People Table (Uniqueness)...');
+      logger.info('Upgrading People Table to enforce case-insensitive uniqueness...');
+
+      // 1. Find and merge duplicates in ID space
+      const allPeople = db.prepare("SELECT id, name FROM people").all();
+      const seen = new Map<string, number>(); // lowercase name -> first ID
+      const merges: Map<number, number> = new Map(); // fromId -> toId
+
+      for (const p of allPeople) {
+        const lower = p.name.trim().toLowerCase();
+        if (seen.has(lower)) {
+          merges.set(p.id, seen.get(lower)!);
+        } else {
+          seen.set(lower, p.id);
+        }
+      }
+
+      db.exec('PRAGMA foreign_keys = OFF');
+      const transaction = db.transaction(() => {
+        // 2. Update faces to point to kept person IDs
+        // Using a single UPDATE for each merge is now fast due to idx_faces_person_id
+        const updateFace = db.prepare('UPDATE faces SET person_id = ? WHERE person_id = ?');
+        for (const [fromId, toId] of merges.entries()) {
+          updateFace.run(toId, fromId);
+        }
+
+        // 3. Recreate table
+        db.exec(`
+          DROP TABLE IF EXISTS people_new;
+          CREATE TABLE people_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL COLLATE NOCASE,
+            descriptor_mean_json TEXT
+          );
+        `);
+
+        // 4. Copy data (only unique entries)
+        const keptIds = [...seen.values()];
+        const insertPerson = db.prepare('INSERT INTO people_new (id, name, descriptor_mean_json) SELECT id, name, descriptor_mean_json FROM people WHERE id = ?');
+        for (const id of keptIds) {
+          insertPerson.run(id);
+        }
+
+        // 5. Swap tables
+        db.exec('DROP TABLE people');
+        db.exec('ALTER TABLE people_new RENAME TO people');
+      });
+      transaction();
+      db.exec('PRAGMA foreign_keys = ON');
+
+      // 6. Recalculate means for people who were merged into
+      const toRecalc = [...new Set(merges.values())];
+      for (const pid of toRecalc) {
+        recalculatePersonMean(db, pid);
+      }
+
+      logger.info('People Table Upgrade: Complete.');
+    }
+  } catch (e) {
+    logger.error('Failed to migrate people table:', e);
+  }
+
   try {
     // Migration: Remove "AI Description" tag if it exists (Cleanup)
     console.log('Running migration: Cleanup "AI Description" tag...');
@@ -273,7 +349,7 @@ export function getUnclusteredFaces() {
     // Fetch ALL faces that are not assigned to a person, joined with photos for display info
     // Return data needed for clustering AND display: id, descriptor, face info, photo info
     const faces = db.prepare(`
-      SELECT f.id, f.descriptor, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
+      SELECT f.id, f.photo_id, f.descriptor, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
       FROM faces f
       JOIN photos p ON f.photo_id = p.id
       WHERE f.person_id IS NULL 
@@ -285,6 +361,7 @@ export function getUnclusteredFaces() {
     // Convert Buffer to Array for JSON IPC
     const formatted = faces.map((f: any) => ({
       id: f.id,
+      photo_id: f.photo_id,
       descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : [],
       blur_score: f.blur_score,
       box: JSON.parse(f.box_json),
@@ -358,3 +435,59 @@ export function getMetricsHistory(limit = 1000) {
     return { success: false, error: String(e) };
   }
 }
+
+/**
+ * Re-calculates the mean descriptor for a person based on all their non-ignored faces.
+ * Updates the people table with the resulting JSON array.
+ */
+export const recalculatePersonMean = (db: any, personId: number) => {
+  try {
+    console.time(`recalculatePersonMean-${personId}`);
+    const allDescriptors = db.prepare('SELECT descriptor FROM faces WHERE person_id = ? AND is_ignored = 0').all(personId);
+
+    if (allDescriptors.length === 0) {
+      db.prepare('UPDATE people SET descriptor_mean_json = NULL WHERE id = ?').run(personId);
+      return;
+    }
+
+    const vectors: number[][] = [];
+    for (const row of allDescriptors) {
+      if (row.descriptor) {
+        vectors.push(Array.from(new Float32Array(row.descriptor.buffer, row.descriptor.byteOffset, row.descriptor.byteLength / 4)));
+      }
+    }
+
+    if (vectors.length === 0) {
+      db.prepare('UPDATE people SET descriptor_mean_json = NULL WHERE id = ?').run(personId);
+      return;
+    }
+
+    const dim = vectors[0].length;
+    const mean = new Array(dim).fill(0);
+
+    for (const vec of vectors) {
+      for (let i = 0; i < dim; i++) {
+        mean[i] += vec[i];
+      }
+    }
+
+    let mag = 0;
+    for (let i = 0; i < dim; i++) {
+      mean[i] /= vectors.length;
+      mag += mean[i] ** 2;
+    }
+
+    // L2 Normalize
+    mag = Math.sqrt(mag);
+    if (mag > 0) {
+      for (let i = 0; i < dim; i++) {
+        mean[i] /= mag;
+      }
+    }
+
+    console.timeEnd(`recalculatePersonMean-${personId}`);
+    db.prepare('UPDATE people SET descriptor_mean_json = ? WHERE id = ?').run(JSON.stringify(mean), personId);
+  } catch (e) {
+    logger.error(`Failed to recalculate mean for person ${personId}:`, e);
+  }
+};

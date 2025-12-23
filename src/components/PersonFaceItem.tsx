@@ -1,5 +1,6 @@
-import { memo, useState } from 'react'
-import FaceThumbnail, { FaceDebugOverlay } from './FaceThumbnail'
+import { memo } from 'react'
+import FaceThumbnail from './FaceThumbnail'
+import { useScan } from '../context/ScanContext'
 
 interface PersonFaceItemProps {
     face: any
@@ -8,7 +9,7 @@ interface PersonFaceItemProps {
 }
 
 const PersonFaceItem = memo(({ face, isSelected, toggleSelection }: PersonFaceItemProps) => {
-    const [showDebug, setShowDebug] = useState(false);
+    const { viewPhoto } = useScan();
 
     return (
         <>
@@ -25,19 +26,6 @@ const PersonFaceItem = memo(({ face, isSelected, toggleSelection }: PersonFaceIt
                     className="w-full h-full pointer-events-none"
                 />
 
-                {/* Debug Button - Solid Red, Top Left */}
-                <button
-                    className="absolute top-2 left-2 p-1.5 bg-red-600 text-white rounded-full z-40 shadow-lg hover:bg-red-700 transition-all"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        setShowDebug(true);
-                    }}
-                    title="Debug Face Crop"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                </button>
 
                 {isSelected && (
                     <div className="absolute top-2 right-2 bg-blue-500 rounded-full p-1">
@@ -46,14 +34,21 @@ const PersonFaceItem = memo(({ face, isSelected, toggleSelection }: PersonFaceIt
                         </svg>
                     </div>
                 )}
+
+                {/* View Original Button */}
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        viewPhoto(face.photo_id);
+                    }}
+                    className="absolute bottom-2 right-2 bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-all z-40 shadow-lg"
+                    title="View Original Photo"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
+                    </svg>
+                </button>
             </div>
-            {showDebug && (
-                <FaceDebugOverlay
-                    src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
-                    box={face.box}
-                    onClose={() => setShowDebug(false)}
-                />
-            )}
         </>
     )
 })

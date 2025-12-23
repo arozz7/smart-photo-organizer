@@ -40,6 +40,7 @@ interface AIContextType {
     isModelReady: boolean;
     processingQueue: any[];
     addToQueue: (photos: any[]) => void;
+    clearQueue: () => void;
     // Event subscription for specific or all photo updates
     onPhotoProcessed: (callback: (photoId: number) => void) => () => void;
     // Queue Control
@@ -75,6 +76,7 @@ const AIContext = createContext<AIContextType>({
     isModelReady: false, // Always true now as Python is managed by Main
     processingQueue: [],
     addToQueue: () => { },
+    clearQueue: () => { },
     onPhotoProcessed: () => () => { },
     isPaused: false,
     setIsPaused: () => { },
@@ -492,6 +494,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         // 3. MACRO (320x320) -> End of line.
     };
 
+    const clearQueue = useCallback(() => {
+        setProcessingQueue([]);
+        setIsProcessing(false);
+        setCurrentBatchCount(0);
+        console.log("[AI] Queue cleared by user.");
+    }, []);
+
 
 
     const completeProcessing = (photoId: number, scanMode: string = 'FAST') => {
@@ -633,6 +642,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             isModelReady,
             processingQueue,
             addToQueue,
+            clearQueue,
             onPhotoProcessed,
             isPaused,
             setIsPaused,

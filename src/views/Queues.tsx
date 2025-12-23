@@ -14,13 +14,14 @@ export default function Queues() {
         cooldownTimeLeft,
         skipCooldown,
         addToQueue,
+        clearQueue,
         systemStatus,
         fetchSystemStatus,
         scanMetrics,
         performanceStats
     } = useAI()
     const { rebuildIndex } = usePeople()
-    const { showAlert } = useAlert()
+    const { showAlert, showConfirm } = useAlert()
 
     const [recovering, setRecovering] = useState(false);
 
@@ -115,6 +116,22 @@ export default function Queues() {
                             >
                                 {isPaused ? 'Resume' : 'Pause'}
                             </button>
+                            {processingQueue.length > 0 && (
+                                <button
+                                    onClick={() => {
+                                        showConfirm({
+                                            title: 'Clear Queue?',
+                                            description: `This will remove all ${processingQueue.length} pending items from the processing queue.`,
+                                            confirmLabel: 'Clear All',
+                                            variant: 'danger',
+                                            onConfirm: () => clearQueue()
+                                        })
+                                    }}
+                                    className="px-4 py-2 rounded font-medium transition-colors border bg-red-900/50 hover:bg-red-800 text-red-100 border-red-700"
+                                >
+                                    Clear
+                                </button>
+                            )}
                         </div>
                     </div>
 

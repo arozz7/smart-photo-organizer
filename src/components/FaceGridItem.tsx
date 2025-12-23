@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { usePeople } from '../context/PeopleContext'
-import FaceThumbnail, { FaceDebugOverlay } from './FaceThumbnail'
+import FaceThumbnail from './FaceThumbnail'
+import { useScan } from '../context/ScanContext'
 
 interface FaceGridItemProps {
     face: any
@@ -11,9 +12,9 @@ interface FaceGridItemProps {
 
 export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit }: FaceGridItemProps) {
     const { ignoreFace, people } = usePeople()
+    const { viewPhoto } = useScan()
     const [nameInput, setNameInput] = useState('')
     const [suggestions, setSuggestions] = useState<string[]>([])
-    const [showDebug, setShowDebug] = useState(false)
     const [selectedIndex, setSelectedIndex] = useState(-1)
     const inputRef = useRef<HTMLInputElement>(null)
 
@@ -118,6 +119,22 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
                         </svg>
                     </button>
                 )}
+
+                {/* View Original Button */}
+                {!isSelected && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            viewPhoto(face.photo_id);
+                        }}
+                        className="absolute bottom-1 right-1 bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-all"
+                        title="View Original Photo"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                )}
             </div>
 
             {/* Quick Name Input (Overlay) */}
@@ -201,13 +218,6 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
                         )}
                     </div>
                 </div>
-            )}
-            {showDebug && (
-                <FaceDebugOverlay
-                    src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
-                    box={face.box}
-                    onClose={() => setShowDebug(false)}
-                />
             )}
         </div>
     )

@@ -9,6 +9,7 @@ interface StoreSchema {
         faceBlurThreshold: number;
         vlmTemperature: number;
         vlmMaxTokens: number;
+        hideUnnamedFacesByDefault: boolean;
     }
     windowBounds: {
         width: number;
@@ -25,8 +26,8 @@ const store = new Store<StoreSchema>({
             faceDetectionThreshold: 0.6,
             faceBlurThreshold: 20.0,
             vlmTemperature: 0.2,
-
-            vlmMaxTokens: 100
+            vlmMaxTokens: 100,
+            hideUnnamedFacesByDefault: true
         },
         windowBounds: {
             width: 1200,

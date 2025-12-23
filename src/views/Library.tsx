@@ -3,18 +3,17 @@ import { useScan } from '../context/ScanContext'
 import { useAI } from '../context/AIContext'
 import { useAlert } from '../context/AlertContext'
 import { VirtuosoGrid } from 'react-virtuoso'
-import PhotoDetail from '../components/PhotoDetail'
+
 // import AIStatus from '../components/AIStatus'
 import ScanErrorsModal from '../components/ScanErrorsModal'
 import SettingsModal from '../components/SettingsModal'
 import { GearIcon } from '@radix-ui/react-icons'
 
 export default function Library() {
-    const { scanning, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, availableFolders, availablePeople, scanErrors, loadScanErrors } = useScan()
+    const { scanning, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, availableFolders, availablePeople, scanErrors, loadScanErrors, setViewingPhoto } = useScan()
     const { addToQueue } = useAI()
     const { showAlert, showConfirm } = useAlert()
     const [localPath, setLocalPath] = useState(scanPath || 'D:\\Photos')
-    const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null)
     const [isSelectionMode, setIsSelectionMode] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
     const [showErrors, setShowErrors] = useState(false)
@@ -420,7 +419,7 @@ export default function Library() {
                                         if (isSelectionMode) {
                                             toggleSelection(photo.id)
                                         } else {
-                                            setSelectedPhotoIndex(index)
+                                            setViewingPhoto(photo)
                                         }
                                     }}
                                 >
@@ -451,15 +450,6 @@ export default function Library() {
                 )}
             </div>
 
-            {/* Detail View Overlay */}
-            {selectedPhotoIndex !== null && photos[selectedPhotoIndex] && (
-                <PhotoDetail
-                    photo={photos[selectedPhotoIndex]}
-                    onClose={() => setSelectedPhotoIndex(null)}
-                    onNext={() => setSelectedPhotoIndex(prev => (prev === null || prev === photos.length - 1) ? prev : prev + 1)}
-                    onPrev={() => setSelectedPhotoIndex(prev => (prev === null || prev === 0) ? prev : prev - 1)}
-                />
-            )}
 
             {/* Error Modal */}
             {showErrors && (
