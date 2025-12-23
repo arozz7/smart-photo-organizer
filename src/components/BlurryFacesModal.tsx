@@ -88,12 +88,14 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
         }
     }, [calculatingBlur, open, loadFaces]);
 
-    const handleToggleSelect = (id: number) => {
-        const next = new Set(selectedIds);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        setSelectedIds(next);
-    };
+    const handleToggleSelect = useCallback((id: number) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    }, []);
 
     const handleDelete = async () => {
         if (selectedIds.size === 0) return;
@@ -125,6 +127,44 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
             }
         });
     };
+
+    const itemContent = useCallback((index: number) => {
+        const face = faces[index];
+        if (!face) return null; // Safety check
+        const isSelected = selectedIds.has(face.id);
+
+        return (
+            <div
+                key={face.id}
+                className={`relative w-full h-full rounded-md overflow-hidden cursor-pointer border-2 transition-all ${isSelected ? 'border-red-500 opacity-100 ring-2 ring-red-500/50' : 'border-transparent opacity-80 hover:opacity-100'}`}
+                onClick={() => handleToggleSelect(face.id)}
+            >
+                <FaceThumbnail
+                    src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
+                    fallbackSrc={`local-resource://${encodeURIComponent(face.file_path || '')}`}
+                    box={face.box}
+                    originalImageWidth={face.original_width}
+                    className="w-full h-full object-cover"
+                />
+
+                <div className="absolute top-0 right-0 bg-black/60 text-white text-[10px] px-1 rounded-bl backdrop-blur-sm">
+                    {face.blur_score?.toFixed(1)}
+                </div>
+
+                {face.person_name && (
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[10px] px-1 py-0.5 truncate text-center backdrop-blur-sm">
+                        {face.person_name}
+                    </div>
+                )}
+
+                {isSelected && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-red-500/30 backdrop-blur-[1px]">
+                        <TrashIcon className="w-8 h-8 text-white drop-shadow-md" />
+                    </div>
+                )}
+            </div>
+        );
+    }, [faces, selectedIds]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -225,40 +265,7 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                                         </div>
                                     )
                                 }}
-                                itemContent={(index) => {
-                                    const face = faces[index];
-                                    return (
-                                        <div
-                                            key={face.id}
-                                            className={`relative w-full h-full rounded-md overflow-hidden cursor-pointer border-2 transition-all ${selectedIds.has(face.id) ? 'border-red-500 opacity-100 ring-2 ring-red-500/50' : 'border-transparent opacity-80 hover:opacity-100'}`}
-                                            onClick={() => handleToggleSelect(face.id)}
-                                        >
-                                            <FaceThumbnail
-                                                src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
-                                                fallbackSrc={`local-resource://${encodeURIComponent(face.file_path || '')}`}
-                                                box={face.box}
-                                                originalImageWidth={face.original_width}
-                                                className="w-full h-full object-cover"
-                                            />
-
-                                            <div className="absolute top-0 right-0 bg-black/60 text-white text-[10px] px-1 rounded-bl backdrop-blur-sm">
-                                                {face.blur_score?.toFixed(1)}
-                                            </div>
-
-                                            {face.person_name && (
-                                                <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[10px] px-1 py-0.5 truncate text-center backdrop-blur-sm">
-                                                    {face.person_name}
-                                                </div>
-                                            )}
-
-                                            {selectedIds.has(face.id) && (
-                                                <div className="absolute inset-0 flex items-center justify-center bg-red-500/30 backdrop-blur-[1px]">
-                                                    <TrashIcon className="w-8 h-8 text-white drop-shadow-md" />
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                }}
+                                itemContent={itemContent}
                             />
                         )}
                     </div>

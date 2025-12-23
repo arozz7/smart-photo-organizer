@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAI } from '../context/AIContext'
 import { useScan } from '../context/ScanContext'
+import { usePeople } from '../context/PeopleContext'
 import { useAlert } from '../context/AlertContext'
 
 interface PhotoDetailProps {
@@ -15,6 +16,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
     const navigate = useNavigate()
     const { loadTags, setFilter, refreshPhoto } = useScan()
     const { onPhotoProcessed } = useAI()
+    const { assignPerson, people, loadPeople } = usePeople()
     const { showConfirm } = useAlert()
 
     const [metadata, setMetadata] = useState<any>(null)
@@ -23,7 +25,27 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
     const [tags, setTags] = useState<string[]>([])
     const [faces, setFaces] = useState<any[]>([])
     const [newTag, setNewTag] = useState('')
+    // Face Naming State
+    const [namingFaceId, setNamingFaceId] = useState<number | null>(null)
+    const [nameFilter, setNameFilter] = useState('')
+    const [showSuggestions, setShowSuggestions] = useState(false)
+
+    // Ensure people list is loaded for type-ahead
+    useEffect(() => {
+        if (people.length === 0) {
+            loadPeople();
+        }
+    }, [people.length, loadPeople]);
+
+
     const [isRotating, setIsRotating] = useState(false)
+    const [showFaceBoxes, setShowFaceBoxes] = useState(true)
+    const [showUnnamedFaces, setShowUnnamedFaces] = useState(true)
+    const [reassigningGroup, setReassigningGroup] = useState<{ id: number, name: string, faceIds: number[] } | null>(null);
+    const [reassignName, setReassignName] = useState('');
+    const [imgRect, setImgRect] = useState<{ width: number, height: number, left: number, top: number } | null>(null)
+    const imgRef = useRef<HTMLImageElement>(null)
+    const photoAreaRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         if (photo) {
@@ -117,6 +139,57 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
         }
     }
 
+    const handleUnassign = async (faceIds: number[]) => {
+        showConfirm({
+            title: 'Unassign Faces',
+            description: `Are you sure you want to remove the name association for ${faceIds.length} face(s)? They will become unnamed.`,
+            confirmLabel: 'Unassign',
+            onConfirm: async () => {
+                try {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:unassignFaces', faceIds);
+                    fetchTags();
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+        });
+    }
+
+    const handleIgnore = async (faceIds: number[]) => {
+        showConfirm({
+            title: 'Ignore Faces',
+            description: `Are you sure you want to ignore ${faceIds.length} face(s)? They will no longer appear in scan results.`,
+            confirmLabel: 'Ignore',
+            variant: 'danger',
+            onConfirm: async () => {
+                try {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:ignoreFaces', faceIds);
+                    fetchTags();
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+        });
+    }
+
+    const handleReassign = async () => {
+        if (!reassigningGroup || !reassignName.trim()) return;
+        try {
+            // @ts-ignore
+            await window.ipcRenderer.invoke('db:reassignFaces', {
+                faceIds: reassigningGroup.faceIds,
+                personName: reassignName.trim()
+            });
+            setReassigningGroup(null);
+            setReassignName('');
+            fetchTags();
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape') onClose()
@@ -124,8 +197,84 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
             if (e.key === 'ArrowLeft') onPrev()
         }
         window.addEventListener('keydown', handleKeyDown)
-        return () => window.removeEventListener('keydown', handleKeyDown)
+
+        // Handle window resize to update box positions
+        const handleResize = () => {
+            if (imgRef.current) {
+                updateImgRect(imgRef.current);
+            }
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown)
+            window.removeEventListener('resize', handleResize);
+        }
     }, [onClose, onNext, onPrev])
+
+    useEffect(() => {
+        const loadDefaultHide = async () => {
+            try {
+                // @ts-ignore
+                const settings = await window.ipcRenderer.invoke('ai:getSettings');
+                if (settings && settings.hideUnnamedFacesByDefault === true) {
+                    setShowUnnamedFaces(false);
+                }
+            } catch (e) {
+                console.error("Failed to load default hide setting:", e);
+            }
+        };
+        loadDefaultHide();
+    }, []);
+
+    useEffect(() => {
+        if (imgRef.current) {
+            updateImgRect(imgRef.current);
+        }
+    }, [visualRotation]);
+
+    const updateImgRect = (img: HTMLImageElement) => {
+        const area = photoAreaRef.current;
+        if (!area) return;
+
+        const cw = area.clientWidth;
+        const ch = area.clientHeight;
+
+        const isRotated = (visualRotation / 90) % 2 !== 0;
+        const maxW = isRotated ? ch : cw;
+        const maxH = isRotated ? cw : ch;
+
+        const iw = img.naturalWidth;
+        const ih = img.naturalHeight;
+
+        if (!iw || !ih) return;
+
+        const aspect = iw / ih;
+        const containerAspect = maxW / maxH;
+
+        let renderedW, renderedH;
+
+        if (aspect > containerAspect) {
+            renderedW = maxW;
+            renderedH = maxW / aspect;
+        } else {
+            renderedH = maxH;
+            renderedW = maxH * aspect;
+        }
+
+        setImgRect({ width: renderedW, height: renderedH, left: 0, top: 0 });
+    }
+
+    const handleImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+        updateImgRect(e.currentTarget);
+    }
+
+    const handleGoToFolder = () => {
+        const path = photo.file_path;
+        const folder = path.substring(0, Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/')));
+        setFilter({ folder });
+        onClose();
+    }
 
     if (!photo) return null
 
@@ -153,7 +302,10 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                     </svg>
                 </button>
 
-                <div className="flex-1 bg-black flex items-center justify-center overflow-hidden relative group min-w-0 min-h-0 w-full h-full">
+                <div
+                    ref={photoAreaRef}
+                    className="flex-1 bg-black flex items-center justify-center overflow-hidden relative group min-w-0 min-h-0 w-full h-full"
+                >
                     {(() => {
                         const ext = photo.file_path.split('.').pop()?.toLowerCase() || ''
                         const isWebFriendly = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)
@@ -172,12 +324,62 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                         }
 
                         return (
-                            <img
-                                src={imagePath}
-                                alt={photo.file_path.split(/[\\/]/).pop()}
-                                className="max-w-full max-h-full object-contain shadow-2xl transition-transform duration-300"
-                                style={{ transform: `rotate(${visualRotation}deg)` }}
-                            />
+                            <div
+                                className="relative transition-transform duration-300 ease-in-out"
+                                style={{
+                                    transform: `rotate(${visualRotation}deg)`,
+                                    width: imgRect ? imgRect.width : 'auto',
+                                    height: imgRect ? imgRect.height : 'auto'
+                                }}
+                            >
+                                <img
+                                    ref={imgRef}
+                                    src={imagePath}
+                                    alt={photo.file_path.split(/[\\/]/).pop()}
+                                    className="w-full h-full object-contain shadow-2xl"
+                                    onLoad={handleImgLoad}
+                                />
+                                {imgRect && (
+                                    <div
+                                        className="absolute top-0 left-0 w-full h-full pointer-events-none"
+                                    >
+                                        {faces
+                                            .filter(f => showFaceBoxes && (showUnnamedFaces || f.person_name))
+                                            .map((face) => {
+                                                const scaleX = imgRect.width / (photo.width || 1);
+                                                const scaleY = imgRect.height / (photo.height || 1);
+                                                const { x, y, width, height } = face.box;
+
+                                                return (
+                                                    <div
+                                                        key={face.id}
+                                                        onClick={(e) => {
+                                                            if (!face.person_name) {
+                                                                e.stopPropagation();
+                                                                setNamingFaceId(face.id);
+                                                                setNameFilter('');
+                                                            }
+                                                        }}
+                                                        className={`absolute border-2 ${face.person_name ? 'border-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]' : 'border-indigo-500/50 shadow-[0_0_8px_rgba(79,70,229,0.3)] cursor-pointer hover:border-white hover:bg-white/10 pointer-events-auto'} rounded-sm`}
+                                                        style={{
+                                                            left: x * scaleX,
+                                                            top: y * scaleY,
+                                                            width: width * scaleX,
+                                                            height: height * scaleY
+                                                        }}
+                                                        title={face.person_name || "Click to name"}
+                                                    >
+                                                        {face.person_name && (
+                                                            <div className="absolute -top-5 left-0 bg-purple-600 text-white text-[9px] px-1 py-0.5 rounded-t whitespace-nowrap font-bold">
+                                                                {face.person_name}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
+                                )}
+                            </div>
                         )
                     })()}
                 </div>
@@ -195,10 +397,21 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
             {/* Right Sidebar - Metadata */}
             <div className="w-80 bg-gray-900 border-l border-gray-800 p-6 flex flex-col gap-6 overflow-y-auto shrink-0">
                 <div>
-                    <h3 className="text-white font-semibold text-lg mb-1 truncate" title={photo.file_path.split('\\').pop()}>
-                        {photo.file_path.split('\\').pop()}
+                    <h3 className="text-white font-semibold text-lg mb-1 truncate" title={photo.file_path.split(/[\\/]/).pop()}>
+                        {photo.file_path.split(/[\\/]/).pop()}
                     </h3>
-                    <p className="text-gray-400 text-xs break-all">{photo.file_path}</p>
+                    <div className="flex flex-col gap-1">
+                        <p className="text-gray-400 text-xs break-all leading-relaxed">{photo.file_path}</p>
+                        <button
+                            onClick={handleGoToFolder}
+                            className="text-indigo-400 hover:text-indigo-300 text-[10px] font-bold flex items-center gap-1 mt-1 transition-colors self-start"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                            </svg>
+                            Go to Folder
+                        </button>
+                    </div>
                 </div>
 
                 {/* Enhance Button */}
@@ -342,7 +555,27 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
 
                 {/* People Section */}
                 <div className="space-y-2">
-                    <h4 className="text-gray-500 text-xs font-bold uppercase tracking-wider">People</h4>
+                    <div className="flex items-center justify-between">
+                        <h4 className="text-gray-500 text-xs font-bold uppercase tracking-wider">People</h4>
+                        <div className="flex gap-1">
+                            <button
+                                onClick={() => setShowFaceBoxes(!showFaceBoxes)}
+                                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showFaceBoxes ? 'bg-indigo-900/30 text-indigo-300 border-indigo-500/30' : 'bg-gray-800 text-gray-400 border-gray-700'}`}
+                                title={showFaceBoxes ? 'Hide all face boxes' : 'Show face boxes'}
+                            >
+                                {showFaceBoxes ? 'Boxes' : 'No Boxes'}
+                            </button>
+                            {showFaceBoxes && (
+                                <button
+                                    onClick={() => setShowUnnamedFaces(!showUnnamedFaces)}
+                                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showUnnamedFaces ? 'bg-indigo-900/30 text-indigo-300 border-indigo-500/30' : 'bg-gray-800 text-gray-400 border-gray-700'}`}
+                                    title={showUnnamedFaces ? 'Hide unnamed face boxes' : 'Show all face boxes'}
+                                >
+                                    {showUnnamedFaces ? 'Show All' : 'Named Only'}
+                                </button>
+                            )}
+                        </div>
+                    </div>
                     {faces.length === 0 ? (
                         <div className="flex items-center gap-2">
                             <p className="text-gray-500 text-sm italic">No people detected</p>
@@ -365,25 +598,102 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                         <div className="flex flex-wrap gap-2">
                             <div className="flex flex-wrap gap-2 items-center">
                                 {(() => {
-                                    const seenPeople = new Set<number>();
-                                    return faces.map((face) => {
-                                        if (face.person_name) {
-                                            if (seenPeople.has(face.person_id)) return null;
-                                            seenPeople.add(face.person_id);
-                                            return (
-                                                <button
-                                                    key={face.person_id}
-                                                    onClick={() => handlePersonClick(face.person_id)}
-                                                    className="px-2 py-1 bg-purple-900/50 text-purple-200 text-xs rounded-full border border-purple-700/50 hover:bg-purple-800/50 transition-colors flex items-center gap-1"
-                                                >
-                                                    <span className="text-xs">👤</span> {face.person_name}
-                                                </button>
-                                            );
+                                    const groups: Record<number, { id: number, name: string, faceIds: number[] }> = {};
+                                    faces.forEach(f => {
+                                        if (f.person_id) {
+                                            if (!groups[f.person_id]) {
+                                                groups[f.person_id] = { id: f.person_id, name: f.person_name, faceIds: [] };
+                                            }
+                                            groups[f.person_id].faceIds.push(f.id);
                                         }
+                                    });
+                                    const faceGroups = Object.values(groups);
+
+                                    return faceGroups.map((group) => {
+                                        const isEditing = reassigningGroup?.id === group.id;
+
                                         return (
-                                            <span key={face.id} className="px-2 py-1 bg-gray-800 text-gray-400 text-xs rounded-full border border-gray-700 flex items-center gap-1" title="Unnamed Face">
-                                                <span className="text-xs">❓</span> Unnamed
-                                            </span>
+                                            <div key={group.id} className="relative group inline-flex items-center justify-center">
+                                                {isEditing ? (
+                                                    <div className="flex items-center gap-1 bg-gray-800 p-1 rounded-full border border-indigo-500/50 relative z-10">
+                                                        <input
+                                                            autoFocus
+                                                            type="text"
+                                                            className="bg-transparent text-white text-[10px] px-2 py-0.5 outline-none w-24"
+                                                            placeholder="New name..."
+                                                            value={reassignName}
+                                                            onChange={(e) => setReassignName(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') handleReassign();
+                                                                if (e.key === 'Escape') setReassigningGroup(null);
+                                                            }}
+                                                        />
+                                                        <button
+                                                            onClick={handleReassign}
+                                                            className="text-green-400 hover:text-green-300 p-1"
+                                                            title="Save"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setReassigningGroup(null)}
+                                                            className="text-red-400 hover:text-red-300 p-1"
+                                                            title="Cancel"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <button
+                                                            onClick={() => handlePersonClick(group.id)}
+                                                            className="px-2 py-1 bg-purple-900/50 text-purple-200 text-xs rounded-full border border-purple-700/50 hover:bg-purple-800/50 transition-colors flex items-center gap-1"
+                                                        >
+                                                            <span className="text-xs">👤</span> {group.name} {group.faceIds.length > 1 && <span className="opacity-50 text-[10px]">x{group.faceIds.length}</span>}
+                                                        </button>
+
+                                                        {/* Actions on Hover */}
+                                                        <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 pb-1 z-30">
+                                                            <div className="flex items-center gap-1 bg-gray-900 border border-gray-700 p-1.5 rounded-lg shadow-xl whitespace-nowrap relative">
+                                                                <div className="absolute bottom-[-5px] left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-900 border-r border-b border-gray-700 rotate-45"></div>
+                                                                <button
+                                                                    onClick={() => { setReassigningGroup(group); setReassignName(group.name); }}
+                                                                    className="p-1 text-gray-400 hover:text-indigo-400 transition-colors"
+                                                                    title="Correct Name"
+                                                                >
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                    </svg>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleUnassign(group.faceIds)}
+                                                                    className="p-1 text-gray-400 hover:text-yellow-400 transition-colors"
+                                                                    title="Unassign (Make Unnamed)"
+                                                                >
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                                                    </svg>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleIgnore(group.faceIds)}
+                                                                    className="p-1 text-gray-400 hover:text-red-400 transition-colors"
+                                                                    title="Ignore Face"
+                                                                >
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.046m4.596-1.596A9.964 9.964 0 0112 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18" />
+                                                                    </svg>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
                                         );
                                     });
                                 })()}
@@ -475,6 +785,88 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                     </div>
                 )}
             </div>
+
+            {/* Naming Modal */}
+            {namingFaceId && (
+                <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center" onClick={() => setNamingFaceId(null)}>
+                    <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-96 border border-gray-700" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-white font-bold mb-4">Name this person</h3>
+
+                        <div className="space-y-4">
+                            <div>
+                                <div className="relative">
+                                    <input
+                                        autoFocus
+                                        type="text"
+                                        className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-indigo-500 outline-none"
+                                        placeholder="Search or enter name..."
+                                        value={nameFilter}
+                                        onChange={(e) => {
+                                            setNameFilter(e.target.value);
+                                            setShowSuggestions(true);
+                                        }}
+                                        onFocus={() => setShowSuggestions(true)}
+                                        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && nameFilter.trim()) {
+                                                assignPerson(namingFaceId, nameFilter.trim());
+                                                setNamingFaceId(null);
+                                                setTimeout(fetchTags, 500);
+                                            }
+                                            if (e.key === 'Escape') setNamingFaceId(null);
+                                        }}
+                                    />
+                                    {showSuggestions && (
+                                        <div className="absolute top-full left-0 w-full mt-1 bg-gray-900 border border-gray-700 rounded shadow-xl max-h-48 overflow-y-auto z-50">
+                                            {people
+                                                .filter(p => !nameFilter || p.name.toLowerCase().includes(nameFilter.toLowerCase()))
+                                                .slice(0, 50)
+                                                .map(person => (
+                                                    <button
+                                                        key={person.id}
+                                                        onClick={() => {
+                                                            assignPerson(namingFaceId, person.name);
+                                                            setNamingFaceId(null);
+                                                            setTimeout(fetchTags, 500);
+                                                        }}
+                                                        className="w-full text-left p-2 hover:bg-gray-800 text-gray-300 hover:text-white flex items-center gap-2 transition-colors border-b border-gray-800 last:border-0"
+                                                    >
+                                                        <div className="w-6 h-6 bg-indigo-900 rounded-full flex items-center justify-center text-[10px] shrink-0 text-white font-bold">
+                                                            {person.name[0]}
+                                                        </div>
+                                                        <span className="truncate">{person.name}</span>
+                                                    </button>
+                                                ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-gray-700">
+                                <button
+                                    onClick={() => setNamingFaceId(null)}
+                                    className="px-3 py-1 text-gray-400 hover:text-white"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (nameFilter.trim()) {
+                                            assignPerson(namingFaceId, nameFilter.trim());
+                                            setNamingFaceId(null);
+                                            setTimeout(fetchTags, 500);
+                                        }
+                                    }}
+                                    className="px-4 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                    disabled={!nameFilter.trim()}
+                                >
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     )
 }

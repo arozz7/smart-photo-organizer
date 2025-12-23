@@ -18,6 +18,7 @@ interface AISettings {
     faceBlurThreshold: number;
     vlmTemperature: number;
     vlmMaxTokens: number;
+    hideUnnamedFacesByDefault: boolean;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => {
@@ -28,7 +29,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
         faceDetectionThreshold: 0.6,
         faceBlurThreshold: 20.0,
         vlmTemperature: 0.2,
-        vlmMaxTokens: 100
+        vlmMaxTokens: 100,
+        hideUnnamedFacesByDefault: false
     });
 
     useEffect(() => {
@@ -82,7 +84,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                     faceDetectionThreshold: 0.6,
                     faceBlurThreshold: 20.0,
                     vlmTemperature: 0.2,
-                    vlmMaxTokens: 100
+                    vlmMaxTokens: 100,
+                    hideUnnamedFacesByDefault: false
                 });
             }
         });
@@ -142,6 +145,22 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                         onChange={(v) => handleChange('faceBlurThreshold', v)}
                                         tooltip="Faces below this sharpness score will be IGNORED during scanning. Use this to prevent blurry faces from cluttering your People list. Typical blurry photos are < 20."
                                     />
+
+                                    <div className="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg border border-gray-700/50">
+                                        <div className="flex flex-col gap-1">
+                                            <div className="flex items-center gap-2">
+                                                <label className="text-sm font-medium text-gray-200">Hide Unnamed Faces</label>
+                                                <InfoTooltip text="If enabled, face bounding boxes on photos will only show for people you have already named. You can still toggle this manually in the photo viewer." />
+                                            </div>
+                                            <p className="text-xs text-gray-500">Hide anonymous face crops by default in the photo detail view.</p>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            checked={settings.hideUnnamedFacesByDefault}
+                                            onChange={(e) => setSettings(prev => ({ ...prev, hideUnnamedFacesByDefault: e.target.checked }))}
+                                            className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-900"
+                                        />
+                                    </div>
                                 </div>
                             </Tabs.Content>
 

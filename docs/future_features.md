@@ -1,3 +1,31 @@
+# Future Features & Roadmap
+
+## Next Priority: UX & Identification Workflow
+- **Goal:** Improve the context and efficiency of naming people.
+
+### 1. Full Photo Context for Face Crops [COMPLETED]
+- **Plan:**
+    - Add "View Original Photo" button to all face crops (Named & Unnamed).
+    - Allow users to quickly review the source photo to confirm identification context.
+
+### 2. Targeted Person Scanning [COMPLETED]
+- **Plan:**
+    - **Per-Person:** "Scan for [Person]" button in Person Detail page.
+    - **Global:** "Scan for All Named Persons" in People view (prioritizing matching against Unnamed list).
+    - **Options:** Scan complete library, specific folders, or only existing unnamed faces.
+
+### 3. Folder Navigation from Modal [COMPLETED]
+- **Plan:**
+    - Add "Go to Folder" option in the Photo Detail modal.
+    - Automatically opens the Library view filtered to the specific folder.
+
+### 4. Declutter Photo Viewer [COMPLETED]
+- **Plan:**
+    - Option to hide "Unnamed" face tags/boxes in the photo preview.
+    - Focus only on Identified people to reduce clutter in group shots.
+
+---
+
 ## Implemented Features
 
 ### Phase 2: User Interface Polish & Responsiveness
@@ -172,3 +200,25 @@
     - Research options for agnostic AI Runtime (e.g., Docker, Python venv management on *nix).
     - ensure Electron build pipelines for Mac/Linux.
 
+
+## Integration & APIs
+
+### 18. External Agent API
+- **Goal:** Allow external agents (e.g. folder watchers, automations) to programmatically control the library.
+- **Plan:**
+    - **Local API Server:** Optional background REST server (configurable port).
+    - **Authentication:** Localhost-only binding with optional API Key.
+    - **Endpoints:**
+        - `POST /api/v1/scan`: Trigger a scan for a specific file or folder.
+        - `POST /api/v1/tag`: Apply specific tags to a photo ID.
+        - `GET /api/v1/status`: Check if the system is busy (scanning/processing).
+        - `POST /api/v1/capture`: Register a new file into the database (without full scan).
+
+### 19. Containerized Backend (Docker)
+- **Goal:** Decouple the backend to run in Docker, enabling remote agents and consistent environments.
+- **Plan:**
+    - Dockerize the Python backend (FastAPI/Flask).
+    - Expose API port for Frontend and Agents.
+    - **Performance Considerations:**
+        - **GPU Access:** Critical dependency. Requires NVIDIA Container Toolkit on host.
+        - **Filesystem:** Volume mounts must be optimized for random read access to large photo libraries.

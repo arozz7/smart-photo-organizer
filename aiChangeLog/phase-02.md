@@ -48,3 +48,11 @@
 - [x] Performance: Client-Side Clustering Updates
 - [x] Fix Linting Errors & Code Quality
 - [x] Release Preparation & Version Bump (v0.3.0)
+
+## Roadmap Updates (Future Work)
+- **Files Modified**: `docs/future_features.md`
+- **Behavior Changes**: Added four new high-priority UX and identification features to the top of the roadmap:
+    - **Full Photo Context for Face Crops**: Button to view source photo from face thumbnails.
+    - **Targeted Person Scanning**: "Scan for [Person]" (localized) and "Scan for all Named Persons" (global, optimized vs Unnamed list).
+    - **Folder Navigation from Modal**: Directly jump to folder in Library from photo detail.
+    - **Hide Unnamed Tags**: Toggle to declutter photo viewer by hiding unnamed boxes.

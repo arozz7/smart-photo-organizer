@@ -859,8 +859,9 @@ def handle_command(command):
                 target_size = (640, 640)
                 det_thresh = 0.4
             elif scan_mode == 'MACRO':
-                target_size = (320, 320)
-                det_thresh = 0.4
+                # "Deep Scan" - High Res + Low Threshold + TTA
+                target_size = (1280, 1280) 
+                det_thresh = 0.25
                 
             init_insightface(providers=CURRENT_PROVIDERS, allowed_modules=ALLOWED_MODULES, det_size=target_size, det_thresh=det_thresh)
             
@@ -910,8 +911,143 @@ def handle_command(command):
         except Exception as e:
             logger.error(f"Analysis (Scan) Error: {e}")
             # We continue to tagging even if scan fails? No, usually return error.
-            # But let's verify if we want partial results.
-            # For now, log and keep empty faces.
+
+        # Test Time Augmentation (TTA) - Rotation Fallback
+        # Force TTA if MACRO mode is requested, even if we found faces (to catch rotated ones missed by upright scan)
+        if scan_mode == 'MACRO':
+            logger.info("[TTA] MACRO mode: Initiating Rotation Augmentation (TTA)...")
+            
+            # Keep original results
+            # We need to de-duplicate later.
+            
+            for rot_angle in [90, 180, 270]:
+                try:
+                    logger.info(f"[TTA] Trying rotation {rot_angle}...")
+                    rotated_img = None
+                    
+                    # Rotate Image
+                    if rot_angle == 90:
+                        rotated_img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+                    elif rot_angle == 180:
+                        rotated_img = cv2.rotate(img, cv2.ROTATE_180)
+                    elif rot_angle == 270:
+                        rotated_img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                    else:
+                        continue
+
+                    # Run Detection
+                    init_insightface(providers=CURRENT_PROVIDERS, allowed_modules=ALLOWED_MODULES, det_size=target_size, det_thresh=det_thresh) # Re-init params
+                    r_faces = app.get(rotated_img)
+                    logger.info(f"[TTA] Rotation {rot_angle}: Found {len(r_faces)} faces")
+
+                    if len(r_faces) > 0:
+                        # Transform Coordinates Back
+                        orig_h, orig_w = img.shape[:2]
+                        rot_h, rot_w = rotated_img.shape[:2]
+
+                        for face in r_faces:
+                            bbox = face.bbox.astype(int).tolist()
+                            rx1, ry1, rx2, ry2 = bbox
+                            
+                            # Transformation Logic
+                            nx1, ny1, nx2, ny2 = 0, 0, 0, 0
+                            
+                            if rot_angle == 90:
+                                # 90 CW (OpenCV ROTATE_90_CLOCKWISE)
+                                # Inverse: rx, ry are in Rotated Frame (W x H) -> Orig (H x W)
+                                # x_orig = ry
+                                # y_orig = orig_h - rx
+                                pts = [(rx1, ry1), (rx2, ry2), (rx1, ry2), (rx2, ry1)]
+                                orig_pts = []
+                                for px, py in pts:
+                                    ox = py
+                                    oy = orig_h - px
+                                    orig_pts.append((ox, oy))
+                                    
+                            elif rot_angle == 180:
+                                # 180 Inverse
+                                pts = [(rx1, ry1), (rx2, ry2)]
+                                orig_pts = []
+                                for px, py in pts:
+                                    ox = orig_w - px
+                                    oy = orig_h - py
+                                    orig_pts.append((ox, oy))
+
+                            elif rot_angle == 270:
+                                # 270 (OpenCV ROTATE_90_COUNTERCLOCKWISE)
+                                # Inverse:
+                                # x_orig = orig_w - ry
+                                # y_orig = rx
+                                pts = [(rx1, ry1), (rx2, ry2), (rx1, ry2), (rx2, ry1)]
+                                orig_pts = []
+                                for px, py in pts:
+                                    ox = orig_w - py
+                                    oy = px
+                                    orig_pts.append((ox, oy))
+                            
+                            # Bounding Box from Points
+                            oxs = [p[0] for p in orig_pts]
+                            oys = [p[1] for p in orig_pts]
+                            nx1, nx2 = min(oxs), max(oxs)
+                            ny1, ny2 = min(oys), max(oys)
+                            
+                            # Clamp
+                            nx1, nx2 = max(0, nx1), min(orig_w, nx2)
+                            ny1, ny2 = max(0, ny1), min(orig_h, ny2)
+
+                            # Process Found Face
+                            # Smart Crop on Original Image using new Box
+                            expanded = smart_crop_landmarks([nx1, ny1, nx2, ny2], None, orig_w, orig_h)
+                            
+                            # Calculate Blur on Original Crop
+                            face_crop = img[int(ny1):int(ny2), int(nx1):int(nx2)]
+                            f_blur = estimate_blur(face_crop, target_size=112)
+                            
+                            # APPEND TO RESULTS
+                            scan_results.append({
+                                "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
+                                "descriptor": face.embedding.tolist() if hasattr(face, 'embedding') else [],
+                                "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
+                                "blurScore": float(f_blur),
+                                "rotation_fix": rot_angle
+                            })
+
+                except Exception as e:
+                    logger.error(f"[TTA] Rotation {rot_angle} failed: {e}")
+        
+        # De-Duplicate (NMS - IoU Check)
+        if len(scan_results) > 1:
+            unique_faces = []
+            # Sort by score desc
+            scan_results.sort(key=lambda x: x['score'], reverse=True)
+            
+            for f in scan_results:
+                box_a = f['box']
+                is_dup = False
+                for existing in unique_faces:
+                    box_b = existing['box']
+                    
+                    # IoU Calculation
+                    x1 = max(box_a['x'], box_b['x'])
+                    y1 = max(box_a['y'], box_b['y'])
+                    x2 = min(box_a['x'] + box_a['width'], box_b['x'] + box_b['width'])
+                    y2 = min(box_a['y'] + box_a['height'], box_b['y'] + box_b['height'])
+                    
+                    inter_area = max(0, x2 - x1) * max(0, y2 - y1)
+                    area_a = box_a['width'] * box_a['height']
+                    area_b = box_b['width'] * box_b['height']
+                    
+                    iou = inter_area / float(area_a + area_b - inter_area)
+                    
+                    if iou > 0.5: # 50% Overlap
+                        is_dup = True
+                        break
+                
+                if not is_dup:
+                    unique_faces.append(f)
+            
+            scan_results = unique_faces
+            logger.info(f"[TTA] Final Unique Faces after NMS: {len(scan_results)}")
         
         metrics['scan'] = (time.time() - t_scan_start) * 1000
         
