@@ -730,6 +730,17 @@ app.whenReady().then(async () => {
     return rows;
   });
 
+  ipcMain.handle('db:autoAssignFaces', async (_event, { faceIds, threshold }) => {
+    const { autoAssignFaces } = await import('./db');
+    logger.info(`[Main] db:autoAssignFaces called with ${faceIds?.length} faces.`);
+    try {
+      return await autoAssignFaces(faceIds, threshold);
+    } catch (e) {
+      logger.error(`[Main] db:autoAssignFaces error:`, e);
+      throw e;
+    }
+  });
+
   // --- IPC Handlers: Settings / Previews ---
   ipcMain.handle('settings:getPreviewStats', async () => {
     try {

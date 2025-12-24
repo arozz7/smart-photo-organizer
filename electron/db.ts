@@ -491,3 +491,100 @@ export const recalculatePersonMean = (db: any, personId: number) => {
     logger.error(`Failed to recalculate mean for person ${personId}:`, e);
   }
 };
+
+export function autoAssignFaces(faceIds: number[], threshold = 0.65) {
+  const db = getDB();
+  try {
+    // 1. Get all people with computed means
+    const people = db.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
+    logger.info(`[AutoAssign] Found ${people.length} people with mean descriptors.`);
+    if (people.length === 0) {
+      return { success: true, count: 0, assigned: [] };
+    }
+
+    // Parse means into arrays
+    const candidates = people.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      mean: JSON.parse(p.descriptor_mean_json)
+    }));
+
+    // 2. Get descriptors for target faces
+    let faces;
+    if (faceIds && faceIds.length > 0) {
+      const placeholders = faceIds.map(() => '?').join(',');
+      faces = db.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND descriptor IS NOT NULL`).all(...faceIds);
+      logger.info(`[AutoAssign] Found ${faces.length} valid descriptors out of ${faceIds.length} requested IDs.`);
+    } else {
+      // If no IDs provided, scan ALL unnamed faces
+      logger.info(`[AutoAssign] No IDs provided. Scanning ALL unassigned faces...`);
+      faces = db.prepare("SELECT id, descriptor FROM faces WHERE person_id IS NULL AND descriptor IS NOT NULL").all();
+      logger.info(`[AutoAssign] Found ${faces.length} unassigned faces to check.`);
+    }
+
+    let assignedCount = 0;
+    const assigned: any[] = [];
+
+    const updateFace = db.prepare("UPDATE faces SET person_id = ? WHERE id = ?");
+
+    // 3. Compare
+    const transaction = db.transaction(() => {
+      for (const face of faces) {
+        if (!face.descriptor) continue;
+
+        // Convert blob to array
+        const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+
+        // L2 NORMALIZE descriptor
+        let mag = 0;
+        for (const val of rawDescriptor) mag += val * val;
+        mag = Math.sqrt(mag);
+
+        const descriptor = mag > 0 ? rawDescriptor.map(v => v / mag) : rawDescriptor;
+
+        let bestMatch = null;
+        let minDist = Infinity;
+
+        // Linear scan (fast enough for < 1000 people)
+        for (const person of candidates) {
+          // Euclidean distance calculation (assuming normalized vectors)
+          // dist = sqrt(sum((a-b)^2))
+          let sumSq = 0;
+          for (let i = 0; i < descriptor.length; i++) {
+            const diff = descriptor[i] - person.mean[i];
+            sumSq += diff * diff;
+          }
+          const dist = Math.sqrt(sumSq);
+
+          if (dist < minDist) {
+            minDist = dist;
+            bestMatch = person;
+          }
+        }
+
+        if (bestMatch && minDist < threshold) {
+          updateFace.run(bestMatch.id, face.id);
+          assignedCount++;
+          assigned.push({ faceId: face.id, personId: bestMatch.id, personName: bestMatch.name, distance: minDist });
+        }
+      }
+    });
+
+    transaction();
+
+    // Recalculate means for affected people (optional/async?)
+    // This makes it slow if we assign to many different people. 
+    // Maybe skip auto-recalc for now and let user trigger it or do it lazily?
+    // OR just recalc the unique set of updated people.
+    const uniquePeople = new Set(assigned.map(a => a.personId));
+    for (const pid of uniquePeople) {
+      recalculatePersonMean(db, pid);
+    }
+
+    return { success: true, count: assignedCount, assigned };
+
+  } catch (e) {
+    logger.error("Auto-Assign failed:", e);
+    return { success: false, error: String(e) };
+  }
+}

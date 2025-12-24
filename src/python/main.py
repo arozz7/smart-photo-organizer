@@ -1575,6 +1575,11 @@ def handle_command(command):
                 
                 X = np.array(descriptors, dtype=np.float32)
                 
+                # NORMALIZE VECTORS (Critical for Euclidean to match Cosine)
+                norm = np.linalg.norm(X, axis=1, keepdims=True)
+                norm[norm == 0] = 1e-10
+                X = X / norm
+
                 # DBSCAN
                 # eps=0.45 -> 0.55 (Looser threshold to group more faces)
                 # min_samples=3 -> 2 (Allow smaller groups to form)
