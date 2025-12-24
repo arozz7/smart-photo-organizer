@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, protocol, net, dialog, shell, globalShortcut } from 'electron'
+import sharp from 'sharp';
 
 // ... (existing code)
 
@@ -162,7 +163,7 @@ function startPythonBackend() {
         }
 
         if (message.type === 'cluster_result') {
-          console.log(`[Main] Received Cluster Result for ${message.photoId}. Clusters: ${message.clusters?.length}`);
+          console.log(`[Main] Received Cluster Result for ${message.photoId || 'Batch'}. Clusters: ${message.clusters?.length}`);
         }
 
 
@@ -399,30 +400,87 @@ app.whenReady().then(async () => {
   protocol.handle('local-resource', async (request) => {
     let decodedPath = '';
     try {
+      // Parse query params safely
+      const urlObj = new URL(request.url);
+
       // 1. Strip protocol
       const rawPath = request.url.replace(/^local-resource:\/\//, '');
 
-      // 2. Decode the path (converts %3A to :, %5C to \, %3F to ?)
+      // 2. Decode the path
       decodedPath = decodeURIComponent(rawPath);
 
-      // 3. Strip query string (now it will be a literal '?')
+      // 3. Strip query string
       const queryIndex = decodedPath.indexOf('?');
       if (queryIndex !== -1) {
         decodedPath = decodedPath.substring(0, queryIndex);
       }
 
-      // 4. Strip trailing slash (Windows cleanup)
+      // 4. Strip trailing slash
       if (decodedPath.endsWith('/') || decodedPath.endsWith('\\')) {
         decodedPath = decodedPath.slice(0, -1);
       }
+      // Resize/Crop if requested
+      const width = urlObj.searchParams.get('width') ? parseInt(urlObj.searchParams.get('width')!) : null;
+      const boxParam = urlObj.searchParams.get('box');
 
-      // 5. Check if file exists (Optional safety for debugging)
-      // try {
-      //   await fs.access(decodedPath);
-      // } catch {
-      //   console.warn(`[Protocol] File not found: ${decodedPath}`);
-      //   return new Response('Not Found', { status: 404 });
-      // }
+      if ((width && width > 0) || boxParam) {
+        try {
+          // Initialize pipeline with AUTO-ROTATION to match Python/EXIF coordinates
+          let pipeline = sharp(decodedPath).rotate();
+
+          // 1. Crop if box provided (x,y,w,h)
+          if (boxParam) {
+            const [x, y, w, h] = boxParam.split(',').map(Number);
+            if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
+              // Validate/Clamp against image dimensions to prevent "extract_area" errors
+              const metadata = await pipeline.metadata();
+              if (metadata.width && metadata.height) {
+                const safeX = Math.max(0, Math.min(Math.round(x), metadata.width - 1));
+                const safeY = Math.max(0, Math.min(Math.round(y), metadata.height - 1));
+                const safeW = Math.max(1, Math.min(Math.round(w), metadata.width - safeX));
+                const safeH = Math.max(1, Math.min(Math.round(h), metadata.height - safeY));
+
+                pipeline = pipeline.extract({ left: safeX, top: safeY, width: safeW, height: safeH });
+              }
+            }
+          }
+
+          // 2. Resize if width provided
+          if (width && width > 0) {
+            pipeline = pipeline.resize(width, null, { fit: 'inside', withoutEnlargement: true });
+          }
+
+          const buffer = await pipeline.toBuffer();
+
+          return new Response(buffer as any, {
+            headers: {
+              'Content-Type': 'image/jpeg',
+              'Cache-Control': 'max-age=3600'
+            }
+          });
+        } catch (resizeErr: any) {
+          logger.warn(`[Protocol] Transform failed for ${decodedPath}: ${resizeErr.message}`);
+
+          // FALLBACK: If crop fails (e.g. bad box), try to just resize the full image
+          // This prevents serving the 20MB original file which causes memory crashes.
+          if (width && width > 0) {
+            try {
+              const fallbackBuffer = await sharp(decodedPath)
+                .resize(width, null, { fit: 'inside', withoutEnlargement: true })
+                .toBuffer();
+
+              return new Response(fallbackBuffer as any, {
+                headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'max-age=3600' }
+              });
+            } catch (fbErr) {
+              logger.error(`[Protocol] Fallback resize also failed: ${fbErr}`);
+            }
+          }
+
+          // Fail safe: Do not serve full file if a specific size/crop was requested
+          return new Response('Thumbnail Generation Failed', { status: 500 });
+        }
+      }
 
       return await net.fetch(pathToFileURL(decodedPath).toString());
     } catch (e: any) {
