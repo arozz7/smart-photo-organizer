@@ -28,6 +28,23 @@ export default function People() {
 
     // Group Naming Modal
     const [namingGroup, setNamingGroup] = useState<{ faces: any[], name: string } | null>(null)
+    const [selectedGroups, setSelectedGroups] = useState<Set<number>>(new Set())
+
+    // Toggle selection
+    const toggleGroupSelection = (groupId: number) => {
+        const next = new Set(selectedGroups)
+        if (next.has(groupId)) next.delete(groupId)
+        else next.add(groupId)
+        setSelectedGroups(next)
+    }
+
+    const handleSelectAllGroups = () => {
+        if (selectedGroups.size === clusters.length) {
+            setSelectedGroups(new Set())
+        } else {
+            setSelectedGroups(new Set(clusters.map(c => c.id)))
+        }
+    }
 
 
     // Track previous faces to detect if we can just filter locally instead of re-clustering
@@ -80,6 +97,7 @@ export default function People() {
         } else {
             setClusters([])
             setSingles([])
+            setSelectedGroups(new Set())
         }
     }, [faces, activeTab])
 
@@ -160,6 +178,8 @@ export default function People() {
         if (!name || selectedIds.length === 0) return
         await autoNameFaces(selectedIds, name)
         setNamingGroup(null)
+        // If we were selecting groups, clear selection
+        setSelectedGroups(new Set())
     }
 
     useEffect(() => {
@@ -296,6 +316,12 @@ export default function People() {
                     {activeTab === 'unnamed' && faces.length > 0 && (
                         <div className="flex gap-2 flex-wrap justify-end">
                             <button
+                                onClick={handleSelectAllGroups}
+                                className="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
+                            >
+                                {selectedGroups.size === clusters.length && clusters.length > 0 ? 'Deselect Groups' : 'Select All Groups'}
+                            </button>
+                            <button
                                 onClick={() => {
                                     showConfirm({
                                         title: 'Ignore All Faces',
@@ -354,6 +380,64 @@ export default function People() {
                     )}
                 </div>
 
+                {/* Bulk Actions Bar */}
+                {selectedGroups.size > 0 && (
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 animate-in slide-in-from-bottom-5 fade-in duration-200">
+                        <span className="text-sm font-medium text-white mr-2">{selectedGroups.size} groups selected</span>
+
+                        <div className="h-4 w-px bg-gray-700 mx-2" />
+
+                        <button
+                            onClick={() => {
+                                const allFaces = clusters
+                                    .filter(c => selectedGroups.has(c.id))
+                                    .flatMap(c => c.faces);
+                                setNamingGroup({ faces: allFaces, name: '' });
+                            }}
+                            className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                        >
+                            Name All
+                        </button>
+
+                        <div className="h-4 w-px bg-gray-700 mx-2" />
+
+                        <button
+                            onClick={() => {
+                                showConfirm({
+                                    title: 'Ignore Selected Groups',
+                                    description: `Are you sure you want to ignore ${selectedGroups.size} groups?`,
+                                    confirmLabel: 'Ignore All',
+                                    variant: 'danger',
+                                    onConfirm: async () => {
+                                        const allFaceIds = clusters
+                                            .filter(c => selectedGroups.has(c.id))
+                                            .flatMap(c => c.faces.map(f => f.id));
+
+                                        await ignoreFaces(allFaceIds);
+
+                                        // Optimistic Update
+                                        setClusters(prev => prev.filter(c => !selectedGroups.has(c.id)));
+                                        setSelectedGroups(new Set());
+                                    }
+                                });
+                            }}
+                            className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors"
+                        >
+                            Ignore All
+                        </button>
+
+                        <div className="h-4 w-px bg-gray-700 mx-2" />
+
+                        <button
+                            onClick={() => setSelectedGroups(new Set())}
+                            className="p-1 hover:bg-gray-800 rounded-full text-gray-400 hover:text-white transition-colors"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                        </button>
+                    </div>
+                )}
             </div >
 
             {/* Content */}
@@ -416,7 +500,15 @@ export default function People() {
                                         {clusters.map(group => (
                                             <div key={group.id} className="relative bg-gray-900/30 border-y border-gray-800/50">
                                                 <div className="sticky top-0 z-20 flex justify-between items-center px-6 py-3 bg-gray-900/90 backdrop-blur-md border-b border-gray-800">
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="flex items-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedGroups.has(group.id)}
+                                                                onChange={() => toggleGroupSelection(group.id)}
+                                                                className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-gray-900 cursor-pointer"
+                                                            />
+                                                        </div>
                                                         <span className="text-sm font-medium text-indigo-200">Group {group.id + 1}</span>
                                                         <span className="bg-gray-800 text-gray-400 text-xs px-2 py-0.5 rounded-full">{group.faces.length} faces</span>
                                                     </div>
@@ -436,6 +528,10 @@ export default function People() {
                                                                         // Because these faces might not be in the global 'faces' context (limit 2000),
                                                                         // we must remove them from the view state manually.
                                                                         setClusters(prev => prev.filter(c => c.id !== group.id));
+                                                                        // Also remove from selection if present
+                                                                        if (selectedGroups.has(group.id)) {
+                                                                            toggleGroupSelection(group.id);
+                                                                        }
                                                                     }
                                                                 });
                                                             }}

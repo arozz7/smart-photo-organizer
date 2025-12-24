@@ -1,5 +1,13 @@
 # Future Features & Roadmap
 
+## Next Priority: Face Management & Productivity
+- **Goal:** Streamline the organization of unnamed faces.
+
+### 1. Multi-Select & Bulk Actions
+- **Plan:**
+    - **Multi-Select Groups:** Allow selecting multiple face clusters to name them all at once.
+    - **Blurry Face Assignment:** Allow assigning "Low Quality" faces to a person directly from the cleanup tool.
+
 ## Next Priority: UX & Identification Workflow
 - **Goal:** Improve the context and efficiency of naming people.
 

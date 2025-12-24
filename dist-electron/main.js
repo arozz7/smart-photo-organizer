@@ -11,6 +11,7 @@ var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "
 var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "access private method"), method);
 var _validator, _encryptionKey, _options, _defaultValues, _isInMigration, _watcher, _watchFile, _debouncedChangeHandler, _Conf_instances, prepareOptions_fn, setupValidator_fn, captureSchemaDefaults_fn, applyDefaultValues_fn, configureSerialization_fn, resolvePath_fn, initializeStore_fn, runMigrations_fn;
 import electron, { app as app$1, BrowserWindow, protocol, net, ipcMain as ipcMain$1, dialog, shell as shell$1, globalShortcut } from "electron";
+import sharp from "sharp";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,7 +20,6 @@ import path from "node:path";
 import fs$1, { promises } from "node:fs";
 import crypto, { createHash } from "node:crypto";
 import { ExifTool } from "exiftool-vendored";
-import sharp from "sharp";
 import process$1 from "node:process";
 import { promisify, isDeepStrictEqual } from "node:util";
 import assert from "node:assert";
@@ -16360,7 +16360,7 @@ function startPythonBackend() {
           }
         }
         if (message.type === "cluster_result") {
-          console.log(`[Main] Received Cluster Result for ${message.photoId}. Clusters: ${(_a = message.clusters) == null ? void 0 : _a.length}`);
+          console.log(`[Main] Received Cluster Result for ${message.photoId || "Batch"}. Clusters: ${(_a = message.clusters) == null ? void 0 : _a.length}`);
         }
         const resId = message.reqId || message.photoId || message.payload && message.payload.reqId;
         if (win && (message.type === "download_progress" || message.type === "download_result")) {
@@ -16544,6 +16544,7 @@ app$1.whenReady().then(async () => {
   protocol.handle("local-resource", async (request) => {
     let decodedPath = "";
     try {
+      const urlObj = new URL(request.url);
       const rawPath = request.url.replace(/^local-resource:\/\//, "");
       decodedPath = decodeURIComponent(rawPath);
       const queryIndex = decodedPath.indexOf("?");
@@ -16552,6 +16553,49 @@ app$1.whenReady().then(async () => {
       }
       if (decodedPath.endsWith("/") || decodedPath.endsWith("\\")) {
         decodedPath = decodedPath.slice(0, -1);
+      }
+      const width = urlObj.searchParams.get("width") ? parseInt(urlObj.searchParams.get("width")) : null;
+      const boxParam = urlObj.searchParams.get("box");
+      if (width && width > 0 || boxParam) {
+        try {
+          let pipeline = sharp(decodedPath).rotate();
+          if (boxParam) {
+            const [x, y, w, h] = boxParam.split(",").map(Number);
+            if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
+              const metadata2 = await pipeline.metadata();
+              if (metadata2.width && metadata2.height) {
+                const safeX = Math.max(0, Math.min(Math.round(x), metadata2.width - 1));
+                const safeY = Math.max(0, Math.min(Math.round(y), metadata2.height - 1));
+                const safeW = Math.max(1, Math.min(Math.round(w), metadata2.width - safeX));
+                const safeH = Math.max(1, Math.min(Math.round(h), metadata2.height - safeY));
+                pipeline = pipeline.extract({ left: safeX, top: safeY, width: safeW, height: safeH });
+              }
+            }
+          }
+          if (width && width > 0) {
+            pipeline = pipeline.resize(width, null, { fit: "inside", withoutEnlargement: true });
+          }
+          const buffer = await pipeline.toBuffer();
+          return new Response(buffer, {
+            headers: {
+              "Content-Type": "image/jpeg",
+              "Cache-Control": "max-age=3600"
+            }
+          });
+        } catch (resizeErr) {
+          logger.warn(`[Protocol] Transform failed for ${decodedPath}: ${resizeErr.message}`);
+          if (width && width > 0) {
+            try {
+              const fallbackBuffer = await sharp(decodedPath).resize(width, null, { fit: "inside", withoutEnlargement: true }).toBuffer();
+              return new Response(fallbackBuffer, {
+                headers: { "Content-Type": "image/jpeg", "Cache-Control": "max-age=3600" }
+              });
+            } catch (fbErr) {
+              logger.error(`[Protocol] Fallback resize also failed: ${fbErr}`);
+            }
+          }
+          return new Response("Thumbnail Generation Failed", { status: 500 });
+        }
       }
       return await net.fetch(pathToFileURL(decodedPath).toString());
     } catch (e) {
