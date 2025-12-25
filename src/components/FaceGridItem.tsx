@@ -8,9 +8,11 @@ interface FaceGridItemProps {
     isSelected: boolean
     onSelect: (faceId: number | null) => void
     onNameSubmit: (faceId: number, name: string) => Promise<void>
+    isMultiSelected?: boolean
+    onToggleMultiSelect?: (faceId: number) => void
 }
 
-export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit }: FaceGridItemProps) {
+export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit, isMultiSelected, onToggleMultiSelect }: FaceGridItemProps) {
     const { ignoreFace, people } = usePeople()
     const { viewPhoto } = useScan()
     const [nameInput, setNameInput] = useState('')
@@ -82,7 +84,7 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
     return (
         <div className="relative group">
             <div
-                className={`aspect-square bg-gray-800 rounded-lg overflow-hidden relative cursor-pointer ring-offset-2 ring-offset-black transition-all ${isSelected ? 'ring-2 ring-indigo-500' : 'hover:ring-2 hover:ring-indigo-500'}`}
+                className={`aspect-square bg-gray-800 rounded-lg overflow-hidden relative cursor-pointer ring-offset-2 ring-offset-black transition-all ${isSelected || isMultiSelected ? 'ring-2 ring-indigo-500' : 'hover:ring-2 hover:ring-indigo-500'}`}
                 onClick={() => onSelect(isSelected ? null : face.id)}
             >
                 <FaceThumbnail
@@ -104,8 +106,28 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit 
                 />
                 */}
 
+                {/* Multi-Select Checkbox */}
+                {onToggleMultiSelect && (
+                    <div
+                        className={`absolute top-2 left-2 z-10 transition-opacity ${isMultiSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleMultiSelect(face.id);
+                        }}
+                    >
+                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isMultiSelected ? 'bg-indigo-500 border-indigo-500' : 'bg-black/40 border-white/70 hover:bg-black/60'
+                            }`}>
+                            {isMultiSelected && (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Ignore Button */}
-                {!isSelected && (
+                {!isSelected && !isMultiSelected && (
                     <button
                         onClick={(e) => {
                             e.stopPropagation();

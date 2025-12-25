@@ -1,58 +1,31 @@
-# Phase 2: UI Polish & Configuration
+# Phase 02: Improved Face Management
 
-## Status: Released (v0.3.0) 🚀
+### 2025-12-23 - Multi-Select for Unnamed Faces
+- **File Modified**: `src/views/People.tsx`
+- **Change**: Added checkboxes to face clusters and a floating action bar for bulk operations (Name, Ignore).
+- **Reason**: Naming one group at a time was tedious for large libraries.
+- **Impact**: Users can now merge multiple duplicate groups into one person in a single action.
 
-## Diff Narrative
+### 2025-12-23 - Blurry Face Assignment
+- **File Modified**: `src/components/BlurryFacesModal.tsx`
+- **Change**: Added "Assign to Person" input in the footer.
+- **Reason**: Users often found recognizable faces in the "Blurry" list but had no way to save them.
+- **Impact**: Improved recall for rare photos where the only face might be slightly blurry.
 
-### Files Modified
-- `src/components/SettingsModal.tsx`: Refactoring to use Tabs and Grid layout.
-- `electron/main.ts`: 
-    - Adding window bounds persistence.
-    - Implementing Smart Face Storage (Top-100 Reference Pruning).
-    - Adding Debounced Mean Recalculation for performance.
-    - Adding Splash Screen Progress handler.
-- `src/views/Settings.tsx`: Improving responsive layout.
-- `electron/db.ts`: 
-    - Schema update (faces `descriptor` BLOB, drop `descriptor_json`).
-    - Async/Chunked `initDB` migration.
-- `src/views/People.tsx`: Client-side clustering updates for instant UI response.
-- `public/splash.html`: Added status text for migration progress.
-- `scripts/bump-version.ps1`: Added release automation script.
-- `package.json`: Version bumped to 0.3.0.
+### 2025-12-23 - Blurry Faces Improvements
+- **File Modified**: `src/components/BlurryFacesModal.tsx`
+- **Change**: Added "Select All" checkbox and optimized grid rendering (reduced overscan).
+- **Reason**: User requested better bulk controls; logs indicated tile memory limits were exceeded due to aggressive pre-loading.
+- **Impact**: Better performance when scrolling through hundreds of blurry faces and faster bulk selection.
 
-### Behavior Changes
-- Application window now remembers its size and position across restarts.
-- "Configure AI Models" modal is organized into tabs (General, Tagging, Maintenance).
-- Settings screens are more responsive on smaller displays.
-- **Smart Face Storage**: Vectors are now BLOBs. Only top 100 reference vectors per person are kept, significantly reducing DB size.
-- **Improved Startup**: Splash screen now shows real-time progress during database migrations.
-- **Performance**:
-    - Scanning no longer blocks the main thread (Debounced calculations).
-    - Naming faces no longer causes "Organizing Faces" lag (Client-side optimization).
+### 2025-12-23 - View Original Popup for Blurry Faces
+- **File Modified**: `src/components/BlurryFacesModal.tsx`
+- **Change**: Added "View Original" button that triggers an in-modal image popup (3/4 size).
+- **Reason**: Users found navigating away to the main photo view disruptive to the cleanup workflow.
+- **Impact**: Streamlined review process for verifying blurry faces without losing context.
 
-### Tests Added
-- Manual verification of window persistence.
-- Manual verification of settings layout on resize.
-- Verified successful DB migration of 2000+ faces.
-- Verified scanning performance and UI responsiveness.
-- Passed Linting checks (Fixed 30+ lint errors).
-
-## Completed Tasks
-- [x] Implement Window State Persistence (electron-store)
-- [x] Refactor SettingsModal to use Tabbed Layout
-- [x] Update Settings.tsx to use Responsive Grid
-- [x] Verify TypeScript Build (Passed)
-- [x] Smart Face Storage (BLOB Migration, Pruning)
-- [x] Splash Screen Migration Progress
-- [x] Performance: Debounced Mean Recalculation
-- [x] Performance: Client-Side Clustering Updates
-- [x] Fix Linting Errors & Code Quality
-- [x] Release Preparation & Version Bump (v0.3.0)
-
-## Roadmap Updates (Future Work)
-- **Files Modified**: `docs/future_features.md`
-- **Behavior Changes**: Added four new high-priority UX and identification features to the top of the roadmap:
-    - **Full Photo Context for Face Crops**: Button to view source photo from face thumbnails.
-    - **Targeted Person Scanning**: "Scan for [Person]" (localized) and "Scan for all Named Persons" (global, optimized vs Unnamed list).
-    - **Folder Navigation from Modal**: Directly jump to folder in Library from photo detail.
-    - **Hide Unnamed Tags**: Toggle to declutter photo viewer by hiding unnamed boxes.
+### 2025-12-23 - Memory Optimization (Server-Side Cropping)
+- **File Modified**: `electron/main.ts`, `src/components/BlurryFacesModal.tsx`
+- **Change**: Implemented on-the-fly server-side cropping for faces missing pre-generated thumbnails.
+- **Reason**: Application was crashing ("Tile Memory Exceeded") when loading hundreds of 20MB+ images in the Blurry Faces modal.
+- **Impact**: Eliminated memory crashes and significantly improved thumbnail load times for raw/high-res photos.

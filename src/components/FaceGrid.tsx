@@ -3,7 +3,13 @@ import { usePeople } from '../context/PeopleContext'
 import FaceGridItem from './FaceGridItem'
 import FaceThumbnail from './FaceThumbnail'
 
-export default function FaceGrid({ faces }: { faces: any[] }) {
+interface FaceGridProps {
+    faces: any[]
+    selectedIds?: Set<number>
+    onToggleSelection?: (id: number) => void
+}
+
+export default function FaceGrid({ faces, selectedIds, onToggleSelection }: FaceGridProps) {
     const { assignPerson, autoNameFaces } = usePeople()
     const [selectedFace, setSelectedFace] = useState<number | null>(null)
 
@@ -65,6 +71,8 @@ export default function FaceGrid({ faces }: { faces: any[] }) {
                         isSelected={selectedFace === face.id}
                         onSelect={setSelectedFace}
                         onNameSubmit={handleNameSubmit}
+                        isMultiSelected={selectedIds?.has(face.id)}
+                        onToggleMultiSelect={onToggleSelection}
                     />
                 ))}
             </div>

@@ -1,4 +1,9 @@
-import { app, BrowserWindow, ipcMain, protocol, net, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol, net, dialog, shell, globalShortcut } from 'electron'
+import sharp from 'sharp';
+
+// ... (existing code)
+
+
 import { spawn, ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url'
@@ -158,7 +163,7 @@ function startPythonBackend() {
         }
 
         if (message.type === 'cluster_result') {
-          console.log(`[Main] Received Cluster Result for ${message.photoId}. Clusters: ${message.clusters?.length}`);
+          console.log(`[Main] Received Cluster Result for ${message.photoId || 'Batch'}. Clusters: ${message.clusters?.length}`);
         }
 
 
@@ -307,6 +312,18 @@ async function createWindow() {
   // Remove the file menu
   win.setMenu(null);
 
+  // Register DevTools shortcut on focus
+  win.on('focus', () => {
+    globalShortcut.register('CommandOrControl+Shift+I', () => {
+      win?.webContents.toggleDevTools();
+    });
+  });
+
+  // Unregister on blur to avoid capturing it globally
+  win.on('blur', () => {
+    globalShortcut.unregister('CommandOrControl+Shift+I');
+  });
+
   win.once('ready-to-show', () => {
     win?.show();
     if (splash) {
@@ -320,7 +337,7 @@ async function createWindow() {
   })
 
   // Force DevTools for debugging blank screen
-  win.webContents.openDevTools();
+  // win.webContents.openDevTools();
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
@@ -383,30 +400,87 @@ app.whenReady().then(async () => {
   protocol.handle('local-resource', async (request) => {
     let decodedPath = '';
     try {
+      // Parse query params safely
+      const urlObj = new URL(request.url);
+
       // 1. Strip protocol
       const rawPath = request.url.replace(/^local-resource:\/\//, '');
 
-      // 2. Decode the path (converts %3A to :, %5C to \, %3F to ?)
+      // 2. Decode the path
       decodedPath = decodeURIComponent(rawPath);
 
-      // 3. Strip query string (now it will be a literal '?')
+      // 3. Strip query string
       const queryIndex = decodedPath.indexOf('?');
       if (queryIndex !== -1) {
         decodedPath = decodedPath.substring(0, queryIndex);
       }
 
-      // 4. Strip trailing slash (Windows cleanup)
+      // 4. Strip trailing slash
       if (decodedPath.endsWith('/') || decodedPath.endsWith('\\')) {
         decodedPath = decodedPath.slice(0, -1);
       }
+      // Resize/Crop if requested
+      const width = urlObj.searchParams.get('width') ? parseInt(urlObj.searchParams.get('width')!) : null;
+      const boxParam = urlObj.searchParams.get('box');
 
-      // 5. Check if file exists (Optional safety for debugging)
-      // try {
-      //   await fs.access(decodedPath);
-      // } catch {
-      //   console.warn(`[Protocol] File not found: ${decodedPath}`);
-      //   return new Response('Not Found', { status: 404 });
-      // }
+      if ((width && width > 0) || boxParam) {
+        try {
+          // Initialize pipeline with AUTO-ROTATION to match Python/EXIF coordinates
+          let pipeline = sharp(decodedPath).rotate();
+
+          // 1. Crop if box provided (x,y,w,h)
+          if (boxParam) {
+            const [x, y, w, h] = boxParam.split(',').map(Number);
+            if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
+              // Validate/Clamp against image dimensions to prevent "extract_area" errors
+              const metadata = await pipeline.metadata();
+              if (metadata.width && metadata.height) {
+                const safeX = Math.max(0, Math.min(Math.round(x), metadata.width - 1));
+                const safeY = Math.max(0, Math.min(Math.round(y), metadata.height - 1));
+                const safeW = Math.max(1, Math.min(Math.round(w), metadata.width - safeX));
+                const safeH = Math.max(1, Math.min(Math.round(h), metadata.height - safeY));
+
+                pipeline = pipeline.extract({ left: safeX, top: safeY, width: safeW, height: safeH });
+              }
+            }
+          }
+
+          // 2. Resize if width provided
+          if (width && width > 0) {
+            pipeline = pipeline.resize(width, null, { fit: 'inside', withoutEnlargement: true });
+          }
+
+          const buffer = await pipeline.toBuffer();
+
+          return new Response(buffer as any, {
+            headers: {
+              'Content-Type': 'image/jpeg',
+              'Cache-Control': 'max-age=3600'
+            }
+          });
+        } catch (resizeErr: any) {
+          logger.warn(`[Protocol] Transform failed for ${decodedPath}: ${resizeErr.message}`);
+
+          // FALLBACK: If crop fails (e.g. bad box), try to just resize the full image
+          // This prevents serving the 20MB original file which causes memory crashes.
+          if (width && width > 0) {
+            try {
+              const fallbackBuffer = await sharp(decodedPath)
+                .resize(width, null, { fit: 'inside', withoutEnlargement: true })
+                .toBuffer();
+
+              return new Response(fallbackBuffer as any, {
+                headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'max-age=3600' }
+              });
+            } catch (fbErr) {
+              logger.error(`[Protocol] Fallback resize also failed: ${fbErr}`);
+            }
+          }
+
+          // Fail safe: Do not serve full file if a specific size/crop was requested
+          return new Response('Thumbnail Generation Failed', { status: 500 });
+        }
+      }
 
       return await net.fetch(pathToFileURL(decodedPath).toString());
     } catch (e: any) {
@@ -654,6 +728,17 @@ app.whenReady().then(async () => {
 
     const rows = db.prepare(query).all(...params);
     return rows;
+  });
+
+  ipcMain.handle('db:autoAssignFaces', async (_event, { faceIds, threshold }) => {
+    const { autoAssignFaces } = await import('./db');
+    logger.info(`[Main] db:autoAssignFaces called with ${faceIds?.length} faces.`);
+    try {
+      return await autoAssignFaces(faceIds, threshold);
+    } catch (e) {
+      logger.error(`[Main] db:autoAssignFaces error:`, e);
+      throw e;
+    }
   });
 
   // --- IPC Handlers: Settings / Previews ---
@@ -1261,43 +1346,46 @@ app.whenReady().then(async () => {
 
       if (descriptors.length === 0) return { success: true, clusters: [] };
 
-      // Call Python
+      const requestId = Math.floor(Math.random() * 1000000);
+
+      // Use Temp File for transfer to avoid STDIN limits and match main.py expected structure
+      // Filter out empty descriptors which cause numpy "inhomogeneous shape" errors
+      const facesPayload = ids
+        .map((id: number, i: number) => ({ id, descriptor: descriptors[i] }))
+        .filter(f => f.descriptor && f.descriptor.length > 0);
+
+      if (facesPayload.length === 0) return { success: true, clusters: [] };
+
+      const tempFile = path.join(app.getPath('temp'), `cluster_req_${requestId}.json`);
+
       return new Promise((resolve, reject) => {
-        // We need a way to get the response back. 
-        // Since sendToPython is fire-and-forget for async commands usually handled by event listeners...
-        // But here we want a direct response.
-        // The current 'sendToPython' / 'reader.on' architecture in startPythonBackend handles 'scan_result' and 'tags_result' via events.
-        // We need to extend it to handle 'cluster_result'.
-        // OR: We can use a request/response ID map if we want to be fancy.
-
-        // Wait! The reader loop (line 69) currently sends 'ai:scan-result' to window.
-        // It also checks `scanPromises` map! 
-        // So if I pass a specific ID, I can piggyback on that system.
-        // But `cluster_faces` isn't photo-specific. 
-        // I'll generate a random request ID.
-
-        const requestId = Math.floor(Math.random() * 1000000);
-
-        // Register promise
         scanPromises.set(requestId, { resolve: (res: any) => resolve({ success: true, clusters: res.clusters }), reject });
 
-        sendToPython({
-          type: 'cluster_faces',
-          payload: {
-            photoId: requestId, // Abuse photoId as requestId
-            descriptors,
-            ids,
-            eps,
-            min_samples
-          }
-        });
+        fs.writeFile(tempFile, JSON.stringify({ faces: facesPayload }))
+          .then(() => {
+            sendToPython({
+              type: 'cluster_faces',
+              payload: {
+                reqId: requestId,
+                dataPath: tempFile,
+                eps,
+                min_samples
+              }
+            });
+          })
+          .catch(err => {
+            console.error('[Clustering] Failed to write temp file:', err);
+            // Cleanup if needed
+            if (scanPromises.has(requestId)) scanPromises.delete(requestId);
+            reject(err);
+          });
 
         setTimeout(() => {
           if (scanPromises.has(requestId)) {
             scanPromises.delete(requestId);
             reject('Clustering timed out');
           }
-        }, 300000);
+        }, 300000); // 5 min timeout
       });
 
     } catch (e) {
@@ -2559,6 +2647,73 @@ ipcMain.handle('db:ignoreFaces', async (_, faceIds: number[]) => {
     return { success: false, error: e };
   }
 })
+
+ipcMain.handle('db:getIgnoredFaces', async (_, { page = 0, limit = 2000 } = {}) => {
+  const db = getDB();
+  try {
+    // 1. Get Total Count
+    const countRes = db.prepare('SELECT count(*) as total FROM faces WHERE is_ignored = 1').get();
+    const total = countRes ? countRes.total : 0;
+
+    // 2. Get Paginated Rows
+    const offset = page * limit;
+    const rows = db.prepare(`
+      SELECT f.*, p.file_path, p.preview_cache_path, p.width, p.height
+      FROM faces f
+      JOIN photos p ON f.photo_id = p.id
+      WHERE f.is_ignored = 1
+      ORDER BY p.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
+
+    const faces = rows.map((f: any) => ({
+      ...f,
+      box: JSON.parse(f.box_json),
+      descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : null,
+    }));
+
+    return { faces, total };
+  } catch (e) {
+    console.error('Failed to get ignored faces:', e);
+    return { faces: [], total: 0 };
+  }
+});
+
+ipcMain.handle('db:restoreFaces', async (_, { faceIds, targetPersonId }: { faceIds: number[], targetPersonId?: number }) => {
+  const db = getDB();
+  try {
+    if (!faceIds || faceIds.length === 0) return { success: true };
+
+    const placeholders = faceIds.map(() => '?').join(',');
+
+    const transaction = db.transaction(() => {
+      // 1. Un-ignore
+      const stmt = db.prepare(`UPDATE faces SET is_ignored = 0 WHERE id IN (${placeholders})`);
+      stmt.run(...faceIds);
+
+      // 2. Assign if requested
+      if (targetPersonId) {
+        const assignStmt = db.prepare(`UPDATE faces SET person_id = ? WHERE id IN (${placeholders})`);
+        assignStmt.run(targetPersonId, ...faceIds);
+        scheduleMeanRecalc(db, targetPersonId);
+      } else {
+        // If we just restored without assignment, we need to recalc for anyone who reclaimed these faces
+        const getPersonIds = db.prepare(`SELECT DISTINCT person_id FROM faces WHERE id IN (${placeholders}) AND person_id IS NOT NULL`);
+        const personsToUpdate = getPersonIds.all(...faceIds).map((p: any) => p.person_id);
+        for (const pid of personsToUpdate) {
+          scheduleMeanRecalc(db, pid);
+        }
+      }
+    });
+
+    transaction();
+    return { success: true };
+  } catch (e) {
+    console.error('Failed to restore faces:', e);
+    return { success: false, error: e };
+  }
+})
+
 
 // Helper to separate Mean Calculation from critical path
 const pendingMeanRecalcs = new Map<number, NodeJS.Timeout>();

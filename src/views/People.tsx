@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePeople } from '../context/PeopleContext'
 import PersonCard from '../components/PersonCard'
@@ -6,7 +6,9 @@ import FaceGrid from '../components/FaceGrid'
 import BlurryFacesModal from '../components/BlurryFacesModal'
 import GroupNamingModal from '../components/GroupNamingModal'
 import TargetedScanModal from '../components/TargetedScanModal'
+import IgnoredFacesModal from '../components/IgnoredFacesModal'
 import { useAI } from '../context/AIContext'
+import { Face } from '../types'
 import { useAlert } from '../context/AlertContext'
 
 export default function People() {
@@ -16,6 +18,7 @@ export default function People() {
     const { showAlert, showConfirm } = useAlert()
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
     const [showBlurryModal, setShowBlurryModal] = useState(false)
+    const [showIgnoredModal, setShowIgnoredModal] = useState(false)
     const [hasNewFaces, setHasNewFaces] = useState(false)
     const [isScanning, setIsScanning] = useState(false)
     const [isScanModalOpen, setIsScanModalOpen] = useState(false)
@@ -27,7 +30,25 @@ export default function People() {
     const [isClustering, setIsClustering] = useState(false)
 
     // Group Naming Modal
-    const [namingGroup, setNamingGroup] = useState<{ faces: any[], name: string } | null>(null)
+    const [namingGroup, setNamingGroup] = useState<{ faces: Face[], name: string } | null>(null)
+    const [selectedSingles, setSelectedSingles] = useState<Set<number>>(new Set())
+    const [selectedGroups, setSelectedGroups] = useState<Set<number>>(new Set())
+
+    // Toggle selection
+    const toggleGroupSelection = (groupId: number) => {
+        const next = new Set(selectedGroups)
+        if (next.has(groupId)) next.delete(groupId)
+        else next.add(groupId)
+        setSelectedGroups(next)
+    }
+
+    const handleSelectAllGroups = () => {
+        if (selectedGroups.size === clusters.length) {
+            setSelectedGroups(new Set())
+        } else {
+            setSelectedGroups(new Set(clusters.map(c => c.id)))
+        }
+    }
 
 
     // Track previous faces to detect if we can just filter locally instead of re-clustering
@@ -80,6 +101,7 @@ export default function People() {
         } else {
             setClusters([])
             setSingles([])
+            setSelectedGroups(new Set())
         }
     }, [faces, activeTab])
 
@@ -160,6 +182,9 @@ export default function People() {
         if (!name || selectedIds.length === 0) return
         await autoNameFaces(selectedIds, name)
         setNamingGroup(null)
+        // If we were selecting groups, clear selection
+        setSelectedGroups(new Set())
+        setSelectedSingles(new Set())
     }
 
     useEffect(() => {
@@ -172,6 +197,104 @@ export default function People() {
         }
     }, [activeTab])
 
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+    // Robust restoration with multiple retries
+    useLayoutEffect(() => {
+        if (activeTab === 'identified' && people.length > 0) {
+            const savedPosition = localStorage.getItem('peopleScrollPosition_v2') // Changed key to force fresh start
+
+            if (savedPosition && scrollContainerRef.current) {
+                const target = parseInt(savedPosition);
+
+                const restore = () => {
+                    if (scrollContainerRef.current) {
+                        // Only restore if we are not already there (approx)
+                        if (Math.abs(scrollContainerRef.current.scrollTop - target) > 5) {
+                            scrollContainerRef.current.scrollTop = target;
+                        }
+                    }
+                };
+
+                // Immediate
+                restore();
+
+                // Frame 1
+                requestAnimationFrame(() => {
+                    restore();
+                    // Frame 2
+                    requestAnimationFrame(restore);
+                });
+
+                // Fail-safe timeouts for slow rendering
+                setTimeout(restore, 50);
+                setTimeout(restore, 150);
+                setTimeout(restore, 300);
+            }
+        }
+    }, [people.length, activeTab])
+
+    const handlePersonClick = (personId: number) => {
+        // Explicitly save scroll position before navigation
+        if (scrollContainerRef.current) {
+            const scrollPos = scrollContainerRef.current.scrollTop;
+            localStorage.setItem('peopleScrollPosition_v2', scrollPos.toString())
+        }
+        navigate(`/people/${personId}`)
+    }
+
+    const [isAutoAssigning, setIsAutoAssigning] = useState(false);
+
+    const handleAutoAssign = async () => {
+        if (faces.length === 0) return;
+
+        showConfirm({
+            title: 'Auto-Identify All Faces',
+            description: `This will cross-check ALL unassigned faces in your library against your identified people. This may take a while depending on the number of faces.`,
+            confirmLabel: 'Run Auto-Identify All',
+            onConfirm: async () => {
+                console.log("[People] User confirmed Auto-Identify All. Starting...");
+                setIsAutoAssigning(true);
+                try {
+                    // Pass empty array to trigger "Scan All" backend mode
+                    console.log(`[People] Invoking db:autoAssignFaces for ALL unassigned faces...`);
+                    // @ts-ignore
+                    const res = await window.ipcRenderer.invoke('db:autoAssignFaces', { faceIds: [] });
+                    console.log("[People] db:autoAssignFaces result:", res);
+
+                    if (res.success) {
+                        if (res.count > 0) {
+                            setTimeout(() => {
+                                showAlert({
+                                    title: 'Auto-ID Complete',
+                                    description: `Successfully assigned ${res.count} faces.`,
+                                    variant: 'primary'
+                                });
+                            }, 100);
+                            loadFaces({ unnamed: true });
+                            loadPeople();
+                        } else {
+                            setTimeout(() => {
+                                showAlert({
+                                    title: 'No Matches',
+                                    description: 'No confident matches found among visible faces.',
+                                    variant: 'primary'
+                                });
+                            }, 100);
+                        }
+                    }
+                } catch (e) {
+                    console.error(e);
+                    setTimeout(() => {
+                        showAlert({ title: 'Error', description: 'Auto-Assign failed', variant: 'danger' });
+                    }, 100);
+                } finally {
+                    setIsAutoAssigning(false);
+                }
+            }
+        });
+    }
+
     return (
         <div className="flex flex-col h-full bg-gray-950 text-white overflow-hidden">
             {/* Header / Tabs */}
@@ -183,15 +306,40 @@ export default function People() {
 
                     <div className="flex gap-2">
                         {activeTab === 'unnamed' && (
-                            <button
-                                onClick={() => setShowBlurryModal(true)}
-                                className="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-4 py-2 rounded-lg text-sm border border-gray-700 transition-colors flex items-center gap-2"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                                Cleanup Blurry
-                            </button>
+                            <>
+                                <button
+                                    onClick={handleAutoAssign}
+                                    disabled={isAutoAssigning || faces.length === 0}
+                                    className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-sm font-medium"
+                                >
+                                    {isAutoAssigning ? (
+                                        <div className="animate-spin h-4 w-4 border-2 border-indigo-500 border-t-transparent rounded-full" />
+                                    ) : (
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                        </svg>
+                                    )}
+                                    Auto-Identify
+                                </button>
+                                <button
+                                    onClick={() => setShowBlurryModal(true)}
+                                    className="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-4 py-2 rounded-lg text-sm border border-gray-700 transition-colors flex items-center gap-2"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                    Cleanup Blurry
+                                </button>
+                                <button
+                                    onClick={() => setShowIgnoredModal(true)}
+                                    className="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-4 py-2 rounded-lg text-sm border border-gray-700 transition-colors flex items-center gap-2"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                    View Ignored
+                                </button>
+                            </>
                         )}
                         <button
                             onClick={() => setIsScanModalOpen(true)}
@@ -249,6 +397,12 @@ export default function People() {
 
                     {activeTab === 'unnamed' && faces.length > 0 && (
                         <div className="flex gap-2 flex-wrap justify-end">
+                            <button
+                                onClick={handleSelectAllGroups}
+                                className="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
+                            >
+                                {selectedGroups.size === clusters.length && clusters.length > 0 ? 'Deselect Groups' : 'Select All Groups'}
+                            </button>
                             <button
                                 onClick={() => {
                                     showConfirm({
@@ -308,10 +462,125 @@ export default function People() {
                     )}
                 </div>
 
-            </div >
+            </div>
+
+            {/* Bulk Actions for SINGLES */}
+            {selectedSingles.size > 0 && (
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 animate-in slide-in-from-bottom-5 fade-in duration-200">
+                    <span className="text-sm font-medium text-white mr-2">{selectedSingles.size} faces selected</span>
+
+                    <div className="h-4 w-px bg-gray-700 mx-2" />
+
+                    <button
+                        onClick={() => {
+                            // Find the faces
+                            // We need to search in 'singles' which is where these IDs come from
+                            const selectedFaceObjects = singles.filter(f => selectedSingles.has(f.id));
+                            // @ts-ignore
+                            setNamingGroup({ faces: selectedFaceObjects, name: '' });
+                        }}
+                        className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                    >
+                        Name Selected
+                    </button>
+
+                    <div className="h-4 w-px bg-gray-700 mx-2" />
+
+                    <button
+                        onClick={() => {
+                            showConfirm({
+                                title: 'Ignore Selected Faces',
+                                description: `Are you sure you want to ignore ${selectedSingles.size} faces?`,
+                                confirmLabel: 'Ignore All',
+                                variant: 'danger',
+                                onConfirm: async () => {
+                                    await ignoreFaces(Array.from(selectedSingles));
+                                    setSelectedSingles(new Set());
+                                }
+                            });
+                        }}
+                        className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors"
+                    >
+                        Ignore Selected
+                    </button>
+
+                    <div className="h-4 w-px bg-gray-700 mx-2" />
+
+                    <button
+                        onClick={() => setSelectedSingles(new Set())}
+                        className="p-1 hover:bg-gray-800 rounded-full text-gray-400 hover:text-white transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            )}
+
+            {/* Bulk Actions Bar */}
+            {selectedGroups.size > 0 && (
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 animate-in slide-in-from-bottom-5 fade-in duration-200">
+                    <span className="text-sm font-medium text-white mr-2">{selectedGroups.size} groups selected</span>
+
+                    <div className="h-4 w-px bg-gray-700 mx-2" />
+
+                    <button
+                        onClick={() => {
+                            const allFaces = clusters
+                                .filter(c => selectedGroups.has(c.id))
+                                .flatMap(c => c.faces);
+                            setNamingGroup({ faces: allFaces, name: '' });
+                        }}
+                        className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                    >
+                        Name All
+                    </button>
+
+                    <div className="h-4 w-px bg-gray-700 mx-2" />
+
+                    <button
+                        onClick={() => {
+                            showConfirm({
+                                title: 'Ignore Selected Groups',
+                                description: `Are you sure you want to ignore ${selectedGroups.size} groups?`,
+                                confirmLabel: 'Ignore All',
+                                variant: 'danger',
+                                onConfirm: async () => {
+                                    const allFaceIds = clusters
+                                        .filter(c => selectedGroups.has(c.id))
+                                        .flatMap(c => c.faces.map(f => f.id));
+
+                                    await ignoreFaces(allFaceIds);
+
+                                    // Optimistic Update
+                                    setClusters(prev => prev.filter(c => !selectedGroups.has(c.id)));
+                                    setSelectedGroups(new Set());
+                                }
+                            });
+                        }}
+                        className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors"
+                    >
+                        Ignore All
+                    </button>
+
+                    <div className="h-4 w-px bg-gray-700 mx-2" />
+
+                    <button
+                        onClick={() => setSelectedGroups(new Set())}
+                        className="p-1 hover:bg-gray-800 rounded-full text-gray-400 hover:text-white transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            )}
 
             {/* Content */}
-            < div className="flex-1 overflow-y-auto min-h-0" >
+            <div
+                ref={scrollContainerRef}
+                className="flex-1 overflow-y-auto min-h-0"
+            >
                 {activeTab === 'identified' ? (
                     <div className="p-6">
                         {loading && people.length === 0 ? (
@@ -332,7 +601,7 @@ export default function People() {
                                     <PersonCard
                                         key={person.id}
                                         person={person}
-                                        onClick={() => navigate(`/people/${person.id}`)}
+                                        onClick={() => handlePersonClick(person.id)}
                                     />
                                 ))}
                             </div>
@@ -367,7 +636,15 @@ export default function People() {
                                         {clusters.map(group => (
                                             <div key={group.id} className="relative bg-gray-900/30 border-y border-gray-800/50">
                                                 <div className="sticky top-0 z-20 flex justify-between items-center px-6 py-3 bg-gray-900/90 backdrop-blur-md border-b border-gray-800">
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="flex items-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedGroups.has(group.id)}
+                                                                onChange={() => toggleGroupSelection(group.id)}
+                                                                className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-gray-900 cursor-pointer"
+                                                            />
+                                                        </div>
                                                         <span className="text-sm font-medium text-indigo-200">Group {group.id + 1}</span>
                                                         <span className="bg-gray-800 text-gray-400 text-xs px-2 py-0.5 rounded-full">{group.faces.length} faces</span>
                                                     </div>
@@ -387,6 +664,10 @@ export default function People() {
                                                                         // Because these faces might not be in the global 'faces' context (limit 2000),
                                                                         // we must remove them from the view state manually.
                                                                         setClusters(prev => prev.filter(c => c.id !== group.id));
+                                                                        // Also remove from selection if present
+                                                                        if (selectedGroups.has(group.id)) {
+                                                                            toggleGroupSelection(group.id);
+                                                                        }
                                                                     }
                                                                 });
                                                             }}
@@ -436,7 +717,18 @@ export default function People() {
                                                 Ignore Visible
                                             </button>
                                         </div>
-                                        <FaceGrid faces={singles.slice(0, 200)} />
+                                        <FaceGrid
+                                            faces={singles.slice(0, 200)}
+                                            selectedIds={selectedSingles}
+                                            onToggleSelection={(id) => {
+                                                setSelectedSingles(prev => {
+                                                    const next = new Set(prev);
+                                                    if (next.has(id)) next.delete(id);
+                                                    else next.add(id);
+                                                    return next;
+                                                });
+                                            }}
+                                        />
                                         {singles.length > 200 && (
                                             <div className="px-6 py-10 text-center text-gray-500 bg-gray-900/10 border-b border-gray-900">
                                                 <p>+ {singles.length - 200} more unsorted faces hidden.</p>
@@ -474,6 +766,11 @@ export default function People() {
                 personId={null}
                 onDeleteComplete={() => loadFaces({ unnamed: true })}
             />
+
+            <IgnoredFacesModal isOpen={showIgnoredModal} onClose={() => {
+                setShowIgnoredModal(false)
+                if (activeTab === 'unnamed') loadFaces({ unnamed: true })
+            }} />
 
             {
                 namingGroup && (

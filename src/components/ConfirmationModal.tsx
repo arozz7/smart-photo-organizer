@@ -22,6 +22,8 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     onConfirm,
     variant = 'primary'
 }) => {
+    const [isLoading, setIsLoading] = React.useState(false);
+
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
             <Dialog.Portal>
@@ -35,7 +37,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                     </Dialog.Description>
 
                     <div className="flex justify-end gap-3">
-                        {cancelLabel && (
+                        {cancelLabel && !isLoading && (
                             <Dialog.Close asChild>
                                 <button className="px-4 py-2 rounded-md bg-gray-800 text-gray-300 hover:text-white transition-colors">
                                     {cancelLabel}
@@ -43,16 +45,22 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                             </Dialog.Close>
                         )}
                         <button
-                            onClick={() => {
-                                onConfirm();
-                                onOpenChange(false);
+                            disabled={isLoading}
+                            onClick={async () => {
+                                setIsLoading(true);
+                                try {
+                                    await onConfirm();
+                                } finally {
+                                    if (open) setIsLoading(false);
+                                }
                             }}
-                            className={`px-6 py-2 rounded-md text-white font-medium transition-all shadow-lg ${variant === 'danger'
-                                ? 'bg-red-600 hover:bg-red-500 shadow-red-900/20'
-                                : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/20'
+                            className={`px-6 py-2 rounded-md text-white font-medium transition-all shadow-lg flex items-center gap-2 ${variant === 'danger'
+                                ? 'bg-red-600 hover:bg-red-500 shadow-red-900/20 disabled:bg-red-600/50'
+                                : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/20 disabled:bg-indigo-600/50'
                                 }`}
                         >
-                            {confirmLabel}
+                            {isLoading && <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                            {isLoading ? 'Processing...' : confirmLabel}
                         </button>
                     </div>
                 </Dialog.Content>

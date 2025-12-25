@@ -76,6 +76,11 @@ const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(
         });
     };
 
+    // Safety check for empty paths
+    if (!src || src === 'local-resource://' || src.startsWith('local-resource://?')) {
+        return <div className={`bg-gray-800 flex items-center justify-center ${className || ''}`}><span className="text-gray-600 text-[10px]">No Image</span></div>;
+    }
+
     return (
         <div className={`overflow-hidden relative ${className || ''}`}>
             <img

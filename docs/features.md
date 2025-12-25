@@ -38,6 +38,10 @@ The core feature of the application is local, privacy-focused face recognition.
 - **Naming:** You can click any unnamed face to assign it to a new or existing person.
 - **Renaming & Merging:** You can rename a person at any time. If you rename "John" to "John Doe", and "John Doe" already exists, the application will intelligently merge all photos and faces into the target person.
 - **Ignore:** You can "Hide" faces that are not relevant (background strangers).
+41: - **Ignored Faces Manager:** A dedicated modal allows you to review all ignored faces.
+42:   - **Pagination:** View thousands of ignored faces with fast pagination.
+43:   - **Group Similar:** Use the AI to cluster your "ignored" pile, making it easy to spot if you accidentally ignored 20 photos of "Grandma".
+44:   - **Restore:** Select individual faces or entire groups to restore them to the active pool (optionally assigning them to a person immediately).
 
 ### Blur Detection & Quality Control
 - **Blur Scoring:** Every detected face is analyzed for sharpness (Laplacian Variance).

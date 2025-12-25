@@ -10,7 +10,8 @@ var __privateAdd = (obj, member, value) => member.has(obj) ? __typeError("Cannot
 var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "write to private field"), setter ? setter.call(obj, value) : member.set(obj, value), value);
 var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "access private method"), method);
 var _validator, _encryptionKey, _options, _defaultValues, _isInMigration, _watcher, _watchFile, _debouncedChangeHandler, _Conf_instances, prepareOptions_fn, setupValidator_fn, captureSchemaDefaults_fn, applyDefaultValues_fn, configureSerialization_fn, resolvePath_fn, initializeStore_fn, runMigrations_fn;
-import electron, { app as app$1, BrowserWindow, protocol, net, ipcMain as ipcMain$1, dialog, shell as shell$1 } from "electron";
+import electron, { app as app$1, BrowserWindow, protocol, net, ipcMain as ipcMain$1, dialog, shell as shell$1, globalShortcut } from "electron";
+import sharp from "sharp";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,7 +20,6 @@ import path from "node:path";
 import fs$1, { promises } from "node:fs";
 import crypto, { createHash } from "node:crypto";
 import { ExifTool } from "exiftool-vendored";
-import sharp from "sharp";
 import process$1 from "node:process";
 import { promisify, isDeepStrictEqual } from "node:util";
 import assert from "node:assert";
@@ -451,8 +451,75 @@ const recalculatePersonMean = (db2, personId) => {
     logger.error(`Failed to recalculate mean for person ${personId}:`, e);
   }
 };
+function autoAssignFaces(faceIds, threshold = 0.65) {
+  const db2 = getDB();
+  try {
+    const people = db2.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
+    logger.info(`[AutoAssign] Found ${people.length} people with mean descriptors.`);
+    if (people.length === 0) {
+      return { success: true, count: 0, assigned: [] };
+    }
+    const candidates = people.map((p) => ({
+      id: p.id,
+      name: p.name,
+      mean: JSON.parse(p.descriptor_mean_json)
+    }));
+    let faces;
+    if (faceIds && faceIds.length > 0) {
+      const placeholders = faceIds.map(() => "?").join(",");
+      faces = db2.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND descriptor IS NOT NULL`).all(...faceIds);
+      logger.info(`[AutoAssign] Found ${faces.length} valid descriptors out of ${faceIds.length} requested IDs.`);
+    } else {
+      logger.info(`[AutoAssign] No IDs provided. Scanning ALL unassigned faces...`);
+      faces = db2.prepare("SELECT id, descriptor FROM faces WHERE person_id IS NULL AND descriptor IS NOT NULL").all();
+      logger.info(`[AutoAssign] Found ${faces.length} unassigned faces to check.`);
+    }
+    let assignedCount = 0;
+    const assigned = [];
+    const updateFace = db2.prepare("UPDATE faces SET person_id = ? WHERE id = ?");
+    const transaction = db2.transaction(() => {
+      for (const face of faces) {
+        if (!face.descriptor) continue;
+        const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+        let mag = 0;
+        for (const val of rawDescriptor) mag += val * val;
+        mag = Math.sqrt(mag);
+        const descriptor = mag > 0 ? rawDescriptor.map((v) => v / mag) : rawDescriptor;
+        let bestMatch = null;
+        let minDist = Infinity;
+        for (const person of candidates) {
+          let sumSq = 0;
+          for (let i = 0; i < descriptor.length; i++) {
+            const diff2 = descriptor[i] - person.mean[i];
+            sumSq += diff2 * diff2;
+          }
+          const dist2 = Math.sqrt(sumSq);
+          if (dist2 < minDist) {
+            minDist = dist2;
+            bestMatch = person;
+          }
+        }
+        if (bestMatch && minDist < threshold) {
+          updateFace.run(bestMatch.id, face.id);
+          assignedCount++;
+          assigned.push({ faceId: face.id, personId: bestMatch.id, personName: bestMatch.name, distance: minDist });
+        }
+      }
+    });
+    transaction();
+    const uniquePeople = new Set(assigned.map((a) => a.personId));
+    for (const pid of uniquePeople) {
+      recalculatePersonMean(db2, pid);
+    }
+    return { success: true, count: assignedCount, assigned };
+  } catch (e) {
+    logger.error("Auto-Assign failed:", e);
+    return { success: false, error: String(e) };
+  }
+}
 const db$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
+  autoAssignFaces,
   closeDB,
   getDB,
   getMetricsHistory,
@@ -16360,7 +16427,7 @@ function startPythonBackend() {
           }
         }
         if (message.type === "cluster_result") {
-          console.log(`[Main] Received Cluster Result for ${message.photoId}. Clusters: ${(_a = message.clusters) == null ? void 0 : _a.length}`);
+          console.log(`[Main] Received Cluster Result for ${message.photoId || "Batch"}. Clusters: ${(_a = message.clusters) == null ? void 0 : _a.length}`);
         }
         const resId = message.reqId || message.photoId || message.payload && message.payload.reqId;
         if (win && (message.type === "download_progress" || message.type === "download_result")) {
@@ -16482,6 +16549,14 @@ async function createWindow() {
   win.on("moved", saveBounds);
   win.on("close", saveBounds);
   win.setMenu(null);
+  win.on("focus", () => {
+    globalShortcut.register("CommandOrControl+Shift+I", () => {
+      win == null ? void 0 : win.webContents.toggleDevTools();
+    });
+  });
+  win.on("blur", () => {
+    globalShortcut.unregister("CommandOrControl+Shift+I");
+  });
   win.once("ready-to-show", () => {
     win == null ? void 0 : win.show();
     if (splash) {
@@ -16491,7 +16566,6 @@ async function createWindow() {
   win.webContents.on("did-finish-load", () => {
     win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
   });
-  win.webContents.openDevTools();
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
   } else {
@@ -16537,6 +16611,7 @@ app$1.whenReady().then(async () => {
   protocol.handle("local-resource", async (request) => {
     let decodedPath = "";
     try {
+      const urlObj = new URL(request.url);
       const rawPath = request.url.replace(/^local-resource:\/\//, "");
       decodedPath = decodeURIComponent(rawPath);
       const queryIndex = decodedPath.indexOf("?");
@@ -16545,6 +16620,49 @@ app$1.whenReady().then(async () => {
       }
       if (decodedPath.endsWith("/") || decodedPath.endsWith("\\")) {
         decodedPath = decodedPath.slice(0, -1);
+      }
+      const width = urlObj.searchParams.get("width") ? parseInt(urlObj.searchParams.get("width")) : null;
+      const boxParam = urlObj.searchParams.get("box");
+      if (width && width > 0 || boxParam) {
+        try {
+          let pipeline = sharp(decodedPath).rotate();
+          if (boxParam) {
+            const [x, y, w, h] = boxParam.split(",").map(Number);
+            if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
+              const metadata2 = await pipeline.metadata();
+              if (metadata2.width && metadata2.height) {
+                const safeX = Math.max(0, Math.min(Math.round(x), metadata2.width - 1));
+                const safeY = Math.max(0, Math.min(Math.round(y), metadata2.height - 1));
+                const safeW = Math.max(1, Math.min(Math.round(w), metadata2.width - safeX));
+                const safeH = Math.max(1, Math.min(Math.round(h), metadata2.height - safeY));
+                pipeline = pipeline.extract({ left: safeX, top: safeY, width: safeW, height: safeH });
+              }
+            }
+          }
+          if (width && width > 0) {
+            pipeline = pipeline.resize(width, null, { fit: "inside", withoutEnlargement: true });
+          }
+          const buffer = await pipeline.toBuffer();
+          return new Response(buffer, {
+            headers: {
+              "Content-Type": "image/jpeg",
+              "Cache-Control": "max-age=3600"
+            }
+          });
+        } catch (resizeErr) {
+          logger.warn(`[Protocol] Transform failed for ${decodedPath}: ${resizeErr.message}`);
+          if (width && width > 0) {
+            try {
+              const fallbackBuffer = await sharp(decodedPath).resize(width, null, { fit: "inside", withoutEnlargement: true }).toBuffer();
+              return new Response(fallbackBuffer, {
+                headers: { "Content-Type": "image/jpeg", "Cache-Control": "max-age=3600" }
+              });
+            } catch (fbErr) {
+              logger.error(`[Protocol] Fallback resize also failed: ${fbErr}`);
+            }
+          }
+          return new Response("Thumbnail Generation Failed", { status: 500 });
+        }
       }
       return await net.fetch(pathToFileURL(decodedPath).toString());
     } catch (e) {
@@ -16748,6 +16866,16 @@ app$1.whenReady().then(async () => {
     }
     const rows = db2.prepare(query).all(...params);
     return rows;
+  });
+  ipcMain$1.handle("db:autoAssignFaces", async (_event, { faceIds, threshold }) => {
+    const { autoAssignFaces: autoAssignFaces2 } = await Promise.resolve().then(() => db$1);
+    logger.info(`[Main] db:autoAssignFaces called with ${faceIds == null ? void 0 : faceIds.length} faces.`);
+    try {
+      return await autoAssignFaces2(faceIds, threshold);
+    } catch (e) {
+      logger.error(`[Main] db:autoAssignFaces error:`, e);
+      throw e;
+    }
   });
   ipcMain$1.handle("settings:getPreviewStats", async () => {
     try {
@@ -17212,19 +17340,26 @@ app$1.whenReady().then(async () => {
       });
       const ids = rows.map((r) => r.id);
       if (descriptors.length === 0) return { success: true, clusters: [] };
+      const requestId = Math.floor(Math.random() * 1e6);
+      const facesPayload = ids.map((id2, i) => ({ id: id2, descriptor: descriptors[i] })).filter((f) => f.descriptor && f.descriptor.length > 0);
+      if (facesPayload.length === 0) return { success: true, clusters: [] };
+      const tempFile = path.join(app$1.getPath("temp"), `cluster_req_${requestId}.json`);
       return new Promise((resolve2, reject) => {
-        const requestId = Math.floor(Math.random() * 1e6);
         scanPromises.set(requestId, { resolve: (res) => resolve2({ success: true, clusters: res.clusters }), reject });
-        sendToPython({
-          type: "cluster_faces",
-          payload: {
-            photoId: requestId,
-            // Abuse photoId as requestId
-            descriptors,
-            ids,
-            eps,
-            min_samples
-          }
+        fs.writeFile(tempFile, JSON.stringify({ faces: facesPayload })).then(() => {
+          sendToPython({
+            type: "cluster_faces",
+            payload: {
+              reqId: requestId,
+              dataPath: tempFile,
+              eps,
+              min_samples
+            }
+          });
+        }).catch((err) => {
+          console.error("[Clustering] Failed to write temp file:", err);
+          if (scanPromises.has(requestId)) scanPromises.delete(requestId);
+          reject(err);
         });
         setTimeout(() => {
           if (scanPromises.has(requestId)) {
@@ -18202,6 +18337,58 @@ ipcMain$1.handle("db:ignoreFaces", async (_, faceIds) => {
     return { success: true };
   } catch (e) {
     console.error("Failed to ignore faces:", e);
+    return { success: false, error: e };
+  }
+});
+ipcMain$1.handle("db:getIgnoredFaces", async (_, { page = 0, limit: limit2 = 2e3 } = {}) => {
+  const db2 = getDB();
+  try {
+    const countRes = db2.prepare("SELECT count(*) as total FROM faces WHERE is_ignored = 1").get();
+    const total = countRes ? countRes.total : 0;
+    const offset = page * limit2;
+    const rows = db2.prepare(`
+      SELECT f.*, p.file_path, p.preview_cache_path, p.width, p.height
+      FROM faces f
+      JOIN photos p ON f.photo_id = p.id
+      WHERE f.is_ignored = 1
+      ORDER BY p.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(limit2, offset);
+    const faces = rows.map((f) => ({
+      ...f,
+      box: JSON.parse(f.box_json),
+      descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : null
+    }));
+    return { faces, total };
+  } catch (e) {
+    console.error("Failed to get ignored faces:", e);
+    return { faces: [], total: 0 };
+  }
+});
+ipcMain$1.handle("db:restoreFaces", async (_, { faceIds, targetPersonId }) => {
+  const db2 = getDB();
+  try {
+    if (!faceIds || faceIds.length === 0) return { success: true };
+    const placeholders = faceIds.map(() => "?").join(",");
+    const transaction = db2.transaction(() => {
+      const stmt = db2.prepare(`UPDATE faces SET is_ignored = 0 WHERE id IN (${placeholders})`);
+      stmt.run(...faceIds);
+      if (targetPersonId) {
+        const assignStmt = db2.prepare(`UPDATE faces SET person_id = ? WHERE id IN (${placeholders})`);
+        assignStmt.run(targetPersonId, ...faceIds);
+        scheduleMeanRecalc(db2, targetPersonId);
+      } else {
+        const getPersonIds = db2.prepare(`SELECT DISTINCT person_id FROM faces WHERE id IN (${placeholders}) AND person_id IS NOT NULL`);
+        const personsToUpdate = getPersonIds.all(...faceIds).map((p) => p.person_id);
+        for (const pid of personsToUpdate) {
+          scheduleMeanRecalc(db2, pid);
+        }
+      }
+    });
+    transaction();
+    return { success: true };
+  } catch (e) {
+    console.error("Failed to restore faces:", e);
     return { success: false, error: e };
   }
 });

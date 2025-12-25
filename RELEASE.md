@@ -1,3 +1,17 @@
+# Release v0.3.5 - Face Management Update
+
+## New Features
+
+### 👤 Retrieve Ignored Faces
+- **View Ignored:** New modal to see faces you previously hid.
+- **Restore:** Bring back ignored faces into your library.
+- **Restore & Assign:** Immediately tag a person when restoring.
+
+## Improvements
+- **Application:** Version bump to v0.3.5.
+
+---
+
 # Release v0.3.0 - AI Powerhouse Update
 
 This release introduces significant AI capabilities and architectural improvements to the Smart Photo Organizer.
