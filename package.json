@@ -1,7 +1,7 @@
 {
   "name": "smart-photo-organizer",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.5",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "scripts": {
@@ -57,4 +57,3 @@
   },
   "main": "dist-electron/main.js"
 }
-

@@ -1346,43 +1346,46 @@ app.whenReady().then(async () => {
 
       if (descriptors.length === 0) return { success: true, clusters: [] };
 
-      // Call Python
+      const requestId = Math.floor(Math.random() * 1000000);
+
+      // Use Temp File for transfer to avoid STDIN limits and match main.py expected structure
+      // Filter out empty descriptors which cause numpy "inhomogeneous shape" errors
+      const facesPayload = ids
+        .map((id: number, i: number) => ({ id, descriptor: descriptors[i] }))
+        .filter(f => f.descriptor && f.descriptor.length > 0);
+
+      if (facesPayload.length === 0) return { success: true, clusters: [] };
+
+      const tempFile = path.join(app.getPath('temp'), `cluster_req_${requestId}.json`);
+
       return new Promise((resolve, reject) => {
-        // We need a way to get the response back. 
-        // Since sendToPython is fire-and-forget for async commands usually handled by event listeners...
-        // But here we want a direct response.
-        // The current 'sendToPython' / 'reader.on' architecture in startPythonBackend handles 'scan_result' and 'tags_result' via events.
-        // We need to extend it to handle 'cluster_result'.
-        // OR: We can use a request/response ID map if we want to be fancy.
-
-        // Wait! The reader loop (line 69) currently sends 'ai:scan-result' to window.
-        // It also checks `scanPromises` map! 
-        // So if I pass a specific ID, I can piggyback on that system.
-        // But `cluster_faces` isn't photo-specific. 
-        // I'll generate a random request ID.
-
-        const requestId = Math.floor(Math.random() * 1000000);
-
-        // Register promise
         scanPromises.set(requestId, { resolve: (res: any) => resolve({ success: true, clusters: res.clusters }), reject });
 
-        sendToPython({
-          type: 'cluster_faces',
-          payload: {
-            photoId: requestId, // Abuse photoId as requestId
-            descriptors,
-            ids,
-            eps,
-            min_samples
-          }
-        });
+        fs.writeFile(tempFile, JSON.stringify({ faces: facesPayload }))
+          .then(() => {
+            sendToPython({
+              type: 'cluster_faces',
+              payload: {
+                reqId: requestId,
+                dataPath: tempFile,
+                eps,
+                min_samples
+              }
+            });
+          })
+          .catch(err => {
+            console.error('[Clustering] Failed to write temp file:', err);
+            // Cleanup if needed
+            if (scanPromises.has(requestId)) scanPromises.delete(requestId);
+            reject(err);
+          });
 
         setTimeout(() => {
           if (scanPromises.has(requestId)) {
             scanPromises.delete(requestId);
             reject('Clustering timed out');
           }
-        }, 300000);
+        }, 300000); // 5 min timeout
       });
 
     } catch (e) {
@@ -2644,6 +2647,73 @@ ipcMain.handle('db:ignoreFaces', async (_, faceIds: number[]) => {
     return { success: false, error: e };
   }
 })
+
+ipcMain.handle('db:getIgnoredFaces', async (_, { page = 0, limit = 2000 } = {}) => {
+  const db = getDB();
+  try {
+    // 1. Get Total Count
+    const countRes = db.prepare('SELECT count(*) as total FROM faces WHERE is_ignored = 1').get();
+    const total = countRes ? countRes.total : 0;
+
+    // 2. Get Paginated Rows
+    const offset = page * limit;
+    const rows = db.prepare(`
+      SELECT f.*, p.file_path, p.preview_cache_path, p.width, p.height
+      FROM faces f
+      JOIN photos p ON f.photo_id = p.id
+      WHERE f.is_ignored = 1
+      ORDER BY p.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
+
+    const faces = rows.map((f: any) => ({
+      ...f,
+      box: JSON.parse(f.box_json),
+      descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : null,
+    }));
+
+    return { faces, total };
+  } catch (e) {
+    console.error('Failed to get ignored faces:', e);
+    return { faces: [], total: 0 };
+  }
+});
+
+ipcMain.handle('db:restoreFaces', async (_, { faceIds, targetPersonId }: { faceIds: number[], targetPersonId?: number }) => {
+  const db = getDB();
+  try {
+    if (!faceIds || faceIds.length === 0) return { success: true };
+
+    const placeholders = faceIds.map(() => '?').join(',');
+
+    const transaction = db.transaction(() => {
+      // 1. Un-ignore
+      const stmt = db.prepare(`UPDATE faces SET is_ignored = 0 WHERE id IN (${placeholders})`);
+      stmt.run(...faceIds);
+
+      // 2. Assign if requested
+      if (targetPersonId) {
+        const assignStmt = db.prepare(`UPDATE faces SET person_id = ? WHERE id IN (${placeholders})`);
+        assignStmt.run(targetPersonId, ...faceIds);
+        scheduleMeanRecalc(db, targetPersonId);
+      } else {
+        // If we just restored without assignment, we need to recalc for anyone who reclaimed these faces
+        const getPersonIds = db.prepare(`SELECT DISTINCT person_id FROM faces WHERE id IN (${placeholders}) AND person_id IS NOT NULL`);
+        const personsToUpdate = getPersonIds.all(...faceIds).map((p: any) => p.person_id);
+        for (const pid of personsToUpdate) {
+          scheduleMeanRecalc(db, pid);
+        }
+      }
+    });
+
+    transaction();
+    return { success: true };
+  } catch (e) {
+    console.error('Failed to restore faces:', e);
+    return { success: false, error: e };
+  }
+})
+
 
 // Helper to separate Mean Calculation from critical path
 const pendingMeanRecalcs = new Map<number, NodeJS.Timeout>();

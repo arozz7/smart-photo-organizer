@@ -8,8 +8,7 @@
 
 Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for objects) to classify and organize your photo library. Unlike cloud services, **all processing happens locally** on your machine, ensuring your privacy.
 
-> [!TIP]
-> **Extreme Slim Installer:** The v0.3.0 release features a lightweight (~400MB) installer. While it works on CPU out-of-box, you can download the optional 5GB GPU Runtime for massive performance gains.
+> **Extreme Slim Installer:** The v0.3.5 release features a lightweight (~400MB) installer. While it works on CPU out-of-box, you can download the optional 5GB GPU Runtime for massive performance gains.
 
 ## Features at a Glance
 
@@ -55,7 +54,7 @@ For detailed examples of how the application works, logic flows, and architectur
 
 The easiest way to get started is to download the latest release:
 
-1.  **Download:** Grab the `Smart Photo Organizer-Windows-v0.3.0-Setup.7z` from the [Releases](https://github.com/arozz7/smart-photo-organizer/releases) page.
+1.  **Download:** Grab the `Smart Photo Organizer-Windows-v0.3.5-Setup.7z` from the [Releases](https://github.com/arozz7/smart-photo-organizer/releases) page.
 2.  **Unpack:** Extract the archive using [7-Zip](https://www.7-zip.org/) or WinRAR.
 3.  **Run:** Open `Smart Photo Organizer.exe`.
 4.  **GPU Setup (Automatic):** 
@@ -71,12 +70,12 @@ The easiest way to get started is to download the latest release:
 
 To create a new release for distribution:
 
-1.  **Build App**: Run `npm run build`. This creates the application installer (e.g., `release/0.3.0/...-Setup.7z`).
+1.  **Build App**: Run `npm run build`. This creates the application installer (e.g., `release/0.3.5/...-Setup.7z`).
 2.  **GPU Runtime (Separate Asset)**: 
     *   The GPU Runtime is **NOT** bundled inside the Setup package (to keep it slim).
     *   You must create or reference a separate `ai-runtime-win-x64.zip` containing the `bin` and `lib` directories.
 3.  **GitHub Release**: 
-    *   Create a release on GitHub (e.g., `v0.3.0`).
+    *   Create a release on GitHub (e.g., `v0.3.5`).
     *   Upload the Setup package (`...-Setup.7z`).
     *   **CRITICAL:** Upload `ai-runtime-win-x64.zip` as a **separate standalone asset** to the same release. The application's downloader specifically looks for this filename in your GitHub releases to enable GPU support.
 

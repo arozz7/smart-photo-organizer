@@ -1581,9 +1581,13 @@ def handle_command(command):
                 X = X / norm
 
                 # DBSCAN
-                # eps=0.45 -> 0.55 (Looser threshold to group more faces)
-                # min_samples=3 -> 2 (Allow smaller groups to form)
-                clustering = DBSCAN(eps=0.55, min_samples=2, metric="euclidean", n_jobs=-1).fit(X)
+                # Allow override from payload
+                eps_val = float(payload.get('eps', 0.55))
+                min_samples_val = int(payload.get('min_samples', 2))
+                
+                logger.info(f"Clustering {len(X)} faces with eps={eps_val}, min_samples={min_samples_val}")
+
+                clustering = DBSCAN(eps=eps_val, min_samples=min_samples_val, metric="euclidean", n_jobs=-1).fit(X)
                 
                 labels = clustering.labels_
                 

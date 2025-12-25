@@ -451,8 +451,75 @@ const recalculatePersonMean = (db2, personId) => {
     logger.error(`Failed to recalculate mean for person ${personId}:`, e);
   }
 };
+function autoAssignFaces(faceIds, threshold = 0.65) {
+  const db2 = getDB();
+  try {
+    const people = db2.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
+    logger.info(`[AutoAssign] Found ${people.length} people with mean descriptors.`);
+    if (people.length === 0) {
+      return { success: true, count: 0, assigned: [] };
+    }
+    const candidates = people.map((p) => ({
+      id: p.id,
+      name: p.name,
+      mean: JSON.parse(p.descriptor_mean_json)
+    }));
+    let faces;
+    if (faceIds && faceIds.length > 0) {
+      const placeholders = faceIds.map(() => "?").join(",");
+      faces = db2.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND descriptor IS NOT NULL`).all(...faceIds);
+      logger.info(`[AutoAssign] Found ${faces.length} valid descriptors out of ${faceIds.length} requested IDs.`);
+    } else {
+      logger.info(`[AutoAssign] No IDs provided. Scanning ALL unassigned faces...`);
+      faces = db2.prepare("SELECT id, descriptor FROM faces WHERE person_id IS NULL AND descriptor IS NOT NULL").all();
+      logger.info(`[AutoAssign] Found ${faces.length} unassigned faces to check.`);
+    }
+    let assignedCount = 0;
+    const assigned = [];
+    const updateFace = db2.prepare("UPDATE faces SET person_id = ? WHERE id = ?");
+    const transaction = db2.transaction(() => {
+      for (const face of faces) {
+        if (!face.descriptor) continue;
+        const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+        let mag = 0;
+        for (const val of rawDescriptor) mag += val * val;
+        mag = Math.sqrt(mag);
+        const descriptor = mag > 0 ? rawDescriptor.map((v) => v / mag) : rawDescriptor;
+        let bestMatch = null;
+        let minDist = Infinity;
+        for (const person of candidates) {
+          let sumSq = 0;
+          for (let i = 0; i < descriptor.length; i++) {
+            const diff2 = descriptor[i] - person.mean[i];
+            sumSq += diff2 * diff2;
+          }
+          const dist2 = Math.sqrt(sumSq);
+          if (dist2 < minDist) {
+            minDist = dist2;
+            bestMatch = person;
+          }
+        }
+        if (bestMatch && minDist < threshold) {
+          updateFace.run(bestMatch.id, face.id);
+          assignedCount++;
+          assigned.push({ faceId: face.id, personId: bestMatch.id, personName: bestMatch.name, distance: minDist });
+        }
+      }
+    });
+    transaction();
+    const uniquePeople = new Set(assigned.map((a) => a.personId));
+    for (const pid of uniquePeople) {
+      recalculatePersonMean(db2, pid);
+    }
+    return { success: true, count: assignedCount, assigned };
+  } catch (e) {
+    logger.error("Auto-Assign failed:", e);
+    return { success: false, error: String(e) };
+  }
+}
 const db$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
+  autoAssignFaces,
   closeDB,
   getDB,
   getMetricsHistory,
@@ -16800,6 +16867,16 @@ app$1.whenReady().then(async () => {
     const rows = db2.prepare(query).all(...params);
     return rows;
   });
+  ipcMain$1.handle("db:autoAssignFaces", async (_event, { faceIds, threshold }) => {
+    const { autoAssignFaces: autoAssignFaces2 } = await Promise.resolve().then(() => db$1);
+    logger.info(`[Main] db:autoAssignFaces called with ${faceIds == null ? void 0 : faceIds.length} faces.`);
+    try {
+      return await autoAssignFaces2(faceIds, threshold);
+    } catch (e) {
+      logger.error(`[Main] db:autoAssignFaces error:`, e);
+      throw e;
+    }
+  });
   ipcMain$1.handle("settings:getPreviewStats", async () => {
     try {
       const previewDir = path.join(getLibraryPath(), "previews");
@@ -17263,19 +17340,26 @@ app$1.whenReady().then(async () => {
       });
       const ids = rows.map((r) => r.id);
       if (descriptors.length === 0) return { success: true, clusters: [] };
+      const requestId = Math.floor(Math.random() * 1e6);
+      const facesPayload = ids.map((id2, i) => ({ id: id2, descriptor: descriptors[i] })).filter((f) => f.descriptor && f.descriptor.length > 0);
+      if (facesPayload.length === 0) return { success: true, clusters: [] };
+      const tempFile = path.join(app$1.getPath("temp"), `cluster_req_${requestId}.json`);
       return new Promise((resolve2, reject) => {
-        const requestId = Math.floor(Math.random() * 1e6);
         scanPromises.set(requestId, { resolve: (res) => resolve2({ success: true, clusters: res.clusters }), reject });
-        sendToPython({
-          type: "cluster_faces",
-          payload: {
-            photoId: requestId,
-            // Abuse photoId as requestId
-            descriptors,
-            ids,
-            eps,
-            min_samples
-          }
+        fs.writeFile(tempFile, JSON.stringify({ faces: facesPayload })).then(() => {
+          sendToPython({
+            type: "cluster_faces",
+            payload: {
+              reqId: requestId,
+              dataPath: tempFile,
+              eps,
+              min_samples
+            }
+          });
+        }).catch((err) => {
+          console.error("[Clustering] Failed to write temp file:", err);
+          if (scanPromises.has(requestId)) scanPromises.delete(requestId);
+          reject(err);
         });
         setTimeout(() => {
           if (scanPromises.has(requestId)) {
@@ -18253,6 +18337,58 @@ ipcMain$1.handle("db:ignoreFaces", async (_, faceIds) => {
     return { success: true };
   } catch (e) {
     console.error("Failed to ignore faces:", e);
+    return { success: false, error: e };
+  }
+});
+ipcMain$1.handle("db:getIgnoredFaces", async (_, { page = 0, limit: limit2 = 2e3 } = {}) => {
+  const db2 = getDB();
+  try {
+    const countRes = db2.prepare("SELECT count(*) as total FROM faces WHERE is_ignored = 1").get();
+    const total = countRes ? countRes.total : 0;
+    const offset = page * limit2;
+    const rows = db2.prepare(`
+      SELECT f.*, p.file_path, p.preview_cache_path, p.width, p.height
+      FROM faces f
+      JOIN photos p ON f.photo_id = p.id
+      WHERE f.is_ignored = 1
+      ORDER BY p.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(limit2, offset);
+    const faces = rows.map((f) => ({
+      ...f,
+      box: JSON.parse(f.box_json),
+      descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : null
+    }));
+    return { faces, total };
+  } catch (e) {
+    console.error("Failed to get ignored faces:", e);
+    return { faces: [], total: 0 };
+  }
+});
+ipcMain$1.handle("db:restoreFaces", async (_, { faceIds, targetPersonId }) => {
+  const db2 = getDB();
+  try {
+    if (!faceIds || faceIds.length === 0) return { success: true };
+    const placeholders = faceIds.map(() => "?").join(",");
+    const transaction = db2.transaction(() => {
+      const stmt = db2.prepare(`UPDATE faces SET is_ignored = 0 WHERE id IN (${placeholders})`);
+      stmt.run(...faceIds);
+      if (targetPersonId) {
+        const assignStmt = db2.prepare(`UPDATE faces SET person_id = ? WHERE id IN (${placeholders})`);
+        assignStmt.run(targetPersonId, ...faceIds);
+        scheduleMeanRecalc(db2, targetPersonId);
+      } else {
+        const getPersonIds = db2.prepare(`SELECT DISTINCT person_id FROM faces WHERE id IN (${placeholders}) AND person_id IS NOT NULL`);
+        const personsToUpdate = getPersonIds.all(...faceIds).map((p) => p.person_id);
+        for (const pid of personsToUpdate) {
+          scheduleMeanRecalc(db2, pid);
+        }
+      }
+    });
+    transaction();
+    return { success: true };
+  } catch (e) {
+    console.error("Failed to restore faces:", e);
     return { success: false, error: e };
   }
 });
