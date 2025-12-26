@@ -4,7 +4,7 @@ import { useAI } from './AIContext'
 interface ScanContextType {
     scanning: boolean
     scanCount: number
-    startScan: (path: string) => Promise<void>
+    startScan: (path: string, options?: { forceRescan?: boolean }) => Promise<void>
     scanPath: string
     photos: any[]
     loadMorePhotos: () => Promise<void>
@@ -28,6 +28,7 @@ interface ScanContextType {
     viewPhoto: (photoId: number) => Promise<void>
     setViewingPhoto: (photo: any | null) => void
     navigateToPhoto: (direction: number) => void
+    rescanFiles: (ids: number[]) => Promise<void>
 }
 
 const ScanContext = createContext<ScanContextType | undefined>(undefined)
@@ -265,24 +266,31 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         }
     }
 
-    const startScan = async (path: string) => {
+    const startScan = async (path: string, options: { forceRescan?: boolean } = {}) => {
         setScanning(true)
         setScanCount(0)
         setScanPath(path)
         try {
-            console.log(`[ScanContext] Starting scan of ${path}`);
-            await window.ipcRenderer.invoke('scan-directory', path)
-            console.log(`[ScanContext] Scan complete.`);
-
-            // Queue Fix: Fetch ALL photos in this folder and add to AI Queue
+            console.log(`[ScanContext] Starting scan of ${path} (forceRescan=${options.forceRescan})`);
             // @ts-ignore
-            const scanPhotos = await window.ipcRenderer.invoke('db:getPhotosForRescan', { filter: { folder: path } })
-            if (scanPhotos.length > 0) {
-                console.log(`[ScanContext] check: Queueing ${scanPhotos.length} photos for AI.`);
-                addToQueue(scanPhotos)
+            const scanResults: any[] = await window.ipcRenderer.invoke('scan-directory', path, options)
+            console.log(`[ScanContext] Scan complete. Found ${scanResults.length} photos.`);
+
+            // Queue Logic:
+            // If forceRescan: Queue ALL returned photos
+            // Else: Queue ONLY photos marked as isNew
+            const photosToQueue = options.forceRescan
+                ? scanResults
+                : scanResults.filter(p => p.isNew);
+
+            if (photosToQueue.length > 0) {
+                console.log(`[ScanContext] Queueing ${photosToQueue.length} photos for AI (Total Scanned: ${scanResults.length})`);
+                addToQueue(photosToQueue)
+            } else {
+                console.log(`[ScanContext] No new photos to queue for AI.`);
             }
 
-            // Also refresh errors if any occurred during scan (synchronous part, though AI is async)
+            // Also refresh errors if any occurred during scan
             loadScanErrors()
 
         } catch (err) {
@@ -292,6 +300,42 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             setScanning(false)
             // Switch to folder view for the scanned path
             setFilterState({ folder: path })
+            // Refresh current view if needed
+            if (isFilterComplete(filter)) {
+                // Trigger reload by setting filter again or separate reload
+                setFilter({ ...filter }); // Hack trigger
+            }
+        }
+    }
+
+    const rescanFiles = async (ids: number[]) => {
+        if (ids.length === 0) return;
+        setScanning(true)
+        try {
+            // @ts-ignore
+            const pathsToScan = await window.ipcRenderer.invoke('db:getFilePaths', ids);
+
+            if (pathsToScan.length > 0) {
+                console.log(`[ScanContext] Rescanning ${pathsToScan.length} specific files...`);
+                // @ts-ignore
+                const scannedPhotos = await window.ipcRenderer.invoke('scan-files', pathsToScan, { forceRescan: true });
+
+                // Queue Logic: Queue ALL returned photos as they are forced
+                if (scannedPhotos.length > 0) {
+                    addToQueue(scannedPhotos);
+                }
+
+                // Refresh view hack
+                setPhotos(prev => prev.map(p => {
+                    const updated = scannedPhotos.find((sp: any) => sp.id === p.id);
+                    if (updated) return { ...updated, _cacheBust: Date.now() };
+                    return p;
+                }));
+            }
+        } catch (e) {
+            console.error('Rescan files failed', e);
+        } finally {
+            setScanning(false);
         }
     }
 
@@ -310,7 +354,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             scanning, scanCount, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter,
             availableTags, loadTags, availableFolders, loadFolders, availablePeople, loadPeople,
             scanErrors, loadScanErrors, retryErrors, clearErrors, loadingPhotos, refreshPhoto,
-            viewingPhoto, viewPhoto, setViewingPhoto, navigateToPhoto
+            viewingPhoto, viewPhoto, setViewingPhoto, navigateToPhoto, rescanFiles
         }}>
             {children}
         </ScanContext.Provider>

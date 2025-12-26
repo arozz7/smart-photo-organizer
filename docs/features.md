@@ -11,6 +11,9 @@ The application features a robust scanning engine designed to handle large photo
 ### Scanning Logic
 1. **Recursive Scan:** The scanner traverses the selected directory and all subdirectories.
 2. **Change Detection:** It checks if a file is already in the database. Existing files are skipped unless they are flagged for a re-scan.
+3. **Rescan Capabilities:**
+   - **Incremental Scan:** The default "Scan" only processes new files effectively.
+   - **Force Rescan:** Explicitly re-analyzes files, regenerating previews and refreshing metadata even if they exist.
 3. **Preview Generation:** 
    - For RAW files, it attempts to extract the embedded JPEG preview using `exiftool` (fast).
    - If that fails, it uses `sharp` to decode and convert the image (slower but reliable).

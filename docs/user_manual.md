@@ -12,7 +12,9 @@ When you first open the application, you'll need to tell it where to store its d
     > [!TIP]
     > Choose a drive with plenty of space if you have a large photo library, as preview images can take up significant storage over time.
 2.  **Add Photo Folders:** Click **"Select Photo Folder"** to choose the root directory where your photos are stored.
-3.  **Initial Scan:** Click **"Scan Library"** in the sidebar. The app will begin finding files, generating previews, and extracting EXIF data.
+3.  **Initial Scan:** Click **"Scan Library"** in the sidebar. 
+    - **Scan (Default):** Runs an incremental scan, skipping files already in the database.
+    - **Force Rescan (Dropdown):** Click the arrow next to the button to **Force Rescan**. This checks every file, regenerates previews if missing, and queues everything for AI analysis.
 
 ---
 
