@@ -75,6 +75,7 @@ The **Create** view is for when you want to gather specific photos for a project
 
 1.  **Filter:** Use the sidebar to find photos. You can combine filters:
     -   *Example:* "Person: Alice" AND "Tag: Beach".
+    -   **Tags (Type-ahead):** Start typing in the "Tags" input to see a sorted list of matches.
 2.  **Add to Set:** Click photos in the results to add them to your **"Current Set"** in the right panel.
 3.  **Export:** Once happy with your set, click **"Export Album"**. Choose a destination folder, and the app will copy all selected photos into that folder, organized and ready to share!
 
@@ -101,6 +102,8 @@ The app generates small preview images to keep the library fast.
 ### 💾 Database Management
 Tools for maintaining the health and accuracy of your library:
 - **Clear AI Tags:** Removes all AI-generated tags while preserving your manual ones. Useful if you want to re-scan with a different performance profile.
+- **Cleanup Tags:** Normalizes all tags in the database (lowercase, single-word) and merges duplicates.
+- **Deduplicate Faces:** Scans for and merges potential duplicate face entries in your database.
 - **Deduplicate Faces:** Scans for and merges potential duplicate face entries in your database.
 - **Calculate Blur Scores:** Missing scores for old scans? Use this to calculate quality scores for existing faces, enabling the "Cleanup Blurry" feature.
 - **Factory Reset:** ⚠️ **Extreme Caution.** Wipes the database and all settings to start fresh.

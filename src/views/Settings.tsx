@@ -319,6 +319,54 @@ export default function Settings() {
                                 </button>
                             </div>
 
+                            <div className="flex justify-between items-center gap-4 flex-wrap border-t border-gray-700 pt-4 mt-4">
+                                <div>
+                                    <h4 className="font-medium text-white">Cleanup & Optimize Tags</h4>
+                                    <p className="text-sm text-gray-400 mt-1">
+                                        Split multi-word tags, enforce lowercase, and remove duplicates.
+                                        <br />
+                                        <span className="text-orange-400 font-semibold text-xs">⚠️ Destructive: Modifies existing tag database.</span>
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={async () => {
+                                        showConfirm({
+                                            title: 'Cleanup Tags',
+                                            description: `This will normalize ALL existing tags:\n\n1. Convert to lowercase\n2. Split phrases into single words\n3. Remove punctuation\n4. Merge duplicates\n\nThis cannot be undone.`,
+                                            confirmLabel: 'Run Cleanup',
+                                            variant: 'danger',
+                                            onConfirm: async () => {
+                                                try {
+                                                    // @ts-ignore
+                                                    const res = await window.ipcRenderer.invoke('db:cleanupTags');
+                                                    if (res.success) {
+                                                        showAlert({
+                                                            title: 'Cleanup Complete',
+                                                            description: `Cleanup finished.\nTags Deleted: ${res.deletedCount}\nLinks Updated: ${res.mergedCount}`
+                                                        });
+                                                    } else {
+                                                        showAlert({
+                                                            title: 'Cleanup Failed',
+                                                            description: res.error,
+                                                            variant: 'danger'
+                                                        });
+                                                    }
+                                                } catch (e) {
+                                                    showAlert({
+                                                        title: 'Error',
+                                                        description: String(e),
+                                                        variant: 'danger'
+                                                    });
+                                                }
+                                            }
+                                        });
+                                    }}
+                                    className="px-4 py-2 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white transition-colors border border-gray-600"
+                                >
+                                    Cleanup Tags
+                                </button>
+                            </div>
+
                             {message && (
                                 <div className={`p-3 rounded text-sm ${message.includes('Success') ? 'bg-green-900/50 text-green-200' : 'bg-red-900/50 text-red-200'}`}>
                                     {message}

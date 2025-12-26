@@ -66,6 +66,10 @@
     - **Incremental Scan:** Only processes new files.
     - **Force Rescan:** Option to force re-extraction of metadata and previews for all files.
     - **Unified Rescan:** "Rescan Selected" now performs a full refresh + AI scan.
+- **Smart Tags Optimization:**
+    - **Normalization:** Enforced single-word, lowercase tags.
+    - **Cleanup Utility:** Settings tool to optimize existing tag database.
+    - **Type-ahead Filter:** Improved tag filtering in Create view.
 
 ## v0.3.0: Core Intelligence
 - **Smart Face Storage:** Vectors stored as BLOBs, on-demand crops (no disk thumbnails), vector pruning for known faces.

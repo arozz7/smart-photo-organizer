@@ -588,3 +588,125 @@ export function autoAssignFaces(faceIds: number[], threshold = 0.65) {
     return { success: false, error: String(e) };
   }
 }
+export async function cleanupTags() {
+  const db = getDB();
+  logger.info("Starting Tag Cleanup...");
+
+  try {
+    const allTags = db.prepare('SELECT id, name FROM tags').all();
+    logger.info(`Found ${allTags.length} tags to process.`);
+
+    let deletedCount = 0;
+    let mergedCount = 0;
+
+    // Helper to get or create a tag ID
+    const getOrCreateTagId = (tagName: string) => {
+      const lowerName = tagName.toLowerCase();
+      const existing = db.prepare('SELECT id FROM tags WHERE name = ?').get(lowerName) as { id: number } | undefined;
+      if (existing) return existing.id;
+      const info = db.prepare('INSERT INTO tags (name) VALUES (?)').run(lowerName);
+      return Number(info.lastInsertRowid);
+    };
+
+    const transaction = db.transaction(() => {
+      // Prepare statements
+      const getPhotoTags = db.prepare('SELECT photo_id FROM photo_tags WHERE tag_id = ?');
+      const insertPhotoTag = db.prepare('INSERT OR IGNORE INTO photo_tags (photo_id, tag_id, source) VALUES (?, ?, ?)');
+      const deleteOldTag = db.prepare('DELETE FROM tags WHERE id = ?');
+      const deleteOldLinks = db.prepare('DELETE FROM photo_tags WHERE tag_id = ?');
+
+      // Stopwords (Javascript Set)
+      const stopwords = new Set(['a', 'an', 'the', 'in', 'on', 'at', 'is', 'are', 'was', 'were',
+        'and', 'or', 'but', 'of', 'to', 'with', 'for', 'this', 'that',
+        'there', 'it', 'he', 'she', 'they', 'looking', 'standing', 'holding']);
+
+      for (const tag of allTags) {
+        // Clean logic (Match Python)
+        const clean = tag.name.replace(/['"]/g, '');
+        const words = clean.split(/\s+/);
+        const validWords = [];
+
+        for (const w of words) {
+          const norm = w.toLowerCase().replace(/^[.,\-!?:;"()[\]{}]+|[.,\-!?:;"()[\]{}]+$/g, '');
+          if (norm.length > 2 && !stopwords.has(norm)) {
+            validWords.push(norm);
+          }
+        }
+
+        // If tag is already perfect (single word, lowercase, valid), skip
+        // Note: If tag was "Red", it becomes "red". We check if "red" is the same name.
+        // If "red" tag already exists separately, we must merge.
+
+        // Logic: Migrate ALL links to new tag IDs, then delete old tag.
+        // Even if "validWords" contains only the same word (e.g. "red"), 
+        // the `getOrCreateTagId` will return the canonical ID. 
+        // If the canonical ID != old ID, we re-link and delete old.
+        // If canonical ID == old ID (it found itself), we do nothing.
+
+        const affectedPhotoIds = getPhotoTags.all(tag.id).map((r: any) => r.photo_id);
+
+        let selfReferential = true;
+        if (validWords.length !== 1 || validWords[0] !== tag.name) {
+          selfReferential = false;
+        }
+
+        // Optimization: If it's already perfect and unique, skip
+        if (selfReferential) continue;
+
+        // Process Migration
+        for (const newWord of validWords) {
+          const targetTagId = getOrCreateTagId(newWord);
+
+          // If we are migrating to ourself (e.g. "red" -> "red"), do nothing for this word link
+          if (targetTagId === tag.id) continue;
+
+          // Move all photos to target
+          for (const pid of affectedPhotoIds) {
+            insertPhotoTag.run(pid, targetTagId, 'auto');
+          }
+          mergedCount++;
+        }
+
+        // After migrating links to new homes, delete original tag
+        // (Unless it was one of the new homes? No, getOrCreate would find it)
+        // Wait, if "red" -> "red", targetTagId === tag.id.
+        // If "Red" -> "red", targetTagId could be existing "red" (merge) or new "red".
+        // If new "red", is it the same ID? 
+        // SQLite `name UNIQUE`. We selected all tags.
+        // "Red" and "red" cannot both exist if collation is NOCASE?
+        // Schema: `name TEXT UNIQUE NOT NULL`. Default collation is BINARY.
+        // So "Red" and "red" CAN both exist.
+
+        // Case 1: "Red" (id 1). "red" (id 2) exists.
+        // Process "Red": valid="red". targetTagId -> 2.
+        // Link photos to 2. Delete 1.
+
+        // Case 2: "Red" (id 1). "red" does not exist.
+        // Process "Red": valid="red". targetTagId -> Creates "red" (id 3)? 
+        // No, we should probably rename "Red" to "red" if it's a direct 1:1 map?
+        // To keep it simple: Create new, move links, delete old. 
+        // So "Red" (id 1) -> creates "red" (id 3). Links moved. "Red" (1) deleted.
+        // Is this efficient? It bumps IDs but clean.
+
+        // Only delete if we actually changed something or migrated
+        // If tag.name is exactly validDocs[0] and length 1, we skipped above.
+
+        deleteOldLinks.run(tag.id);
+        deleteOldTag.run(tag.id);
+        deletedCount++;
+      }
+    });
+
+    transaction();
+    logger.info(`Cleanup Complete. Deleted ${deletedCount} tags. Merged/Links updated: ${mergedCount}`);
+
+    // Vacuum to reclaim space
+    db.exec('VACUUM');
+
+    return { success: true, deletedCount, mergedCount };
+
+  } catch (e) {
+    logger.error("Cleanup Tags Failed", e);
+    return { success: false, error: String(e) };
+  }
+}

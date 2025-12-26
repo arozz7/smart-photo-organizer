@@ -64,6 +64,9 @@ The application allows you to fine-tune the AI models to match your specific har
   - **Low (0.1):** Deterministic, factual tags.
   - **High (0.8+):** More diverse vocabulary, but risk of "hallucinations" (seeing things that aren't there).
 - **Max Tokens:** Controls the length of the generated descriptions.
+- **Tag Normalization:**
+  - By default, the application enforces **lowercase** and **single-word** tags to keep your library clean.
+  - A **Cleanup Tool** is available to migrate existing tags to this format.
 
 ## 4. Smart Tagging (Generative AI)
 

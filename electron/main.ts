@@ -601,6 +601,11 @@ app.whenReady().then(async () => {
     });
   });
 
+  ipcMain.handle('db:cleanupTags', async () => {
+    const { cleanupTags } = await import('./db');
+    return await cleanupTags();
+  });
+
   ipcMain.handle('ai:getSystemStatus', async () => {
     return new Promise((resolve, reject) => {
       const requestId = Math.floor(Math.random() * 1000000);
