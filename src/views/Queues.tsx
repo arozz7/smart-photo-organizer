@@ -2,6 +2,7 @@ import { useAI } from '../context/AIContext'
 import { useState, useEffect } from 'react'
 import { usePeople } from '../context/PeopleContext'
 import { useAlert } from '../context/AlertContext'
+import { Virtuoso } from 'react-virtuoso'
 
 export default function Queues() {
     const {
@@ -18,7 +19,8 @@ export default function Queues() {
         systemStatus,
         fetchSystemStatus,
         scanMetrics,
-        performanceStats
+        performanceStats,
+        setThrottled
     } = useAI()
     const { rebuildIndex } = usePeople()
     const { showAlert, showConfirm } = useAlert()
@@ -42,6 +44,9 @@ export default function Queues() {
 
     useEffect(() => {
         reloadHistory();
+        // Throttle AI while viewing this page to prevent UI lockups during rapid updates
+        setThrottled(true);
+        return () => setThrottled(false);
     }, [scanMetrics?.lastUpdate]);
 
     const handleBatchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -173,22 +178,22 @@ export default function Queues() {
                         <div className="bg-gray-700 px-4 py-2 text-xs font-semibold text-gray-300">
                             Next Up
                         </div>
-                        <div className="overflow-y-auto flex-1 p-2 space-y-1">
-                            {processingQueue.slice(0, 50).map((p, i) => (
-                                <div key={p.id} className="text-xs text-gray-400 truncate border-b border-gray-800/50 pb-1 flex gap-2">
-                                    <span className="text-gray-600 font-mono w-6 text-right">{i + 1}.</span>
-                                    {p.file_path || `Photo #${p.id}`}
-                                </div>
-                            ))}
-                            {processingQueue.length > 50 && (
-                                <div className="text-xs text-center text-gray-500 py-2">
-                                    ... and {processingQueue.length - 50} more
-                                </div>
-                            )}
-                            {processingQueue.length === 0 && (
-                                <div className="h-full flex items-center justify-center text-gray-600 text-sm italic">
+                        <div className="flex-1 p-0 h-full">
+                            {processingQueue.length === 0 ? (
+                                <div className="h-full flex items-center justify-center text-gray-600 text-sm italic p-8">
                                     Queue is empty
                                 </div>
+                            ) : (
+                                <Virtuoso
+                                    style={{ height: '100%' }}
+                                    data={processingQueue}
+                                    itemContent={(index, p) => (
+                                        <div className="px-2 py-1 text-xs text-gray-400 truncate border-b border-gray-800/50 flex gap-2 hover:bg-white/5">
+                                            <span className="text-gray-600 font-mono w-8 text-right shrink-0">{index + 1}.</span>
+                                            <span className="truncate">{p.file_path || `Photo #${p.id}`}</span>
+                                        </div>
+                                    )}
+                                />
                             )}
                         </div>
                     </div>

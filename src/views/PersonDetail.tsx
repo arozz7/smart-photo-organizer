@@ -35,12 +35,14 @@ const PersonDetail = () => {
     const [loading, setLoading] = useState(false);
     const [selectedFaces, setSelectedFaces] = useState<Set<number>>(new Set());
     const { showAlert, showConfirm } = useAlert();
-    const { addToQueue } = useAI();
+    const { addToQueue, setThrottled } = useAI();
     const [isScanning, setIsScanning] = useState(false);
     const [isScanModalOpen, setIsScanModalOpen] = useState(false);
 
     useEffect(() => {
         loadData();
+        setThrottled(true);
+        return () => setThrottled(false);
     }, [personId]);
 
     const loadData = async () => {

@@ -625,27 +625,33 @@ def generate_captions(image_path):
             description = desc_part
             
         # Parse tags
-        tags = [t.strip() for t in tags_part.split(",") if t.strip()]
-        tags = [t.replace('[','').replace(']','').replace('.','') for t in tags] # Clean punctuation
-    else:
-        # Fallback: Extract keywords from description
-        logger.info("Tags not found explicitly, extracting from description...")
-        import re
-        # Simple stopword list
+        raw_tags = [t.strip() for t in tags_part.split(",") if t.strip()]
+        
+        # Strict Normalization (Single Word, Lowercase, No Punctuation)
+        normalized_tags = []
         stopwords = {'a', 'an', 'the', 'in', 'on', 'at', 'is', 'are', 'was', 'were', 
                      'and', 'or', 'but', 'of', 'to', 'with', 'for', 'this', 'that', 
                      'there', 'it', 'he', 'she', 'they', 'looking', 'standing', 'holding'}
+
+        for t in raw_tags:
+             # Remove quotes
+             clean = t.replace('"', '').replace("'", "")
+             # Split into words
+             words = clean.split()
+             for w in words:
+                 # Clean punctuation from edges
+                 w = w.lower().strip('.,-!?:;"()[]{}')
+                 if len(w) > 2 and w not in stopwords:
+                     normalized_tags.append(w)
         
-        words = re.findall(r'\b\w+\b', description.lower())
-        keywords = [w for w in words if w not in stopwords and len(w) > 3]
         # Deduplicate preserving order
         seen = set()
         tags = []
-        for w in keywords:
-            if w not in seen:
-                seen.add(w)
-                tags.append(w)
-        tags = tags[:8] # Take top 8 keywords
+        for t in normalized_tags:
+            if t not in seen:
+                seen.add(t)
+                tags.append(t)
+
 
         tags = tags[:8] # Take top 8 keywords
 

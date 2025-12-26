@@ -11,6 +11,9 @@ The application features a robust scanning engine designed to handle large photo
 ### Scanning Logic
 1. **Recursive Scan:** The scanner traverses the selected directory and all subdirectories.
 2. **Change Detection:** It checks if a file is already in the database. Existing files are skipped unless they are flagged for a re-scan.
+3. **Rescan Capabilities:**
+   - **Incremental Scan:** The default "Scan" only processes new files effectively.
+   - **Force Rescan:** Explicitly re-analyzes files, regenerating previews and refreshing metadata even if they exist.
 3. **Preview Generation:** 
    - For RAW files, it attempts to extract the embedded JPEG preview using `exiftool` (fast).
    - If that fails, it uses `sharp` to decode and convert the image (slower but reliable).
@@ -61,6 +64,9 @@ The application allows you to fine-tune the AI models to match your specific har
   - **Low (0.1):** Deterministic, factual tags.
   - **High (0.8+):** More diverse vocabulary, but risk of "hallucinations" (seeing things that aren't there).
 - **Max Tokens:** Controls the length of the generated descriptions.
+- **Tag Normalization:**
+  - By default, the application enforces **lowercase** and **single-word** tags to keep your library clean.
+  - A **Cleanup Tool** is available to migrate existing tags to this format.
 
 ## 4. Smart Tagging (Generative AI)
 

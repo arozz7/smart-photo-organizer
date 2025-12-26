@@ -10,12 +10,14 @@ import IgnoredFacesModal from '../components/IgnoredFacesModal'
 import { useAI } from '../context/AIContext'
 import { Face } from '../types'
 import { useAlert } from '../context/AlertContext'
+import { useToast } from '../context/ToastContext'
 
 export default function People() {
     const navigate = useNavigate()
     const { people, faces, loadPeople, loadFaces, loading, autoNameFaces, ignoreFaces } = usePeople()
-    const { onPhotoProcessed, addToQueue } = useAI()
+    const { onPhotoProcessed, addToQueue, setThrottled } = useAI()
     const { showAlert, showConfirm } = useAlert()
+    const { addToast } = useToast()
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
     const [showBlurryModal, setShowBlurryModal] = useState(false)
     const [showIgnoredModal, setShowIgnoredModal] = useState(false)
@@ -106,6 +108,12 @@ export default function People() {
     }, [faces, activeTab])
 
 
+    // Enable throttling while this complex view is active
+    useEffect(() => {
+        setThrottled(true);
+        return () => setThrottled(false);
+    }, []);
+
     useEffect(() => {
         // Refresh faces when AI finishing processing, if we are on unnamed tab
         const cleanup = onPhotoProcessed((_photoId) => {
@@ -180,7 +188,13 @@ export default function People() {
 
     const handleConfirmName = async (selectedIds: number[], name: string) => {
         if (!name || selectedIds.length === 0) return
+
+        // Optimistic UI - Immediately remove from view if they are just singles
+        // (For groups, the modal closes and we might need to refresh, but we can try)
+
         await autoNameFaces(selectedIds, name)
+        addToast({ type: 'success', description: `Named ${selectedIds.length} faces as "${name}"` })
+
         setNamingGroup(null)
         // If we were selecting groups, clear selection
         setSelectedGroups(new Set())
@@ -413,15 +427,16 @@ export default function People() {
                                         onConfirm: async () => {
                                             try {
                                                 const faceIds = faces.map(f => f.id);
+                                                // Optimistic Clear
+                                                setSingles([]);
+                                                setClusters([]);
+
                                                 await window.ipcRenderer.invoke('db:ignoreFaces', faceIds);
-                                                loadFaces({ unnamed: true }); // Refresh
+                                                addToast({ type: 'success', description: `Ignored ${faceIds.length} faces` });
+                                                loadFaces({ unnamed: true }); // Refresh to be sure
                                             } catch (e) {
                                                 console.error(e);
-                                                showAlert({
-                                                    title: 'Error',
-                                                    description: 'Failed to ignore faces',
-                                                    variant: 'danger'
-                                                });
+                                                addToast({ type: 'error', description: 'Failed to ignore faces' });
                                             }
                                         }
                                     });
@@ -440,16 +455,17 @@ export default function People() {
                                         onConfirm: async () => {
                                             try {
                                                 const faceIds = faces.map(f => f.id);
+                                                // Optimistic Clear
+                                                setSingles([]);
+                                                setClusters([]);
+
                                                 // @ts-ignore
                                                 await window.ipcRenderer.invoke('db:deleteFaces', faceIds);
+                                                addToast({ type: 'success', description: `Deleted ${faceIds.length} faces` });
                                                 loadFaces({ unnamed: true }); // Refresh
                                             } catch (e) {
                                                 console.error(e);
-                                                showAlert({
-                                                    title: 'Error',
-                                                    description: 'Failed to delete faces',
-                                                    variant: 'danger'
-                                                });
+                                                addToast({ type: 'error', description: 'Failed to delete faces' });
                                             }
                                         }
                                     });
@@ -494,8 +510,12 @@ export default function People() {
                                 confirmLabel: 'Ignore All',
                                 variant: 'danger',
                                 onConfirm: async () => {
-                                    await ignoreFaces(Array.from(selectedSingles));
+                                    // Optimistic Update
+                                    setSingles(prev => prev.filter(f => !selectedSingles.has(f.id)));
                                     setSelectedSingles(new Set());
+
+                                    await ignoreFaces(Array.from(selectedSingles));
+                                    addToast({ type: 'success', description: `Ignored ${selectedSingles.size} faces` });
                                 }
                             });
                         }}
@@ -550,11 +570,12 @@ export default function People() {
                                         .filter(c => selectedGroups.has(c.id))
                                         .flatMap(c => c.faces.map(f => f.id));
 
-                                    await ignoreFaces(allFaceIds);
-
                                     // Optimistic Update
                                     setClusters(prev => prev.filter(c => !selectedGroups.has(c.id)));
                                     setSelectedGroups(new Set());
+
+                                    await ignoreFaces(allFaceIds);
+                                    addToast({ type: 'success', description: `Ignored ${selectedGroups.size} groups` });
                                 }
                             });
                         }}
@@ -668,6 +689,8 @@ export default function People() {
                                                                         if (selectedGroups.has(group.id)) {
                                                                             toggleGroupSelection(group.id);
                                                                         }
+
+                                                                        addToast({ type: 'success', description: 'Group ignored' });
                                                                     }
                                                                 });
                                                             }}

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { useAlert } from './AlertContext';
+import { useToast } from './ToastContext';
 
 interface SystemStatus {
     insightface: {
@@ -69,6 +70,9 @@ interface AIContextType {
         photosProcessed: number;
         averagePerFace: number;
     };
+    // Smart Throttling
+    isThrottled: boolean;
+    setThrottled: (throttled: boolean) => void;
 }
 
 const AIContext = createContext<AIContextType>({
@@ -94,7 +98,9 @@ const AIContext = createContext<AIContextType>({
     aiMode: 'UNKNOWN',
     vlmEnabled: false,
     scanMetrics: null,
-    performanceStats: { averageTime: 0, bestTime: 0, photosProcessed: 0, averagePerFace: 0 }
+    performanceStats: { averageTime: 0, bestTime: 0, photosProcessed: 0, averagePerFace: 0 },
+    isThrottled: false,
+    setThrottled: () => { }
 });
 
 export const useAI = () => useContext(AIContext);
@@ -103,6 +109,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     // Python backend starts with Main, so we assume it's ready. 
     // We could add a check later, but for now simplify.
     const { showAlert } = useAlert();
+    const { addToast } = useToast();
     const [isModelLoading] = useState(false);
     const [isModelReady] = useState(true);
 
@@ -151,6 +158,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [vlmEnabled, setVlmEnabled] = useState(false);
     const [scanMetrics, setScanMetrics] = useState<{ load: number; scan: number; tag: number; total: number; lastUpdate: number } | null>(null);
     const [performanceStats, setPerformanceStats] = useState({ averageTime: 0, bestTime: 0, photosProcessed: 0, averagePerFace: 0 });
+    const [isThrottled, setThrottled] = useState(false);
 
     const fetchSystemStatus = useCallback(async () => {
         try {
@@ -212,29 +220,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     // @ts-ignore
                     await window.ipcRenderer.invoke('ai:scanImage', { photoId: res.photoIds[i] });
                     setBlurProgress({ current: i + 1, total });
+                    setBlurProgress({ current: i + 1, total });
                 }
-                showAlert({
-                    title: 'Blur Calculation Complete',
-                    description: `Finished calculating blur scores for ${total} photos.`
-                });
+                addToast({ type: 'success', description: `Finished calculating blur scores for ${total} photos.` });
             } else if (res.success) {
-                showAlert({
-                    title: 'No Action Required',
-                    description: 'No photos found missing blur scores.'
-                });
+                addToast({ type: 'info', description: 'No photos found missing blur scores.' });
             } else {
-                showAlert({
-                    title: 'Error',
-                    description: "Failed to find photos: " + res.error,
-                    variant: 'danger'
-                });
+                addToast({ type: 'error', description: "Failed to find photos: " + res.error });
             }
         } catch (e) {
-            showAlert({
-                title: 'Error',
-                description: "Error: " + e,
-                variant: 'danger'
-            });
+            addToast({ type: 'error', description: "Error calculating blur" });
         } finally {
             setCalculatingBlur(false);
             setBlurProgress({ current: 0, total: 0 });
@@ -626,8 +621,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }
         };
 
-        processNext();
-    }, [processingQueue, isProcessing, isPaused, isCoolingDown, currentBatchCount, queueConfig]);
+        if (isThrottled) {
+            // Add significant delay if throttled to free up UI thread
+            console.log("[AI] Throttling active: Slowing down queue processing...");
+            const timer = setTimeout(processNext, 1000); // 1s delay
+            return () => clearTimeout(timer);
+        } else {
+            processNext();
+        }
+
+    }, [processingQueue, isProcessing, isPaused, isCoolingDown, currentBatchCount, queueConfig, isThrottled]);
 
     // Clear interval on unmount
     useEffect(() => {
@@ -660,7 +663,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             aiMode,
             vlmEnabled,
             scanMetrics,
-            performanceStats
+            performanceStats,
+            isThrottled,
+            setThrottled
         }}>
             {children}
         </AIContext.Provider>

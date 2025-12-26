@@ -7,20 +7,24 @@ import { VirtuosoGrid } from 'react-virtuoso'
 // import AIStatus from '../components/AIStatus'
 import ScanErrorsModal from '../components/ScanErrorsModal'
 import SettingsModal from '../components/SettingsModal'
-import { GearIcon } from '@radix-ui/react-icons'
+import { GearIcon, ChevronDownIcon } from '@radix-ui/react-icons'
 
 export default function Library() {
-    const { scanning, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, availableFolders, availablePeople, scanErrors, loadScanErrors, setViewingPhoto } = useScan()
-    const { addToQueue } = useAI()
+    const { scanning, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, availableFolders, availablePeople, scanErrors, loadScanErrors, setViewingPhoto, rescanFiles } = useScan()
+    const { setThrottled } = useAI()
     const { showAlert, showConfirm } = useAlert()
     const [localPath, setLocalPath] = useState(scanPath || 'D:\\Photos')
     const [isSelectionMode, setIsSelectionMode] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
     const [showErrors, setShowErrors] = useState(false)
     const [showSettings, setShowSettings] = useState(false)
+    const [showScanMenu, setShowScanMenu] = useState(false)
 
     useEffect(() => {
         loadScanErrors()
+        // Enable Throttling to keep scrolling smooth
+        setThrottled(true)
+        return () => setThrottled(false)
     }, [])
 
     useEffect(() => {
@@ -29,9 +33,10 @@ export default function Library() {
         }
     }, [scanning])
 
-    const handleScan = async () => {
+    const handleScan = async (forceRescan = false) => {
         try {
-            await startScan(localPath)
+            setShowScanMenu(false)
+            await startScan(localPath, { forceRescan })
         } catch (err) {
             console.error('Scan failed', err)
         }
@@ -59,12 +64,11 @@ export default function Library() {
         if (selectedIds.size === 0) return
 
         showConfirm({
-            title: 'Rescan with AI',
-            description: `Rescan ${selectedIds.size} selected photos with AI?`,
+            title: 'Rescan Selected',
+            description: `Force rescan (refresh metadata + AI) for ${selectedIds.size} selected photos?`,
             confirmLabel: 'Rescan Now',
-            onConfirm: () => {
-                const photosToRescan = photos.filter(p => selectedIds.has(p.id))
-                addToQueue(photosToRescan)
+            onConfirm: async () => {
+                await rescanFiles(Array.from(selectedIds))
                 setIsSelectionMode(false)
                 setSelectedIds(new Set())
             }
@@ -74,7 +78,7 @@ export default function Library() {
     const handleRescanFiltered = async () => {
         showConfirm({
             title: 'Bulk Rescan',
-            description: 'Rescan ALL photos matching the current filter? This might take a while.',
+            description: 'Rescan ALL photos matching the current filter? This will refresh metadata and run AI logic.',
             confirmLabel: 'Prepare Rescan',
             onConfirm: async () => {
                 try {
@@ -85,10 +89,11 @@ export default function Library() {
                         setTimeout(() => {
                             showConfirm({
                                 title: 'Proceed with Rescan',
-                                description: `Found ${photosToRescan.length} photos. Proceed with AI processing?`,
+                                description: `Found ${photosToRescan.length} photos. Proceed with Force Rescan?`,
                                 confirmLabel: 'Start Processing',
-                                onConfirm: () => {
-                                    addToQueue(photosToRescan)
+                                onConfirm: async () => {
+                                    const ids = photosToRescan.map((p: any) => p.id);
+                                    await rescanFiles(ids);
                                 }
                             });
                         }, 200);
@@ -341,13 +346,33 @@ export default function Library() {
                     >
                         Browse
                     </button>
-                    <button
-                        onClick={handleScan}
-                        disabled={scanning}
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
-                    >
-                        {scanning ? `Scanning...` : 'Scan'}
-                    </button>
+                    <div className="relative flex items-center">
+                        <button
+                            onClick={() => handleScan(false)}
+                            disabled={scanning}
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-l text-sm font-medium transition-colors disabled:opacity-50 border-r border-indigo-700"
+                        >
+                            {scanning ? `Scanning...` : 'Scan'}
+                        </button>
+                        <button
+                            disabled={scanning}
+                            onClick={() => setShowScanMenu(!showScanMenu)}
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-1.5 py-1.5 rounded-r text-sm transition-colors disabled:opacity-50"
+                        >
+                            <ChevronDownIcon />
+                        </button>
+
+                        {showScanMenu && (
+                            <div className="absolute top-full right-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded shadow-xl z-50 overflow-hidden">
+                                <button
+                                    onClick={() => handleScan(true)}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors"
+                                >
+                                    Force Rescan (Check All)
+                                </button>
+                            </div>
+                        )}
+                    </div>
                     <button
                         onClick={() => setShowSettings(true)}
                         className="bg-gray-700 hover:bg-gray-600 text-gray-300 p-1.5 rounded transition-colors"

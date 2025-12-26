@@ -8,7 +8,7 @@ import { spawn, ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url'
 import { initDB, getDB, closeDB, recalculatePersonMean } from './db'
-import { scanDirectory } from './scanner'
+import { scanDirectory, scanFiles } from './scanner'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import {
@@ -520,10 +520,16 @@ app.whenReady().then(async () => {
     return false;
   });
 
-  ipcMain.handle('scan-directory', async (event, dirPath) => {
+  ipcMain.handle('scan-directory', async (event, dirPath, options = {}) => {
     return await scanDirectory(dirPath, LIBRARY_PATH, (count) => {
       event.sender.send('scan-progress', count)
-    })
+    }, options)
+  })
+
+  ipcMain.handle('scan-files', async (event, filePaths: string[], options = {}) => {
+    return await scanFiles(filePaths, LIBRARY_PATH, (count) => {
+      event.sender.send('scan-progress', count)
+    }, options)
   })
 
   ipcMain.handle('dialog:openDirectory', async () => {
@@ -593,6 +599,11 @@ app.whenReady().then(async () => {
         }
       }, 1800000);
     });
+  });
+
+  ipcMain.handle('db:cleanupTags', async () => {
+    const { cleanupTags } = await import('./db');
+    return await cleanupTags();
   });
 
   ipcMain.handle('ai:getSystemStatus', async () => {
@@ -1352,7 +1363,7 @@ app.whenReady().then(async () => {
       // Filter out empty descriptors which cause numpy "inhomogeneous shape" errors
       const facesPayload = ids
         .map((id: number, i: number) => ({ id, descriptor: descriptors[i] }))
-        .filter(f => f.descriptor && f.descriptor.length > 0);
+        .filter((f: { id: number; descriptor: number[] }) => f.descriptor && f.descriptor.length > 0);
 
       if (facesPayload.length === 0) return { success: true, clusters: [] };
 

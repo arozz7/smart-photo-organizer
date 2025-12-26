@@ -15,6 +15,16 @@ export default function Create() {
     const [peopleMatchAll, setPeopleMatchAll] = useState(false)
     const [semanticSearch, setSemanticSearch] = useState('')
 
+    // Type-ahead State
+    const [tagInput, setTagInput] = useState('')
+    const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false)
+
+    const filteredTags = useMemo(() => {
+        return availableTags
+            .filter(t => t.name.toLowerCase().includes(tagInput.toLowerCase()))
+            .sort((a, b) => a.name.localeCompare(b.name))
+    }, [availableTags, tagInput])
+
     // Staging State
     const [currentSet, setCurrentSet] = useState<any[]>([])
     // Initialize filter on mount
@@ -137,19 +147,40 @@ export default function Create() {
                     {/* Tags Filter */}
                     <div className="mb-6">
                         <label className="text-sm font-medium text-gray-400 mb-2 block">Tags</label>
-                        <select
-                            className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm mb-2"
-                            onChange={(e) => {
-                                const val = e.target.value
-                                if (val && !localTags.includes(val)) setLocalTags([...localTags, val])
-                            }}
-                            value=""
-                        >
-                            <option value="">Add Tag...</option>
-                            {availableTags.map(t => (
-                                <option key={t.name} value={t.name}>{t.name}</option>
-                            ))}
-                        </select>
+                        <div className="relative z-20 mb-2">
+                            <input
+                                type="text"
+                                className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                                placeholder="Type to filter tags..."
+                                value={tagInput}
+                                onChange={(e) => {
+                                    setTagInput(e.target.value)
+                                    setIsTagDropdownOpen(true)
+                                }}
+                                onFocus={() => setIsTagDropdownOpen(true)}
+                                onBlur={() => setTimeout(() => setIsTagDropdownOpen(false), 200)}
+                            />
+                            {isTagDropdownOpen && filteredTags.length > 0 && (
+                                <div className="absolute top-full left-0 right-0 bg-gray-800 border border-gray-700 rounded shadow-xl max-h-60 overflow-y-auto mt-1">
+                                    {filteredTags.map(t => (
+                                        <div
+                                            key={t.name}
+                                            className="p-2 hover:bg-indigo-600/50 cursor-pointer text-sm text-gray-200"
+                                            onClick={() => {
+                                                if (!localTags.includes(t.name)) {
+                                                    setLocalTags([...localTags, t.name])
+                                                }
+                                                setTagInput('')
+                                                setIsTagDropdownOpen(false)
+                                            }}
+                                        >
+                                            {t.name}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
                         <div className="flex flex-wrap gap-2 mb-2">
                             {localTags.map(tag => (
                                 <div key={tag} className="bg-emerald-900 text-xs px-2 py-1 rounded flex items-center gap-1">
