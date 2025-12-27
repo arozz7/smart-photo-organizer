@@ -12,6 +12,13 @@ export default defineConfig({
         // Shortcut of `build.lib.entry`.
         entry: 'electron/main.ts',
         vite: {
+          server: {
+            port: 5173,
+            strictPort: true,
+          },
+          optimizeDeps: {
+            include: [], // react-window removed
+          },
           build: {
             rollupOptions: {
               external: ['better-sqlite3', 'exiftool-vendored', 'sharp'],

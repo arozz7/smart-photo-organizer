@@ -1,8 +1,12 @@
-import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect, memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePeople } from '../context/PeopleContext'
 import PersonCard from '../components/PersonCard'
-import FaceGrid from '../components/FaceGrid'
+
+import { Virtuoso } from 'react-virtuoso'
+
+import ClusterRow from '../components/ClusterRow'
+
 import BlurryFacesModal from '../components/BlurryFacesModal'
 import GroupNamingModal from '../components/GroupNamingModal'
 import TargetedScanModal from '../components/TargetedScanModal'
@@ -14,10 +18,11 @@ import { useToast } from '../context/ToastContext'
 
 export default function People() {
     const navigate = useNavigate()
-    const { people, faces, loadPeople, loadFaces, loading, autoNameFaces, ignoreFaces } = usePeople()
+    const { people, loadPeople, loadUnnamedFaces, autoNameFaces, fetchFacesByIds, loading } = usePeople()
     const { onPhotoProcessed, addToQueue, setThrottled } = useAI()
     const { showAlert, showConfirm } = useAlert()
     const { addToast } = useToast()
+
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
     const [showBlurryModal, setShowBlurryModal] = useState(false)
     const [showIgnoredModal, setShowIgnoredModal] = useState(false)
@@ -26,87 +31,45 @@ export default function People() {
     const [isScanModalOpen, setIsScanModalOpen] = useState(false)
 
     // Clustering State
-    const [clusters, setClusters] = useState<{ id: number; faces: any[] }[]>([])
-    const [singles, setSingles] = useState<any[]>([])
-    const [blurryFaces, setBlurryFaces] = useState<any[]>([])
+    const [clusters, setClusters] = useState<{ faces: number[] }[]>([])
+    const [singles, setSingles] = useState<number[]>([])
+
+    // Selection State
+    const [selectedFaceIds, setSelectedFaceIds] = useState<Set<number>>(new Set())
+
+    const toggleFace = (id: number) => {
+        const newSet = new Set(selectedFaceIds)
+        if (newSet.has(id)) newSet.delete(id)
+        else newSet.add(id)
+        setSelectedFaceIds(newSet)
+    }
+
+    const toggleGroup = (ids: number[]) => {
+        const newSet = new Set(selectedFaceIds)
+        const allSelected = ids.every(id => newSet.has(id))
+
+        if (allSelected) {
+            ids.forEach(id => newSet.delete(id))
+        } else {
+            ids.forEach(id => newSet.add(id))
+        }
+        setSelectedFaceIds(newSet)
+    }
+
+    const clearSelection = () => setSelectedFaceIds(new Set())
+    const [totalFaces, setTotalFaces] = useState(0)
     const [isClustering, setIsClustering] = useState(false)
+    const [isAutoAssigning, setIsAutoAssigning] = useState(false);
 
-    // Group Naming Modal
+    // Group Naming Modal State
     const [namingGroup, setNamingGroup] = useState<{ faces: Face[], name: string } | null>(null)
-    const [selectedSingles, setSelectedSingles] = useState<Set<number>>(new Set())
-    const [selectedGroups, setSelectedGroups] = useState<Set<number>>(new Set())
 
-    // Toggle selection
-    const toggleGroupSelection = (groupId: number) => {
-        const next = new Set(selectedGroups)
-        if (next.has(groupId)) next.delete(groupId)
-        else next.add(groupId)
-        setSelectedGroups(next)
-    }
-
-    const handleSelectAllGroups = () => {
-        if (selectedGroups.size === clusters.length) {
-            setSelectedGroups(new Set())
-        } else {
-            setSelectedGroups(new Set(clusters.map(c => c.id)))
-        }
-    }
-
-
-    // Track previous faces to detect if we can just filter locally instead of re-clustering
-    const prevFacesRef = useRef(faces);
-
-    // Run clustering when faces are loaded
+    // Load initial batch when tab changes
     useEffect(() => {
-        if (activeTab === 'unnamed' && faces.length > 0) {
-
-            // OPTIMIZATION: If faces are a SUBSET of previous faces (just removals), 
-            // we can update local state without re-running heavy clustering.
-            const prevFaces = prevFacesRef.current;
-            const currentIds = new Set(faces.map(f => f.id));
-
-            // Debug Logic
-            const removedCount = prevFaces.length - faces.length;
-            const allExistInPrev = faces.every(f => prevFaces.find((p: any) => p.id === f.id));
-            const isSubset = faces.length < prevFaces.length && allExistInPrev;
-
-            console.log(`[People] Face update check: Count=${faces.length}, Prev=${prevFaces.length}, Removed=${removedCount}, AllExistInPrev=${allExistInPrev}, IsSubset=${isSubset}`);
-
-            if (isSubset) {
-                console.log("[People] Faces removed. Updating clusters locally without re-running AI.");
-
-                // 1. Filter Singles
-                setSingles(prev => prev.filter(f => currentIds.has(f.id)));
-
-                // 2. Filter Clusters
-                setClusters(prev => {
-                    const next = prev.map(c => ({
-                        ...c,
-                        faces: c.faces.filter(f => currentIds.has(f.id))
-                    })).filter(c => c.faces.length > 0);
-                    // console.log(`[People] Clusters updated locally. PrevGroups=${prev.length}, NextGroups=${next.length}`);
-                    return next;
-                });
-
-                prevFacesRef.current = faces;
-                return;
-            }
-
-            prevFacesRef.current = faces;
-
-            // Debounce clustering to avoid CPU thrashing during heavy scans
-            const timeout = setTimeout(() => {
-                runClustering()
-                setHasNewFaces(false)
-            }, 500)
-            return () => clearTimeout(timeout)
-        } else {
-            setClusters([])
-            setSingles([])
-            setSelectedGroups(new Set())
+        if (activeTab === 'unnamed') {
+            loadClusteredFaces()
         }
-    }, [faces, activeTab])
-
+    }, [activeTab])
 
     // Enable throttling while this complex view is active
     useEffect(() => {
@@ -115,152 +78,43 @@ export default function People() {
     }, []);
 
     useEffect(() => {
-        // Refresh faces when AI finishing processing, if we are on unnamed tab
         const cleanup = onPhotoProcessed((_photoId) => {
             if (activeTab === 'unnamed') {
                 setHasNewFaces(true)
-                // We could auto-load, but let's be subtle or debounced
-                // Triggering a reload after a short delay if multiple photos finish
             }
         })
         return cleanup
     }, [activeTab, onPhotoProcessed])
 
-    // Auto-reload faces when new ones are detected (debounced)
-    // Auto-reload faces when new ones are detected (debounced)
-    // DISABLED: User requested manual refresh only (2025-12-19)
-    /*
     useEffect(() => {
-        if (hasNewFaces && activeTab === 'unnamed') {
-            const timeout = setTimeout(() => {
-                loadFaces({ unnamed: true })
-            }, 3000)
-            return () => clearTimeout(timeout)
-        }
-    }, [hasNewFaces, activeTab])
-    */
+        loadPeople()
+    }, [])
 
-    // Server-side clustering
-    const runClustering = async () => {
-        if (isClustering) return
+    const loadClusteredFaces = async () => {
         setIsClustering(true)
-        console.log("Fetching clustered faces from server...")
-
         try {
-            // @ts-ignore
-            const res = await window.ipcRenderer.invoke('ai:getClusteredFaces');
+            const res = await loadUnnamedFaces()
+            if (res) {
+                // Sort clusters by size (descending)
+                const sortedClusters = res.clusters.sort((a, b) => b.length - a.length).map(ids => ({ faces: ids }));
+                setClusters(sortedClusters)
+                setSingles(res.singles)
 
-            if (res.error) {
-                console.error("Clustering error:", res.error);
-                return;
+                const clusterCount = res.clusters.reduce((acc, c) => acc + c.length, 0);
+                setTotalFaces(clusterCount + res.singles.length);
             }
-
-            // res structure: { clusters: [{ faces: [] }], singles: [face, ...], blurry: [face, ...] }
-            // Note: Update main.ts to return 'blurry' as well.
-
-
-
-            if (res.clusters) {
-                // Map ID-based groups to match state structure
-                const formattedClusters = res.clusters.map((c: any, idx: number) => ({
-                    id: idx,
-                    faces: c.faces
-                }));
-                setClusters(formattedClusters);
-            } else {
-                setClusters([]);
-            }
-
-            setSingles(res.singles || []);
-            setBlurryFaces(res.blurry || []);
-
         } catch (e) {
-            console.error("Clustering failed", e)
+            console.error("Failed to load clusters", e)
         } finally {
             setIsClustering(false)
         }
     }
 
+    // Moved handleConfirmName down to use handleNameGroup defined later
 
-    const handleNameGroupClick = (groupFaces: any[]) => {
-        setNamingGroup({ faces: groupFaces, name: '' })
-    }
-
-    const handleConfirmName = async (selectedIds: number[], name: string) => {
-        if (!name || selectedIds.length === 0) return
-
-        // Optimistic UI - Immediately remove from view if they are just singles
-        // (For groups, the modal closes and we might need to refresh, but we can try)
-
-        await autoNameFaces(selectedIds, name)
-        addToast({ type: 'success', description: `Named ${selectedIds.length} faces as "${name}"` })
-
-        setNamingGroup(null)
-        // If we were selecting groups, clear selection
-        setSelectedGroups(new Set())
-        setSelectedSingles(new Set())
-    }
-
-    useEffect(() => {
-        loadPeople()
-    }, [])
-
-    useEffect(() => {
-        if (activeTab === 'unnamed') {
-            loadFaces({ unnamed: true })
-        }
-    }, [activeTab])
-
-    const scrollContainerRef = useRef<HTMLDivElement>(null)
-
-    // Robust restoration with multiple retries
-    useLayoutEffect(() => {
-        if (activeTab === 'identified' && people.length > 0) {
-            const savedPosition = localStorage.getItem('peopleScrollPosition_v2') // Changed key to force fresh start
-
-            if (savedPosition && scrollContainerRef.current) {
-                const target = parseInt(savedPosition);
-
-                const restore = () => {
-                    if (scrollContainerRef.current) {
-                        // Only restore if we are not already there (approx)
-                        if (Math.abs(scrollContainerRef.current.scrollTop - target) > 5) {
-                            scrollContainerRef.current.scrollTop = target;
-                        }
-                    }
-                };
-
-                // Immediate
-                restore();
-
-                // Frame 1
-                requestAnimationFrame(() => {
-                    restore();
-                    // Frame 2
-                    requestAnimationFrame(restore);
-                });
-
-                // Fail-safe timeouts for slow rendering
-                setTimeout(restore, 50);
-                setTimeout(restore, 150);
-                setTimeout(restore, 300);
-            }
-        }
-    }, [people.length, activeTab])
-
-    const handlePersonClick = (personId: number) => {
-        // Explicitly save scroll position before navigation
-        if (scrollContainerRef.current) {
-            const scrollPos = scrollContainerRef.current.scrollTop;
-            localStorage.setItem('peopleScrollPosition_v2', scrollPos.toString())
-        }
-        navigate(`/people/${personId}`)
-    }
-
-    const [isAutoAssigning, setIsAutoAssigning] = useState(false);
 
     const handleAutoAssign = async () => {
-        if (faces.length === 0) return;
+        if (totalFaces === 0) return;
 
         showConfirm({
             title: 'Auto-Identify All Faces',
@@ -270,7 +124,6 @@ export default function People() {
                 console.log("[People] User confirmed Auto-Identify All. Starting...");
                 setIsAutoAssigning(true);
                 try {
-                    // Pass empty array to trigger "Scan All" backend mode
                     console.log(`[People] Invoking db:autoAssignFaces for ALL unassigned faces...`);
                     // @ts-ignore
                     const res = await window.ipcRenderer.invoke('db:autoAssignFaces', { faceIds: [] });
@@ -285,7 +138,7 @@ export default function People() {
                                     variant: 'primary'
                                 });
                             }, 100);
-                            loadFaces({ unnamed: true });
+                            loadClusteredFaces();
                             loadPeople();
                         } else {
                             setTimeout(() => {
@@ -309,52 +162,169 @@ export default function People() {
         });
     }
 
+    // Scroll Restoration
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
+    useLayoutEffect(() => {
+        if (activeTab === 'identified' && people.length > 0) {
+            const savedPosition = localStorage.getItem('peopleScrollPosition_v2')
+            if (savedPosition && scrollContainerRef.current) {
+                const target = parseInt(savedPosition);
+                const restore = () => {
+                    if (scrollContainerRef.current) {
+                        if (Math.abs(scrollContainerRef.current.scrollTop - target) > 5) {
+                            scrollContainerRef.current.scrollTop = target;
+                        }
+                    }
+                };
+                restore();
+                requestAnimationFrame(() => {
+                    restore();
+                    requestAnimationFrame(restore);
+                });
+                setTimeout(restore, 50);
+            }
+        }
+    }, [people.length, activeTab])
+
+    const handlePersonClick = (personId: number) => {
+        if (scrollContainerRef.current) {
+            const scrollPos = scrollContainerRef.current.scrollTop;
+            localStorage.setItem('peopleScrollPosition_v2', scrollPos.toString())
+        }
+        navigate(`/people/${personId}`)
+    }
+
+    const handleNameGroup = async (ids: number[], name: string) => {
+        // Optimistic: Remove from clusters immediately
+        const idsSet = new Set(ids)
+        setClusters(prev => prev.map(c => ({
+            faces: c.faces.filter(id => !idsSet.has(id))
+        })).filter(c => c.faces.length > 0))
+        setSingles(prev => prev.filter(id => !idsSet.has(id)))
+        setTotalFaces(prev => prev - ids.length)
+        setSelectedFaceIds(prev => {
+            const next = new Set(prev)
+            ids.forEach(id => next.delete(id))
+            return next
+        })
+
+        // API Call
+        await autoNameFaces(ids, name)
+        addToast({ type: 'success', description: `Named ${ids.length} faces.` })
+    }
+
+    const handleConfirmName = async (selectedIds: number[], name: string) => {
+        if (!name || selectedIds.length === 0) return
+        setNamingGroup(null)
+        await handleNameGroup(selectedIds, name)
+    }
+
+    const handleOpenNaming = async (ids: number[]) => {
+        // Fetch faces if needed (or if passed, use them? For now, fetch to be safe/consistent)
+        try {
+            const faces = await fetchFacesByIds(ids);
+            setNamingGroup({ faces });
+        } catch (e) {
+            console.error("Failed to load faces for naming", e);
+            addToast({ type: 'error', description: 'Failed to load faces.' })
+        }
+    }
+
+    const handleIgnoreGroup = (ids: number[]) => {
+        showConfirm({
+            title: 'Ignore Faces',
+            description: `Ignore ${ids.length} faces? They will be hidden from unnamed faces.`,
+            confirmLabel: 'Ignore',
+            variant: 'danger',
+            onConfirm: async () => {
+                // Optimistic Update
+                const idsSet = new Set(ids)
+                setClusters(prev => prev.map(c => ({
+                    faces: c.faces.filter(id => !idsSet.has(id))
+                })).filter(c => c.faces.length > 0))
+                setSingles(prev => prev.filter(id => !idsSet.has(id)))
+                setTotalFaces(prev => prev - ids.length)
+                setSelectedFaceIds(prev => {
+                    const next = new Set(prev)
+                    ids.forEach(id => next.delete(id))
+                    return next
+                })
+
+                // @ts-ignore
+                await window.ipcRenderer.invoke('db:ignoreFaces', ids)
+                addToast({ type: 'success', description: `Ignored ${ids.length} faces.` })
+            }
+        })
+    }
+
+    // Row component for react-window
+    const VirtualRow = ({ index, style, data }: any) => {
+        // Debugging Row Style
+        if (index === 0 || index === 1) console.log(`[People.tsx] VirtualRow ${index} Style:`, style);
+
+        const { clusters } = data
+        const cluster = clusters[index]
+
+        return (
+            <div style={style} className="border-b border-red-500 bg-gray-800 text-white p-2">
+                Row {index} - Faces: {cluster?.faces?.length || 0}
+                {/* <ClusterRow ... /> - Temporarily removed for debugging */}
+            </div>
+        )
+    }
+
     return (
         <div className="flex flex-col h-full bg-gray-950 text-white overflow-hidden">
             {/* Header / Tabs */}
             <div className="flex-none p-6 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl z-10">
                 <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-                        People
-                    </h1>
+                    <div className="flex items-center gap-8">
+                        <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+                            People
+                        </h1>
+
+                        <div className="flex space-x-1 bg-gray-800/50 p-1 rounded-lg">
+                            <button
+                                onClick={() => setActiveTab('identified')}
+                                className={`px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === 'identified'
+                                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
+                                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                                    }`}
+                            >
+                                Identified People <span className="ml-2 opacity-50 text-xs">({people.length})</span>
+                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setActiveTab('unnamed')}
+                                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === 'unnamed'
+                                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
+                                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                                        }`}
+                                >
+                                    Unnamed Faces
+                                </button>
+                                {activeTab === 'unnamed' && (
+                                    <div className="flex items-center">
+                                        <button
+                                            onClick={() => {
+                                                loadClusteredFaces();
+                                                setHasNewFaces(false);
+                                            }}
+                                            className={`p-2 rounded-md transition-colors ${hasNewFaces ? 'text-indigo-400 animate-pulse' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+                                            title={hasNewFaces ? "New faces available (Click to refresh)" : "Refresh"}
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v3.292a1 1 0 01-2 0V13.099a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                                            </svg>
+                                        </button>
+                                        {hasNewFaces && <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider ml-1">New</span>}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
 
                     <div className="flex gap-2">
-                        {activeTab === 'unnamed' && (
-                            <>
-                                <button
-                                    onClick={handleAutoAssign}
-                                    disabled={isAutoAssigning || faces.length === 0}
-                                    className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-sm font-medium"
-                                >
-                                    {isAutoAssigning ? (
-                                        <div className="animate-spin h-4 w-4 border-2 border-indigo-500 border-t-transparent rounded-full" />
-                                    ) : (
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                                        </svg>
-                                    )}
-                                    Auto-Identify
-                                </button>
-                                <button
-                                    onClick={() => setShowBlurryModal(true)}
-                                    className="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-4 py-2 rounded-lg text-sm border border-gray-700 transition-colors flex items-center gap-2"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                    Cleanup Blurry
-                                </button>
-                                <button
-                                    onClick={() => setShowIgnoredModal(true)}
-                                    className="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-4 py-2 rounded-lg text-sm border border-gray-700 transition-colors flex items-center gap-2"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                    View Ignored
-                                </button>
-                            </>
-                        )}
                         <button
                             onClick={() => setIsScanModalOpen(true)}
                             disabled={isScanning}
@@ -367,242 +337,14 @@ export default function People() {
                         </button>
                     </div>
                 </div>
-
-                <div className="flex items-center justify-between gap-4">
-                    <div className="flex space-x-1 bg-gray-800/50 p-1 rounded-lg w-fit overflow-x-auto no-scrollbar">
-                        <button
-                            onClick={() => setActiveTab('identified')}
-                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === 'identified'
-                                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
-                                : 'text-gray-400 hover:text-white hover:bg-white/5'
-                                }`}
-                        >
-                            Identified People <span className="ml-2 opacity-50 text-xs">({people.length})</span>
-                        </button>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => setActiveTab('unnamed')}
-                                className={`px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === 'unnamed'
-                                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
-                                    : 'text-gray-400 hover:text-white hover:bg-white/5'
-                                    }`}
-                            >
-                                Unnamed Faces
-                            </button>
-                            {activeTab === 'unnamed' && (
-                                <div className="flex items-center">
-                                    <button
-                                        onClick={() => {
-                                            loadFaces({ unnamed: true });
-                                            setHasNewFaces(false);
-                                        }}
-                                        className={`p-2 rounded-md transition-colors ${hasNewFaces ? 'text-indigo-400 animate-pulse' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
-                                        title={hasNewFaces ? "New faces available (Click to refresh)" : "Refresh"}
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v3.292a1 1 0 01-2 0V13.099a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-                                        </svg>
-                                    </button>
-                                    {hasNewFaces && <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider ml-1">New</span>}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {activeTab === 'unnamed' && faces.length > 0 && (
-                        <div className="flex gap-2 flex-wrap justify-end">
-                            <button
-                                onClick={handleSelectAllGroups}
-                                className="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
-                            >
-                                {selectedGroups.size === clusters.length && clusters.length > 0 ? 'Deselect Groups' : 'Select All Groups'}
-                            </button>
-                            <button
-                                onClick={() => {
-                                    showConfirm({
-                                        title: 'Ignore All Faces',
-                                        description: `Are you sure you want to ignore all ${faces.length} visible faces?`,
-                                        confirmLabel: 'Ignore All',
-                                        variant: 'danger',
-                                        onConfirm: async () => {
-                                            try {
-                                                const faceIds = faces.map(f => f.id);
-                                                // Optimistic Clear
-                                                setSingles([]);
-                                                setClusters([]);
-
-                                                await window.ipcRenderer.invoke('db:ignoreFaces', faceIds);
-                                                addToast({ type: 'success', description: `Ignored ${faceIds.length} faces` });
-                                                loadFaces({ unnamed: true }); // Refresh to be sure
-                                            } catch (e) {
-                                                console.error(e);
-                                                addToast({ type: 'error', description: 'Failed to ignore faces' });
-                                            }
-                                        }
-                                    });
-                                }}
-                                className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
-                            >
-                                Ignore All Visible
-                            </button>
-                            <button
-                                onClick={() => {
-                                    showConfirm({
-                                        title: 'PERMANENT DELETE',
-                                        description: `Are you sure you want to PERMANENTLY DELETE all ${faces.length} visible faces? They will reappear if you rescan.`,
-                                        confirmLabel: 'Delete All',
-                                        variant: 'danger',
-                                        onConfirm: async () => {
-                                            try {
-                                                const faceIds = faces.map(f => f.id);
-                                                // Optimistic Clear
-                                                setSingles([]);
-                                                setClusters([]);
-
-                                                // @ts-ignore
-                                                await window.ipcRenderer.invoke('db:deleteFaces', faceIds);
-                                                addToast({ type: 'success', description: `Deleted ${faceIds.length} faces` });
-                                                loadFaces({ unnamed: true }); // Refresh
-                                            } catch (e) {
-                                                console.error(e);
-                                                addToast({ type: 'error', description: 'Failed to delete faces' });
-                                            }
-                                        }
-                                    });
-                                }}
-                                className="bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-300 hover:text-white px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
-                            >
-                                Clear All
-                            </button>
-                        </div>
-                    )}
-                </div>
-
             </div>
-
-            {/* Bulk Actions for SINGLES */}
-            {selectedSingles.size > 0 && (
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 animate-in slide-in-from-bottom-5 fade-in duration-200">
-                    <span className="text-sm font-medium text-white mr-2">{selectedSingles.size} faces selected</span>
-
-                    <div className="h-4 w-px bg-gray-700 mx-2" />
-
-                    <button
-                        onClick={() => {
-                            // Find the faces
-                            // We need to search in 'singles' which is where these IDs come from
-                            const selectedFaceObjects = singles.filter(f => selectedSingles.has(f.id));
-                            // @ts-ignore
-                            setNamingGroup({ faces: selectedFaceObjects, name: '' });
-                        }}
-                        className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
-                    >
-                        Name Selected
-                    </button>
-
-                    <div className="h-4 w-px bg-gray-700 mx-2" />
-
-                    <button
-                        onClick={() => {
-                            showConfirm({
-                                title: 'Ignore Selected Faces',
-                                description: `Are you sure you want to ignore ${selectedSingles.size} faces?`,
-                                confirmLabel: 'Ignore All',
-                                variant: 'danger',
-                                onConfirm: async () => {
-                                    // Optimistic Update
-                                    setSingles(prev => prev.filter(f => !selectedSingles.has(f.id)));
-                                    setSelectedSingles(new Set());
-
-                                    await ignoreFaces(Array.from(selectedSingles));
-                                    addToast({ type: 'success', description: `Ignored ${selectedSingles.size} faces` });
-                                }
-                            });
-                        }}
-                        className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors"
-                    >
-                        Ignore Selected
-                    </button>
-
-                    <div className="h-4 w-px bg-gray-700 mx-2" />
-
-                    <button
-                        onClick={() => setSelectedSingles(new Set())}
-                        className="p-1 hover:bg-gray-800 rounded-full text-gray-400 hover:text-white transition-colors"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
-                    </button>
-                </div>
-            )}
-
-            {/* Bulk Actions Bar */}
-            {selectedGroups.size > 0 && (
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 animate-in slide-in-from-bottom-5 fade-in duration-200">
-                    <span className="text-sm font-medium text-white mr-2">{selectedGroups.size} groups selected</span>
-
-                    <div className="h-4 w-px bg-gray-700 mx-2" />
-
-                    <button
-                        onClick={() => {
-                            const allFaces = clusters
-                                .filter(c => selectedGroups.has(c.id))
-                                .flatMap(c => c.faces);
-                            setNamingGroup({ faces: allFaces, name: '' });
-                        }}
-                        className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
-                    >
-                        Name All
-                    </button>
-
-                    <div className="h-4 w-px bg-gray-700 mx-2" />
-
-                    <button
-                        onClick={() => {
-                            showConfirm({
-                                title: 'Ignore Selected Groups',
-                                description: `Are you sure you want to ignore ${selectedGroups.size} groups?`,
-                                confirmLabel: 'Ignore All',
-                                variant: 'danger',
-                                onConfirm: async () => {
-                                    const allFaceIds = clusters
-                                        .filter(c => selectedGroups.has(c.id))
-                                        .flatMap(c => c.faces.map(f => f.id));
-
-                                    // Optimistic Update
-                                    setClusters(prev => prev.filter(c => !selectedGroups.has(c.id)));
-                                    setSelectedGroups(new Set());
-
-                                    await ignoreFaces(allFaceIds);
-                                    addToast({ type: 'success', description: `Ignored ${selectedGroups.size} groups` });
-                                }
-                            });
-                        }}
-                        className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors"
-                    >
-                        Ignore All
-                    </button>
-
-                    <div className="h-4 w-px bg-gray-700 mx-2" />
-
-                    <button
-                        onClick={() => setSelectedGroups(new Set())}
-                        className="p-1 hover:bg-gray-800 rounded-full text-gray-400 hover:text-white transition-colors"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
-                    </button>
-                </div>
-            )}
 
             {/* Content */}
             <div
                 ref={scrollContainerRef}
                 className="flex-1 overflow-y-auto min-h-0"
             >
-                {activeTab === 'identified' ? (
+                {activeTab === 'identified' && (
                     <div className="p-6">
                         {loading && people.length === 0 ? (
                             <div className="flex items-center justify-center h-full p-20">
@@ -628,171 +370,136 @@ export default function People() {
                             </div>
                         )}
                     </div>
-                ) : (
-                    <div className="h-full">
-                        {loading && faces.length === 0 ? (
-                            <div className="flex items-center justify-center h-full">
-                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
+                )}
+                {activeTab === 'unnamed' && (
+                    <div className="animate-fade-in space-y-8 p-6">
+                        {/* Actions Toolbar */}
+                        <div className="flex items-center justify-between bg-gray-800/30 p-4 rounded-xl border border-gray-800 backdrop-blur-sm">
+                            <div className="flex items-center gap-4">
+                                <div className="text-sm text-gray-400">
+                                    Found <span className="text-white font-medium">{clusters.length}</span> suggested groups and <span className="text-white font-medium">{singles.length}</span> single faces.
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={handleAutoAssign}
+                                    disabled={isAutoAssigning || totalFaces === 0}
+                                    className="px-3 py-1.5 text-sm bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg transition-colors flex items-center gap-2"
+                                >
+                                    {isAutoAssigning ? (
+                                        <div className="animate-spin h-3 w-3 border-2 border-indigo-400 border-t-transparent rounded-full" />
+                                    ) : (
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                                        </svg>
+                                    )}
+                                    Auto-Identify All
+                                </button>
+                                <button
+                                    onClick={() => setShowBlurryModal(true)}
+                                    className="px-3 py-1.5 text-sm bg-gray-800/50 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-lg transition-colors flex items-center gap-2"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                    </svg>
+                                    Cleanup Blurry
+                                </button>
+                                <button
+                                    onClick={() => setShowIgnoredModal(true)}
+                                    className="px-3 py-1.5 text-sm bg-gray-800/50 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-lg transition-colors flex items-center gap-2"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                    Ignored
+                                </button>
+                            </div>
+                        </div>
+
+                        {isClustering ? (
+                            <div className="flex flex-col items-center justify-center p-20 text-gray-500">
+                                <div className="animate-spin h-8 w-8 border-2 border-indigo-500 border-t-transparent rounded-full mb-4"></div>
+                                <p>Grouping faces...</p>
                             </div>
                         ) : (
-
-                            <div className="flex flex-col gap-8 pb-20">
-                                {!hasNewFaces && !loading && faces.length === 0 && (
-                                    <div className="flex flex-col items-center justify-center p-20 text-gray-500 border border-dashed border-gray-800 rounded-2xl">
-                                        <span className="text-6xl mb-4">✨</span>
-                                        <h3 className="text-xl font-medium mb-2">All faces organized!</h3>
-                                        <p className="max-w-md text-center">
-                                            Great job! There are no unnamed faces requiring attention right now.
-                                        </p>
-                                    </div>
-                                )}
-                                {isClustering && (
-                                    <div className="px-6 py-2 text-sm text-indigo-300 animate-pulse">
-                                        Organizing faces...
-                                    </div>
-                                )}
-
+                            <div className="space-y-6">
+                                {/* Clusters */}
+                                {/* Clusters */}
                                 {clusters.length > 0 && (
-                                    <div className="space-y-8">
-                                        {clusters.map(group => (
-                                            <div key={group.id} className="relative bg-gray-900/30 border-y border-gray-800/50">
-                                                <div className="sticky top-0 z-20 flex justify-between items-center px-6 py-3 bg-gray-900/90 backdrop-blur-md border-b border-gray-800">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="flex items-center">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={selectedGroups.has(group.id)}
-                                                                onChange={() => toggleGroupSelection(group.id)}
-                                                                className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-gray-900 cursor-pointer"
-                                                            />
-                                                        </div>
-                                                        <span className="text-sm font-medium text-indigo-200">Group {group.id + 1}</span>
-                                                        <span className="bg-gray-800 text-gray-400 text-xs px-2 py-0.5 rounded-full">{group.faces.length} faces</span>
+                                    <div className="h-[65vh] w-full relative">
+                                        <Virtuoso
+                                            style={{ height: '100%', width: '100%' }}
+                                            totalCount={clusters.length}
+                                            itemContent={(index) => {
+                                                const cluster = clusters[index];
+                                                if (!cluster || !cluster.faces) return null;
+
+                                                return (
+                                                    <div className="border-b border-gray-800 pb-4 pr-2">
+                                                        <ClusterRow
+                                                            faceIds={cluster.faces}
+                                                            index={index}
+                                                            selectedFaceIds={selectedFaceIds}
+                                                            toggleFace={toggleFace}
+                                                            toggleGroup={toggleGroup}
+                                                            fetchFacesByIds={fetchFacesByIds}
+                                                            onNameGroup={handleNameGroup}
+                                                            onIgnoreGroup={handleIgnoreGroup}
+                                                            onOpenNaming={handleOpenNaming}
+                                                        />
                                                     </div>
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            onClick={async () => {
-                                                                showConfirm({
-                                                                    title: 'Ignore Group',
-                                                                    description: `Ignore all ${group.faces.length} faces in this group?`,
-                                                                    confirmLabel: 'Ignore',
-                                                                    variant: 'danger',
-                                                                    onConfirm: async () => {
-                                                                        const ids = group.faces.map(f => f.id);
-                                                                        await ignoreFaces(ids);
-
-                                                                        // Manual Local Update (Optimistic)
-                                                                        // Because these faces might not be in the global 'faces' context (limit 2000),
-                                                                        // we must remove them from the view state manually.
-                                                                        setClusters(prev => prev.filter(c => c.id !== group.id));
-                                                                        // Also remove from selection if present
-                                                                        if (selectedGroups.has(group.id)) {
-                                                                            toggleGroupSelection(group.id);
-                                                                        }
-
-                                                                        addToast({ type: 'success', description: 'Group ignored' });
-                                                                    }
-                                                                });
-                                                            }}
-                                                            className="text-xs bg-gray-700 hover:bg-red-600 text-gray-300 hover:text-white px-3 py-1.5 rounded transition-colors border border-gray-600 hover:border-red-500"
-                                                        >
-                                                            Ignore Group
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleNameGroupClick(group.faces)}
-                                                            className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded transition-colors shadow-lg shadow-indigo-900/20"
-                                                        >
-                                                            Name Group
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                                <div className="p-2">
-                                                    <FaceGrid faces={group.faces} />
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                {singles.length > 0 && (
-                                    <div>
-                                        <div className="sticky top-0 z-20 px-6 py-3 bg-gray-950/90 backdrop-blur-md border-y border-gray-800 text-sm font-medium text-gray-400 flex justify-between items-center">
-                                            <span>
-                                                {clusters.length > 0 ? 'Unsorted Faces' : 'Identified Faces'} ({singles.length > 200 ? 'Showing 200 of ' : ''}{singles.length})
-                                                {singles.length > 200 && <span className="ml-2 text-xs text-indigo-400 font-normal opacity-80">(Complete groups above first)</span>}
-                                            </span>
-                                            <button
-                                                onClick={async () => {
-                                                    const toIgnore = singles.slice(0, 200);
-                                                    showConfirm({
-                                                        title: 'Ignore Visible',
-                                                        description: `Ignore all ${toIgnore.length} currently visible unsorted faces?`,
-                                                        confirmLabel: 'Ignore',
-                                                        variant: 'danger',
-                                                        onConfirm: async () => {
-                                                            const ids = toIgnore.map(f => f.id);
-                                                            await ignoreFaces(ids);
-                                                        }
-                                                    });
-                                                }}
-                                                className="text-xs bg-gray-800 hover:bg-red-900/50 text-gray-400 hover:text-red-200 px-3 py-1.5 rounded transition-colors border border-gray-700 hover:border-red-800"
-                                            >
-                                                Ignore Visible
-                                            </button>
-                                        </div>
-                                        <FaceGrid
-                                            faces={singles.slice(0, 200)}
-                                            selectedIds={selectedSingles}
-                                            onToggleSelection={(id) => {
-                                                setSelectedSingles(prev => {
-                                                    const next = new Set(prev);
-                                                    if (next.has(id)) next.delete(id);
-                                                    else next.add(id);
-                                                    return next;
-                                                });
+                                                );
+                                            }}
+                                            components={{
+                                                Footer: () => <div className="h-20" /> // Extra space at bottom
                                             }}
                                         />
-                                        {singles.length > 200 && (
-                                            <div className="px-6 py-10 text-center text-gray-500 bg-gray-900/10 border-b border-gray-900">
-                                                <p>+ {singles.length - 200} more unsorted faces hidden.</p>
-                                                <p className="text-xs mt-2 italic text-gray-600">Group or name the faces above to see more unsorted ones.</p>
-                                            </div>
-                                        )}
                                     </div>
                                 )}
+                                {/* Duplicate FAB removed */}
 
-                                {blurryFaces.length > 0 && (
-                                    <div className="opacity-70 grayscale-[0.3]">
-                                        <div className="sticky top-0 z-20 px-6 py-3 bg-gray-950/90 backdrop-blur-md border-y border-gray-800 text-sm font-medium text-orange-400 flex justify-between items-center">
-                                            <span>Low Quality / Blurry ({blurryFaces.length})</span>
+                                {/* Modals */}
+                                {singles.length > 0 && (
+                                    <div className="mt-8 pt-8 border-t border-gray-800">
+                                        <h3 className="text-lg font-medium text-white mb-4 flex items-center gap-2">
+                                            <span>Unmatched Faces</span>
+                                            <span className="text-sm font-normal text-gray-500">({singles.length})</span>
+                                        </h3>
+                                        <div className="bg-gray-800/20 rounded-xl p-8 border border-gray-800 border-dashed text-center text-gray-500">
+                                            <p className="mb-4">These faces don't strongly associate with any known clusters.</p>
                                             <button
-                                                onClick={() => setShowBlurryModal(true)}
-                                                className="text-xs underline hover:text-orange-300"
+                                                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-md text-sm text-gray-300 transition-colors"
+                                                onClick={() => {
+                                                    alert("Singles viewer coming next.")
+                                                }}
                                             >
-                                                Manage
+                                                View Unmatched Faces
                                             </button>
                                         </div>
-                                        <FaceGrid faces={blurryFaces} />
                                     </div>
                                 )}
 
+                                {clusters.length === 0 && singles.length === 0 && (
+                                    <div className="text-center py-20 text-gray-500">
+                                        <p className="text-lg">No unnamed faces found.</p>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
-                )
-                }
-            </div >
+                )}
+            </div>
 
             <BlurryFacesModal
                 open={showBlurryModal}
                 onOpenChange={setShowBlurryModal}
                 personId={null}
-                onDeleteComplete={() => loadFaces({ unnamed: true })}
+                onDeleteComplete={() => loadClusteredFaces()}
             />
 
             <IgnoredFacesModal isOpen={showIgnoredModal} onClose={() => {
                 setShowIgnoredModal(false)
-                if (activeTab === 'unnamed') loadFaces({ unnamed: true })
+                if (activeTab === 'unnamed') loadClusteredFaces()
             }} />
 
             {
@@ -842,6 +549,42 @@ export default function People() {
                 onSuccess={loadPeople}
             />
 
-        </div >
+            {/* Selection Floating Action Bar */}
+            {selectedFaceIds.size > 0 && (
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
+                    <div className="text-sm font-medium text-white border-r border-gray-700 pr-4">
+                        {selectedFaceIds.size} selected
+                    </div>
+                    <button
+                        onClick={() => handleOpenNaming(Array.from(selectedFaceIds))}
+                        className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-2"
+                    >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                        Name
+                    </button>
+                    <button
+                        onClick={() => handleIgnoreGroup(Array.from(selectedFaceIds))}
+                        className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors flex items-center gap-2"
+                    >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                        </svg>
+                        Ignore
+                    </button>
+                    <div className="border-l border-gray-700 pl-4">
+                        <button
+                            onClick={clearSelection}
+                            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
+
+
+        </div>
     )
 }

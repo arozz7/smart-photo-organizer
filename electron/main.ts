@@ -17,6 +17,7 @@ import {
   getWindowBounds, setWindowBounds
 } from './store';
 import * as fs from 'node:fs/promises';
+
 import Store from 'electron-store';
 import logger from './logger';
 
@@ -461,6 +462,31 @@ app.whenReady().then(async () => {
         } catch (resizeErr: any) {
           logger.warn(`[Protocol] Transform failed for ${decodedPath}: ${resizeErr.message}`);
 
+          // NEW: Log to scan_errors for user visibility
+          try {
+            const db = getDB();
+            // extract photoId if possible? We don't have it here easily from just path.
+            // But we can look it up or just log file_path.
+            // The table has file_path.
+
+            // Try to find photo_id
+            const photoParam = urlObj.searchParams.get('photoId');
+            let photoId = photoParam ? parseInt(photoParam) : null;
+
+            if (!photoId) {
+              const row = db.prepare('SELECT id FROM photos WHERE file_path = ?').get(decodedPath) as { id: number };
+              if (row) photoId = row.id;
+            }
+
+            const errorMsg = resizeErr.message || "Unknown Image Error";
+            // Avoid duplicate logs?
+            // SQLite INSERT OR IGNORE or just let it append (timestamp differs)
+            db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, ?, ?, ?)').run(photoId, decodedPath, errorMsg, 'Preview Generation');
+
+          } catch (dbErr) {
+            logger.error("[Protocol] Failed to log error to DB", dbErr);
+          }
+
           // FALLBACK: If crop fails (e.g. bad box), try to just resize the full image
           // This prevents serving the 20MB original file which causes memory crashes.
           if (width && width > 0) {
@@ -478,6 +504,7 @@ app.whenReady().then(async () => {
           }
 
           // Fail safe: Do not serve full file if a specific size/crop was requested
+          // Return a specific 500 so frontend can maybe show a "Broken" icon
           return new Response('Thumbnail Generation Failed', { status: 500 });
         }
       }
@@ -562,6 +589,16 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:getMetricsHistory', async () => {
     const { getMetricsHistory } = await import('./db');
     return getMetricsHistory();
+  });
+
+  ipcMain.handle('db:getScanErrors', async () => {
+    const { getScanErrors } = await import('./db');
+    return await getScanErrors();
+  });
+
+  ipcMain.handle('db:deleteScanError', async (_, { id, deleteFile }) => {
+    const { deleteScanErrorAndFile } = await import('./db');
+    return await deleteScanErrorAndFile(id, deleteFile);
   });
 
   ipcMain.handle('ai:saveSettings', (_event, settings) => {
@@ -821,87 +858,106 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('ai:getClusteredFaces', async () => {
-    const { getUnclusteredFaces } = await import('./db');
-    const dbRes = getUnclusteredFaces();
+    try {
+      const { getFacesForClustering } = await import('./db');
 
-    if (!dbRes.success || !dbRes.faces || dbRes.faces.length === 0) {
-      return { clusters: [], singles: [], blurry: [] };
-    }
+      // Dynamic import just for crypto, others are top-level
+      const crypto = await import('node:crypto');
 
-    // Separate Clean vs Blurry
-    const BLUR_THRESHOLD = 25; // TODO: Get from settings?
-    const cleanFaces = dbRes.faces.filter((f: any) => (f.blur_score || 0) >= BLUR_THRESHOLD);
-    const blurryFaces = dbRes.faces.filter((f: any) => (f.blur_score || 0) < BLUR_THRESHOLD);
+      logger.info('[IPC] Starting Full Face Clustering...');
 
-    // If no clean faces, return early
-    if (cleanFaces.length === 0) {
-      return { clusters: [], singles: [], blurry: blurryFaces.map((f: any) => { const { descriptor, ...rest } = f; return rest; }) };
-    }
+      // 1. Fetch RAW descriptors
+      // Note: We ignore limit/offset here to cluster EVERYTHING.
+      // Pagination happens on the frontend after receiving the cluster structure.
+      const dbRes = getFacesForClustering();
 
-    // Send to Python
-    return new Promise((resolve, reject) => {
-      const requestId = Math.floor(Math.random() * 1000000);
-      scanPromises.set(requestId, {
-        resolve: (res: any) => {
-          // res: { clusters: [[id, ...], ...], singles: [id, ...] }
+      if (!dbRes.success || !dbRes.faces) {
+        throw new Error(dbRes.error || 'Failed to fetch faces from DB');
+      }
 
-          if (!res.clusters && !res.singles) {
-            resolve({ clusters: [], singles: [], blurry: [] });
-            return;
+      const faces = dbRes.faces;
+      logger.info(`[IPC] Fetched ${faces.length} faces for clustering.`);
+
+      if (faces.length === 0) {
+        return { clusters: [], singles: [] };
+      }
+
+      // 2. Write to Temp File (Streamed to avoid String limit)
+      const reqId = crypto.randomUUID();
+      const tempFile = path.join(app.getPath('temp'), `cluster_payload_${reqId}.json`);
+
+      // Manual JSON construction
+      const fileHandle = await fs.open(tempFile, 'w');
+      try {
+        await fileHandle.write('{"faces":[');
+        for (let i = 0; i < faces.length; i++) {
+          if (i > 0) await fileHandle.write(',');
+          await fileHandle.write(JSON.stringify(faces[i]));
+        }
+        await fileHandle.write(']}');
+      } finally {
+        await fileHandle.close();
+      }
+
+      logger.info(`[IPC] Descriptors written to ${tempFile}. Invoking Python...`);
+
+      // 3. Call Python
+      const result = await new Promise<any>((resolve, reject) => {
+        // @ts-ignore
+        if (!pythonProcess) {
+          reject(new Error('Python backend not running'));
+          return;
+        }
+
+        const responseHandler = (data: any) => {
+          if (data.reqId === reqId) {
+            // @ts-ignore
+            pythonProcess.stdout.removeListener('data', onData);
+            if (data.error) reject(new Error(data.error));
+            else resolve(data);
           }
+        };
 
-          const faceMap = new Map();
-          dbRes.faces.forEach((f: any) => faceMap.set(f.id, f));
+        const onData = (chunk: any) => {
+          const lines = chunk.toString().split('\n');
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const json = JSON.parse(line);
+              responseHandler(json);
+            } catch (e) { }
+          }
+        };
 
-          // Remove descriptor from UI payload
-          const cleanFace = (id: number) => {
-            const f = faceMap.get(id);
-            if (!f) return null;
-            const { descriptor, ...rest } = f;
-            return rest;
-          };
+        // @ts-ignore
+        pythonProcess.stdout.on('data', onData);
 
-          const clusters = (res.clusters || []).map((clusterIds: number[]) => {
-            const faces = clusterIds.map(cleanFace).filter(Boolean);
-            return { faces };
-          }).filter((c: any) => c.faces.length > 0);
+        const command = {
+          type: 'cluster_faces',
+          payload: {
+            dataPath: tempFile,
+            eps: 0.55,
+            min_samples: 2,
+            reqId
+          }
+        };
 
-          const singles = (res.singles || []).map(cleanFace).filter(Boolean);
-          const blurry = blurryFaces.map((f: any) => { const { descriptor, ...rest } = f; return rest; });
+        // @ts-ignore
+        pythonProcess.stdin.write(JSON.stringify(command) + '\n');
 
-          resolve({ clusters, singles, blurry });
-        },
-        reject
+        setTimeout(() => {
+          // @ts-ignore
+          pythonProcess.stdout.removeListener('data', onData);
+          reject(new Error('Clustering timed out (>60s)'));
+        }, 60000);
       });
 
-      // Send minimal data to Python (descriptors of CLEAN faces only)
-      const pythonPayload = cleanFaces.map((f: any) => ({ id: f.id, descriptor: f.descriptor }));
+      return result; // { clusters: [[id...], ...], singles: [id...] }
 
-      // Use Temp File for Large Payloads to avoid STDIN buffer limits
-      const tempFile = path.join(app.getPath('temp'), `cluster_payload_${requestId}.json`);
-
-      fs.writeFile(tempFile, JSON.stringify({ faces: pythonPayload }))
-        .then(() => {
-          sendToPython({
-            type: 'cluster_faces',
-            payload: {
-              dataPath: tempFile,
-              reqId: requestId
-            }
-          });
-        })
-        .catch(err => {
-          console.error('[Clustering] Failed to start cluster job:', err);
-          reject(err);
-        });
-
-      setTimeout(() => {
-        if (scanPromises.has(requestId)) {
-          scanPromises.delete(requestId);
-          reject('Clustering timed out');
-        }
-      }, 60000);
-    });
+    } catch (e) {
+      logger.error('Clustering Failed:', e);
+      return { error: String(e), clusters: [], singles: [] };
+    }
   });
 
 
@@ -2305,16 +2361,7 @@ app.whenReady().then(async () => {
 
   // --- Scan Error Tracking ---
 
-  ipcMain.handle('db:getScanErrors', async () => {
-    const db = getDB();
-    try {
-      const stmt = db.prepare('SELECT * FROM scan_errors ORDER BY timestamp DESC');
-      return stmt.all();
-    } catch (e) {
-      console.error('Failed to get scan errors:', e);
-      return [];
-    }
-  })
+
 
   ipcMain.handle('db:clearScanErrors', async () => {
     const db = getDB();
@@ -2467,6 +2514,16 @@ ipcMain.handle('db:unassignFaces', async (_, faceIds: number[]) => {
     return { success: false, error: e };
   }
 })
+
+ipcMain.handle('db:getFacesByIds', async (_, ids: number[]) => {
+  try {
+    const { getFacesByIds } = await import('./db');
+    return getFacesByIds(ids);
+  } catch (e) {
+    logger.error('Failed to get faces by IDs:', e);
+    return { success: false, error: String(e) };
+  }
+});
 
 ipcMain.handle('db:getPerson', async (_, personId: number) => {
   const db = getDB();

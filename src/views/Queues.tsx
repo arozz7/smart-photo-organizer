@@ -174,7 +174,7 @@ export default function Queues() {
                     </div>
 
                     {/* Pending Items List */}
-                    <div className="flex-1 min-h-[200px] border rounded border-gray-700 bg-gray-900/30 overflow-hidden flex flex-col">
+                    <div className="h-[600px] border rounded border-gray-700 bg-gray-900/30 overflow-hidden flex flex-col">
                         <div className="bg-gray-700 px-4 py-2 text-xs font-semibold text-gray-300">
                             Next Up
                         </div>

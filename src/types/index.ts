@@ -3,7 +3,7 @@ export interface Face {
     photo_id: number;
     person_id: number | null;
     box: { x: number, y: number, width: number, height: number };
-    descriptor: number[];
+    descriptor?: number[];
     file_path?: string;
     preview_cache_path?: string;
     blur_score?: number;

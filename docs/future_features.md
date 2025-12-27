@@ -12,12 +12,14 @@
     - **Goal:** Customize the representative image for a person.
     - **Plan:** "Set as Cover" button, Smart Variety algorithms for "Top Faces", and "Shuffle" option.
 
-### 3. Organization & Management
-- **Advanced Library Filtering**
-    - **Goal:** Combine multiple filter types with conditional logic (AND/OR).
-    - **New Filters:** Blur Score, Date (Year/Month), Compound Logic.
-- **Expanded Create View Integration**
-    - **Goal:** Centralize creative tools (Gallery, Collage, Export) as output modes in the Create View.
+### 4. Immediate Optimizations & Fixes (Analysis Findings)
+- **Auto-Identify Optimization:**
+    - **Problem:** "Scan for All Named People" and "Auto-Identify" find faces that should have been assigned during initial scan.
+    - **Status:** Pending.
+
+### 5. Advanced Library Filtering
+- **Goal:** Combine multiple filter types with conditional logic (AND/OR).
+- **New Filters:** Blur Score, Date (Year/Month), Compound Logic.
 
 ---
 
@@ -54,6 +56,14 @@
 # ✅ Implemented Features
 
 ## v0.3.5 (Current Release)
+- **Unnamed Faces Performance & UX:**
+    - **Virtualization:** Implemented `react-virtuoso` to handle 10,000+ faces smoothly.
+    - **Optimistic Updates:** Instant UI feedback for "Name", "Ignore", and "Group" actions (no loading spinners).
+    - **View Original Photo:** Added context button to view source image for any face thumbnail.
+    - **Inline Actions:** "Ignore Group" button added directly to cluster headers.
+- **Corrupt Photo Tracking:**
+    - **Backend Safety:** Robust error handling for truncated/corrupt images (preventing silent crashes).
+    - **Scan Warnings Report:** New "Settings" tab to list and manage (delete/dismiss) corrupt files.
 - **Retrieve Ignored Faces:**
     - View, Manage, and Restore faces previously marked as ignored.
     - "Group Similar" AI clustering for ignored faces.

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { Toast } from '../components/ui/Toast';
+import { Toast } from '../components/ui/ToastNotification';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning' | 'loading';
 
