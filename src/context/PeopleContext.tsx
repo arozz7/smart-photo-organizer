@@ -11,7 +11,7 @@ interface Face {
     photo_id: number
     person_id: number | null
     box: { x: number, y: number, width: number, height: number }
-    descriptor: number[]
+    descriptor?: number[] // Optional now for performance
     file_path: string
     preview_cache_path?: string
     person_name?: string
@@ -25,6 +25,8 @@ interface PeopleContextType {
     loading: boolean
     loadPeople: () => Promise<void>
     loadFaces: (filter?: any) => Promise<void>
+    loadUnnamedFaces: () => Promise<{ clusters: number[][], singles: number[] }>
+    fetchFacesByIds: (ids: number[]) => Promise<Face[]>
     assignPerson: (faceId: number, name: string) => Promise<any>
     ignoreFace: (faceId: number) => Promise<void>
     ignoreFaces: (faceIds: number[]) => Promise<void>
@@ -56,12 +58,37 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         setLoading(true)
         try {
             // @ts-ignore
-            const result = await window.ipcRenderer.invoke('db:getAllFaces', { limit: 2000, filter })
+            const result = await window.ipcRenderer.invoke('db:getAllFaces', { limit: 2000, filter }) // Keep this for "All Faces"
             setFaces(result)
         } catch (e) {
             console.error("Failed to load faces", e)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const loadUnnamedFaces = async () => {
+        try {
+            // New Architecture: fetch CLUSTERS (IDs only)
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('ai:getClusteredFaces')
+            // result = { clusters: [[id...], ...], singles: [id...] }
+            return result;
+        } catch (e) {
+            console.error(e);
+            return { clusters: [], singles: [] };
+        }
+    }
+
+    const fetchFacesByIds = async (ids: number[]) => {
+        try {
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('db:getFacesByIds', ids);
+            if (result.success) return result.faces;
+            return [];
+        } catch (e) {
+            console.error("Failed to fetch faces by IDs", e);
+            return [];
         }
     }
 
@@ -173,7 +200,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     return (
         <PeopleContext.Provider value={{
             people, faces, loading,
-            loadPeople, loadFaces, assignPerson,
+            loadPeople, loadFaces, loadUnnamedFaces, fetchFacesByIds, assignPerson,
             ignoreFace, ignoreFaces, autoNameFaces,
             rebuildIndex
         }}>

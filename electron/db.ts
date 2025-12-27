@@ -343,26 +343,39 @@ export function getDB() {
 
 
 
-export function getUnclusteredFaces() {
+export function getUnclusteredFaces(limit = 500, offset = 0) {
   const db = getDB();
   try {
-    // Fetch ALL faces that are not assigned to a person, joined with photos for display info
-    // Return data needed for clustering AND display: id, descriptor, face info, photo info
+    // OPTIMIZATION: Removed 'f.descriptor' from SELECT. 
+    // This reduces payload from ~2MB/1000 faces to ~50KB.
+    // Added LIMIT/OFFSET for pagination.
     const faces = db.prepare(`
-      SELECT f.id, f.photo_id, f.descriptor, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
+      SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
       FROM faces f
       JOIN photos p ON f.photo_id = p.id
       WHERE f.person_id IS NULL 
         AND f.descriptor IS NOT NULL
         AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
-        AND (f.blur_score IS NULL OR f.blur_score >= 10)  -- Basic quality filter for clustering (User request)
-    `).all();
+        AND (f.blur_score IS NULL OR f.blur_score >= 10)
+      ORDER BY f.id ASC
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
+
+    // Get total count for pagination UI
+    const total = db.prepare(`
+        SELECT COUNT(f.id) as count
+        FROM faces f
+        WHERE f.person_id IS NULL 
+        AND f.descriptor IS NOT NULL
+        AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
+        AND (f.blur_score IS NULL OR f.blur_score >= 10)
+    `).get() as { count: number };
 
     // Convert Buffer to Array for JSON IPC
     const formatted = faces.map((f: any) => ({
       id: f.id,
       photo_id: f.photo_id,
-      descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : [],
+      // descriptor: [], // Descriptor deliberately omitted for performance
       blur_score: f.blur_score,
       box: JSON.parse(f.box_json),
       file_path: f.file_path,
@@ -371,10 +384,35 @@ export function getUnclusteredFaces() {
       height: f.height
     }));
 
-    // Filter invalid descriptors
-    const valid = formatted.filter((f: any) => f.descriptor.length === 512);
+    // No need to filter by descriptor length here since we are not selecting it
+    // But we trust the DB 'descriptor IS NOT NULL' check.
 
-    return { success: true, faces: valid };
+    return { success: true, faces: formatted, total: total.count };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+export function getFacesForClustering() {
+  const db = getDB();
+  try {
+    // Select descriptors because Python needs them for clustering
+    const faces = db.prepare(`
+      SELECT id, descriptor
+      FROM faces 
+      WHERE person_id IS NULL 
+        AND descriptor IS NOT NULL
+        AND (is_ignored = 0 OR is_ignored IS NULL)
+        AND (blur_score IS NULL OR blur_score >= 10)
+    `).all();
+
+    // Convert Buffer to Array for JSON IPC/File
+    const formatted = faces.map((f: any) => ({
+      id: f.id,
+      descriptor: Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4))
+    }));
+
+    return { success: true, faces: formatted };
   } catch (e) {
     return { success: false, error: String(e) };
   }
@@ -710,3 +748,74 @@ export async function cleanupTags() {
     return { success: false, error: String(e) };
   }
 }
+
+export async function getScanErrors(limit = 100) {
+  const db = getDB();
+  try {
+    const errors = db.prepare('SELECT * FROM scan_errors ORDER BY timestamp DESC LIMIT ?').all(limit);
+    return { success: true, errors };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+
+export async function deleteScanErrorAndFile(errorId: number, deleteFile: boolean) {
+  const db = getDB();
+  const fs = await import('node:fs/promises');
+  try {
+    const row = db.prepare('SELECT file_path FROM scan_errors WHERE id = ?').get(errorId) as { file_path: string };
+
+    if (deleteFile && row && row.file_path) {
+      try {
+        await fs.unlink(row.file_path);
+        logger.info(`[ScanErrors] Deleted corrupt file: ${row.file_path}`);
+      } catch (e) {
+        logger.warn(`[ScanErrors] Failed to delete file: ${row.file_path}`, e);
+      }
+    }
+
+    db.prepare('DELETE FROM scan_errors WHERE id = ?').run(errorId);
+
+    // Also cleanup photo entry if it exists
+    if (row && row.file_path && deleteFile) {
+      db.prepare('DELETE FROM photos WHERE file_path = ?').run(row.file_path);
+    }
+
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+export function getFacesByIds(ids: number[]) {
+  const db = getDB();
+  try {
+    if (!ids || ids.length === 0) return { success: true, faces: [] };
+
+    const placeholders = ids.map(() => '?').join(',');
+    const faces = db.prepare(`
+      SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
+      FROM faces f
+      JOIN photos p ON f.photo_id = p.id
+      WHERE f.id IN (${placeholders})
+    `).all(...ids);
+
+    const formatted = faces.map((f: any) => ({
+      id: f.id,
+      photo_id: f.photo_id,
+      descriptor: [], // Not needed for display
+      blur_score: f.blur_score,
+      box: JSON.parse(f.box_json),
+      file_path: f.file_path,
+      preview_cache_path: f.preview_cache_path,
+      width: f.width,
+      height: f.height
+    }));
+
+    return { success: true, faces: formatted };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+

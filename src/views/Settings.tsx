@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import SettingsModal from '../components/SettingsModal';
+import ScanWarningsModal from '../components/ScanWarningsModal';
 import { useAI } from '../context/AIContext';
 import { useAlert } from '../context/AlertContext';
 
@@ -114,6 +115,7 @@ export default function Settings() {
     const [message, setMessage] = useState('')
     const [libraryPath, setLibraryPath] = useState(localStorage.getItem('libraryPath') || '')
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [showWarningsModal, setShowWarningsModal] = useState(false);
     const { calculatingBlur, blurProgress, calculateBlurScores } = useAI();
     const { showAlert, showConfirm } = useAlert();
 
@@ -196,6 +198,11 @@ export default function Settings() {
             <SettingsModal
                 open={showSettingsModal}
                 onOpenChange={setShowSettingsModal}
+            />
+
+            <ScanWarningsModal
+                isOpen={showWarningsModal}
+                onClose={() => setShowWarningsModal(false)}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl w-full">
@@ -445,6 +452,26 @@ export default function Settings() {
                 </div>
             </div>
 
+            {/* Scan Errors / Warnings */}
+            <section className="space-y-4">
+                <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Health & Logs</h3>
+                <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 flex justify-between items-center">
+                    <div>
+                        <h4 className="font-medium text-white">Scan Warnings</h4>
+                        <p className="text-sm text-gray-400 mt-1">
+                            View corrupt files or errors encountered during scanning.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => setShowWarningsModal(true)}
+                        className="px-4 py-2 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white border border-gray-600"
+                    >
+                        View Warnings
+                    </button>
+                </div>
+            </section>
+
+
             {/* Factory Reset Modal */}
             {
                 showResetConfirm && (
@@ -471,29 +498,26 @@ export default function Settings() {
                                     <label className="block text-gray-400 text-xs mb-1">To confirm, type <span className="font-mono font-bold text-white">RESET</span> below:</label>
                                     <input
                                         type="text"
-                                        value={resetInput}
-                                        onChange={(e) => setResetInput(e.target.value)}
-                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+                                        className="w-full bg-gray-900 border border-red-900 rounded px-3 py-2 text-white focus:border-red-500 outline-none"
                                         placeholder="Type RESET"
+                                        value={resetInput}
+                                        onChange={e => setResetInput(e.target.value)}
                                     />
                                 </div>
 
-                                <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+                                <div className="flex justify-end gap-3 pt-2">
                                     <button
                                         onClick={() => setShowResetConfirm(false)}
-                                        className="px-4 py-2 rounded text-gray-300 hover:text-white"
+                                        className="px-4 py-2 rounded text-gray-300 hover:bg-gray-700"
                                     >
                                         Cancel
                                     </button>
                                     <button
                                         onClick={handleFactoryReset}
                                         disabled={resetInput !== 'RESET'}
-                                        className={`px-4 py-2 rounded font-bold transition-all ${resetInput === 'RESET'
-                                            ? 'bg-red-600 hover:bg-red-700 text-white'
-                                            : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                                            }`}
+                                        className="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed font-bold"
                                     >
-                                        DELETE EVERYTHING
+                                        Confirm Reset
                                     </button>
                                 </div>
                             </div>
@@ -501,6 +525,12 @@ export default function Settings() {
                     </div>
                 )
             }
+
+            <ScanWarningsModal
+                isOpen={showWarningsModal}
+                onClose={() => setShowWarningsModal(false)}
+            />
         </div >
     )
 }
+

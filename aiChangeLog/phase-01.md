@@ -70,3 +70,7 @@
 - **Change**: Added animated GIFs to `README.md` to demonstrate key features (Scan, Organize, Smart Tags, Set Builder).
 - **Reason**: User request to improve documentation visibility and demonstrate app capabilities visually.
 - **Impact**: README now visually demonstrates core workflows.
+
+### 2025-12-25 - Smart Tag Optimization & Cleanup
+- **Feature**: Enforce strict single-word, lowercase normalization for all smart tags.
+- **Files Modified**: src/python/main.py, electron/db.ts, electron/main.ts, src/views/Settings.tsx, src/views/Create.tsx, docs/*`n- **Impact**: Improved tag consistency. Added Cleanup Tags tool to Settings. Replaced Create page tag dropdown with sorted Type-ahead filter.
