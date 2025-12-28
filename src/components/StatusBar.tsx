@@ -9,7 +9,9 @@ export default function StatusBar() {
         isCoolingDown,
         cooldownTimeLeft,
         processingQueue,
-        isThrottled
+        isThrottled,
+        isProcessing,
+        isPaused
     } = useAI();
     const { scanning, scanCount } = useScan();
 
@@ -43,9 +45,25 @@ export default function StatusBar() {
                 )}
 
                 {processingQueue.length > 0 && (
-                    <span className="flex items-center gap-2 text-green-400 font-medium">
-                        <span className="animate-pulse">●</span> AI Queue: {processingQueue.length}
-                    </span>
+                    <>
+                        {isPaused ? (
+                            <span className="flex items-center gap-2 text-amber-500 font-medium animate-pulse">
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                                Paused ({processingQueue.length} pending)
+                            </span>
+                        ) : !isProcessing ? (
+                            <span className="flex items-center gap-2 text-cyan-400 font-medium">
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                Pending: {processingQueue.length}
+                            </span>
+                        ) : (
+                            <span className="flex items-center gap-2 text-green-400 font-medium">
+                                <span className="animate-pulse">●</span> Processing ({processingQueue.length})
+                            </span>
+                        )}
+                    </>
                 )}
 
                 {isCoolingDown && (

@@ -867,3 +867,49 @@ export function getFacesByIds(ids: number[]) {
   }
 }
 
+
+export function findPotentialMatches(faceIds: number[], threshold = 0.40) {
+  const db = getDB();
+  try {
+    // 1. Get Candidates (People with means)
+    const people = db.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
+    if (people.length === 0) return { success: true, matches: [] };
+
+    const candidates = people.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      mean: JSON.parse(p.descriptor_mean_json)
+    }));
+
+    // 2. Get Faces
+    const placeholders = faceIds.map(() => '?').join(',');
+    const faces = db.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND descriptor IS NOT NULL`).all(...faceIds);
+
+    const matches: any[] = [];
+
+    for (const face of faces) {
+      // @ts-ignore
+      const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+      // @ts-ignore
+      const match = findBestMatch(rawDescriptor, candidates, threshold);
+
+      if (match.success) {
+        matches.push({
+          faceId: face.id,
+          match: {
+            personId: match.personId,
+            personName: match.personName,
+            similarity: match.similarity,
+            distance: match.distance
+          }
+        });
+      }
+    }
+
+    return { success: true, matches };
+
+  } catch (e) {
+    logger.error("Find Potential Matches failed:", e);
+    return { success: false, error: String(e) };
+  }
+}

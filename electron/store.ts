@@ -6,6 +6,7 @@ interface StoreSchema {
     libraryPath: string;
     aiSettings: {
         faceDetectionThreshold: number;
+        faceSimilarityThreshold: number;
         faceBlurThreshold: number;
         vlmTemperature: number;
         vlmMaxTokens: number;
@@ -24,6 +25,7 @@ const store = new Store<StoreSchema>({
         libraryPath: path.join(app.getPath('userData')),
         aiSettings: {
             faceDetectionThreshold: 0.6,
+            faceSimilarityThreshold: 0.65, // Add new setting
             faceBlurThreshold: 20.0,
             vlmTemperature: 0.2,
             vlmMaxTokens: 100,

@@ -49,7 +49,7 @@ The core feature of the application is local, privacy-focused face recognition.
 ### Blur Detection & Quality Control
 - **Blur Scoring:** Every detected face is analyzed for sharpness (Laplacian Variance).
 - **Auto-Filter:** Extremely blurry faces are automatically discarded during scanning based on your configurable threshold.
-- **Cleanup Tool:** The **"Cleanup Blurry"** tool scans your existing library for low-quality face captures, allowing you to bulk-delete blurry faces while keeping the high-quality ones.
+- **Cleanup Tool:** The **"Cleanup Blurry"** tool scans your library for low-quality face captures. It features a **high-performance virtualized grid** capable of handling thousands of faces instantly and supports **RAW photo previews** using the generated cache.
 
 ## 3. AI Configuration
 

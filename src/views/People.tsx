@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useLayoutEffect, memo } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect, memo, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePeople } from '../context/PeopleContext'
 import PersonCard from '../components/PersonCard'
@@ -11,10 +11,65 @@ import BlurryFacesModal from '../components/BlurryFacesModal'
 import GroupNamingModal from '../components/GroupNamingModal'
 import TargetedScanModal from '../components/TargetedScanModal'
 import IgnoredFacesModal from '../components/IgnoredFacesModal'
+import UnmatchedFacesModal from '../components/UnmatchedFacesModal'
 import { useAI } from '../context/AIContext'
 import { Face } from '../types'
 import { useAlert } from '../context/AlertContext'
 import { useToast } from '../context/ToastContext'
+
+
+interface ClusterListProps {
+    clusters: { faces: number[] }[]
+    selectedFaceIds: Set<number>
+    toggleFace: (id: number) => void
+    toggleGroup: (ids: number[]) => void
+    fetchFacesByIds: (ids: number[]) => Promise<Face[]>
+    handleNameGroup: (ids: number[], name: string) => Promise<void>
+    handleIgnoreGroup: (ids: number[]) => void
+    handleOpenNaming: (ids: number[]) => Promise<void>
+}
+
+const ClusterList = memo(({
+    clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleOpenNaming
+}: ClusterListProps) => {
+
+    const renderClusterRow = useCallback((index: number) => {
+        const cluster = clusters[index];
+        if (!cluster || !cluster.faces) return null;
+
+        return (
+            <div className="border-b border-gray-800 pb-4 pr-2">
+                <ClusterRow
+                    faceIds={cluster.faces}
+                    index={index}
+                    selectedFaceIds={selectedFaceIds}
+                    toggleFace={toggleFace}
+                    toggleGroup={toggleGroup}
+                    fetchFacesByIds={fetchFacesByIds}
+                    onNameGroup={handleNameGroup}
+                    onIgnoreGroup={handleIgnoreGroup}
+                    onOpenNaming={handleOpenNaming}
+                />
+            </div>
+        );
+    }, [clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleOpenNaming]);
+
+    // Use memo for style to prevent re-renders on every parent render
+    const style = useMemo(() => ({ height: '100%', width: '100%' }), []);
+
+    return (
+        <div className="h-[65vh] w-full relative">
+            <Virtuoso
+                style={style}
+                totalCount={clusters.length}
+                itemContent={renderClusterRow}
+                components={{
+                    Footer: () => <div className="h-20" /> // Extra space at bottom
+                }}
+            />
+        </div>
+    )
+})
 
 export default function People() {
     const navigate = useNavigate()
@@ -26,6 +81,7 @@ export default function People() {
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
     const [showBlurryModal, setShowBlurryModal] = useState(false)
     const [showIgnoredModal, setShowIgnoredModal] = useState(false)
+    const [showUnmatchedModal, setShowUnmatchedModal] = useState(false)
     const [hasNewFaces, setHasNewFaces] = useState(false)
     const [isScanning, setIsScanning] = useState(false)
     const [isScanModalOpen, setIsScanModalOpen] = useState(false)
@@ -37,14 +93,14 @@ export default function People() {
     // Selection State
     const [selectedFaceIds, setSelectedFaceIds] = useState<Set<number>>(new Set())
 
-    const toggleFace = (id: number) => {
+    const toggleFace = useCallback((id: number) => {
         const newSet = new Set(selectedFaceIds)
         if (newSet.has(id)) newSet.delete(id)
         else newSet.add(id)
         setSelectedFaceIds(newSet)
-    }
+    }, [selectedFaceIds])
 
-    const toggleGroup = (ids: number[]) => {
+    const toggleGroup = useCallback((ids: number[]) => {
         const newSet = new Set(selectedFaceIds)
         const allSelected = ids.every(id => newSet.has(id))
 
@@ -54,9 +110,10 @@ export default function People() {
             ids.forEach(id => newSet.add(id))
         }
         setSelectedFaceIds(newSet)
-    }
+    }, [selectedFaceIds])
 
-    const clearSelection = () => setSelectedFaceIds(new Set())
+    const clearSelection = useCallback(() => setSelectedFaceIds(new Set()), [])
+
     const [totalFaces, setTotalFaces] = useState(0)
     const [isClustering, setIsClustering] = useState(false)
     const [isAutoAssigning, setIsAutoAssigning] = useState(false);
@@ -109,9 +166,6 @@ export default function People() {
             setIsClustering(false)
         }
     }
-
-    // Moved handleConfirmName down to use handleNameGroup defined later
-
 
     const handleAutoAssign = async () => {
         if (totalFaces === 0) return;
@@ -194,7 +248,7 @@ export default function People() {
         navigate(`/people/${personId}`)
     }
 
-    const handleNameGroup = async (ids: number[], name: string) => {
+    const handleNameGroup = useCallback(async (ids: number[], name: string) => {
         // Optimistic: Remove from clusters immediately
         const idsSet = new Set(ids)
         setClusters(prev => prev.map(c => ({
@@ -211,26 +265,26 @@ export default function People() {
         // API Call
         await autoNameFaces(ids, name)
         addToast({ type: 'success', description: `Named ${ids.length} faces.` })
-    }
+    }, [autoNameFaces, addToast])
 
-    const handleConfirmName = async (selectedIds: number[], name: string) => {
+    const handleConfirmName = useCallback(async (selectedIds: number[], name: string) => {
         if (!name || selectedIds.length === 0) return
         setNamingGroup(null)
         await handleNameGroup(selectedIds, name)
-    }
+    }, [handleNameGroup])
 
-    const handleOpenNaming = async (ids: number[]) => {
+    const handleOpenNaming = useCallback(async (ids: number[]) => {
         // Fetch faces if needed (or if passed, use them? For now, fetch to be safe/consistent)
         try {
             const faces = await fetchFacesByIds(ids);
-            setNamingGroup({ faces });
+            setNamingGroup({ faces, name: '' });
         } catch (e) {
             console.error("Failed to load faces for naming", e);
             addToast({ type: 'error', description: 'Failed to load faces.' })
         }
-    }
+    }, [fetchFacesByIds, addToast])
 
-    const handleIgnoreGroup = (ids: number[]) => {
+    const handleIgnoreGroup = useCallback((ids: number[]) => {
         showConfirm({
             title: 'Ignore Faces',
             description: `Ignore ${ids.length} faces? They will be hidden from unnamed faces.`,
@@ -255,23 +309,29 @@ export default function People() {
                 addToast({ type: 'success', description: `Ignored ${ids.length} faces.` })
             }
         })
-    }
+    }, [showConfirm, addToast])
 
-    // Row component for react-window
-    const VirtualRow = ({ index, style, data }: any) => {
-        // Debugging Row Style
-        if (index === 0 || index === 1) console.log(`[People.tsx] VirtualRow ${index} Style:`, style);
 
-        const { clusters } = data
-        const cluster = clusters[index]
+    const renderClusterRow = useCallback((index: number) => {
+        const cluster = clusters[index];
+        if (!cluster || !cluster.faces) return null;
 
         return (
-            <div style={style} className="border-b border-red-500 bg-gray-800 text-white p-2">
-                Row {index} - Faces: {cluster?.faces?.length || 0}
-                {/* <ClusterRow ... /> - Temporarily removed for debugging */}
+            <div className="border-b border-gray-800 pb-4 pr-2">
+                <ClusterRow
+                    faceIds={cluster.faces}
+                    index={index}
+                    selectedFaceIds={selectedFaceIds}
+                    toggleFace={toggleFace}
+                    toggleGroup={toggleGroup}
+                    fetchFacesByIds={fetchFacesByIds}
+                    onNameGroup={handleNameGroup}
+                    onIgnoreGroup={handleIgnoreGroup}
+                    onOpenNaming={handleOpenNaming}
+                />
             </div>
-        )
-    }
+        );
+    }, [clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleOpenNaming]);
 
     return (
         <div className="flex flex-col h-full bg-gray-950 text-white overflow-hidden">
@@ -426,35 +486,16 @@ export default function People() {
                                 {/* Clusters */}
                                 {/* Clusters */}
                                 {clusters.length > 0 && (
-                                    <div className="h-[65vh] w-full relative">
-                                        <Virtuoso
-                                            style={{ height: '100%', width: '100%' }}
-                                            totalCount={clusters.length}
-                                            itemContent={(index) => {
-                                                const cluster = clusters[index];
-                                                if (!cluster || !cluster.faces) return null;
-
-                                                return (
-                                                    <div className="border-b border-gray-800 pb-4 pr-2">
-                                                        <ClusterRow
-                                                            faceIds={cluster.faces}
-                                                            index={index}
-                                                            selectedFaceIds={selectedFaceIds}
-                                                            toggleFace={toggleFace}
-                                                            toggleGroup={toggleGroup}
-                                                            fetchFacesByIds={fetchFacesByIds}
-                                                            onNameGroup={handleNameGroup}
-                                                            onIgnoreGroup={handleIgnoreGroup}
-                                                            onOpenNaming={handleOpenNaming}
-                                                        />
-                                                    </div>
-                                                );
-                                            }}
-                                            components={{
-                                                Footer: () => <div className="h-20" /> // Extra space at bottom
-                                            }}
-                                        />
-                                    </div>
+                                    <ClusterList
+                                        clusters={clusters}
+                                        selectedFaceIds={selectedFaceIds}
+                                        toggleFace={toggleFace}
+                                        toggleGroup={toggleGroup}
+                                        fetchFacesByIds={fetchFacesByIds}
+                                        handleNameGroup={handleNameGroup}
+                                        handleIgnoreGroup={handleIgnoreGroup}
+                                        handleOpenNaming={handleOpenNaming}
+                                    />
                                 )}
                                 {/* Duplicate FAB removed */}
 
@@ -470,7 +511,7 @@ export default function People() {
                                             <button
                                                 className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-md text-sm text-gray-300 transition-colors"
                                                 onClick={() => {
-                                                    alert("Singles viewer coming next.")
+                                                    setShowUnmatchedModal(true)
                                                 }}
                                             >
                                                 View Unmatched Faces
@@ -547,6 +588,14 @@ export default function People() {
                     }
                 }}
                 onSuccess={loadPeople}
+            />
+
+            <UnmatchedFacesModal
+                isOpen={showUnmatchedModal}
+                onClose={() => setShowUnmatchedModal(false)}
+                faceIds={singles}
+                onName={handleOpenNaming}
+                onIgnore={handleIgnoreGroup}
             />
 
             {/* Selection Floating Action Bar */}

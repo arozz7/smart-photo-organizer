@@ -18,14 +18,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs$1, { promises } from "node:fs";
-import crypto, { createHash } from "node:crypto";
-import { ExifTool } from "exiftool-vendored";
 import process$1 from "node:process";
 import { promisify, isDeepStrictEqual } from "node:util";
+import crypto, { createHash } from "node:crypto";
 import assert from "node:assert";
 import os from "node:os";
 import "node:events";
 import "node:stream";
+import { ExifTool } from "exiftool-vendored";
 import * as fs from "node:fs/promises";
 const logDir = path.join(app$1.getPath("userData"), "logs");
 if (!fs$1.existsSync(logDir)) {
@@ -79,895 +79,6 @@ const logger = {
   },
   getLogPath: () => logFile
 };
-let db;
-async function initDB(basePath, onProgress) {
-  const dbPath = path.join(basePath, "library.db");
-  if (onProgress) onProgress("Initializing Database...");
-  logger.info("Initializing Database at:", dbPath);
-  await new Promise((resolve2) => setTimeout(resolve2, 100));
-  db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS photos (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      file_path TEXT UNIQUE NOT NULL,
-      file_hash TEXT,
-      preview_cache_path TEXT,
-      created_at DATETIME,
-      width INTEGER,
-      height INTEGER,
-      blur_score REAL,
-      metadata_json TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS tags (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT UNIQUE NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS photo_tags (
-      photo_id INTEGER,
-      tag_id INTEGER,
-      source TEXT,
-      PRIMARY KEY (photo_id, tag_id),
-      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
-      FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS people (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT UNIQUE NOT NULL COLLATE NOCASE,
-      descriptor_mean_json TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS faces (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      photo_id INTEGER,
-      box_json TEXT,
-      descriptor BLOB,
-      person_id INTEGER,
-      is_ignored BOOLEAN DEFAULT 0,
-      is_reference BOOLEAN DEFAULT 0,
-      blur_score REAL,
-      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
-      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS scan_errors (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      photo_id INTEGER,
-      file_path TEXT,
-      error_message TEXT,
-      stage TEXT,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS scan_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      photo_id INTEGER,
-      file_path TEXT,
-      scan_ms INTEGER,
-      tag_ms INTEGER,
-      face_count INTEGER,
-      scan_mode TEXT,
-      status TEXT,
-      error TEXT,
-      timestamp INTEGER
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_faces_person_id ON faces(person_id);
-    CREATE INDEX IF NOT EXISTS idx_faces_photo_id ON faces(photo_id);
-  `);
-  try {
-    db.exec("ALTER TABLE faces ADD COLUMN blur_score REAL");
-  } catch (e) {
-  }
-  try {
-    db.exec("ALTER TABLE faces ADD COLUMN is_ignored BOOLEAN DEFAULT 0");
-  } catch (e) {
-  }
-  try {
-    db.exec("ALTER TABLE people ADD COLUMN descriptor_mean_json TEXT");
-  } catch (e) {
-  }
-  try {
-    db.exec("ALTER TABLE photos ADD COLUMN blur_score REAL");
-  } catch (e) {
-  }
-  try {
-    db.exec("ALTER TABLE scan_history ADD COLUMN scan_mode TEXT");
-  } catch (e) {
-  }
-  try {
-    try {
-      db.exec("ALTER TABLE faces ADD COLUMN descriptor BLOB");
-    } catch (e) {
-    }
-    try {
-      db.exec("ALTER TABLE faces ADD COLUMN is_reference BOOLEAN DEFAULT 0");
-    } catch (e) {
-    }
-    let hasJson = { count: 0 };
-    try {
-      hasJson = db.prepare("SELECT count(*) as count FROM faces WHERE descriptor IS NULL AND (descriptor_json IS NOT NULL AND descriptor_json != 'NULL')").get();
-    } catch (e) {
-    }
-    if (hasJson.count > 0) {
-      if (onProgress) onProgress(`Migrating ${hasJson.count} faces...`);
-      logger.info(`Starting Smart Face Storage Migration for ${hasJson.count} faces...`);
-      const allFaces = db.prepare("SELECT id, descriptor_json, person_id, blur_score FROM faces").all();
-      const updateFace = db.prepare("UPDATE faces SET descriptor = ?, is_reference = ? WHERE id = ?");
-      if (onProgress) onProgress("Analyzing Face Quality...");
-      const personFaces = {};
-      const unknownFaces = [];
-      for (const face of allFaces) {
-        if (!face.person_id) {
-          unknownFaces.push(face);
-        } else {
-          if (!personFaces[face.person_id]) personFaces[face.person_id] = [];
-          personFaces[face.person_id].push(face);
-        }
-      }
-      let processedCount = 0;
-      const totalCount = hasJson.count;
-      const CHUNK_SIZE = 500;
-      const report = () => {
-        if (onProgress) {
-          const pct = Math.round(processedCount / totalCount * 100);
-          onProgress(`Migrating Database: ${pct}%`);
-        }
-      };
-      const unknownChunks = [];
-      for (let i = 0; i < unknownFaces.length; i += CHUNK_SIZE) {
-        unknownChunks.push(unknownFaces.slice(i, i + CHUNK_SIZE));
-      }
-      for (const chunk of unknownChunks) {
-        const transaction = db.transaction(() => {
-          for (const face of chunk) {
-            if (face.descriptor_json) {
-              try {
-                const arr = JSON.parse(face.descriptor_json);
-                const buf = Buffer.from(new Float32Array(arr).buffer);
-                updateFace.run(buf, 0, face.id);
-              } catch (e) {
-                logger.error(`Failed to migrate face ${face.id}`, e);
-              }
-            }
-          }
-        });
-        transaction();
-        processedCount += chunk.length;
-        report();
-        await new Promise((resolve2) => setTimeout(resolve2, 0));
-      }
-      const personIds = Object.keys(personFaces);
-      for (let i = 0; i < personIds.length; i += 50) {
-        const pIdsChunk = personIds.slice(i, i + 50);
-        const transaction = db.transaction(() => {
-          for (const pid of pIdsChunk) {
-            const faces = personFaces[parseInt(pid)];
-            faces.sort((a, b) => (b.blur_score || 0) - (a.blur_score || 0));
-            faces.forEach((face, index) => {
-              if (index < 100) {
-                if (face.descriptor_json) {
-                  try {
-                    const arr = JSON.parse(face.descriptor_json);
-                    const buf = Buffer.from(new Float32Array(arr).buffer);
-                    updateFace.run(buf, 1, face.id);
-                  } catch (e) {
-                    logger.error(`Failed to migrate reference ${face.id}`, e);
-                  }
-                }
-              } else {
-                updateFace.run(null, 0, face.id);
-              }
-            });
-            processedCount += faces.length;
-          }
-        });
-        transaction();
-        report();
-        await new Promise((resolve2) => setTimeout(resolve2, 0));
-      }
-      logger.info("Smart Face Storage Migration: Data converted.");
-      try {
-        if (onProgress) onProgress("Optimizing Database (VACUUM)...");
-        await new Promise((resolve2) => setTimeout(resolve2, 100));
-        logger.info("Dropping old descriptor_json column...");
-        db.exec("ALTER TABLE faces DROP COLUMN descriptor_json");
-        db.exec("VACUUM");
-      } catch (e) {
-        logger.warn("Could not drop descriptor_json column (SQLite version might be old), setting to NULL instead.", e);
-        db.exec("UPDATE faces SET descriptor_json = NULL");
-        db.exec("VACUUM");
-      }
-      logger.info("Smart Face Storage Migration: Complete.");
-    }
-  } catch (e) {
-    logger.error("Smart Face Storage Migration Failed:", e);
-  }
-  try {
-    const getCollate = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='people'").get();
-    if (getCollate && !getCollate.sql.includes("COLLATE NOCASE")) {
-      if (onProgress) onProgress("Upgrading People Table (Uniqueness)...");
-      logger.info("Upgrading People Table to enforce case-insensitive uniqueness...");
-      const allPeople = db.prepare("SELECT id, name FROM people").all();
-      const seen = /* @__PURE__ */ new Map();
-      const merges = /* @__PURE__ */ new Map();
-      for (const p of allPeople) {
-        const lower = p.name.trim().toLowerCase();
-        if (seen.has(lower)) {
-          merges.set(p.id, seen.get(lower));
-        } else {
-          seen.set(lower, p.id);
-        }
-      }
-      db.exec("PRAGMA foreign_keys = OFF");
-      const transaction = db.transaction(() => {
-        const updateFace = db.prepare("UPDATE faces SET person_id = ? WHERE person_id = ?");
-        for (const [fromId, toId] of merges.entries()) {
-          updateFace.run(toId, fromId);
-        }
-        db.exec(`
-          DROP TABLE IF EXISTS people_new;
-          CREATE TABLE people_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL COLLATE NOCASE,
-            descriptor_mean_json TEXT
-          );
-        `);
-        const keptIds = [...seen.values()];
-        const insertPerson = db.prepare("INSERT INTO people_new (id, name, descriptor_mean_json) SELECT id, name, descriptor_mean_json FROM people WHERE id = ?");
-        for (const id2 of keptIds) {
-          insertPerson.run(id2);
-        }
-        db.exec("DROP TABLE people");
-        db.exec("ALTER TABLE people_new RENAME TO people");
-      });
-      transaction();
-      db.exec("PRAGMA foreign_keys = ON");
-      const toRecalc = [...new Set(merges.values())];
-      for (const pid of toRecalc) {
-        recalculatePersonMean(db, pid);
-      }
-      logger.info("People Table Upgrade: Complete.");
-    }
-  } catch (e) {
-    logger.error("Failed to migrate people table:", e);
-  }
-  try {
-    console.log('Running migration: Cleanup "AI Description" tag...');
-    const tag = db.prepare("SELECT id FROM tags WHERE name = ?").get("AI Description");
-    if (tag) {
-      db.prepare("DELETE FROM photo_tags WHERE tag_id = ?").run(tag.id);
-      db.prepare("DELETE FROM tags WHERE id = ?").run(tag.id);
-      logger.info('Migration complete: "AI Description" tag removed.');
-    }
-  } catch (e) {
-    logger.error("Migration failed:", e);
-  }
-  logger.info("Database schema ensured.");
-}
-function getDB() {
-  if (!db) {
-    throw new Error("Database not initialized");
-  }
-  return db;
-}
-function getFacesForClustering() {
-  const db2 = getDB();
-  try {
-    const faces = db2.prepare(`
-      SELECT id, descriptor
-      FROM faces 
-      WHERE person_id IS NULL 
-        AND descriptor IS NOT NULL
-        AND (is_ignored = 0 OR is_ignored IS NULL)
-        AND (blur_score IS NULL OR blur_score >= 10)
-    `).all();
-    const formatted = faces.map((f) => ({
-      id: f.id,
-      descriptor: Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4))
-    }));
-    return { success: true, faces: formatted };
-  } catch (e) {
-    return { success: false, error: String(e) };
-  }
-}
-function closeDB() {
-  if (db) {
-    logger.info("Closing Database connection.");
-    db.close();
-    db = void 0;
-  }
-}
-function getMetricsHistory(limit2 = 1e3) {
-  const db2 = getDB();
-  try {
-    const history = db2.prepare("SELECT * FROM scan_history ORDER BY timestamp DESC LIMIT ?").all(limit2);
-    const stats = db2.prepare(`
-            SELECT 
-                COUNT(*) as total_scans,
-                SUM(CASE WHEN face_count > 0 THEN 1 ELSE 0 END) as face_scans,
-                SUM(scan_ms + COALESCE(tag_ms, 0)) as total_processing_time,
-                SUM(face_count) as total_faces
-            FROM scan_history
-            WHERE status = 'success'
-        `).get();
-    return { success: true, history, stats };
-  } catch (e) {
-    return { success: false, error: String(e) };
-  }
-}
-const recalculatePersonMean = (db2, personId) => {
-  try {
-    console.time(`recalculatePersonMean-${personId}`);
-    const allDescriptors = db2.prepare("SELECT descriptor FROM faces WHERE person_id = ? AND is_ignored = 0").all(personId);
-    if (allDescriptors.length === 0) {
-      db2.prepare("UPDATE people SET descriptor_mean_json = NULL WHERE id = ?").run(personId);
-      return;
-    }
-    const vectors = [];
-    for (const row of allDescriptors) {
-      if (row.descriptor) {
-        vectors.push(Array.from(new Float32Array(row.descriptor.buffer, row.descriptor.byteOffset, row.descriptor.byteLength / 4)));
-      }
-    }
-    if (vectors.length === 0) {
-      db2.prepare("UPDATE people SET descriptor_mean_json = NULL WHERE id = ?").run(personId);
-      return;
-    }
-    const dim = vectors[0].length;
-    const mean = new Array(dim).fill(0);
-    for (const vec of vectors) {
-      for (let i = 0; i < dim; i++) {
-        mean[i] += vec[i];
-      }
-    }
-    let mag = 0;
-    for (let i = 0; i < dim; i++) {
-      mean[i] /= vectors.length;
-      mag += mean[i] ** 2;
-    }
-    mag = Math.sqrt(mag);
-    if (mag > 0) {
-      for (let i = 0; i < dim; i++) {
-        mean[i] /= mag;
-      }
-    }
-    console.timeEnd(`recalculatePersonMean-${personId}`);
-    db2.prepare("UPDATE people SET descriptor_mean_json = ? WHERE id = ?").run(JSON.stringify(mean), personId);
-  } catch (e) {
-    logger.error(`Failed to recalculate mean for person ${personId}:`, e);
-  }
-};
-function autoAssignFaces(faceIds, threshold = 0.65) {
-  const db2 = getDB();
-  try {
-    const people = db2.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
-    logger.info(`[AutoAssign] Found ${people.length} people with mean descriptors.`);
-    if (people.length === 0) {
-      return { success: true, count: 0, assigned: [] };
-    }
-    const candidates = people.map((p) => ({
-      id: p.id,
-      name: p.name,
-      mean: JSON.parse(p.descriptor_mean_json)
-    }));
-    let faces;
-    if (faceIds && faceIds.length > 0) {
-      const placeholders = faceIds.map(() => "?").join(",");
-      faces = db2.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND descriptor IS NOT NULL`).all(...faceIds);
-      logger.info(`[AutoAssign] Found ${faces.length} valid descriptors out of ${faceIds.length} requested IDs.`);
-    } else {
-      logger.info(`[AutoAssign] No IDs provided. Scanning ALL unassigned faces...`);
-      faces = db2.prepare("SELECT id, descriptor FROM faces WHERE person_id IS NULL AND descriptor IS NOT NULL").all();
-      logger.info(`[AutoAssign] Found ${faces.length} unassigned faces to check.`);
-    }
-    let assignedCount = 0;
-    const assigned = [];
-    const updateFace = db2.prepare("UPDATE faces SET person_id = ? WHERE id = ?");
-    const transaction = db2.transaction(() => {
-      for (const face of faces) {
-        if (!face.descriptor) continue;
-        const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
-        let mag = 0;
-        for (const val of rawDescriptor) mag += val * val;
-        mag = Math.sqrt(mag);
-        const descriptor = mag > 0 ? rawDescriptor.map((v) => v / mag) : rawDescriptor;
-        let bestMatch = null;
-        let minDist = Infinity;
-        for (const person of candidates) {
-          let sumSq = 0;
-          for (let i = 0; i < descriptor.length; i++) {
-            const diff2 = descriptor[i] - person.mean[i];
-            sumSq += diff2 * diff2;
-          }
-          const dist2 = Math.sqrt(sumSq);
-          if (dist2 < minDist) {
-            minDist = dist2;
-            bestMatch = person;
-          }
-        }
-        if (bestMatch && minDist < threshold) {
-          updateFace.run(bestMatch.id, face.id);
-          assignedCount++;
-          assigned.push({ faceId: face.id, personId: bestMatch.id, personName: bestMatch.name, distance: minDist });
-        }
-      }
-    });
-    transaction();
-    const uniquePeople = new Set(assigned.map((a) => a.personId));
-    for (const pid of uniquePeople) {
-      recalculatePersonMean(db2, pid);
-    }
-    return { success: true, count: assignedCount, assigned };
-  } catch (e) {
-    logger.error("Auto-Assign failed:", e);
-    return { success: false, error: String(e) };
-  }
-}
-async function cleanupTags() {
-  const db2 = getDB();
-  logger.info("Starting Tag Cleanup...");
-  try {
-    const allTags = db2.prepare("SELECT id, name FROM tags").all();
-    logger.info(`Found ${allTags.length} tags to process.`);
-    let deletedCount = 0;
-    let mergedCount = 0;
-    const getOrCreateTagId = (tagName) => {
-      const lowerName = tagName.toLowerCase();
-      const existing = db2.prepare("SELECT id FROM tags WHERE name = ?").get(lowerName);
-      if (existing) return existing.id;
-      const info = db2.prepare("INSERT INTO tags (name) VALUES (?)").run(lowerName);
-      return Number(info.lastInsertRowid);
-    };
-    const transaction = db2.transaction(() => {
-      const getPhotoTags = db2.prepare("SELECT photo_id FROM photo_tags WHERE tag_id = ?");
-      const insertPhotoTag = db2.prepare("INSERT OR IGNORE INTO photo_tags (photo_id, tag_id, source) VALUES (?, ?, ?)");
-      const deleteOldTag = db2.prepare("DELETE FROM tags WHERE id = ?");
-      const deleteOldLinks = db2.prepare("DELETE FROM photo_tags WHERE tag_id = ?");
-      const stopwords = /* @__PURE__ */ new Set([
-        "a",
-        "an",
-        "the",
-        "in",
-        "on",
-        "at",
-        "is",
-        "are",
-        "was",
-        "were",
-        "and",
-        "or",
-        "but",
-        "of",
-        "to",
-        "with",
-        "for",
-        "this",
-        "that",
-        "there",
-        "it",
-        "he",
-        "she",
-        "they",
-        "looking",
-        "standing",
-        "holding"
-      ]);
-      for (const tag of allTags) {
-        const clean2 = tag.name.replace(/['"]/g, "");
-        const words = clean2.split(/\s+/);
-        const validWords = [];
-        for (const w of words) {
-          const norm = w.toLowerCase().replace(/^[.,\-!?:;"()[\]{}]+|[.,\-!?:;"()[\]{}]+$/g, "");
-          if (norm.length > 2 && !stopwords.has(norm)) {
-            validWords.push(norm);
-          }
-        }
-        const affectedPhotoIds = getPhotoTags.all(tag.id).map((r) => r.photo_id);
-        let selfReferential = true;
-        if (validWords.length !== 1 || validWords[0] !== tag.name) {
-          selfReferential = false;
-        }
-        if (selfReferential) continue;
-        for (const newWord of validWords) {
-          const targetTagId = getOrCreateTagId(newWord);
-          if (targetTagId === tag.id) continue;
-          for (const pid of affectedPhotoIds) {
-            insertPhotoTag.run(pid, targetTagId, "auto");
-          }
-          mergedCount++;
-        }
-        deleteOldLinks.run(tag.id);
-        deleteOldTag.run(tag.id);
-        deletedCount++;
-      }
-    });
-    transaction();
-    logger.info(`Cleanup Complete. Deleted ${deletedCount} tags. Merged/Links updated: ${mergedCount}`);
-    db2.exec("VACUUM");
-    return { success: true, deletedCount, mergedCount };
-  } catch (e) {
-    logger.error("Cleanup Tags Failed", e);
-    return { success: false, error: String(e) };
-  }
-}
-async function getScanErrors(limit2 = 100) {
-  const db2 = getDB();
-  try {
-    const errors2 = db2.prepare("SELECT * FROM scan_errors ORDER BY timestamp DESC LIMIT ?").all(limit2);
-    return { success: true, errors: errors2 };
-  } catch (e) {
-    return { success: false, error: String(e) };
-  }
-}
-async function deleteScanErrorAndFile(errorId, deleteFile) {
-  const db2 = getDB();
-  const fs2 = await import("node:fs/promises");
-  try {
-    const row = db2.prepare("SELECT file_path FROM scan_errors WHERE id = ?").get(errorId);
-    if (deleteFile && row && row.file_path) {
-      try {
-        await fs2.unlink(row.file_path);
-        logger.info(`[ScanErrors] Deleted corrupt file: ${row.file_path}`);
-      } catch (e) {
-        logger.warn(`[ScanErrors] Failed to delete file: ${row.file_path}`, e);
-      }
-    }
-    db2.prepare("DELETE FROM scan_errors WHERE id = ?").run(errorId);
-    if (row && row.file_path && deleteFile) {
-      db2.prepare("DELETE FROM photos WHERE file_path = ?").run(row.file_path);
-    }
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: String(e) };
-  }
-}
-function getFacesByIds(ids) {
-  const db2 = getDB();
-  try {
-    if (!ids || ids.length === 0) return { success: true, faces: [] };
-    const placeholders = ids.map(() => "?").join(",");
-    const faces = db2.prepare(`
-      SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
-      FROM faces f
-      JOIN photos p ON f.photo_id = p.id
-      WHERE f.id IN (${placeholders})
-    `).all(...ids);
-    const formatted = faces.map((f) => ({
-      id: f.id,
-      photo_id: f.photo_id,
-      descriptor: [],
-      // Not needed for display
-      blur_score: f.blur_score,
-      box: JSON.parse(f.box_json),
-      file_path: f.file_path,
-      preview_cache_path: f.preview_cache_path,
-      width: f.width,
-      height: f.height
-    }));
-    return { success: true, faces: formatted };
-  } catch (e) {
-    return { success: false, error: String(e) };
-  }
-}
-const db$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  autoAssignFaces,
-  cleanupTags,
-  closeDB,
-  deleteScanErrorAndFile,
-  getDB,
-  getFacesByIds,
-  getFacesForClustering,
-  getMetricsHistory,
-  getScanErrors,
-  initDB,
-  recalculatePersonMean
-}, Symbol.toStringTag, { value: "Module" }));
-let _exiftool = null;
-let _exiftoolInitPromise = null;
-async function getExifTool() {
-  if (_exiftool) return _exiftool;
-  if (_exiftoolInitPromise) return _exiftoolInitPromise;
-  _exiftoolInitPromise = (async () => {
-    try {
-      logger.info("Initializing ExifTool...");
-      const tool = new ExifTool({
-        taskTimeoutMillis: 5e3,
-        maxProcs: 1
-      });
-      const initCheck = new Promise((resolve2, reject) => {
-        const timer = setTimeout(() => reject(new Error("ExifTool startup timed out")), 3e4);
-        tool.version().then((v) => {
-          clearTimeout(timer);
-          resolve2(v);
-        }).catch((e) => {
-          clearTimeout(timer);
-          reject(e);
-        });
-      });
-      const version = await initCheck;
-      logger.info(`ExifTool started successfully. Version: ${version}`);
-      _exiftool = tool;
-      return tool;
-    } catch (err) {
-      logger.error("FAILED to initialize ExifTool. RAW support will be disabled.", err);
-      return null;
-    }
-  })();
-  return _exiftoolInitPromise;
-}
-const SUPPORTED_EXTS = [".jpg", ".jpeg", ".png", ".arw", ".cr2", ".nef", ".dng", ".orf", ".rw2", ".tif", ".tiff"];
-async function extractPreview(filePath, previewDir, forceRescan = false) {
-  const fileName = path.basename(filePath);
-  const hash = createHash("md5").update(filePath).digest("hex");
-  const previewName = `${hash}.jpg`;
-  const previewPath = path.join(previewDir, previewName);
-  try {
-    if (!forceRescan) {
-      try {
-        await promises.access(previewPath);
-        return previewPath;
-      } catch {
-      }
-    }
-    const ext = path.extname(filePath).toLowerCase();
-    const isRaw = ![".jpg", ".jpeg", ".png"].includes(ext);
-    let rotationDegrees = 0;
-    let shouldRotate = false;
-    try {
-      const tool = await getExifTool();
-      if (tool) {
-        const tags = await tool.read(filePath, ["Orientation"]);
-        if (tags == null ? void 0 : tags.Orientation) {
-          const val = tags.Orientation;
-          if (val === 1 || val === "Horizontal (normal)") {
-            rotationDegrees = 0;
-            shouldRotate = false;
-          } else if (val === 3 || val === "Rotate 180") {
-            rotationDegrees = 180;
-            shouldRotate = true;
-          } else if (val === 6 || val === "Rotate 90 CW") {
-            rotationDegrees = 90;
-            shouldRotate = true;
-          } else if (val === 8 || val === "Rotate 270 CW") {
-            rotationDegrees = 270;
-            shouldRotate = true;
-          }
-        }
-      }
-    } catch (e) {
-      logger.warn(`Failed to read orientation for ${fileName}, assuming upright.`);
-    }
-    if (isRaw) {
-      let extracted = false;
-      if (![".tif", ".tiff"].includes(ext)) {
-        try {
-          const tool = await getExifTool();
-          if (tool) {
-            const tempPreviewPath = `${previewPath}.tmp`;
-            const timeoutPromise = new Promise(
-              (_, reject) => setTimeout(() => reject(new Error("Preview extraction timed out")), 15e3)
-            );
-            await Promise.race([
-              tool.extractPreview(filePath, tempPreviewPath),
-              timeoutPromise
-            ]);
-            await promises.access(tempPreviewPath);
-            const pipeline = sharp(tempPreviewPath);
-            if (shouldRotate) pipeline.rotate(rotationDegrees);
-            await pipeline.resize(1200, 1200, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(previewPath);
-            try {
-              await promises.unlink(tempPreviewPath);
-            } catch {
-            }
-            logger.info(`Extracted and normalized preview for ${fileName}`);
-            extracted = true;
-          }
-        } catch (e) {
-          try {
-            await promises.unlink(`${previewPath}.tmp`);
-          } catch {
-          }
-        }
-      }
-      if (!extracted) {
-        try {
-          logger.info(`Generating preview with Sharp for ${fileName}...`);
-          const pipeline = sharp(filePath);
-          if (shouldRotate) pipeline.rotate(rotationDegrees);
-          await pipeline.resize(1200, 1200, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(previewPath);
-          logger.info(`Generated preview with Sharp for ${fileName}`);
-          extracted = true;
-        } catch (sharpErr) {
-          logger.error(`Sharp conversion failed for ${fileName}:`, sharpErr);
-        }
-      }
-      if (extracted) return previewPath;
-    } else {
-      try {
-        const pipeline = sharp(filePath);
-        if (shouldRotate) pipeline.rotate(rotationDegrees);
-        await pipeline.resize(1200, 1200, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(previewPath);
-        return previewPath;
-      } catch (e) {
-        logger.error(`Failed to generate preview for image ${fileName}`, e);
-      }
-    }
-  } catch (e) {
-    logger.error(`Failed to extract/generate preview for ${filePath}`, e);
-  }
-  return null;
-}
-async function processFile(fullPath, previewDir, db2, options = {}) {
-  const { forceRescan } = options;
-  const ext = path.extname(fullPath).toLowerCase();
-  if (!SUPPORTED_EXTS.includes(ext)) return null;
-  const selectStmt = db2.prepare("SELECT * FROM photos WHERE file_path = ?");
-  const insertStmt = db2.prepare(`
-        INSERT INTO photos (file_path, preview_cache_path, created_at, metadata_json) 
-        VALUES (@file_path, @preview_cache_path, @created_at, @metadata_json)
-        ON CONFLICT(file_path) DO NOTHING
-    `);
-  let photo = selectStmt.get(fullPath);
-  let needsUpdate = false;
-  let isNew = false;
-  if (photo) {
-    if (forceRescan) {
-      isNew = true;
-      needsUpdate = true;
-    }
-    const isRaw = ![".jpg", ".jpeg", ".png"].includes(ext);
-    let previewMissing = false;
-    if (isRaw) {
-      if (photo.preview_cache_path) {
-        try {
-          await promises.access(photo.preview_cache_path);
-        } catch {
-          previewMissing = true;
-        }
-      } else {
-        previewMissing = true;
-      }
-      if (previewMissing || forceRescan) {
-        const tool = await getExifTool();
-        if (tool) {
-          const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
-          if (previewPath) {
-            db2.prepare("UPDATE photos SET preview_cache_path = ? WHERE id = ?").run(previewPath, photo.id);
-            photo.preview_cache_path = previewPath;
-            needsUpdate = true;
-          }
-        }
-      }
-    } else {
-      if (forceRescan) {
-        const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
-        if (previewPath) {
-          db2.prepare("UPDATE photos SET preview_cache_path = ? WHERE id = ?").run(previewPath, photo.id);
-          photo.preview_cache_path = previewPath;
-          needsUpdate = true;
-        }
-      }
-    }
-    if (!photo.metadata_json || photo.metadata_json === "{}" || forceRescan) {
-      try {
-        const tool = await getExifTool();
-        if (tool) {
-          const metadata2 = await tool.read(fullPath);
-          db2.prepare("UPDATE photos SET metadata_json = ? WHERE id = ?").run(JSON.stringify(metadata2), photo.id);
-          photo.metadata_json = JSON.stringify(metadata2);
-          needsUpdate = true;
-        }
-      } catch (e) {
-        logger.error(`Failed to backfill metadata for ${fullPath}`, e);
-      }
-    }
-  }
-  if (!photo) {
-    logger.info(`[Scanner] New photo found: ${path.basename(fullPath)}`);
-    const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
-    try {
-      let metadata2 = {};
-      try {
-        const tool = await getExifTool();
-        if (tool) {
-          metadata2 = await tool.read(fullPath);
-        }
-      } catch (e) {
-        logger.error(`Failed to read metadata for ${fullPath}`, e);
-      }
-      insertStmt.run({
-        file_path: fullPath,
-        preview_cache_path: previewPath,
-        created_at: (/* @__PURE__ */ new Date()).toISOString(),
-        metadata_json: JSON.stringify(metadata2)
-      });
-      photo = selectStmt.get(fullPath);
-      isNew = true;
-    } catch (e) {
-      logger.error("Insert failed", e);
-    }
-  }
-  if (photo) {
-    photo.isNew = isNew;
-    photo.needsUpdate = needsUpdate;
-    return photo;
-  }
-  return null;
-}
-async function scanFiles(filePaths, libraryPath, onProgress, options = {}) {
-  const db2 = getDB();
-  const photos = [];
-  let count = 0;
-  const previewDir = path.join(libraryPath, "previews");
-  await promises.mkdir(previewDir, { recursive: true });
-  logger.info(`Scanning ${filePaths.length} specific files...`);
-  for (const filePath of filePaths) {
-    try {
-      await promises.access(filePath);
-      const photo = await processFile(filePath, previewDir, db2, options);
-      if (photo) {
-        photos.push(photo);
-        count++;
-        if (onProgress && count % 5 === 0) onProgress(count);
-      }
-    } catch (e) {
-      logger.error(`Failed to process specific file: ${filePath}`, e);
-    }
-  }
-  if (onProgress) onProgress(count);
-  return photos;
-}
-async function scanDirectory(dirPath, libraryPath, onProgress, options = {}) {
-  const db2 = getDB();
-  const photos = [];
-  let count = 0;
-  let totalFiles = 0;
-  const skippedStats = {};
-  const previewDir = path.join(libraryPath, "previews");
-  await promises.mkdir(previewDir, { recursive: true });
-  async function scan(currentPath) {
-    try {
-      logger.info(`Scanning directory: ${currentPath}`);
-      const entries = await promises.readdir(currentPath, { withFileTypes: true });
-      for (const entry of entries) {
-        const fullPath = path.join(currentPath, entry.name);
-        if (entry.isDirectory()) {
-          if (!entry.name.startsWith(".")) {
-            await scan(fullPath);
-          }
-        } else if (entry.isFile()) {
-          totalFiles++;
-          const photo = await processFile(fullPath, previewDir, db2, options);
-          if (photo) {
-            photos.push(photo);
-            count++;
-            if (count % 10 === 0 || photo.needsUpdate) {
-              if (onProgress) onProgress(count);
-              await new Promise((resolve2) => setTimeout(resolve2, 0));
-            }
-          } else {
-            const ext = path.extname(entry.name).toLowerCase();
-            if (!SUPPORTED_EXTS.includes(ext)) {
-              skippedStats[ext] = (skippedStats[ext] || 0) + 1;
-            }
-          }
-        }
-      }
-    } catch (err) {
-      logger.error(`Error scanning ${currentPath}:`, err);
-    }
-  }
-  await scan(dirPath);
-  logger.info(`[Scanner] Total files: ${totalFiles}, Processed: ${count}, Returned: ${photos.length}`);
-  logger.info(`[Scanner] Skipped Extensions:`, skippedStats);
-  return photos;
-}
 const isObject = (value) => {
   const type2 = typeof value;
   return value !== null && (type2 === "object" || type2 === "function");
@@ -16490,6 +15601,8 @@ const store$1 = new ElectronStore({
     libraryPath: path.join(app$1.getPath("userData")),
     aiSettings: {
       faceDetectionThreshold: 0.6,
+      faceSimilarityThreshold: 0.65,
+      // Add new setting
       faceBlurThreshold: 20,
       vlmTemperature: 0.2,
       vlmMaxTokens: 100,
@@ -16520,6 +15633,962 @@ function getAISettings() {
 }
 function setAISettings(settings) {
   store$1.set("aiSettings", settings);
+}
+let db;
+async function initDB(basePath, onProgress) {
+  const dbPath = path.join(basePath, "library.db");
+  if (onProgress) onProgress("Initializing Database...");
+  logger.info("Initializing Database at:", dbPath);
+  await new Promise((resolve2) => setTimeout(resolve2, 100));
+  db = new Database(dbPath);
+  db.pragma("journal_mode = WAL");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_path TEXT UNIQUE NOT NULL,
+      file_hash TEXT,
+      preview_cache_path TEXT,
+      created_at DATETIME,
+      width INTEGER,
+      height INTEGER,
+      blur_score REAL,
+      metadata_json TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS photo_tags (
+      photo_id INTEGER,
+      tag_id INTEGER,
+      source TEXT,
+      PRIMARY KEY (photo_id, tag_id),
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+      FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS people (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL COLLATE NOCASE,
+      descriptor_mean_json TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS faces (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_id INTEGER,
+      box_json TEXT,
+      descriptor BLOB,
+      person_id INTEGER,
+      is_ignored BOOLEAN DEFAULT 0,
+      is_reference BOOLEAN DEFAULT 0,
+      blur_score REAL,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS scan_errors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_id INTEGER,
+      file_path TEXT,
+      error_message TEXT,
+      stage TEXT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS scan_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_id INTEGER,
+      file_path TEXT,
+      scan_ms INTEGER,
+      tag_ms INTEGER,
+      face_count INTEGER,
+      scan_mode TEXT,
+      status TEXT,
+      error TEXT,
+      timestamp INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_faces_person_id ON faces(person_id);
+    CREATE INDEX IF NOT EXISTS idx_faces_photo_id ON faces(photo_id);
+  `);
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN blur_score REAL");
+  } catch (e) {
+  }
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN is_ignored BOOLEAN DEFAULT 0");
+  } catch (e) {
+  }
+  try {
+    db.exec("ALTER TABLE people ADD COLUMN descriptor_mean_json TEXT");
+  } catch (e) {
+  }
+  try {
+    db.exec("ALTER TABLE photos ADD COLUMN blur_score REAL");
+  } catch (e) {
+  }
+  try {
+    db.exec("ALTER TABLE scan_history ADD COLUMN scan_mode TEXT");
+  } catch (e) {
+  }
+  try {
+    try {
+      db.exec("ALTER TABLE faces ADD COLUMN descriptor BLOB");
+    } catch (e) {
+    }
+    try {
+      db.exec("ALTER TABLE faces ADD COLUMN is_reference BOOLEAN DEFAULT 0");
+    } catch (e) {
+    }
+    let hasJson = { count: 0 };
+    try {
+      hasJson = db.prepare("SELECT count(*) as count FROM faces WHERE descriptor IS NULL AND (descriptor_json IS NOT NULL AND descriptor_json != 'NULL')").get();
+    } catch (e) {
+    }
+    if (hasJson.count > 0) {
+      if (onProgress) onProgress(`Migrating ${hasJson.count} faces...`);
+      logger.info(`Starting Smart Face Storage Migration for ${hasJson.count} faces...`);
+      const allFaces = db.prepare("SELECT id, descriptor_json, person_id, blur_score FROM faces").all();
+      const updateFace = db.prepare("UPDATE faces SET descriptor = ?, is_reference = ? WHERE id = ?");
+      if (onProgress) onProgress("Analyzing Face Quality...");
+      const personFaces = {};
+      const unknownFaces = [];
+      for (const face of allFaces) {
+        if (!face.person_id) {
+          unknownFaces.push(face);
+        } else {
+          if (!personFaces[face.person_id]) personFaces[face.person_id] = [];
+          personFaces[face.person_id].push(face);
+        }
+      }
+      let processedCount = 0;
+      const totalCount = hasJson.count;
+      const CHUNK_SIZE = 500;
+      const report = () => {
+        if (onProgress) {
+          const pct = Math.round(processedCount / totalCount * 100);
+          onProgress(`Migrating Database: ${pct}%`);
+        }
+      };
+      const unknownChunks = [];
+      for (let i = 0; i < unknownFaces.length; i += CHUNK_SIZE) {
+        unknownChunks.push(unknownFaces.slice(i, i + CHUNK_SIZE));
+      }
+      for (const chunk of unknownChunks) {
+        const transaction = db.transaction(() => {
+          for (const face of chunk) {
+            if (face.descriptor_json) {
+              try {
+                const arr = JSON.parse(face.descriptor_json);
+                const buf = Buffer.from(new Float32Array(arr).buffer);
+                updateFace.run(buf, 0, face.id);
+              } catch (e) {
+                logger.error(`Failed to migrate face ${face.id}`, e);
+              }
+            }
+          }
+        });
+        transaction();
+        processedCount += chunk.length;
+        report();
+        await new Promise((resolve2) => setTimeout(resolve2, 0));
+      }
+      const personIds = Object.keys(personFaces);
+      for (let i = 0; i < personIds.length; i += 50) {
+        const pIdsChunk = personIds.slice(i, i + 50);
+        const transaction = db.transaction(() => {
+          for (const pid of pIdsChunk) {
+            const faces = personFaces[parseInt(pid)];
+            faces.sort((a, b) => (b.blur_score || 0) - (a.blur_score || 0));
+            faces.forEach((face, index) => {
+              if (index < 100) {
+                if (face.descriptor_json) {
+                  try {
+                    const arr = JSON.parse(face.descriptor_json);
+                    const buf = Buffer.from(new Float32Array(arr).buffer);
+                    updateFace.run(buf, 1, face.id);
+                  } catch (e) {
+                    logger.error(`Failed to migrate reference ${face.id}`, e);
+                  }
+                }
+              } else {
+                updateFace.run(null, 0, face.id);
+              }
+            });
+            processedCount += faces.length;
+          }
+        });
+        transaction();
+        report();
+        await new Promise((resolve2) => setTimeout(resolve2, 0));
+      }
+      logger.info("Smart Face Storage Migration: Data converted.");
+      try {
+        if (onProgress) onProgress("Optimizing Database (VACUUM)...");
+        await new Promise((resolve2) => setTimeout(resolve2, 100));
+        logger.info("Dropping old descriptor_json column...");
+        db.exec("ALTER TABLE faces DROP COLUMN descriptor_json");
+        db.exec("VACUUM");
+      } catch (e) {
+        logger.warn("Could not drop descriptor_json column (SQLite version might be old), setting to NULL instead.", e);
+        db.exec("UPDATE faces SET descriptor_json = NULL");
+        db.exec("VACUUM");
+      }
+      logger.info("Smart Face Storage Migration: Complete.");
+    }
+  } catch (e) {
+    logger.error("Smart Face Storage Migration Failed:", e);
+  }
+  try {
+    const getCollate = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='people'").get();
+    if (getCollate && !getCollate.sql.includes("COLLATE NOCASE")) {
+      if (onProgress) onProgress("Upgrading People Table (Uniqueness)...");
+      logger.info("Upgrading People Table to enforce case-insensitive uniqueness...");
+      const allPeople = db.prepare("SELECT id, name FROM people").all();
+      const seen = /* @__PURE__ */ new Map();
+      const merges = /* @__PURE__ */ new Map();
+      for (const p of allPeople) {
+        const lower = p.name.trim().toLowerCase();
+        if (seen.has(lower)) {
+          merges.set(p.id, seen.get(lower));
+        } else {
+          seen.set(lower, p.id);
+        }
+      }
+      db.exec("PRAGMA foreign_keys = OFF");
+      const transaction = db.transaction(() => {
+        const updateFace = db.prepare("UPDATE faces SET person_id = ? WHERE person_id = ?");
+        for (const [fromId, toId] of merges.entries()) {
+          updateFace.run(toId, fromId);
+        }
+        db.exec(`
+          DROP TABLE IF EXISTS people_new;
+          CREATE TABLE people_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL COLLATE NOCASE,
+            descriptor_mean_json TEXT
+          );
+        `);
+        const keptIds = [...seen.values()];
+        const insertPerson = db.prepare("INSERT INTO people_new (id, name, descriptor_mean_json) SELECT id, name, descriptor_mean_json FROM people WHERE id = ?");
+        for (const id2 of keptIds) {
+          insertPerson.run(id2);
+        }
+        db.exec("DROP TABLE people");
+        db.exec("ALTER TABLE people_new RENAME TO people");
+      });
+      transaction();
+      db.exec("PRAGMA foreign_keys = ON");
+      const toRecalc = [...new Set(merges.values())];
+      for (const pid of toRecalc) {
+        recalculatePersonMean(db, pid);
+      }
+      logger.info("People Table Upgrade: Complete.");
+    }
+  } catch (e) {
+    logger.error("Failed to migrate people table:", e);
+  }
+  try {
+    console.log('Running migration: Cleanup "AI Description" tag...');
+    const tag = db.prepare("SELECT id FROM tags WHERE name = ?").get("AI Description");
+    if (tag) {
+      db.prepare("DELETE FROM photo_tags WHERE tag_id = ?").run(tag.id);
+      db.prepare("DELETE FROM tags WHERE id = ?").run(tag.id);
+      logger.info('Migration complete: "AI Description" tag removed.');
+    }
+  } catch (e) {
+    logger.error("Migration failed:", e);
+  }
+  logger.info("Database schema ensured.");
+}
+function getDB() {
+  if (!db) {
+    throw new Error("Database not initialized");
+  }
+  return db;
+}
+function getFacesForClustering() {
+  const db2 = getDB();
+  try {
+    const faces = db2.prepare(`
+      SELECT id, descriptor
+      FROM faces 
+      WHERE person_id IS NULL 
+        AND descriptor IS NOT NULL
+        AND (is_ignored = 0 OR is_ignored IS NULL)
+        AND (blur_score IS NULL OR blur_score >= 10)
+    `).all();
+    const formatted = faces.map((f) => ({
+      id: f.id,
+      descriptor: Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4))
+    }));
+    return { success: true, faces: formatted };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+function closeDB() {
+  if (db) {
+    logger.info("Closing Database connection.");
+    db.close();
+    db = void 0;
+  }
+}
+function getMetricsHistory(limit2 = 1e3) {
+  const db2 = getDB();
+  try {
+    const history = db2.prepare("SELECT * FROM scan_history ORDER BY timestamp DESC LIMIT ?").all(limit2);
+    const stats = db2.prepare(`
+            SELECT 
+                COUNT(*) as total_scans,
+                SUM(CASE WHEN face_count > 0 THEN 1 ELSE 0 END) as face_scans,
+                SUM(scan_ms + COALESCE(tag_ms, 0)) as total_processing_time,
+                SUM(face_count) as total_faces
+            FROM scan_history
+            WHERE status = 'success'
+        `).get();
+    return { success: true, history, stats };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+const recalculatePersonMean = (db2, personId) => {
+  try {
+    const settings = getAISettings();
+    const blurThreshold = settings.faceBlurThreshold ?? 20;
+    console.time(`recalculatePersonMean-${personId}`);
+    const allDescriptors = db2.prepare(`
+      SELECT descriptor FROM faces 
+      WHERE person_id = ? 
+      AND is_ignored = 0
+      AND (blur_score IS NULL OR blur_score >= ?)
+    `).all(personId, blurThreshold);
+    if (allDescriptors.length === 0) {
+      db2.prepare("UPDATE people SET descriptor_mean_json = NULL WHERE id = ?").run(personId);
+      return;
+    }
+    const vectors = [];
+    for (const row of allDescriptors) {
+      if (row.descriptor) {
+        vectors.push(Array.from(new Float32Array(row.descriptor.buffer, row.descriptor.byteOffset, row.descriptor.byteLength / 4)));
+      }
+    }
+    if (vectors.length === 0) {
+      db2.prepare("UPDATE people SET descriptor_mean_json = NULL WHERE id = ?").run(personId);
+      return;
+    }
+    const dim = vectors[0].length;
+    const mean = new Array(dim).fill(0);
+    for (const vec of vectors) {
+      for (let i = 0; i < dim; i++) {
+        mean[i] += vec[i];
+      }
+    }
+    let mag = 0;
+    for (let i = 0; i < dim; i++) {
+      mean[i] /= vectors.length;
+      mag += mean[i] ** 2;
+    }
+    mag = Math.sqrt(mag);
+    if (mag > 0) {
+      for (let i = 0; i < dim; i++) {
+        mean[i] /= mag;
+      }
+    }
+    console.timeEnd(`recalculatePersonMean-${personId}`);
+    db2.prepare("UPDATE people SET descriptor_mean_json = ? WHERE id = ?").run(JSON.stringify(mean), personId);
+  } catch (e) {
+    logger.error(`Failed to recalculate mean for person ${personId}:`, e);
+  }
+};
+function findBestMatch(descriptor, candidates, threshold) {
+  let mag = 0;
+  for (const val of descriptor) mag += val * val;
+  mag = Math.sqrt(mag);
+  const normalized = mag > 0 ? descriptor.map((v) => v / mag) : descriptor;
+  let bestMatch = null;
+  let minDist = Infinity;
+  for (const person of candidates) {
+    let sumSq = 0;
+    if (person.mean.length !== normalized.length) continue;
+    for (let i = 0; i < normalized.length; i++) {
+      const diff2 = normalized[i] - person.mean[i];
+      sumSq += diff2 * diff2;
+    }
+    const dist2 = Math.sqrt(sumSq);
+    if (dist2 < minDist) {
+      minDist = dist2;
+      bestMatch = person;
+    }
+  }
+  const similarity = 1 / (1 + minDist);
+  if (bestMatch && similarity >= threshold) {
+    return { success: true, personId: bestMatch.id, personName: bestMatch.name, distance: minDist, similarity };
+  }
+  return { success: false, distance: minDist, similarity };
+}
+function autoAssignFaces(faceIds, threshold = 0.65) {
+  const db2 = getDB();
+  try {
+    let totalAssigned = 0;
+    const allAssigned = [];
+    let pass = 1;
+    const MAX_PASSES = 10;
+    while (pass <= MAX_PASSES) {
+      const people = db2.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
+      if (people.length === 0) break;
+      const candidates = people.map((p) => ({
+        id: p.id,
+        name: p.name,
+        mean: JSON.parse(p.descriptor_mean_json)
+      }));
+      let faces;
+      if (faceIds && faceIds.length > 0) {
+        const placeholders = faceIds.map(() => "?").join(",");
+        faces = db2.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND person_id IS NULL AND descriptor IS NOT NULL`).all(...faceIds);
+      } else {
+        faces = db2.prepare("SELECT id, descriptor FROM faces WHERE person_id IS NULL AND descriptor IS NOT NULL").all();
+      }
+      if (faces.length === 0) {
+        if (pass === 1) logger.info(`[AutoAssign] No unassigned faces found.`);
+        break;
+      }
+      logger.info(`[AutoAssign] Pass ${pass}: Processing ${faces.length} faces against ${candidates.length} people...`);
+      let passAssignedCount = 0;
+      const passAssigned = [];
+      const updateFace = db2.prepare("UPDATE faces SET person_id = ? WHERE id = ?");
+      const transaction = db2.transaction(() => {
+        var _a;
+        for (const face of faces) {
+          if (!face.descriptor) continue;
+          const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+          const match = findBestMatch(rawDescriptor, candidates, threshold);
+          if (match.success && match.personId) {
+            updateFace.run(match.personId, face.id);
+            passAssignedCount++;
+            passAssigned.push({ faceId: face.id, personId: match.personId, personName: match.personName, distance: match.distance, similarity: match.similarity });
+            if (passAssignedCount <= 5) {
+              logger.info(`[AutoAssign] Matched Face ${face.id} to ${match.personName} (Sim: ${(_a = match.similarity) == null ? void 0 : _a.toFixed(4)})`);
+            }
+          }
+        }
+      });
+      transaction();
+      if (passAssignedCount === 0) break;
+      totalAssigned += passAssignedCount;
+      allAssigned.push(...passAssigned);
+      logger.info(`[AutoAssign] Pass ${pass}: Assigned ${passAssignedCount} faces.`);
+      const uniquePeople = new Set(passAssigned.map((a) => a.personId));
+      for (const pid of uniquePeople) {
+        recalculatePersonMean(db2, pid);
+      }
+      pass++;
+    }
+    logger.info(`[AutoAssign] Complete after ${pass - 1} passes. Total Assigned: ${totalAssigned} faces.`);
+    return { success: true, count: totalAssigned, assigned: allAssigned };
+  } catch (e) {
+    logger.error("Auto-Assign failed:", e);
+    return { success: false, error: String(e) };
+  }
+}
+async function cleanupTags() {
+  const db2 = getDB();
+  logger.info("Starting Tag Cleanup...");
+  try {
+    const allTags = db2.prepare("SELECT id, name FROM tags").all();
+    logger.info(`Found ${allTags.length} tags to process.`);
+    let deletedCount = 0;
+    let mergedCount = 0;
+    const getOrCreateTagId = (tagName) => {
+      const lowerName = tagName.toLowerCase();
+      const existing = db2.prepare("SELECT id FROM tags WHERE name = ?").get(lowerName);
+      if (existing) return existing.id;
+      const info = db2.prepare("INSERT INTO tags (name) VALUES (?)").run(lowerName);
+      return Number(info.lastInsertRowid);
+    };
+    const transaction = db2.transaction(() => {
+      const getPhotoTags = db2.prepare("SELECT photo_id FROM photo_tags WHERE tag_id = ?");
+      const insertPhotoTag = db2.prepare("INSERT OR IGNORE INTO photo_tags (photo_id, tag_id, source) VALUES (?, ?, ?)");
+      const deleteOldTag = db2.prepare("DELETE FROM tags WHERE id = ?");
+      const deleteOldLinks = db2.prepare("DELETE FROM photo_tags WHERE tag_id = ?");
+      const stopwords = /* @__PURE__ */ new Set([
+        "a",
+        "an",
+        "the",
+        "in",
+        "on",
+        "at",
+        "is",
+        "are",
+        "was",
+        "were",
+        "and",
+        "or",
+        "but",
+        "of",
+        "to",
+        "with",
+        "for",
+        "this",
+        "that",
+        "there",
+        "it",
+        "he",
+        "she",
+        "they",
+        "looking",
+        "standing",
+        "holding"
+      ]);
+      for (const tag of allTags) {
+        const clean2 = tag.name.replace(/['"]/g, "");
+        const words = clean2.split(/\s+/);
+        const validWords = [];
+        for (const w of words) {
+          const norm = w.toLowerCase().replace(/^[.,\-!?:;"()[\]{}]+|[.,\-!?:;"()[\]{}]+$/g, "");
+          if (norm.length > 2 && !stopwords.has(norm)) {
+            validWords.push(norm);
+          }
+        }
+        const affectedPhotoIds = getPhotoTags.all(tag.id).map((r) => r.photo_id);
+        let selfReferential = true;
+        if (validWords.length !== 1 || validWords[0] !== tag.name) {
+          selfReferential = false;
+        }
+        if (selfReferential) continue;
+        for (const newWord of validWords) {
+          const targetTagId = getOrCreateTagId(newWord);
+          if (targetTagId === tag.id) continue;
+          for (const pid of affectedPhotoIds) {
+            insertPhotoTag.run(pid, targetTagId, "auto");
+          }
+          mergedCount++;
+        }
+        deleteOldLinks.run(tag.id);
+        deleteOldTag.run(tag.id);
+        deletedCount++;
+      }
+    });
+    transaction();
+    logger.info(`Cleanup Complete. Deleted ${deletedCount} tags. Merged/Links updated: ${mergedCount}`);
+    db2.exec("VACUUM");
+    return { success: true, deletedCount, mergedCount };
+  } catch (e) {
+    logger.error("Cleanup Tags Failed", e);
+    return { success: false, error: String(e) };
+  }
+}
+async function getScanErrors(limit2 = 100) {
+  const db2 = getDB();
+  try {
+    const errors2 = db2.prepare("SELECT * FROM scan_errors ORDER BY timestamp DESC LIMIT ?").all(limit2);
+    return { success: true, errors: errors2 };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+async function deleteScanErrorAndFile(errorId, deleteFile) {
+  const db2 = getDB();
+  const fs2 = await import("node:fs/promises");
+  try {
+    const row = db2.prepare("SELECT file_path FROM scan_errors WHERE id = ?").get(errorId);
+    if (deleteFile && row && row.file_path) {
+      try {
+        await fs2.unlink(row.file_path);
+        logger.info(`[ScanErrors] Deleted corrupt file: ${row.file_path}`);
+      } catch (e) {
+        logger.warn(`[ScanErrors] Failed to delete file: ${row.file_path}`, e);
+      }
+    }
+    db2.prepare("DELETE FROM scan_errors WHERE id = ?").run(errorId);
+    if (row && row.file_path && deleteFile) {
+      db2.prepare("DELETE FROM photos WHERE file_path = ?").run(row.file_path);
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+function getFacesByIds(ids) {
+  const db2 = getDB();
+  try {
+    if (!ids || ids.length === 0) return { success: true, faces: [] };
+    const placeholders = ids.map(() => "?").join(",");
+    const faces = db2.prepare(`
+      SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
+      FROM faces f
+      JOIN photos p ON f.photo_id = p.id
+      WHERE f.id IN (${placeholders})
+    `).all(...ids);
+    const formatted = faces.map((f) => ({
+      id: f.id,
+      photo_id: f.photo_id,
+      descriptor: [],
+      // Not needed for display
+      blur_score: f.blur_score,
+      box: JSON.parse(f.box_json),
+      file_path: f.file_path,
+      preview_cache_path: f.preview_cache_path,
+      width: f.width,
+      height: f.height
+    }));
+    return { success: true, faces: formatted };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+function findPotentialMatches(faceIds, threshold = 0.4) {
+  const db2 = getDB();
+  try {
+    const people = db2.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
+    if (people.length === 0) return { success: true, matches: [] };
+    const candidates = people.map((p) => ({
+      id: p.id,
+      name: p.name,
+      mean: JSON.parse(p.descriptor_mean_json)
+    }));
+    const placeholders = faceIds.map(() => "?").join(",");
+    const faces = db2.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND descriptor IS NOT NULL`).all(...faceIds);
+    const matches = [];
+    for (const face of faces) {
+      const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+      const match = findBestMatch(rawDescriptor, candidates, threshold);
+      if (match.success) {
+        matches.push({
+          faceId: face.id,
+          match: {
+            personId: match.personId,
+            personName: match.personName,
+            similarity: match.similarity,
+            distance: match.distance
+          }
+        });
+      }
+    }
+    return { success: true, matches };
+  } catch (e) {
+    logger.error("Find Potential Matches failed:", e);
+    return { success: false, error: String(e) };
+  }
+}
+const db$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  autoAssignFaces,
+  cleanupTags,
+  closeDB,
+  deleteScanErrorAndFile,
+  findBestMatch,
+  findPotentialMatches,
+  getDB,
+  getFacesByIds,
+  getFacesForClustering,
+  getMetricsHistory,
+  getScanErrors,
+  initDB,
+  recalculatePersonMean
+}, Symbol.toStringTag, { value: "Module" }));
+let _exiftool = null;
+let _exiftoolInitPromise = null;
+async function getExifTool() {
+  if (_exiftool) return _exiftool;
+  if (_exiftoolInitPromise) return _exiftoolInitPromise;
+  _exiftoolInitPromise = (async () => {
+    try {
+      logger.info("Initializing ExifTool...");
+      const tool = new ExifTool({
+        taskTimeoutMillis: 5e3,
+        maxProcs: 1
+      });
+      const initCheck = new Promise((resolve2, reject) => {
+        const timer = setTimeout(() => reject(new Error("ExifTool startup timed out")), 3e4);
+        tool.version().then((v) => {
+          clearTimeout(timer);
+          resolve2(v);
+        }).catch((e) => {
+          clearTimeout(timer);
+          reject(e);
+        });
+      });
+      const version = await initCheck;
+      logger.info(`ExifTool started successfully. Version: ${version}`);
+      _exiftool = tool;
+      return tool;
+    } catch (err) {
+      logger.error("FAILED to initialize ExifTool. RAW support will be disabled.", err);
+      return null;
+    }
+  })();
+  return _exiftoolInitPromise;
+}
+const SUPPORTED_EXTS = [".jpg", ".jpeg", ".png", ".arw", ".cr2", ".nef", ".dng", ".orf", ".rw2", ".tif", ".tiff"];
+async function extractPreview(filePath, previewDir, forceRescan = false) {
+  const fileName = path.basename(filePath);
+  const hash = createHash("md5").update(filePath).digest("hex");
+  const previewName = `${hash}.jpg`;
+  const previewPath = path.join(previewDir, previewName);
+  try {
+    if (!forceRescan) {
+      try {
+        await promises.access(previewPath);
+        return previewPath;
+      } catch {
+      }
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const isRaw = ![".jpg", ".jpeg", ".png"].includes(ext);
+    let rotationDegrees = 0;
+    let shouldRotate = false;
+    try {
+      const tool = await getExifTool();
+      if (tool) {
+        const tags = await tool.read(filePath, ["Orientation"]);
+        if (tags == null ? void 0 : tags.Orientation) {
+          const val = tags.Orientation;
+          if (val === 1 || val === "Horizontal (normal)") {
+            rotationDegrees = 0;
+            shouldRotate = false;
+          } else if (val === 3 || val === "Rotate 180") {
+            rotationDegrees = 180;
+            shouldRotate = true;
+          } else if (val === 6 || val === "Rotate 90 CW") {
+            rotationDegrees = 90;
+            shouldRotate = true;
+          } else if (val === 8 || val === "Rotate 270 CW") {
+            rotationDegrees = 270;
+            shouldRotate = true;
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn(`Failed to read orientation for ${fileName}, assuming upright.`);
+    }
+    if (isRaw) {
+      let extracted = false;
+      if (![".tif", ".tiff"].includes(ext)) {
+        try {
+          const tool = await getExifTool();
+          if (tool) {
+            const tempPreviewPath = `${previewPath}.tmp`;
+            const timeoutPromise = new Promise(
+              (_, reject) => setTimeout(() => reject(new Error("Preview extraction timed out")), 15e3)
+            );
+            await Promise.race([
+              tool.extractPreview(filePath, tempPreviewPath),
+              timeoutPromise
+            ]);
+            await promises.access(tempPreviewPath);
+            const pipeline = sharp(tempPreviewPath);
+            if (shouldRotate) pipeline.rotate(rotationDegrees);
+            await pipeline.resize(1200, 1200, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(previewPath);
+            try {
+              await promises.unlink(tempPreviewPath);
+            } catch {
+            }
+            logger.info(`Extracted and normalized preview for ${fileName}`);
+            extracted = true;
+          }
+        } catch (e) {
+          try {
+            await promises.unlink(`${previewPath}.tmp`);
+          } catch {
+          }
+        }
+      }
+      if (!extracted) {
+        try {
+          logger.info(`Generating preview with Sharp for ${fileName}...`);
+          const pipeline = sharp(filePath);
+          if (shouldRotate) pipeline.rotate(rotationDegrees);
+          await pipeline.resize(1200, 1200, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(previewPath);
+          logger.info(`Generated preview with Sharp for ${fileName}`);
+          extracted = true;
+        } catch (sharpErr) {
+          logger.error(`Sharp conversion failed for ${fileName}:`, sharpErr);
+        }
+      }
+      if (extracted) return previewPath;
+    } else {
+      try {
+        const pipeline = sharp(filePath);
+        if (shouldRotate) pipeline.rotate(rotationDegrees);
+        await pipeline.resize(1200, 1200, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(previewPath);
+        return previewPath;
+      } catch (e) {
+        logger.error(`Failed to generate preview for image ${fileName}`, e);
+      }
+    }
+  } catch (e) {
+    logger.error(`Failed to extract/generate preview for ${filePath}`, e);
+  }
+  return null;
+}
+async function processFile(fullPath, previewDir, db2, options = {}) {
+  const { forceRescan } = options;
+  const ext = path.extname(fullPath).toLowerCase();
+  if (!SUPPORTED_EXTS.includes(ext)) return null;
+  const selectStmt = db2.prepare("SELECT * FROM photos WHERE file_path = ?");
+  const insertStmt = db2.prepare(`
+        INSERT INTO photos (file_path, preview_cache_path, created_at, metadata_json) 
+        VALUES (@file_path, @preview_cache_path, @created_at, @metadata_json)
+        ON CONFLICT(file_path) DO NOTHING
+    `);
+  let photo = selectStmt.get(fullPath);
+  let needsUpdate = false;
+  let isNew = false;
+  if (photo) {
+    if (forceRescan) {
+      isNew = true;
+      needsUpdate = true;
+    }
+    const isRaw = ![".jpg", ".jpeg", ".png"].includes(ext);
+    let previewMissing = false;
+    if (isRaw) {
+      if (photo.preview_cache_path) {
+        try {
+          await promises.access(photo.preview_cache_path);
+        } catch {
+          previewMissing = true;
+        }
+      } else {
+        previewMissing = true;
+      }
+      if (previewMissing || forceRescan) {
+        const tool = await getExifTool();
+        if (tool) {
+          const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
+          if (previewPath) {
+            db2.prepare("UPDATE photos SET preview_cache_path = ? WHERE id = ?").run(previewPath, photo.id);
+            photo.preview_cache_path = previewPath;
+            needsUpdate = true;
+          }
+        }
+      }
+    } else {
+      if (forceRescan) {
+        const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
+        if (previewPath) {
+          db2.prepare("UPDATE photos SET preview_cache_path = ? WHERE id = ?").run(previewPath, photo.id);
+          photo.preview_cache_path = previewPath;
+          needsUpdate = true;
+        }
+      }
+    }
+    if (!photo.metadata_json || photo.metadata_json === "{}" || forceRescan) {
+      try {
+        const tool = await getExifTool();
+        if (tool) {
+          const metadata2 = await tool.read(fullPath);
+          db2.prepare("UPDATE photos SET metadata_json = ? WHERE id = ?").run(JSON.stringify(metadata2), photo.id);
+          photo.metadata_json = JSON.stringify(metadata2);
+          needsUpdate = true;
+        }
+      } catch (e) {
+        logger.error(`Failed to backfill metadata for ${fullPath}`, e);
+      }
+    }
+  }
+  if (!photo) {
+    logger.info(`[Scanner] New photo found: ${path.basename(fullPath)}`);
+    const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
+    try {
+      let metadata2 = {};
+      try {
+        const tool = await getExifTool();
+        if (tool) {
+          metadata2 = await tool.read(fullPath);
+        }
+      } catch (e) {
+        logger.error(`Failed to read metadata for ${fullPath}`, e);
+      }
+      insertStmt.run({
+        file_path: fullPath,
+        preview_cache_path: previewPath,
+        created_at: (/* @__PURE__ */ new Date()).toISOString(),
+        metadata_json: JSON.stringify(metadata2)
+      });
+      photo = selectStmt.get(fullPath);
+      isNew = true;
+    } catch (e) {
+      logger.error("Insert failed", e);
+    }
+  }
+  if (photo) {
+    photo.isNew = isNew;
+    photo.needsUpdate = needsUpdate;
+    return photo;
+  }
+  return null;
+}
+async function scanFiles(filePaths, libraryPath, onProgress, options = {}) {
+  const db2 = getDB();
+  const photos = [];
+  let count = 0;
+  const previewDir = path.join(libraryPath, "previews");
+  await promises.mkdir(previewDir, { recursive: true });
+  logger.info(`Scanning ${filePaths.length} specific files...`);
+  for (const filePath of filePaths) {
+    try {
+      await promises.access(filePath);
+      const photo = await processFile(filePath, previewDir, db2, options);
+      if (photo) {
+        photos.push(photo);
+        count++;
+        if (onProgress && count % 5 === 0) onProgress(count);
+      }
+    } catch (e) {
+      logger.error(`Failed to process specific file: ${filePath}`, e);
+    }
+  }
+  if (onProgress) onProgress(count);
+  return photos;
+}
+async function scanDirectory(dirPath, libraryPath, onProgress, options = {}) {
+  const db2 = getDB();
+  const photos = [];
+  let count = 0;
+  let totalFiles = 0;
+  const skippedStats = {};
+  const previewDir = path.join(libraryPath, "previews");
+  await promises.mkdir(previewDir, { recursive: true });
+  async function scan(currentPath) {
+    try {
+      logger.info(`Scanning directory: ${currentPath}`);
+      const entries = await promises.readdir(currentPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(currentPath, entry.name);
+        if (entry.isDirectory()) {
+          if (!entry.name.startsWith(".")) {
+            await scan(fullPath);
+          }
+        } else if (entry.isFile()) {
+          totalFiles++;
+          const photo = await processFile(fullPath, previewDir, db2, options);
+          if (photo) {
+            photos.push(photo);
+            count++;
+            if (count % 10 === 0 || photo.needsUpdate) {
+              if (onProgress) onProgress(count);
+              await new Promise((resolve2) => setTimeout(resolve2, 0));
+            }
+          } else {
+            const ext = path.extname(entry.name).toLowerCase();
+            if (!SUPPORTED_EXTS.includes(ext)) {
+              skippedStats[ext] = (skippedStats[ext] || 0) + 1;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      logger.error(`Error scanning ${currentPath}:`, err);
+    }
+  }
+  await scan(dirPath);
+  logger.info(`[Scanner] Total files: ${totalFiles}, Processed: ${count}, Returned: ${photos.length}`);
+  logger.info(`[Scanner] Skipped Extensions:`, skippedStats);
+  return photos;
 }
 const store = new ElectronStore();
 const __filename$1 = fileURLToPath(import.meta.url);
@@ -16564,10 +16633,26 @@ function startPythonBackend() {
     setTimeout(() => syncInitialSettings(), 2e3);
     const reader = createInterface({ input: pythonProcess.stdout });
     reader.on("line", async (line) => {
-      var _a;
+      var _a, _b, _c;
       try {
         const message = JSON.parse(line);
-        logger.info("[Python]", message);
+        if (message.type === "cluster_result") {
+          logger.info(`[Python] Cluster Result: ${((_a = message.clusters) == null ? void 0 : _a.length) || 0} clusters found.`);
+        } else if (message.type === "search_result") {
+          logger.info(`[Python] Search Result: ${((_b = message.matches) == null ? void 0 : _b.length) || 0} matches found.`);
+        } else if (message.type === "scan_result") {
+          const count = message.faces ? message.faces.length : 0;
+          logger.info(`[Python] Scan Result: ${message.success ? "Success" : "Failed"} for ${message.photoId} (${count} faces).`);
+        } else if (message.type === "analysis_result") {
+          const count = message.faces ? message.faces.length : 0;
+          logger.info(`[Python] Analysis Result: ${message.photoId} (${count} faces).`);
+        } else if (message.type === "tags_result") {
+          const count = message.tags ? message.tags.length : 0;
+          logger.info(`[Python] Tags Result: ${message.photoId} (${count} tags).`);
+        } else if (message.type === "download_progress") {
+        } else {
+          logger.info("[Python]", message);
+        }
         if (win && (message.type === "scan_result" || message.type === "tags_result" || message.type === "analysis_result")) {
           win.webContents.send("ai:scan-result", message);
           const isSuccess = message.type === "scan_result" && message.success || message.type === "analysis_result" && !message.error;
@@ -16576,28 +16661,72 @@ function startPythonBackend() {
               const { getDB: getDB2 } = await Promise.resolve().then(() => db$1);
               const db2 = getDB2();
               if (message.type === "analysis_result" && message.faces && message.faces.length > 0) {
+                const existingFaces = db2.prepare("SELECT id, box_json, person_id FROM faces WHERE photo_id = ?").all(message.photoId);
+                const updateFaceStmt = db2.prepare("UPDATE faces SET descriptor = ?, box_json = ?, blur_score = ? WHERE id = ?");
                 const insertFace = db2.prepare(`
                     INSERT INTO faces (photo_id, person_id, descriptor, box_json, blur_score, is_reference)
                     VALUES (?, ?, ?, ?, ?, 0)
                  `);
+                const insertedIds = [];
                 const processFaces = db2.transaction(() => {
                   for (const face of message.faces) {
                     let descriptorBuffer = null;
                     if (face.descriptor && Array.isArray(face.descriptor)) {
                       descriptorBuffer = Buffer.from(new Float32Array(face.descriptor).buffer);
                     }
-                    insertFace.run(
-                      message.photoId,
-                      null,
-                      // person_id (unknown initially)
-                      descriptorBuffer,
-                      JSON.stringify(face.box),
-                      face.blurScore
-                    );
+                    let bestMatch = null;
+                    let maxIoU = 0;
+                    for (const oldFace of existingFaces) {
+                      try {
+                        const oldBox = JSON.parse(oldFace.box_json);
+                        const interX1 = Math.max(face.box.x, oldBox.x);
+                        const interY1 = Math.max(face.box.y, oldBox.y);
+                        const interX2 = Math.min(face.box.x + face.box.width, oldBox.x + oldBox.width);
+                        const interY2 = Math.min(face.box.y + face.box.height, oldBox.y + oldBox.height);
+                        const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
+                        const unionArea = face.box.width * face.box.height + oldBox.width * oldBox.height - interArea;
+                        const iou = unionArea > 0 ? interArea / unionArea : 0;
+                        if (iou > 0.5 && iou > maxIoU) {
+                          maxIoU = iou;
+                          bestMatch = oldFace;
+                        }
+                      } catch (e) {
+                      }
+                    }
+                    if (bestMatch) {
+                      updateFaceStmt.run(descriptorBuffer, JSON.stringify(face.box), face.blurScore, bestMatch.id);
+                      insertedIds.push(bestMatch.id);
+                    } else {
+                      const info = insertFace.run(
+                        message.photoId,
+                        null,
+                        descriptorBuffer,
+                        JSON.stringify(face.box),
+                        face.blurScore
+                      );
+                      if (info.changes > 0) {
+                        insertedIds.push(Number(info.lastInsertRowid));
+                      }
+                    }
                   }
                 });
                 processFaces();
-                logger.info(`[Main] Persisted ${message.faces.length} faces from analysis_result.`);
+                logger.info(`[Main] Processed ${message.faces.length} faces. (Updated/Inserted: ${insertedIds.length})`);
+                if (insertedIds.length > 0) {
+                  try {
+                    const { autoAssignFaces: autoAssignFaces2 } = await Promise.resolve().then(() => db$1);
+                    const settings = getAISettings();
+                    const threshold = settings.faceSimilarityThreshold || 0.65;
+                    const matchRes = await autoAssignFaces2(insertedIds, threshold);
+                    if (matchRes.success && (matchRes.count || 0) > 0) {
+                      logger.info(`[AutoMatch] Automatically assigned ${matchRes.count} faces for photo ${message.photoId} (Threshold: ${threshold})`);
+                    } else {
+                      logger.info(`[AutoMatch] No matches found for photo ${message.photoId} at threshold ${threshold}`);
+                    }
+                  } catch (amErr) {
+                    logger.error(`[AutoMatch] Failed for photo ${message.photoId}:`, amErr);
+                  }
+                }
               }
               const metrics = message.metrics || {};
               const faceCount = message.faces ? message.faces.length : 0;
@@ -16619,7 +16748,7 @@ function startPythonBackend() {
           }
         }
         if (message.type === "cluster_result") {
-          console.log(`[Main] Received Cluster Result for ${message.photoId || "Batch"}. Clusters: ${(_a = message.clusters) == null ? void 0 : _a.length}`);
+          console.log(`[Main] Received Cluster Result for ${message.photoId || "Batch"}. Clusters: ${(_c = message.clusters) == null ? void 0 : _c.length}`);
         }
         const resId = message.reqId || message.photoId || message.payload && message.payload.reqId;
         if (win && (message.type === "download_progress" || message.type === "download_result")) {
@@ -16823,10 +16952,22 @@ app$1.whenReady().then(async () => {
             if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
               const metadata2 = await pipeline.metadata();
               if (metadata2.width && metadata2.height) {
-                const safeX = Math.max(0, Math.min(Math.round(x), metadata2.width - 1));
-                const safeY = Math.max(0, Math.min(Math.round(y), metadata2.height - 1));
-                const safeW = Math.max(1, Math.min(Math.round(w), metadata2.width - safeX));
-                const safeH = Math.max(1, Math.min(Math.round(h), metadata2.height - safeY));
+                let finalX = x;
+                let finalY = y;
+                let finalW = w;
+                let finalH = h;
+                const originalWidth = urlObj.searchParams.get("originalWidth") ? parseInt(urlObj.searchParams.get("originalWidth")) : null;
+                if (originalWidth && originalWidth > 0 && metadata2.width !== originalWidth) {
+                  const scale = metadata2.width / originalWidth;
+                  finalX = x * scale;
+                  finalY = y * scale;
+                  finalW = w * scale;
+                  finalH = h * scale;
+                }
+                const safeX = Math.max(0, Math.min(Math.round(finalX), metadata2.width - 1));
+                const safeY = Math.max(0, Math.min(Math.round(finalY), metadata2.height - 1));
+                const safeW = Math.max(1, Math.min(Math.round(finalW), metadata2.width - safeX));
+                const safeH = Math.max(1, Math.min(Math.round(finalH), metadata2.height - safeY));
                 pipeline = pipeline.extract({ left: safeX, top: safeY, width: safeW, height: safeH });
               }
             }
@@ -16999,48 +17140,77 @@ app$1.whenReady().then(async () => {
       }, 3e4);
     });
   });
-  ipcMain$1.handle("face:getBlurry", async (_event, { personId, threshold, scope: scope2 }) => {
+  ipcMain$1.handle("face:getBlurry", async (_event, { personId, threshold, scope: scope2, limit: limit2 = 1e3, offset = 0 }) => {
     const db2 = getDB();
     let query = "";
+    let countQuery = "";
     const params = [];
+    const countParams = [];
     if (personId) {
-      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json, pp.name as person_name 
+      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json, p.width, p.height, pp.name as person_name 
                FROM faces f 
                JOIN photos p ON f.photo_id = p.id
                LEFT JOIN people pp ON f.person_id = pp.id
-               WHERE f.person_id = ? AND f.blur_score < ?`;
+               WHERE f.person_id = ? AND f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
+      countQuery = `SELECT COUNT(*) as count FROM faces f WHERE f.person_id = ? AND f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
       params.push(personId);
+      countParams.push(personId);
     } else if (scope2 === "all") {
-      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json, pp.name as person_name
+      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json, p.width, p.height, pp.name as person_name
                FROM faces f 
                JOIN photos p ON f.photo_id = p.id
                LEFT JOIN people pp ON f.person_id = pp.id
-               WHERE f.blur_score < ?`;
+               WHERE f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
+      countQuery = `SELECT COUNT(*) as count FROM faces f WHERE f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
     } else {
-      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json 
+      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json, p.width, p.height 
                FROM faces f 
                JOIN photos p ON f.photo_id = p.id
-               WHERE f.person_id IS NULL AND f.blur_score < ?`;
+               WHERE f.person_id IS NULL AND f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
+      countQuery = `SELECT COUNT(*) as count FROM faces f WHERE f.person_id IS NULL AND f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
     }
     const thresh = threshold || 20;
     params.push(thresh);
+    countParams.push(thresh);
+    query += " LIMIT ? OFFSET ?";
+    params.push(limit2, offset);
     const stmt = db2.prepare(query);
-    const rows = stmt.all(...params);
-    return rows.map((r) => {
-      let original_width = null;
-      if (r.metadata_json) {
-        try {
-          const meta = JSON.parse(r.metadata_json);
-          original_width = meta.ImageWidth || meta.SourceImageWidth || meta.ExifImageWidth;
-        } catch (e) {
+    const countStmt = db2.prepare(countQuery);
+    try {
+      const rows = stmt.all(...params);
+      const totalRes = countStmt.get(...countParams);
+      const total = totalRes ? totalRes.count : 0;
+      const faces = rows.map((r) => {
+        let original_width = r.width;
+        let original_height = r.height;
+        if ((!original_width || !original_height) && r.metadata_json) {
+          try {
+            const meta = JSON.parse(r.metadata_json);
+            original_width = original_width || meta.ImageWidth || meta.SourceImageWidth || meta.ExifImageWidth;
+            original_height = original_height || meta.ImageHeight || meta.SourceImageHeight || meta.ExifImageHeight;
+          } catch (e) {
+          }
         }
-      }
-      return {
-        ...r,
-        box: JSON.parse(r.box_json),
-        original_width
-      };
-    });
+        return {
+          ...r,
+          box: JSON.parse(r.box_json),
+          original_width,
+          original_height
+        };
+      });
+      return { faces, total };
+    } catch (e) {
+      console.error("Failed to get blurry faces:", e);
+      return { faces: [], total: 0, error: String(e) };
+    }
+  });
+  ipcMain$1.handle("face:findPotentialMatches", async (_event, { faceIds, threshold }) => {
+    try {
+      const { findPotentialMatches: findPotentialMatches2 } = await Promise.resolve().then(() => db$1);
+      return findPotentialMatches2(faceIds, threshold);
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
   });
   ipcMain$1.handle("debug:getBlurStats", async () => {
     const db2 = getDB();
@@ -17091,9 +17261,12 @@ app$1.whenReady().then(async () => {
   });
   ipcMain$1.handle("db:autoAssignFaces", async (_event, { faceIds, threshold }) => {
     const { autoAssignFaces: autoAssignFaces2 } = await Promise.resolve().then(() => db$1);
-    logger.info(`[Main] db:autoAssignFaces called with ${faceIds == null ? void 0 : faceIds.length} faces.`);
+    const settings = getAISettings();
+    const configThreshold = settings.faceSimilarityThreshold || 0.65;
+    const finalThreshold = threshold || configThreshold;
+    logger.info(`[Main] db:autoAssignFaces called with ${(faceIds == null ? void 0 : faceIds.length) || "ALL"} faces. Using Threshold: ${finalThreshold}`);
     try {
-      return await autoAssignFaces2(faceIds, threshold);
+      return await autoAssignFaces2(faceIds, finalThreshold);
     } catch (e) {
       logger.error(`[Main] db:autoAssignFaces error:`, e);
       throw e;
@@ -17929,7 +18102,6 @@ app$1.whenReady().then(async () => {
       const insertFace = db2.prepare("INSERT INTO faces (photo_id, box_json, descriptor, person_id, blur_score, is_reference) VALUES (?, ?, ?, ?, ?, ?)");
       const deleteFace = db2.prepare("DELETE FROM faces WHERE id = ?");
       const getAllKnownPeople = db2.prepare("SELECT id, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL");
-      const getAllKnownFaces = db2.prepare("SELECT person_id, descriptor FROM faces WHERE person_id IS NOT NULL AND descriptor IS NOT NULL");
       const getPersonRefCount = db2.prepare("SELECT count(*) as count FROM faces WHERE person_id = ? AND is_reference = 1");
       const getWorstReference = db2.prepare("SELECT id, blur_score FROM faces WHERE person_id = ? AND is_reference = 1 ORDER BY blur_score ASC LIMIT 1");
       const downgradeReference = db2.prepare("UPDATE faces SET is_reference = 0, descriptor = NULL WHERE id = ?");
@@ -18003,44 +18175,20 @@ app$1.whenReady().then(async () => {
             insertedIds.push(bestMatchId);
           } else {
             let matchedPersonId = null;
-            let bestDistance = 0.45;
-            const knownPeople = getAllKnownPeople.all();
-            for (const person of knownPeople) {
-              const meanDesc = JSON.parse(person.descriptor_mean_json);
-              let dot = 0, mag1 = 0, mag2 = 0;
-              if (newFace.descriptor.length !== meanDesc.length) continue;
-              for (let i = 0; i < newFace.descriptor.length; i++) {
-                dot += newFace.descriptor[i] * meanDesc[i];
-                mag1 += newFace.descriptor[i] ** 2;
-                mag2 += meanDesc[i] ** 2;
-              }
-              const magnitude = Math.sqrt(mag1) * Math.sqrt(mag2);
-              const dist2 = magnitude === 0 ? 1 : 1 - dot / magnitude;
-              if (dist2 < bestDistance) {
-                bestDistance = dist2;
-                matchedPersonId = person.id;
-              }
-            }
-            if (!matchedPersonId) {
-              const knownFaces = getAllKnownFaces.all();
-              for (const known of knownFaces) {
-                const knownBuf = known.descriptor;
-                if (!knownBuf) continue;
-                const knownArr = new Float32Array(knownBuf.buffer, knownBuf.byteOffset, knownBuf.byteLength / 4);
-                let dot = 0, mag1 = 0, mag2 = 0;
-                if (newFace.descriptor.length !== knownArr.length) continue;
-                for (let i = 0; i < newFace.descriptor.length; i++) {
-                  dot += newFace.descriptor[i] * knownArr[i];
-                  mag1 += newFace.descriptor[i] ** 2;
-                  mag2 += knownArr[i] ** 2;
-                }
-                const magnitude = Math.sqrt(mag1) * Math.sqrt(mag2);
-                const dist2 = magnitude === 0 ? 1 : 1 - dot / magnitude;
-                if (dist2 < bestDistance) {
-                  bestDistance = dist2;
-                  matchedPersonId = known.person_id;
-                }
-              }
+            let bestDistance = Infinity;
+            const settings = getAISettings();
+            const threshold = settings.faceSimilarityThreshold || 0.65;
+            const knownPeople = getAllKnownPeople.all().map((p) => ({
+              id: p.id,
+              name: "",
+              // Name not strictly needed for ID match, but kept for type safety
+              mean: JSON.parse(p.descriptor_mean_json)
+            }));
+            const match = findBestMatch(newFace.descriptor, knownPeople, threshold);
+            if (match.success && match.personId) {
+              matchedPersonId = match.personId;
+              bestDistance = match.distance;
+              logger.info(`[Auto-Match] Assigned new face to Person ${matchedPersonId} (Dist: ${bestDistance.toFixed(4)})`);
             }
             let isRef = 0;
             let finalDesc = descBuf;
@@ -18636,6 +18784,12 @@ const scheduleMeanRecalc = (db2, personId) => {
   }, 2e3);
   pendingMeanRecalcs.set(personId, timeout);
 };
+ipcMain$1.handle("settings:getAIQueue", () => {
+  return store.get("ai_queue", []);
+});
+ipcMain$1.handle("settings:setAIQueue", (_, queue) => {
+  store.set("ai_queue", queue);
+});
 ipcMain$1.handle("db:removeDuplicateFaces", async () => {
   const db2 = getDB();
   try {

@@ -18,3 +18,23 @@ export interface Person {
     face_count?: number;
     cover_photo?: string;
 }
+
+export interface BlurryFace extends Face {
+    photo_id: number;
+    blur_score: number;
+    box: { x: number, y: number, width: number, height: number };
+    person_name?: string;
+    preview_cache_path?: string;
+    original_width?: number;
+    original_height?: number;
+}
+
+export interface PotentialMatch {
+    faceId: number;
+    match: {
+        personId: number;
+        personName: string;
+        similarity: number;
+        distance: number;
+    };
+}

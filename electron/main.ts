@@ -760,62 +760,97 @@ app.whenReady().then(async () => {
 
   // Handle Face Blur
 
-  ipcMain.handle('face:getBlurry', async (_event, { personId, threshold, scope }) => {
+  ipcMain.handle('face:getBlurry', async (_event, { personId, threshold, scope, limit = 1000, offset = 0 }) => {
     const db = getDB();
 
     // Determine the query based on scope or personId
     // scope: 'person' | 'unnamed' | 'all'
 
     let query = '';
+    let countQuery = '';
     const params = [];
+    const countParams = [];
 
     if (personId) {
       // Specific person
-      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json, pp.name as person_name 
+      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json, p.width, p.height, pp.name as person_name 
                FROM faces f 
                JOIN photos p ON f.photo_id = p.id
                LEFT JOIN people pp ON f.person_id = pp.id
                WHERE f.person_id = ? AND f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
+      countQuery = `SELECT COUNT(*) as count FROM faces f WHERE f.person_id = ? AND f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
       params.push(personId);
+      countParams.push(personId);
     } else if (scope === 'all') {
       // All faces (global cleanup)
-      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json, pp.name as person_name
+      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json, p.width, p.height, pp.name as person_name
                FROM faces f 
                JOIN photos p ON f.photo_id = p.id
                LEFT JOIN people pp ON f.person_id = pp.id
                WHERE f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
+      countQuery = `SELECT COUNT(*) as count FROM faces f WHERE f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
     } else {
       // Default: Unnamed only
-      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json 
+      query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json, p.width, p.height 
                FROM faces f 
                JOIN photos p ON f.photo_id = p.id
                WHERE f.person_id IS NULL AND f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
+      countQuery = `SELECT COUNT(*) as count FROM faces f WHERE f.person_id IS NULL AND f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
     }
 
     const thresh = threshold || 20.0;
     params.push(thresh);
+    countParams.push(thresh);
+
+    // Apply Pagination
+    query += ' LIMIT ? OFFSET ?';
+    params.push(limit, offset);
 
     const stmt = db.prepare(query);
+    const countStmt = db.prepare(countQuery);
 
-    // Default threshold if not provided
-    const rows = stmt.all(...params);
-    return rows.map((r: any) => {
-      let original_width = null;
-      if (r.metadata_json) {
-        try {
-          const meta = JSON.parse(r.metadata_json);
-          // ExifTool usually provides 'ImageWidth'. Sometimes 'SourceImageWidth' or just 'Width'.
-          original_width = meta.ImageWidth || meta.SourceImageWidth || meta.ExifImageWidth;
-        } catch (e) {
-          // ignore parse error
+    try {
+      const rows = stmt.all(...params);
+      const totalRes = countStmt.get(...countParams) as { count: number };
+      const total = totalRes ? totalRes.count : 0;
+
+      const faces = rows.map((r: any) => {
+        let original_width = r.width;
+        let original_height = r.height;
+
+        // Fallback to metadata if columns NULL (legacy support)
+        if ((!original_width || !original_height) && r.metadata_json) {
+          try {
+            const meta = JSON.parse(r.metadata_json);
+            original_width = original_width || meta.ImageWidth || meta.SourceImageWidth || meta.ExifImageWidth;
+            original_height = original_height || meta.ImageHeight || meta.SourceImageHeight || meta.ExifImageHeight;
+          } catch (e) {
+            // ignore parse error
+          }
         }
-      }
-      return {
-        ...r,
-        box: JSON.parse(r.box_json),
-        original_width
-      };
-    });
+        return {
+          ...r,
+          box: JSON.parse(r.box_json),
+          original_width,
+          original_height
+        };
+      });
+
+      return { faces, total };
+
+    } catch (e) {
+      console.error("Failed to get blurry faces:", e);
+      return { faces: [], total: 0, error: String(e) };
+    }
+  });
+
+  ipcMain.handle('face:findPotentialMatches', async (_event, { faceIds, threshold }) => {
+    try {
+      const { findPotentialMatches } = await import('./db');
+      return findPotentialMatches(faceIds, threshold);
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
   });
 
   ipcMain.handle('debug:getBlurStats', async () => {
