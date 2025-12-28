@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import { spawn, ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url'
-import { initDB, getDB, closeDB, recalculatePersonMean } from './db'
+import { initDB, getDB, closeDB, recalculatePersonMean, findBestMatch } from './db'
 import { scanDirectory, scanFiles } from './scanner'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -94,7 +94,26 @@ function startPythonBackend() {
     reader.on('line', async (line) => {
       try {
         const message = JSON.parse(line);
-        logger.info('[Python]', message);
+
+        // Condensed Logging for Verbose Types
+        if (message.type === 'cluster_result') {
+          logger.info(`[Python] Cluster Result: ${message.clusters?.length || 0} clusters found.`);
+        } else if (message.type === 'search_result') {
+          logger.info(`[Python] Search Result: ${message.matches?.length || 0} matches found.`);
+        } else if (message.type === 'scan_result') {
+          const count = message.faces ? message.faces.length : 0;
+          logger.info(`[Python] Scan Result: ${message.success ? 'Success' : 'Failed'} for ${message.photoId} (${count} faces).`);
+        } else if (message.type === 'analysis_result') {
+          const count = message.faces ? message.faces.length : 0;
+          logger.info(`[Python] Analysis Result: ${message.photoId} (${count} faces).`);
+        } else if (message.type === 'tags_result') {
+          const count = message.tags ? message.tags.length : 0;
+          logger.info(`[Python] Tags Result: ${message.photoId} (${count} tags).`);
+        } else if (message.type === 'download_progress') {
+          // Suppress progress logs to console
+        } else {
+          logger.info('[Python]', message);
+        }
         if (win && (message.type === 'scan_result' || message.type === 'tags_result' || message.type === 'analysis_result')) {
           win.webContents.send('ai:scan-result', message);
 
@@ -109,30 +128,88 @@ function startPythonBackend() {
 
               // NEW: Persist analysis results (Force Scan)
               if (message.type === 'analysis_result' && message.faces && message.faces.length > 0) {
+                const existingFaces = db.prepare('SELECT id, box_json, person_id FROM faces WHERE photo_id = ?').all(message.photoId);
+                const updateFaceStmt = db.prepare('UPDATE faces SET descriptor = ?, box_json = ?, blur_score = ? WHERE id = ?');
                 const insertFace = db.prepare(`
                     INSERT INTO faces (photo_id, person_id, descriptor, box_json, blur_score, is_reference)
                     VALUES (?, ?, ?, ?, ?, 0)
                  `);
 
+                const insertedIds: number[] = [];
                 const processFaces = db.transaction(() => {
                   for (const face of message.faces) {
-                    // serialize descriptor if present
+                    // serialize descriptor
                     let descriptorBuffer = null;
                     if (face.descriptor && Array.isArray(face.descriptor)) {
                       descriptorBuffer = Buffer.from(new Float32Array(face.descriptor).buffer);
                     }
 
-                    insertFace.run(
-                      message.photoId,
-                      null, // person_id (unknown initially)
-                      descriptorBuffer,
-                      JSON.stringify(face.box),
-                      face.blurScore
-                    );
+                    // Smart Merge: Check for overlap
+                    let bestMatch = null;
+                    let maxIoU = 0;
+
+                    for (const oldFace of existingFaces) {
+                      try {
+                        const oldBox = JSON.parse(oldFace.box_json);
+                        const interX1 = Math.max(face.box.x, oldBox.x);
+                        const interY1 = Math.max(face.box.y, oldBox.y);
+                        const interX2 = Math.min(face.box.x + face.box.width, oldBox.x + oldBox.width);
+                        const interY2 = Math.min(face.box.y + face.box.height, oldBox.y + oldBox.height);
+
+                        const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
+                        const unionArea = (face.box.width * face.box.height) + (oldBox.width * oldBox.height) - interArea;
+
+                        const iou = unionArea > 0 ? interArea / unionArea : 0;
+                        if (iou > 0.5 && iou > maxIoU) {
+                          maxIoU = iou;
+                          bestMatch = oldFace;
+                        }
+                      } catch (e) { }
+                    }
+
+                    if (bestMatch) {
+                      // Update existing
+                      updateFaceStmt.run(descriptorBuffer, JSON.stringify(face.box), face.blurScore, bestMatch.id);
+                      insertedIds.push(bestMatch.id);
+                    } else {
+                      // Insert new
+                      const info = insertFace.run(
+                        message.photoId,
+                        null,
+                        descriptorBuffer,
+                        JSON.stringify(face.box),
+                        face.blurScore
+                      );
+                      if (info.changes > 0) {
+                        insertedIds.push(Number(info.lastInsertRowid));
+                      }
+                    }
                   }
                 });
                 processFaces();
-                logger.info(`[Main] Persisted ${message.faces.length} faces from analysis_result.`);
+                logger.info(`[Main] Processed ${message.faces.length} faces. (Updated/Inserted: ${insertedIds.length})`);
+
+                // NEW: Auto-Match immediately
+                if (insertedIds.length > 0) {
+                  // We use a small delay or just await it? 
+                  // Await is fine, it's fast.
+                  try {
+                    const { autoAssignFaces } = await import('./db');
+                    // Fetch Settings for Threshold
+                    const settings = getAISettings();
+                    const threshold = settings.faceSimilarityThreshold || 0.65;
+
+                    const matchRes = await autoAssignFaces(insertedIds, threshold);
+
+                    if (matchRes.success && (matchRes.count || 0) > 0) {
+                      logger.info(`[AutoMatch] Automatically assigned ${matchRes.count} faces for photo ${message.photoId} (Threshold: ${threshold})`);
+                    } else {
+                      logger.info(`[AutoMatch] No matches found for photo ${message.photoId} at threshold ${threshold}`);
+                    }
+                  } catch (amErr) {
+                    logger.error(`[AutoMatch] Failed for photo ${message.photoId}:`, amErr);
+                  }
+                }
               }
 
               // associateMatchedFaces removed (not available)
@@ -429,6 +506,7 @@ app.whenReady().then(async () => {
           // Initialize pipeline with AUTO-ROTATION to match Python/EXIF coordinates
           let pipeline = sharp(decodedPath).rotate();
 
+
           // 1. Crop if box provided (x,y,w,h)
           if (boxParam) {
             const [x, y, w, h] = boxParam.split(',').map(Number);
@@ -436,10 +514,25 @@ app.whenReady().then(async () => {
               // Validate/Clamp against image dimensions to prevent "extract_area" errors
               const metadata = await pipeline.metadata();
               if (metadata.width && metadata.height) {
-                const safeX = Math.max(0, Math.min(Math.round(x), metadata.width - 1));
-                const safeY = Math.max(0, Math.min(Math.round(y), metadata.height - 1));
-                const safeW = Math.max(1, Math.min(Math.round(w), metadata.width - safeX));
-                const safeH = Math.max(1, Math.min(Math.round(h), metadata.height - safeY));
+                let finalX = x;
+                let finalY = y;
+                let finalW = w;
+                let finalH = h;
+
+                // Checking for originalWidth to perform checking
+                const originalWidth = urlObj.searchParams.get('originalWidth') ? parseInt(urlObj.searchParams.get('originalWidth')!) : null;
+                if (originalWidth && originalWidth > 0 && metadata.width !== originalWidth) {
+                  const scale = metadata.width / originalWidth;
+                  finalX = x * scale;
+                  finalY = y * scale;
+                  finalW = w * scale;
+                  finalH = h * scale;
+                }
+
+                const safeX = Math.max(0, Math.min(Math.round(finalX), metadata.width - 1));
+                const safeY = Math.max(0, Math.min(Math.round(finalY), metadata.height - 1));
+                const safeW = Math.max(1, Math.min(Math.round(finalW), metadata.width - safeX));
+                const safeH = Math.max(1, Math.min(Math.round(finalH), metadata.height - safeY));
 
                 pipeline = pipeline.extract({ left: safeX, top: safeY, width: safeW, height: safeH });
               }
@@ -682,7 +775,7 @@ app.whenReady().then(async () => {
                FROM faces f 
                JOIN photos p ON f.photo_id = p.id
                LEFT JOIN people pp ON f.person_id = pp.id
-               WHERE f.person_id = ? AND f.blur_score < ?`;
+               WHERE f.person_id = ? AND f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
       params.push(personId);
     } else if (scope === 'all') {
       // All faces (global cleanup)
@@ -690,13 +783,13 @@ app.whenReady().then(async () => {
                FROM faces f 
                JOIN photos p ON f.photo_id = p.id
                LEFT JOIN people pp ON f.person_id = pp.id
-               WHERE f.blur_score < ?`;
+               WHERE f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
     } else {
       // Default: Unnamed only
       query = `SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.metadata_json 
                FROM faces f 
                JOIN photos p ON f.photo_id = p.id
-               WHERE f.person_id IS NULL AND f.blur_score < ?`;
+               WHERE f.person_id IS NULL AND f.blur_score < ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)`;
     }
 
     const thresh = threshold || 20.0;
@@ -780,9 +873,16 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('db:autoAssignFaces', async (_event, { faceIds, threshold }) => {
     const { autoAssignFaces } = await import('./db');
-    logger.info(`[Main] db:autoAssignFaces called with ${faceIds?.length} faces.`);
+    // Align with global settings for consistency
+    const settings = getAISettings();
+    const configThreshold = settings.faceSimilarityThreshold || 0.65;
+
+    // Allow override if explicitly passed, otherwise use config
+    const finalThreshold = threshold || configThreshold;
+
+    logger.info(`[Main] db:autoAssignFaces called with ${faceIds?.length || 'ALL'} faces. Using Threshold: ${finalThreshold}`);
     try {
-      return await autoAssignFaces(faceIds, threshold);
+      return await autoAssignFaces(faceIds, finalThreshold);
     } catch (e) {
       logger.error(`[Main] db:autoAssignFaces error:`, e);
       throw e;
@@ -1866,8 +1966,7 @@ app.whenReady().then(async () => {
 
       const deleteFace = db.prepare('DELETE FROM faces WHERE id = ?');
       const getAllKnownPeople = db.prepare('SELECT id, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL');
-      // Fallback for people without mean yet
-      const getAllKnownFaces = db.prepare('SELECT person_id, descriptor FROM faces WHERE person_id IS NOT NULL AND descriptor IS NOT NULL');
+
 
       // Helpers for Reference Management
       const getPersonRefCount = db.prepare('SELECT count(*) as count FROM faces WHERE person_id = ? AND is_reference = 1');
@@ -1974,64 +2073,37 @@ app.whenReady().then(async () => {
 
           } else {
             // INSERT new face (Auto-recognize)
+            // INSERT new face (Auto-recognize)
             let matchedPersonId = null;
-            let bestDistance = 0.45; // Cosine Distance Threshold
+            let bestDistance = Infinity;
 
-            // A. Try matching against People Means
-            const knownPeople = getAllKnownPeople.all();
-            for (const person of knownPeople) {
-              // @ts-ignore
-              const meanDesc = JSON.parse(person.descriptor_mean_json);
+            // Use the shared matching logic
+            const settings = getAISettings();
+            const threshold = settings.faceSimilarityThreshold || 0.65;
 
-              let dot = 0, mag1 = 0, mag2 = 0;
-              if (newFace.descriptor.length !== meanDesc.length) continue;
+            // 1. Prepare candidates
+            const knownPeople = getAllKnownPeople.all().map((p: any) => ({
+              id: p.id,
+              name: '', // Name not strictly needed for ID match, but kept for type safety
+              mean: JSON.parse(p.descriptor_mean_json)
+            }));
 
-              for (let i = 0; i < newFace.descriptor.length; i++) {
-                dot += newFace.descriptor[i] * meanDesc[i];
-                mag1 += newFace.descriptor[i] ** 2;
-                mag2 += meanDesc[i] ** 2;
-              }
-              const magnitude = Math.sqrt(mag1) * Math.sqrt(mag2);
-              const dist = magnitude === 0 ? 1.0 : 1.0 - (dot / magnitude);
+            // 2. Find Match
+            const match = findBestMatch(newFace.descriptor, knownPeople, threshold);
 
-              if (dist < bestDistance) {
-                bestDistance = dist;
-                // @ts-ignore
-                matchedPersonId = person.id;
-              }
+            if (match.success && match.personId) {
+              matchedPersonId = match.personId;
+              bestDistance = match.distance;
+              logger.info(`[Auto-Match] Assigned new face to Person ${matchedPersonId} (Dist: ${bestDistance.toFixed(4)})`);
             }
 
             // B. Fallback: Match against known face VECTORS (if valid)
-            if (!matchedPersonId) {
-              const knownFaces = getAllKnownFaces.all();
-              for (const known of knownFaces) {
-                // @ts-ignore
-                // Reader BLOB to Float32Array
-                const knownBuf = known.descriptor;
-                if (!knownBuf) continue;
-
-                // Assuming stored as bytes of float32
-                const knownArr = new Float32Array(knownBuf.buffer, knownBuf.byteOffset, knownBuf.byteLength / 4);
-
-                let dot = 0, mag1 = 0, mag2 = 0;
-                // newFace.descriptor is array
-                if (newFace.descriptor.length !== knownArr.length) continue;
-
-                for (let i = 0; i < newFace.descriptor.length; i++) {
-                  dot += newFace.descriptor[i] * knownArr[i];
-                  mag1 += newFace.descriptor[i] ** 2;
-                  mag2 += knownArr[i] ** 2;
-                }
-                const magnitude = Math.sqrt(mag1) * Math.sqrt(mag2);
-                const dist = magnitude === 0 ? 1.0 : 1.0 - (dot / magnitude);
-
-                if (dist < bestDistance) {
-                  bestDistance = dist;
-                  // @ts-ignore
-                  matchedPersonId = known.person_id;
-                }
-              }
-            }
+            // Note: `findBestMatch` expects candidates to have .mean. 
+            // If we want to support matching against raw face vectors too (for people without means yet),
+            // we would need to adapt them. However, recalculatePersonMean should handle most cases.
+            // If we *really* want raw vector fallback, we can add it, but unifying on Mean is cleaner/faster.
+            // For now, let's stick to Mean-based matching for consistency with Manual Auto-ID.
+            // If a person has 0 faces or no mean, they are effectively "new/unknown".
 
             // Logic for Saving
             let isRef = 0;
@@ -2804,6 +2876,14 @@ const scheduleMeanRecalc = (db: any, personId: number) => {
   pendingMeanRecalcs.set(personId, timeout);
 };
 
+
+ipcMain.handle('settings:getAIQueue', () => {
+  return store.get('ai_queue', []);
+});
+
+ipcMain.handle('settings:setAIQueue', (_, queue) => {
+  store.set('ai_queue', queue);
+});
 
 ipcMain.handle('db:removeDuplicateFaces', async () => {
   const db = getDB();

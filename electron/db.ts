@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import logger from './logger';
+import { getAISettings } from './store';
 
 let db: any;
 
@@ -480,8 +481,17 @@ export function getMetricsHistory(limit = 1000) {
  */
 export const recalculatePersonMean = (db: any, personId: number) => {
   try {
+    const settings = getAISettings();
+    const blurThreshold = settings.faceBlurThreshold ?? 20;
+
     console.time(`recalculatePersonMean-${personId}`);
-    const allDescriptors = db.prepare('SELECT descriptor FROM faces WHERE person_id = ? AND is_ignored = 0').all(personId);
+    // Exclude blurry faces from the Mean Calculation to keep the reference high-quality
+    const allDescriptors = db.prepare(`
+      SELECT descriptor FROM faces 
+      WHERE person_id = ? 
+      AND is_ignored = 0
+      AND (blur_score IS NULL OR blur_score >= ?)
+    `).all(personId, blurThreshold);
 
     if (allDescriptors.length === 0) {
       db.prepare('UPDATE people SET descriptor_mean_json = NULL WHERE id = ?').run(personId);
@@ -530,96 +540,134 @@ export const recalculatePersonMean = (db: any, personId: number) => {
   }
 };
 
+// Shared Matching Logic (Similarity based on L2 Distance)
+export function findBestMatch(descriptor: number[], candidates: { id: number, name: string, mean: number[] }[], threshold: number) {
+  // L2 Normalize input if not already?
+  // Our mean descriptors in DB are L2 normalized.
+  // Input descriptor (from Python) is typically raw 128D float array.
+
+  let mag = 0;
+  for (const val of descriptor) mag += val * val;
+  mag = Math.sqrt(mag);
+
+  const normalized = mag > 0 ? descriptor.map(v => v / mag) : descriptor;
+
+  let bestMatch = null;
+  let minDist = Infinity;
+
+  // Linear scan
+  for (const person of candidates) {
+    let sumSq = 0;
+    // Assume dimensions match. Python Dlib is 128d
+    if (person.mean.length !== normalized.length) continue;
+
+    for (let i = 0; i < normalized.length; i++) {
+      const diff = normalized[i] - person.mean[i];
+      sumSq += diff * diff;
+    }
+    const dist = Math.sqrt(sumSq);
+
+    if (dist < minDist) {
+      minDist = dist;
+      bestMatch = person;
+    }
+  }
+
+  // Convert Distance to Similarity (0.0 - 1.0)
+  // Distance 0 = Sim 1.0
+  // Distance 0.6 (~Threshold) = 1/(1+0.6) = 0.625
+  const similarity = 1 / (1 + minDist);
+
+  // Use STRICTER logic: Threshold is now CONFIDENCE (Higher is better)
+  if (bestMatch && similarity >= threshold) {
+    return { success: true, personId: bestMatch.id, personName: bestMatch.name, distance: minDist, similarity };
+  }
+
+  return { success: false, distance: minDist, similarity };
+}
+
 export function autoAssignFaces(faceIds: number[], threshold = 0.65) {
   const db = getDB();
   try {
-    // 1. Get all people with computed means
-    const people = db.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
-    logger.info(`[AutoAssign] Found ${people.length} people with mean descriptors.`);
-    if (people.length === 0) {
-      return { success: true, count: 0, assigned: [] };
-    }
+    let totalAssigned = 0;
+    const allAssigned: any[] = [];
+    let pass = 1;
+    const MAX_PASSES = 10;
 
-    // Parse means into arrays
-    const candidates = people.map((p: any) => ({
-      id: p.id,
-      name: p.name,
-      mean: JSON.parse(p.descriptor_mean_json)
-    }));
+    // Loop until no more matches are found or max passes reached
+    while (pass <= MAX_PASSES) {
+      // 1. Refresh Candidates (Means might have changed in previous pass)
+      const people = db.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
 
-    // 2. Get descriptors for target faces
-    let faces;
-    if (faceIds && faceIds.length > 0) {
-      const placeholders = faceIds.map(() => '?').join(',');
-      faces = db.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND descriptor IS NOT NULL`).all(...faceIds);
-      logger.info(`[AutoAssign] Found ${faces.length} valid descriptors out of ${faceIds.length} requested IDs.`);
-    } else {
-      // If no IDs provided, scan ALL unnamed faces
-      logger.info(`[AutoAssign] No IDs provided. Scanning ALL unassigned faces...`);
-      faces = db.prepare("SELECT id, descriptor FROM faces WHERE person_id IS NULL AND descriptor IS NOT NULL").all();
-      logger.info(`[AutoAssign] Found ${faces.length} unassigned faces to check.`);
-    }
+      if (people.length === 0) break;
 
-    let assignedCount = 0;
-    const assigned: any[] = [];
+      const candidates = people.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        mean: JSON.parse(p.descriptor_mean_json)
+      }));
 
-    const updateFace = db.prepare("UPDATE faces SET person_id = ? WHERE id = ?");
-
-    // 3. Compare
-    const transaction = db.transaction(() => {
-      for (const face of faces) {
-        if (!face.descriptor) continue;
-
-        // Convert blob to array
-        const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
-
-        // L2 NORMALIZE descriptor
-        let mag = 0;
-        for (const val of rawDescriptor) mag += val * val;
-        mag = Math.sqrt(mag);
-
-        const descriptor = mag > 0 ? rawDescriptor.map(v => v / mag) : rawDescriptor;
-
-        let bestMatch = null;
-        let minDist = Infinity;
-
-        // Linear scan (fast enough for < 1000 people)
-        for (const person of candidates) {
-          // Euclidean distance calculation (assuming normalized vectors)
-          // dist = sqrt(sum((a-b)^2))
-          let sumSq = 0;
-          for (let i = 0; i < descriptor.length; i++) {
-            const diff = descriptor[i] - person.mean[i];
-            sumSq += diff * diff;
-          }
-          const dist = Math.sqrt(sumSq);
-
-          if (dist < minDist) {
-            minDist = dist;
-            bestMatch = person;
-          }
-        }
-
-        if (bestMatch && minDist < threshold) {
-          updateFace.run(bestMatch.id, face.id);
-          assignedCount++;
-          assigned.push({ faceId: face.id, personId: bestMatch.id, personName: bestMatch.name, distance: minDist });
-        }
+      // 2. Refresh Unassigned Faces
+      let faces;
+      if (faceIds && faceIds.length > 0) {
+        // If specific faceIds were requested, we only want to process those that are STILL unassigned
+        const placeholders = faceIds.map(() => '?').join(',');
+        faces = db.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND person_id IS NULL AND descriptor IS NOT NULL`).all(...faceIds);
+      } else {
+        faces = db.prepare("SELECT id, descriptor FROM faces WHERE person_id IS NULL AND descriptor IS NOT NULL").all();
       }
-    });
 
-    transaction();
+      if (faces.length === 0) {
+        if (pass === 1) logger.info(`[AutoAssign] No unassigned faces found.`);
+        break;
+      }
 
-    // Recalculate means for affected people (optional/async?)
-    // This makes it slow if we assign to many different people. 
-    // Maybe skip auto-recalc for now and let user trigger it or do it lazily?
-    // OR just recalc the unique set of updated people.
-    const uniquePeople = new Set(assigned.map(a => a.personId));
-    for (const pid of uniquePeople) {
-      recalculatePersonMean(db, pid);
+      logger.info(`[AutoAssign] Pass ${pass}: Processing ${faces.length} faces against ${candidates.length} people...`);
+
+      let passAssignedCount = 0;
+      const passAssigned: any[] = [];
+      const updateFace = db.prepare("UPDATE faces SET person_id = ? WHERE id = ?");
+
+      const transaction = db.transaction(() => {
+        for (const face of faces) {
+          if (!face.descriptor) continue;
+          const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+
+          const match = findBestMatch(rawDescriptor, candidates, threshold);
+
+          if (match.success && match.personId) {
+            updateFace.run(match.personId, face.id);
+            passAssignedCount++;
+            passAssigned.push({ faceId: face.id, personId: match.personId, personName: match.personName, distance: match.distance, similarity: match.similarity });
+
+            // Log details only if small batch or first few
+            if (passAssignedCount <= 5) {
+              logger.info(`[AutoAssign] Matched Face ${face.id} to ${match.personName} (Sim: ${match.similarity?.toFixed(4)})`);
+            }
+          }
+        }
+      });
+
+      transaction();
+
+      // If nothing found in this pass, we are done
+      if (passAssignedCount === 0) break;
+
+      totalAssigned += passAssignedCount;
+      allAssigned.push(...passAssigned);
+      logger.info(`[AutoAssign] Pass ${pass}: Assigned ${passAssignedCount} faces.`);
+
+      // 3. Recalculate Means to enable "Snowball" effect for next pass
+      const uniquePeople = new Set(passAssigned.map(a => a.personId));
+      for (const pid of uniquePeople) {
+        recalculatePersonMean(db, pid);
+      }
+
+      pass++;
     }
 
-    return { success: true, count: assignedCount, assigned };
+    logger.info(`[AutoAssign] Complete after ${pass - 1} passes. Total Assigned: ${totalAssigned} faces.`);
+    return { success: true, count: totalAssigned, assigned: allAssigned };
 
   } catch (e) {
     logger.error("Auto-Assign failed:", e);
