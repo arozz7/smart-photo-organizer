@@ -7,9 +7,10 @@ interface FaceThumbnailProps {
     originalImageWidth?: number; // The width of the original image the box coords correspond to
     alt?: string;
     className?: string;
+    useServerCrop?: boolean; // If true, treats src as pre-cropped (no CSS crop), but fallbackSrc as needing CSS crop
 }
 
-const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(function FaceThumbnail({ src, fallbackSrc, box, originalImageWidth, alt, className }: FaceThumbnailProps & { fallbackSrc?: string }) {
+const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(function FaceThumbnail({ src, fallbackSrc, box, originalImageWidth, alt, className, useServerCrop }: FaceThumbnailProps & { fallbackSrc?: string }) {
     const [style, setStyle] = useState<React.CSSProperties>({
         opacity: 0, // Hide until loaded and positioned
         transition: 'opacity 0.2s',
@@ -33,8 +34,11 @@ const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(
 
     const handleLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
         setIsLoading(false);
-        if (!box) {
-            // No box, just show full image
+
+        const isServerCropped = useServerCrop && !hasRetried;
+
+        if (!box || isServerCropped) {
+            // No box, just show full image (or server crop)
             setStyle({ opacity: 1, width: '100%', height: '100%', objectFit: 'cover' });
             return;
         }

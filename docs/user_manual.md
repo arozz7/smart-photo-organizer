@@ -38,7 +38,9 @@ The AI automatically detects faces during the scan. Your job is to give them nam
 1.  **Unnamed Faces:** Go to the **People** tab. You'll see groups of similar looking faces that haven't been named yet.
 2.  **Naming:** Click a group, type a name (e.g., "Mom"), and hit Enter. The AI will now know what "Mom" looks like and will attempt to auto-assign her to other photos.
 3.  **Merging:** If you accidentally created two entries for the same person (e.g., "John" and "John Doe"), simply rename one to match the other. The app will ask if you want to **merge** them.
-4.  **Cleaning Up:** Use the **"Cleanup Blurry Faces"** tool in the People view to find and remove low-quality face captures that might be cluttering your view.
+4.  **Cleaning Up:** Use the **"Cleanup Blurry Faces"** tool to bulk-manage low-quality captures. 
+    - **Performance:** Optimized to handle selecting thousands of faces without slowing down.
+    - **RAW Support:** View original "Context" photos even for RAW files (ARW, CR2, etc.).
 
 ---
 

@@ -39,6 +39,7 @@ interface QueueConfig {
 interface AIContextType {
     isModelLoading: boolean;
     isModelReady: boolean;
+    isProcessing: boolean; // Exposed status
     processingQueue: any[];
     addToQueue: (photos: any[]) => void;
     clearQueue: () => void;
@@ -78,6 +79,7 @@ interface AIContextType {
 const AIContext = createContext<AIContextType>({
     isModelLoading: false,
     isModelReady: false, // Always true now as Python is managed by Main
+    isProcessing: false,
     processingQueue: [],
     addToQueue: () => { },
     clearQueue: () => { },
@@ -147,6 +149,60 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         // @ts-ignore
         window.ipcRenderer.invoke('settings:setQueueConfig', queueConfig).catch(console.error);
     }, [queueConfig, isConfigLoaded])
+
+    // Load Persisted Queue
+    useEffect(() => {
+        const loadQueue = async () => {
+            try {
+                // @ts-ignore
+                const savedQueue = await window.ipcRenderer.invoke('settings:getAIQueue');
+                if (savedQueue && Array.isArray(savedQueue) && savedQueue.length > 0) {
+                    console.log(`[AIContext] Loaded ${savedQueue.length} pending items from storage.`);
+                    setProcessingQueue(savedQueue);
+                }
+            } catch (e) {
+                console.error("Failed to load saved queue", e);
+            }
+        };
+        loadQueue();
+    }, []);
+
+    // Save Queue Persistence (Debounced slightly by React batching, but we can just save on change)
+    useEffect(() => {
+        if (!isConfigLoaded) return; // Wait for initial config load to avoid overwriting with empty? 
+        // Actually we need a separate flag for Queue Loaded? 
+        // Simplification: Just save whatever is in processingQueue if it changed.
+        // But on initial load processingQueue is [], if we save immediately we might wipe disk.
+        // So we need isQueueLoaded flag.
+    }, [processingQueue]);
+
+    // Better approach: modifying addToQueue and completeProcessing to save? 
+    // Or just use a ref to track if we loaded.
+    const isQueueLoaded = useRef(false);
+
+    useEffect(() => {
+        const loadQueue = async () => {
+            try {
+                // @ts-ignore
+                const savedQueue = await window.ipcRenderer.invoke('settings:getAIQueue');
+                if (savedQueue && Array.isArray(savedQueue) && savedQueue.length > 0) {
+                    console.log(`[AIContext] Loaded ${savedQueue.length} pending items from storage.`);
+                    setProcessingQueue(savedQueue);
+                }
+            } catch (e) {
+                console.error("Failed to load saved queue", e);
+            } finally {
+                isQueueLoaded.current = true;
+            }
+        };
+        loadQueue();
+    }, []);
+
+    useEffect(() => {
+        if (!isQueueLoaded.current) return;
+        // @ts-ignore
+        window.ipcRenderer.invoke('settings:setAIQueue', processingQueue).catch(e => console.error("Failed to save queue", e));
+    }, [processingQueue]);
 
     const [currentBatchCount, setCurrentBatchCount] = useState(0);
     const [isCoolingDown, setIsCoolingDown] = useState(false);
@@ -665,7 +721,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             scanMetrics,
             performanceStats,
             isThrottled,
-            setThrottled
+            setThrottled,
+            isProcessing // Exposed for UI status
         }}>
             {children}
         </AIContext.Provider>

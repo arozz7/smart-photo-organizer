@@ -15,6 +15,7 @@ interface SettingsModalProps {
 
 interface AISettings {
     faceDetectionThreshold: number;
+    faceSimilarityThreshold: number;
     faceBlurThreshold: number;
     vlmTemperature: number;
     vlmMaxTokens: number;
@@ -27,6 +28,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
     const [downloaderOpen, setDownloaderOpen] = useState(false);
     const [settings, setSettings] = useState<AISettings>({
         faceDetectionThreshold: 0.6,
+        faceSimilarityThreshold: 0.65,
         faceBlurThreshold: 20.0,
         vlmTemperature: 0.2,
         vlmMaxTokens: 100,
@@ -82,6 +84,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
             onConfirm: () => {
                 setSettings({
                     faceDetectionThreshold: 0.6,
+                    faceSimilarityThreshold: 0.65,
                     faceBlurThreshold: 20.0,
                     vlmTemperature: 0.2,
                     vlmMaxTokens: 100,
@@ -136,6 +139,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                         min={0.1} max={0.99} step={0.01}
                                         onChange={(v) => handleChange('faceDetectionThreshold', v)}
                                         tooltip="Minimum confidence score (0.0 - 1.0) to detect a face. Higher values reduce false positives (like trees seeing valid faces) but might miss difficult faces."
+                                    />
+
+                                    <SettingSlider
+                                        label="Face Recognition Confidence"
+                                        value={settings.faceSimilarityThreshold || 0.65}
+                                        min={0.1} max={0.99} step={0.01}
+                                        onChange={(v) => handleChange('faceSimilarityThreshold', v)}
+                                        tooltip="Minimum similarity (0.0 - 1.0) required to match a face to a known person. Higher values require closer matches. Default: 0.65."
                                     />
 
                                     <SettingSlider

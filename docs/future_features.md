@@ -21,6 +21,10 @@
 - **Goal:** Combine multiple filter types with conditional logic (AND/OR).
 - **New Filters:** Blur Score, Date (Year/Month), Compound Logic.
 
+### 6. Automatic Face Matching
+- **Goal:** Automatically assign newly scanned faces to known people without manual intervention.
+- **Plan:** Trigger matching logic immediately after scan persist.
+
 ---
 
 ## 🔮 Feature Backlog

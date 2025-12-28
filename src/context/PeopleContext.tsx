@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode } from 'react'
+import React, { createContext, useContext, useState, ReactNode } from 'react'
 
 interface Person {
     id: number
@@ -197,13 +197,15 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         }
     }
 
+    const value = React.useMemo(() => ({
+        people, faces, loading,
+        loadPeople, loadFaces, loadUnnamedFaces, fetchFacesByIds, assignPerson,
+        ignoreFace, ignoreFaces, autoNameFaces,
+        rebuildIndex
+    }), [people, faces, loading])
+
     return (
-        <PeopleContext.Provider value={{
-            people, faces, loading,
-            loadPeople, loadFaces, loadUnnamedFaces, fetchFacesByIds, assignPerson,
-            ignoreFace, ignoreFaces, autoNameFaces,
-            rebuildIndex
-        }}>
+        <PeopleContext.Provider value={value}>
             {children}
         </PeopleContext.Provider>
     )
