@@ -2,28 +2,17 @@
 
 ## 🚀 Priority Roadmap
 
-### 1. User Experience & Feedback
-- **Scan vs Rescan Logic:**
-    - **Goal:** Differentiate between incremental scans and full re-processing.
-    - **Status:** ✅ Implemented in v0.3.5 (Incremental vs Force Rescan).
 
-### 2. Face Management & Productivity
+### 1. Face Management & Productivity
 - **Person Thumbnail Management**
     - **Goal:** Customize the representative image for a person.
     - **Plan:** "Set as Cover" button, Smart Variety algorithms for "Top Faces", and "Shuffle" option.
 
-### 4. Immediate Optimizations & Fixes (Analysis Findings)
-- **Auto-Identify Optimization:**
-    - **Problem:** "Scan for All Named People" and "Auto-Identify" find faces that should have been assigned during initial scan.
-    - **Status:** Pending.
 
-### 5. Advanced Library Filtering
+### 2. Advanced Library Filtering
 - **Goal:** Combine multiple filter types with conditional logic (AND/OR).
 - **New Filters:** Blur Score, Date (Year/Month), Compound Logic.
 
-### 6. Automatic Face Matching
-- **Goal:** Automatically assign newly scanned faces to known people without manual intervention.
-- **Plan:** Trigger matching logic immediately after scan persist.
 
 ---
 
@@ -36,6 +25,12 @@
 - **Batch Enhancement:** Background queue for upscaling multiple photos.
 
 ### Organization & Metadata
+- **Blurry Photo List Export:**
+    - **Goal:** Generate and export lists of photos with blur scores below a threshold.
+    - **Features:** Group by location/folder, filter by file type, usage for manual review/deletion.
+- **Person Portfolio Export:**
+    - **Goal:** Export catalog of named persons with high-res reference thumbnails and library statistics.
+    - **Details:** Metrics per person (photo count), heatmaps for tags/years, and exportable format (PDF/HTML).
 - **Batch Renaming & Cleanup:** Template-based renaming (`{Date}_{Location}`), Deduplication via perceptual hash.
 - **Duplicate Photo Detection:** SHA-256 (exact) and pHash (visual) detection with "Safe Deduplication" UI.
 - **Saved Smart Searches:** Save active filters as "Smart Albums".
@@ -58,6 +53,14 @@
 ---
 
 # ✅ Implemented Features
+
+## v0.3.6 (Upcoming/Main)
+- **Auto-Identify Optimization:**
+    - Improved "Scan for All Named People" and "Auto-Identify" logic to capture faces missed in initial scans.
+- **Automatic Face Matching:**
+    - Newly scanned faces are now automatically matched against known people immediately after scan persist.
+- **Review All Faces:**
+    - Implemented a dedicated modal to review, move, and remove all faces for a person, bypassing the 1000 face display limit.
 
 ## v0.3.5 (Current Release)
 - **Unnamed Faces Performance & UX:**

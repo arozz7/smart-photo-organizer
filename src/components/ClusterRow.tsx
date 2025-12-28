@@ -1,4 +1,4 @@
-import React, { useState, useEffect, memo } from 'react'
+import { useState, useEffect, memo } from 'react'
 import { Face } from '../types'
 import FaceThumbnail from './FaceThumbnail'
 import { useScan } from '../context/ScanContext'
@@ -22,7 +22,7 @@ const ClusterRow = memo(({
     toggleFace,
     toggleGroup,
     fetchFacesByIds,
-    onNameGroup,
+
     onIgnoreGroup,
     onOpenNaming
 }: ClusterRowProps) => { // Removed 'export' from here, added it to the end or declared it as export const

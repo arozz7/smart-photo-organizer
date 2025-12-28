@@ -312,26 +312,7 @@ export default function People() {
     }, [showConfirm, addToast])
 
 
-    const renderClusterRow = useCallback((index: number) => {
-        const cluster = clusters[index];
-        if (!cluster || !cluster.faces) return null;
 
-        return (
-            <div className="border-b border-gray-800 pb-4 pr-2">
-                <ClusterRow
-                    faceIds={cluster.faces}
-                    index={index}
-                    selectedFaceIds={selectedFaceIds}
-                    toggleFace={toggleFace}
-                    toggleGroup={toggleGroup}
-                    fetchFacesByIds={fetchFacesByIds}
-                    onNameGroup={handleNameGroup}
-                    onIgnoreGroup={handleIgnoreGroup}
-                    onOpenNaming={handleOpenNaming}
-                />
-            </div>
-        );
-    }, [clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleOpenNaming]);
 
     return (
         <div className="flex flex-col h-full bg-gray-950 text-white overflow-hidden">

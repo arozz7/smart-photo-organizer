@@ -2255,7 +2255,7 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('db:getAllFaces', async (_, { limit = 100, offset = 0, filter = {} } = {}) => {
+  ipcMain.handle('db:getAllFaces', async (_, { limit = 100, offset = 0, filter = {}, includeDescriptors = true } = {}) => {
     const db = getDB();
     try {
       let query = `
@@ -2294,7 +2294,8 @@ app.whenReady().then(async () => {
       return faces.map((f: any) => ({
         ...f,
         box: JSON.parse(f.box_json),
-        descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : null,
+        // Optimize: Only send descriptors if requested. They are heavy (4KB each)
+        descriptor: includeDescriptors && f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : null,
         is_reference: !!f.is_reference
       }));
     } catch (error) {

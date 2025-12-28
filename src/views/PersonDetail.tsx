@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PersonFaceItem from '../components/PersonFaceItem';
 import BlurryFacesModal from '../components/BlurryFacesModal';
+import AllFacesModal from '../components/AllFacesModal';
 import TargetedScanModal from '../components/TargetedScanModal';
 import { useAlert } from '../context/AlertContext';
 import { useAI } from '../context/AIContext';
@@ -30,6 +31,7 @@ const PersonDetail = () => {
     const [person, setPerson] = useState<Person | null>(null);
     const [faces, setFaces] = useState<Face[]>([]);
     const [isBlurryModalOpen, setIsBlurryModalOpen] = useState(false);
+    const [isAllFacesModalOpen, setIsAllFacesModalOpen] = useState(false);
     const [isNameEditOpen, setIsNameEditOpen] = useState(false);
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -243,6 +245,17 @@ const PersonDetail = () => {
                     </button>
 
                     <button
+                        onClick={() => setIsAllFacesModalOpen(true)}
+                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                        title="Review complete list of faces"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                        </svg>
+                        Review All
+                    </button>
+
+                    <button
                         onClick={() => setIsScanModalOpen(true)}
                         disabled={isScanning}
                         className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
@@ -278,6 +291,14 @@ const PersonDetail = () => {
                 onOpenChange={setIsBlurryModalOpen}
                 personId={personId ? parseInt(personId) : null}
                 onDeleteComplete={loadData}
+            />
+
+            <AllFacesModal
+                isOpen={isAllFacesModalOpen}
+                onClose={() => setIsAllFacesModalOpen(false)}
+                personId={personId ? parseInt(personId) : 0}
+                personName={person.name}
+                onUpdate={loadData}
             />
 
             <div className="flex-1 overflow-y-auto pr-2">
