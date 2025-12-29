@@ -57,6 +57,7 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
       person_id INTEGER,
       is_ignored BOOLEAN DEFAULT 0,
       is_reference BOOLEAN DEFAULT 0,
+      score REAL,
       blur_score REAL,
       FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
       FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
@@ -98,6 +99,12 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
 
   try {
     db.exec('ALTER TABLE faces ADD COLUMN is_ignored BOOLEAN DEFAULT 0');
+  } catch (e) {
+    // Column likely already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN score REAL');
   } catch (e) {
     // Column likely already exists
   }

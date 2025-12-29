@@ -49,6 +49,7 @@ const buildCmd = [
     '--hidden-import modulefinder', // Required by torchvision (runtime)
     '--hidden-import cProfile',     // Required by torch (dynamo)
     '--hidden-import pstats',       // often used with cProfile
+    '--collect-all mpmath',         // Required by sympy (used by torch)
     '--collect-all imageio',
     '--collect-all rawpy',
     '--collect-all PIL',            // Ensure full Pillow is included

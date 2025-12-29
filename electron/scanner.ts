@@ -1,168 +1,29 @@
 import { promises as fs } from 'node:fs';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { ExifTool } from 'exiftool-vendored';
-import { getDB } from './db';
-import sharp from 'sharp';
 import logger from './logger';
+import { getDB } from './db';
 
-// Lazy load ExifTool
-let _exiftool: ExifTool | null = null;
-let _exiftoolInitPromise: Promise<ExifTool | null> | null = null;
-
-async function getExifTool(): Promise<ExifTool | null> {
-    if (_exiftool) return _exiftool;
-    if (_exiftoolInitPromise) return _exiftoolInitPromise;
-
-    _exiftoolInitPromise = (async () => {
-        try {
-            logger.info('Initializing ExifTool...');
-            // Create instance with timeout
-            const tool = new ExifTool({
-                taskTimeoutMillis: 5000,
-                maxProcs: 1
-            });
-
-            // Verify it works with a timeout
-            const initCheck = new Promise<string>((resolve, reject) => {
-                const timer = setTimeout(() => reject(new Error('ExifTool startup timed out')), 30000);
-                tool.version()
-                    .then(v => { clearTimeout(timer); resolve(v); })
-                    .catch(e => { clearTimeout(timer); reject(e); });
-            });
-
-            const version = await initCheck;
-            logger.info(`ExifTool started successfully. Version: ${version}`);
-            _exiftool = tool;
-            return tool;
-        } catch (err) {
-            logger.error('FAILED to initialize ExifTool. RAW support will be disabled.', err);
-            return null;
-        }
-    })();
-
-    return _exiftoolInitPromise;
+// Helper to get ExifTool from service
+export async function getExifTool(): Promise<ExifTool | null> {
+    const { PhotoService } = await import('./services/photoService');
+    return PhotoService.getExifTool();
 }
 
 const SUPPORTED_EXTS = ['.jpg', '.jpeg', '.png', '.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.tif', '.tiff'];
 
-// Helper to extract preview
-async function extractPreview(filePath: string, previewDir: string, forceRescan: boolean = false): Promise<string | null> {
-    // Use hash of filePath to ensure uniqueness across folders
-    const fileName = path.basename(filePath);
-    const hash = createHash('md5').update(filePath).digest('hex');
-    const previewName = `${hash}.jpg`;
-    const previewPath = path.join(previewDir, previewName);
-
-    try {
-        // Check if already exists (skip if forceRescan is FALSE)
-        if (!forceRescan) {
-            try {
-                await fs.access(previewPath);
-                return previewPath;
-            } catch {
-                // Start extraction
-            }
-        }
-
-        // Determine if RAW or TIF
-        const ext = path.extname(filePath).toLowerCase();
-        const isRaw = !['.jpg', '.jpeg', '.png'].includes(ext);
-
-        let rotationDegrees = 0;
-        let shouldRotate = false;
-
-        try {
-            const tool = await getExifTool();
-            if (tool) {
-                const tags = await tool.read(filePath, ['Orientation']);
-                if (tags?.Orientation) {
-                    const val = tags.Orientation as any;
-                    if (val === 1 || val === 'Horizontal (normal)') { rotationDegrees = 0; shouldRotate = false; }
-                    else if (val === 3 || val === 'Rotate 180') { rotationDegrees = 180; shouldRotate = true; }
-                    else if (val === 6 || val === 'Rotate 90 CW') { rotationDegrees = 90; shouldRotate = true; }
-                    else if (val === 8 || val === 'Rotate 270 CW') { rotationDegrees = 270; shouldRotate = true; }
-                }
-            }
-        } catch (e) {
-            logger.warn(`Failed to read orientation for ${fileName}, assuming upright.`);
-        }
-
-
-        if (isRaw) {
-            let extracted = false;
-            if (!['.tif', '.tiff'].includes(ext)) {
-                try {
-                    const tool = await getExifTool();
-                    if (tool) {
-                        const tempPreviewPath = `${previewPath}.tmp`;
-                        const timeoutPromise = new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error('Preview extraction timed out')), 15000)
-                        );
-                        await Promise.race([
-                            tool.extractPreview(filePath, tempPreviewPath),
-                            timeoutPromise
-                        ]);
-                        await fs.access(tempPreviewPath);
-
-                        const pipeline = sharp(tempPreviewPath);
-                        if (shouldRotate) pipeline.rotate(rotationDegrees);
-
-                        await pipeline
-                            .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
-                            .jpeg({ quality: 80 })
-                            .toFile(previewPath);
-
-                        try { await fs.unlink(tempPreviewPath); } catch { /* ignore */ }
-                        logger.info(`Extracted and normalized preview for ${fileName}`);
-                        extracted = true;
-                    }
-                } catch (e) {
-                    try { await fs.unlink(`${previewPath}.tmp`); } catch { /* ignore */ }
-                }
-            }
-
-            if (!extracted) {
-                try {
-                    logger.info(`Generating preview with Sharp for ${fileName}...`);
-                    const pipeline = sharp(filePath);
-                    if (shouldRotate) pipeline.rotate(rotationDegrees);
-
-                    await pipeline
-                        .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
-                        .jpeg({ quality: 80 })
-                        .toFile(previewPath);
-                    logger.info(`Generated preview with Sharp for ${fileName}`);
-                    extracted = true;
-                } catch (sharpErr) {
-                    logger.error(`Sharp conversion failed for ${fileName}:`, sharpErr);
-                }
-            }
-            if (extracted) return previewPath;
-        } else {
-            try {
-                const pipeline = sharp(filePath);
-                if (shouldRotate) pipeline.rotate(rotationDegrees);
-
-                await pipeline
-                    .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
-                    .jpeg({ quality: 80 })
-                    .toFile(previewPath);
-                return previewPath;
-            } catch (e) {
-                logger.error(`Failed to generate preview for image ${fileName}`, e);
-            }
-        }
-
-    } catch (e) {
-        logger.error(`Failed to extract/generate preview for ${filePath}`, e);
-    }
-    return null;
+// Helper to extract preview (delegated to PhotoService)
+export async function extractPreview(filePath: string, previewDir: string, forceRescan: boolean = false): Promise<string | null> {
+    const { PhotoService } = await import('./services/photoService');
+    return PhotoService.extractPreview(filePath, previewDir, forceRescan);
 }
 
 // Shared processing logic for a single file
 async function processFile(fullPath: string, previewDir: string, db: any, options: { forceRescan?: boolean } = {}) {
     const { forceRescan } = options;
+    if (fullPath.includes('_DSC7405')) {
+        logger.info(`[TRACE] Processing _DSC7405. ForceRescan: ${forceRescan}`);
+    }
     const ext = path.extname(fullPath).toLowerCase();
 
     if (!SUPPORTED_EXTS.includes(ext)) return null;
@@ -191,16 +52,27 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
             if (photo.preview_cache_path) {
                 try {
                     await fs.access(photo.preview_cache_path);
-                } catch {
+                    // DEBUG: Check stats
+                    const stats = await fs.stat(photo.preview_cache_path);
+                    if (stats.size === 0) {
+                        logger.warn(`[Scanner] Preview exists but is 0 bytes: ${photo.preview_cache_path}`);
+                        previewMissing = true;
+                    } else {
+                        logger.info(`[Scanner] Preview verified for ${path.basename(fullPath)} matches ${photo.preview_cache_path}`);
+                    }
+                } catch (accessErr) {
+                    logger.warn(`[Scanner] Preview missing (access failed) for ${fullPath} at ${photo.preview_cache_path}`);
                     previewMissing = true;
                 }
             } else {
+                logger.warn(`[Scanner] Preview path null in DB for ${fullPath}`);
                 previewMissing = true;
             }
 
             if (previewMissing || forceRescan) {
                 const tool = await getExifTool();
                 if (tool) {
+                    logger.info(`[Scanner] Starting RAW extraction for ${path.basename(fullPath)}`);
                     const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
                     if (previewPath) {
                         db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
@@ -210,7 +82,20 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
                 }
             }
         } else {
-            if (forceRescan) {
+            // Standard Image (JPG/PNG) - Verify existence too
+            if (photo.preview_cache_path) {
+                try {
+                    await fs.access(photo.preview_cache_path);
+                    const stats = await fs.stat(photo.preview_cache_path);
+                    if (stats.size === 0) previewMissing = true;
+                } catch {
+                    previewMissing = true;
+                }
+            } else {
+                previewMissing = true;
+            }
+
+            if (previewMissing || forceRescan) {
                 const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
                 if (previewPath) {
                     db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
@@ -281,6 +166,13 @@ export async function scanFiles(filePaths: string[], libraryPath: string, onProg
     await fs.mkdir(previewDir, { recursive: true });
 
     logger.info(`Scanning ${filePaths.length} specific files...`);
+    // TRACE DEBUG
+    const traceFile = filePaths.find(p => p.includes('_DSC7405'));
+    if (traceFile) {
+        logger.info(`[TRACE] Found target file in flush list: ${traceFile}`);
+    } else {
+        logger.info(`[TRACE] Target file _DSC7405 NOT found in current batch.`);
+    }
 
     for (const filePath of filePaths) {
         try {

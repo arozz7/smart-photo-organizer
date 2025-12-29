@@ -165,7 +165,8 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             try {
                 setLoadingPhotos(true)
                 // @ts-ignore
-                const newPhotos = await window.ipcRenderer.invoke('db:getPhotos', { limit: 50, offset: 0, filter })
+                const result = await window.ipcRenderer.invoke('db:getPhotos', { limit: 50, offset: 0, filter })
+                const newPhotos = result.photos || []
 
                 if (!didCancel) {
                     setPhotos(newPhotos)
@@ -191,8 +192,8 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     }
 
     const loadMorePhotos = async () => {
-        if (scanning || loadingPhotos || !isFilterComplete(filter)) {
-            console.log(`[ScanContext] loadMorePhotos skipped: scanning=${scanning}, loading=${loadingPhotos}, filterComplete=${isFilterComplete(filter)}`);
+        if (scanning || loadingPhotos || !isFilterComplete(filter) || !hasMore) {
+            console.log(`[ScanContext] loadMorePhotos skipped: scanning=${scanning}, loading=${loadingPhotos}, filterComplete=${isFilterComplete(filter)}, hasMore=${hasMore}`);
             return
         }
 
@@ -200,7 +201,8 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             console.log(`[ScanContext] Loading more photos... Offset: ${offset}`);
             setLoadingPhotos(true)
             // @ts-ignore
-            const newPhotos = await window.ipcRenderer.invoke('db:getPhotos', { limit: 50, offset, filter })
+            const result = await window.ipcRenderer.invoke('db:getPhotos', { limit: 50, offset, filter })
+            const newPhotos = result.photos || []
             console.log(`[ScanContext] Loaded ${newPhotos.length} photos.`);
 
             if (newPhotos.length < 50) {
@@ -313,7 +315,8 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         setScanning(true)
         try {
             // @ts-ignore
-            const pathsToScan = await window.ipcRenderer.invoke('db:getFilePaths', ids);
+            const filesData = await window.ipcRenderer.invoke('db:getFilePaths', ids);
+            const pathsToScan = filesData.map((f: any) => f.file_path);
 
             if (pathsToScan.length > 0) {
                 console.log(`[ScanContext] Rescanning ${pathsToScan.length} specific files...`);

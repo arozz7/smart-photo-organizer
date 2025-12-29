@@ -25,3 +25,9 @@ trigger: glob
 - Do not manipulate the DOM directly (no `document.getElementById`). Use Refs.
 - Do not put API calls directly inside `useEffect`. Abstract them to a service layer.
 - Do not prop-drill more than 2 layers. Use composition or Context.
+
+## Code Organization & Size Limits
+- **Soft Limit:** 300 lines.
+- **Hard Limit:** 600 lines.
+- **Action:** If a file exceeds the hard limit during editing, you MUST stop and suggest a refactor using `@RefactoringProtocol`.
+- **Single Responsibility:** Each file should export one main component/class or a cohesive set of utilities.

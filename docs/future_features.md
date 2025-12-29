@@ -54,6 +54,11 @@
 
 # ✅ Implemented Features
 
+## v0.4.0 (Stability Release)
+- **Architecture Refactor:** Modularized Main Process for better stability.
+- **Data Safety:** Fixed Face Assignment data loss during re-scans.
+- **Reduced Verbosity:** Cleaner logs for easier debugging.
+
 ## v0.3.6 (Upcoming/Main)
 - **Auto-Identify Optimization:**
     - Improved "Scan for All Named People" and "Auto-Identify" logic to capture faces missed in initial scans.

@@ -23,3 +23,9 @@ trigger: glob
 - Do not catch `Throwable` or `Error`. Catch specific Exceptions.
 - Do not use `System.out.println`. Use SLF4J/Logback.
 - Do not hardcode file separators (`/` or `\`). Use `File.separator`.
+
+## Code Organization & Size Limits
+- **Soft Limit:** 300 lines.
+- **Hard Limit:** 600 lines.
+- **Action:** If a file exceeds the hard limit during editing, you MUST stop and suggest a refactor using `@RefactoringProtocol`.
+- **Single Responsibility:** Each file should export one main component/class or a cohesive set of utilities.

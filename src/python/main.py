@@ -798,12 +798,109 @@ def handle_command(command):
                 for i, face_db_id in enumerate(ids):
                     id_map[start_idx + i] = face_db_id
                 
-                response = {"type": "add_to_index_result", "success": True, "count": index.ntotal}
+                response = {"type": "add_to_index_result", "success": True, "count": len(vectors)}
             else:
-                response = {"type": "add_to_index_result", "success": False, "error": "Mismatch or empty data"}
+                 response = {"type": "add_to_index_result", "success": False, "error": "Mismatch in vectors/ids length"}
         except Exception as e:
-            logger.error(f"Failed to add vectors: {e}")
+            logger.error(f"Failed to add to index: {e}")
             response = {"type": "add_to_index_result", "success": False, "error": str(e)}
+
+    elif cmd_type == 'generate_thumbnail':
+        # payload: { path: "...", width: 300, height: 300 (optional) }
+        path_str = payload.get('path')
+        width = payload.get('width', 300)
+        
+        logger.info(f"Generating thumbnail for: {path_str}")
+        try:
+            import base64
+            from io import BytesIO
+            from PIL import Image, ImageOps 
+            
+            # Robust Load (reuse logic if possible, but inline is safe)
+            pil_img = None
+            try:
+                pil_img = Image.open(path_str)
+                pil_img = ImageOps.exif_transpose(pil_img)
+            except Exception as e:
+                # RAW Fallback
+                try:
+                    logger.info("PIL load failed, trying rawpy...")
+                    with rawpy.imread(path_str) as raw:
+                        rgb = raw.postprocess(user_flip=None)
+                        pil_img = Image.fromarray(rgb)
+                except Exception as raw_e:
+                     raise ValueError(f"Failed to load image: {e} | {raw_e}")
+
+            # Resize
+            if pil_img:
+                pil_img.thumbnail((width, width))
+                # Convert to RGB if needed (e.g. RGBA -> RGB for JPEG)
+                if pil_img.mode in ('RGBA', 'P'):
+                    pil_img = pil_img.convert('RGB')
+                
+                # Save to Buffer
+                buffered = BytesIO()
+                pil_img.save(buffered, format="JPEG", quality=80)
+                img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                
+                response = {
+                    "type": "thumbnail_result", 
+                    "success": True, 
+                    "data": img_str,
+                    "contentType": "image/jpeg"
+                }
+        except Exception as e:
+            logger.error(f"Thumbnail generation failed: {e}")
+            response = {"type": "thumbnail_result", "success": False, "error": str(e)}
+
+
+
+    elif cmd_type == 'save_vector_index':
+        logger.info("Saving FAISS index (save_vector_index)...")
+        try:
+            save_faiss()
+            response = {"success": True}
+        except Exception as e:
+            logger.error(f"Failed to save index: {e}")
+            response = {"success": False, "error": str(e)}
+
+    elif cmd_type == 'add_faces_to_vector_index':
+        # payload: { faces: [{id, descriptor}, ...] }
+        faces = payload.get('faces', [])
+        logger.info(f"Adding {len(faces)} faces to FAISS index (add_faces_to_vector_index).")
+        try:
+            new_vectors = []
+            new_ids = []
+            
+            for f in faces:
+                if 'descriptor' in f and f['descriptor']:
+                     # Descriptor might be list or bytes used by JS
+                     # JS sends Array<number> usually
+                     desc = f['descriptor']
+                     if isinstance(desc, list):
+                         new_vectors.append(desc)
+                         new_ids.append(f['id'])
+            
+            if new_vectors:
+                if index is None:
+                    init_faiss()
+                
+                X = np.array(new_vectors).astype('float32')
+                faiss_lib.normalize_L2(X)
+                
+                start_idx = index.ntotal
+                index.add(X)
+                
+                for i, face_db_id in enumerate(new_ids):
+                    id_map[start_idx + i] = face_db_id
+                
+                response = {"success": True, "count": len(new_ids)}
+            else:
+                 response = {"success": True, "count": 0}
+
+        except Exception as e:
+            logger.error(f"Failed to add faces to index: {e}")
+            response = {"success": False, "error": str(e)}
 
     elif cmd_type == 'analyze_image':
         # Unified pipeline: Load -> Scan (Faces) -> Tag (VLM) -> Return
@@ -1556,9 +1653,9 @@ def handle_command(command):
                         file_payload = json.load(f)
                         faces_data = file_payload.get('faces', [])
                     
-                    # Cleanup
-                    try: os.remove(dpath)
-                    except: pass
+                    # Cleanup (Handled by Electron)
+                    # try: os.remove(dpath)
+                    # except: pass
                 except Exception as e:
                     logger.error(f"[Cluster] File Read Error: {e}")
         

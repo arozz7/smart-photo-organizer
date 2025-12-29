@@ -58,6 +58,13 @@ const logger = {
         console.error(...args);
         logStream.write(formatted);
     },
+    debug: (...args: any[]) => {
+        rotateLogIfNeeded();
+        const formatted = formatMsg('DEBUG', ...args);
+        // Only log to console in dev? Or always? Let's mirror others for now.
+        console.log(...args);
+        logStream.write(formatted);
+    },
     getLogPath: () => logFile
 };
 
