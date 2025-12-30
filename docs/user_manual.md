@@ -41,10 +41,12 @@ The AI automatically detects faces during the scan. Your job is to give them nam
 4.  **Cleaning Up:** Use the **"Cleanup Blurry Faces"** tool to bulk-manage low-quality captures. 
     - **Performance:** Optimized to handle selecting thousands of faces without slowing down.
     - **RAW Support:** View original "Context" photos even for RAW files (ARW, CR2, etc.).
+5.  **Ignored Faces:** Managing ignored faces is easy. Open the Ignored Faces modal to review hidden faces. Use the **"Group Similar"** button to automatically cluster them, making it much faster to find and restore a specific person you accidentally ignored.
 
 ---
 
 ## 🪄 4. AI Enhance Lab: Upgrading Your Memories
+
 
 Found an old, blurry, or low-resolution photo? Use the **Enhance Lab**.
 
@@ -123,4 +125,6 @@ Other Fine-Tuning controls:
 - **Tagging Creativity (Temperature):** 
     - **LOWER (0.1 - 0.3):** Factual, consistent descriptions. 
     - **HIGHER (0.7+):** Multi-sentence, descriptive, and "creative" tagging.
--   **Queue Management:** In the **Queues** tab, you can watch the AI working in real-time and adjust how many photos it processes at once to manage your computer's performance.
+     - **HIGHER (0.7+):** Multi-sentence, descriptive, and "creative" tagging.
+-   **Queue Management:** In the **Queues** tab, you can watch the AI working in real-time. 
+    -   **Manual Start:** The AI Queue starts in a **Paused** state to prevent slowing down your system on startup. Click **"Resume"** to begin processing pending tasks.

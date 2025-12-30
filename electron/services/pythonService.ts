@@ -97,18 +97,20 @@ export function startPythonBackend() {
                     // logger.info(`[Python] Cluster Result: ${message.clusters?.length || 0} clusters found.`);
                     // console.log(`[Python] Received Cluster Result for ${message.photoId || 'Batch'}. Clusters: ${message.clusters?.length}`);
                 } else if (message.type === 'search_result') {
-                    logger.info(`[Python] Search Result: ${message.matches?.length || 0} matches found.`);
+                    logger.debug(`[Python] Search Result: ${message.matches?.length || 0} matches found.`);
                 } else if (message.type === 'scan_result') {
                     const count = message.faces ? message.faces.length : 0;
-                    logger.info(`[Python] Scan Result: ${message.success ? 'Success' : 'Failed'} for ${message.photoId} (${count} faces).`);
+                    logger.debug(`[Python] Scan Result: ${message.success ? 'Success' : 'Failed'} for ${message.photoId} (${count} faces).`);
                 } else if (message.type === 'analysis_result') {
                     const count = message.faces ? message.faces.length : 0;
-                    logger.info(`[Python] Analysis Result: ${message.photoId} (${count} faces).`);
+                    logger.debug(`[Python] Analysis Result: ${message.photoId} (${count} faces).`);
                 } else if (message.type === 'tags_result') {
                     const count = message.tags ? message.tags.length : 0;
-                    logger.info(`[Python] Tags Result: ${message.photoId} (${count} tags).`);
+                    logger.debug(`[Python] Tags Result: ${message.photoId} (${count} tags).`);
                 } else if (message.type === 'download_progress') {
                     // Suppress progress logs
+                } else if (message.type === 'thumbnail_result') {
+                    // Suppress thumbnail binary data logs
                 } else {
                     logger.info('[Python]', message);
                 }
@@ -207,8 +209,15 @@ export function startPythonBackend() {
 function syncInitialSettings() {
     if (pythonProcess && pythonProcess.stdin) {
         const aiSettings = getAISettings();
-        const configCmd = { type: 'update_config', payload: { config: aiSettings } };
+        // Determine VLM status based on profile
+        const vlmEnabled = aiSettings.aiProfile === 'high';
+
+        // Pass explicit vlmEnabled flag in config payload
+        const configPayload = { ...aiSettings, vlmEnabled };
+
+        const configCmd = { type: 'update_config', payload: { config: configPayload } };
         pythonProcess.stdin.write(JSON.stringify(configCmd) + '\n');
+        logger.info(`[PythonService] Sent initial config (VLM: ${vlmEnabled})`);
     }
 }
 

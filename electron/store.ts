@@ -11,6 +11,7 @@ interface StoreSchema {
         vlmTemperature: number;
         vlmMaxTokens: number;
         hideUnnamedFacesByDefault: boolean;
+        aiProfile: 'balanced' | 'high';
     }
     windowBounds: {
         width: number;
@@ -28,8 +29,9 @@ const store = new Store<StoreSchema>({
             faceSimilarityThreshold: 0.65, // Add new setting
             faceBlurThreshold: 20.0,
             vlmTemperature: 0.2,
-            vlmMaxTokens: 100,
-            hideUnnamedFacesByDefault: true
+            vlmMaxTokens: 512,
+            hideUnnamedFacesByDefault: true,
+            aiProfile: 'balanced'
         },
         windowBounds: {
             width: 1200,

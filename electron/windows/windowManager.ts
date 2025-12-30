@@ -1,4 +1,4 @@
-import { BrowserWindow, globalShortcut, screen } from 'electron';
+import { BrowserWindow, screen } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as fs from 'node:fs/promises';
@@ -125,16 +125,12 @@ export class WindowManager {
         // Remove the file menu
         this.win.setMenu(null);
 
-        // Register DevTools shortcut on focus
-        this.win.on('focus', () => {
-            globalShortcut.register('CommandOrControl+Shift+I', () => {
+        // Local shortcut for DevTools
+        this.win.webContents.on('before-input-event', (event, input) => {
+            if (input.control && input.shift && input.key.toLowerCase() === 'i') {
                 this.win?.webContents.toggleDevTools();
-            });
-        });
-
-        // Unregister on blur
-        this.win.on('blur', () => {
-            globalShortcut.unregister('CommandOrControl+Shift+I');
+                event.preventDefault();
+            }
         });
 
         this.win.once('ready-to-show', () => {

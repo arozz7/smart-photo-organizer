@@ -113,7 +113,7 @@ const ClusterRow = memo(({
                                 }`}
                         >
                             <FaceThumbnail
-                                src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
+                                src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}?width=400`}
                                 box={face.box}
                                 originalImageWidth={face.width}
                                 className="w-full h-full object-cover"

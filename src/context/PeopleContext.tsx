@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react'
+import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react'
 
 interface Person {
     id: number
@@ -41,7 +41,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     const [faces, setFaces] = useState<Face[]>([])
     const [loading, setLoading] = useState(false)
 
-    const loadPeople = async () => {
+    const loadPeople = useCallback(async () => {
         setLoading(true)
         try {
             // @ts-ignore
@@ -52,9 +52,9 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         } finally {
             setLoading(false)
         }
-    }
+    }, [])
 
-    const loadFaces = async (filter: any = {}) => {
+    const loadFaces = useCallback(async (filter: any = {}) => {
         setLoading(true)
         try {
             // @ts-ignore
@@ -65,9 +65,9 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         } finally {
             setLoading(false)
         }
-    }
+    }, [])
 
-    const loadUnnamedFaces = async () => {
+    const loadUnnamedFaces = useCallback(async () => {
         try {
             // New Architecture: fetch CLUSTERS (IDs only)
             // @ts-ignore
@@ -78,9 +78,9 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
             console.error(e);
             return { clusters: [], singles: [] };
         }
-    }
+    }, [])
 
-    const fetchFacesByIds = async (ids: number[]) => {
+    const fetchFacesByIds = useCallback(async (ids: number[]) => {
         try {
             // @ts-ignore
             const result = await window.ipcRenderer.invoke('db:getFacesByIds', ids);
@@ -90,9 +90,9 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
             console.error("Failed to fetch faces by IDs", e);
             return [];
         }
-    }
+    }, [])
 
-    const ignoreFace = async (faceId: number) => {
+    const ignoreFace = useCallback(async (faceId: number) => {
         try {
             // @ts-ignore
             await window.ipcRenderer.invoke('db:ignoreFace', faceId)
@@ -101,9 +101,9 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         } catch (e) {
             console.error("Failed to ignore face", e)
         }
-    }
+    }, [])
 
-    const ignoreFaces = async (faceIds: number[]) => {
+    const ignoreFaces = useCallback(async (faceIds: number[]) => {
         try {
             console.log(`[PeopleContext] Ignoring ${faceIds.length} faces:`, faceIds);
             // @ts-ignore
@@ -117,9 +117,9 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         } catch (e) {
             console.error("Failed to ignore faces", e)
         }
-    }
+    }, [])
 
-    const autoNameFaces = async (faceIds: number[], name: string) => {
+    const autoNameFaces = useCallback(async (faceIds: number[], name: string) => {
         try {
             for (const id of faceIds) {
                 // @ts-ignore
@@ -130,19 +130,19 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         } catch (e) {
             console.error("Failed to auto name faces", e)
         }
-    }
+    }, [loadPeople])
 
 
-    const rebuildIndex = async () => {
+    const rebuildIndex = useCallback(async () => {
         // @ts-ignore
         const res = await window.ipcRenderer.invoke('ai:rebuildIndex');
         if (res.success) {
             console.log(`[PeopleContext] Index rebuilt with ${res.count} vectors.`);
         }
         return res;
-    };
+    }, []);
 
-    const assignPerson = async (faceId: number, name: string) => {
+    const assignPerson = useCallback(async (faceId: number, name: string) => {
         try {
             console.log('[PeopleContext] Assigning person:', { faceId, name });
             const namedFace = faces.find(f => f.id === faceId); // Capture before removal
@@ -195,7 +195,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         } catch (e) {
             console.error("Failed to assign person", e)
         }
-    }
+    }, [faces, loadPeople])
 
     const value = React.useMemo(() => ({
         people, faces, loading,

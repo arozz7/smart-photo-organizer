@@ -40,7 +40,65 @@ export function registerAIHandlers() {
             return { success: false, error: 'Missing filePath for analysis' };
         }
 
+        // Debug Settings Propagation
+        if (rest.enableVLM !== undefined) {
+            logger.info(`[Main] Analyze Request for ${photoId} - VLM: ${rest.enableVLM}`);
+        }
+
         return await sendRequestToPython('analyze_image', { photoId, filePath, ...rest }, 300000);
+    });
+
+    ipcMain.handle('ai:generateTags', async (_event, { photoId }) => {
+        const { getDB } = await import('../db');
+        const db = getDB();
+        try {
+            const photo = db.prepare('SELECT file_path FROM photos WHERE id = ?').get(photoId) as { file_path: string };
+            if (photo && photo.file_path) {
+                const result = await sendRequestToPython('generate_tags', { photoId, filePath: photo.file_path }, 60000);
+
+                // Save results to DB
+                if (result && !result.error && (result.description || result.tags)) {
+                    const updates = [];
+                    // 1. Save Description
+                    if (result.description) {
+                        try {
+                            db.prepare('UPDATE photos SET description = ? WHERE id = ?').run(result.description, photoId);
+                            updates.push("Description saved");
+                        } catch (err: any) {
+                            // Ignore if column missing (migration should have run, but safe fallback)
+                            logger.warn("Could not save description:", err.message);
+                        }
+                    }
+
+                    // 2. Save Tags
+                    if (result.tags && Array.isArray(result.tags)) {
+                        const insertTag = db.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)');
+                        const getTagId = db.prepare('SELECT id FROM tags WHERE name = ?');
+                        const linkTag = db.prepare('INSERT OR IGNORE INTO photo_tags (photo_id, tag_id, source) VALUES (?, ?, ?)');
+
+                        const trx = db.transaction(() => {
+                            for (const tag of result.tags) {
+                                const cleanTag = tag.toLowerCase().trim();
+                                if (!cleanTag) continue;
+
+                                insertTag.run(cleanTag);
+                                const row = getTagId.get(cleanTag) as { id: number };
+                                if (row) {
+                                    linkTag.run(photoId, row.id, 'ai');
+                                }
+                            }
+                        });
+                        trx();
+                        updates.push(`Tags saved: ${result.tags.length}`);
+                    }
+                    result.dbStatus = updates.join(", ");
+                }
+                return result;
+            }
+            return { success: false, error: 'Photo not found' };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
     });
 
     // Handle Settings
@@ -174,6 +232,72 @@ COUNT(*) as total,
             return { success: true, stats };
         } catch (e) {
             return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('ai:clusterFaces', async (_event, { faceIds, eps, min_samples }) => {
+        try {
+            const db = getDB();
+            const crypto = await import('node:crypto');
+            logger.info(`[IPC] Requesting clustering for ${faceIds?.length} specific faces...`);
+
+            if (!faceIds || faceIds.length === 0) {
+                return { clusters: [], singles: [] };
+            }
+
+            // 1. Fetch RAW descriptors for specific IDs
+            const placeholders = faceIds.map(() => '?').join(',');
+            const faces = db.prepare(`
+                SELECT id, descriptor
+                FROM faces
+                WHERE id IN (${placeholders})
+                AND descriptor IS NOT NULL
+            `).all(...faceIds);
+
+            if (faces.length === 0) {
+                return { clusters: [], singles: [] };
+            }
+
+            const formattedFaces = faces.map((f: any) => ({
+                id: f.id,
+                descriptor: Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4))
+            }));
+
+            // 2. Write to Temp File
+            const reqId = crypto.randomUUID();
+            const tempFile = path.join(app.getPath('temp'), `cluster_payload_${reqId}.json`);
+
+            const fileHandle = await fs.open(tempFile, 'w');
+            try {
+                await fileHandle.write('{"faces":[');
+                for (let i = 0; i < formattedFaces.length; i++) {
+                    if (i > 0) await fileHandle.write(',');
+                    await fileHandle.write(JSON.stringify(formattedFaces[i]));
+                }
+                await fileHandle.write(']}');
+            } finally {
+                await fileHandle.close();
+            }
+
+            logger.info(`[IPC] Descriptors written to ${tempFile}. Invoking Python...`);
+
+            // 3. Call Python
+            const res: any = await sendRequestToPython('cluster_faces', {
+                reqId,
+                dataPath: tempFile,
+                eps: eps || 0.6,
+                min_samples: min_samples || 2
+            }, 300000);
+
+            // Clean up
+            try { await fs.unlink(tempFile); } catch { }
+
+            if (res.error) throw new Error(res.error);
+            return res;
+
+        } catch (e) {
+            logger.error('Targeted Clustering Failed:', e);
+            return { error: String(e), clusters: [], singles: [] };
         }
     });
 

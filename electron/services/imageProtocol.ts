@@ -9,7 +9,8 @@ import { pathToFileURL } from 'node:url';
 // Base64 for 1x1 transparent PNG
 const TRANSPARENT_1X1_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 
-export function registerImageProtocol(fallbackGenerator?: (path: string, width?: number) => Promise<Buffer | null>) {
+// Fallback generator provided by main process (calls Python)
+export function registerImageProtocol(fallbackGenerator?: (path: string, width?: number, box?: string) => Promise<Buffer | null>) {
     protocol.handle('local-resource', async (request) => {
         let decodedPath = '';
         try {
@@ -29,12 +30,6 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
 
             // 2. Decode the path
             decodedPath = decodeURIComponent(rawPath);
-
-            // DEBUG LOGGING
-            if (decodedPath.includes('_DSC7104') || decodedPath.includes('DSC7104')) {
-                logger.info(`[Protocol] Request: ${request.url}`);
-                logger.info(`[Protocol] Raw: ${rawPath} -> Decoded: ${decodedPath}`);
-            }
 
             // 3. Strip query string (manually, as regex replacement might be fragile with paths containing ?)
             const queryIndex = decodedPath.indexOf('?');
@@ -73,6 +68,7 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
 
                                 // Checking for originalWidth to perform checking
                                 const originalWidth = urlObj.searchParams.get('originalWidth') ? parseInt(urlObj.searchParams.get('originalWidth')!) : null;
+
                                 if (originalWidth && originalWidth > 0 && metadata.width !== originalWidth) {
                                     const scale = metadata.width / originalWidth;
                                     finalX = x * scale;
@@ -114,7 +110,7 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
                         const row = db.prepare('SELECT preview_cache_path FROM photos WHERE file_path = ?').get(decodedPath) as { preview_cache_path: string };
 
                         if (row && row.preview_cache_path) {
-                            logger.info(`[Protocol] Using Fallback Preview for ${decodedPath} -> ${row.preview_cache_path}`);
+                            // logger.info(`[Protocol] Using Fallback Preview for ${decodedPath} -> ${row.preview_cache_path}`);
                             // Verify preview file exists
                             await fs.access(row.preview_cache_path);
 
@@ -142,6 +138,7 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
 
                                 if (originalWidth && pMeta.width) {
                                     const scale = pMeta.width / originalWidth;
+                                    logger.debug(`[Protocol] RAW Preview Scale for ${decodedPath}: Width=${pMeta.width}, Original=${originalWidth}, Scale=${scale}`);
                                     const [x, y, w, h] = boxParts;
                                     const nx = Math.round(x * scale);
                                     const ny = Math.round(y * scale);
@@ -154,6 +151,8 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
                                         width: Math.min(nw, pMeta.width! - nx),
                                         height: Math.min(nh, pMeta.height! - ny)
                                     });
+                                } else if (!originalWidth && pMeta.width) {
+                                    logger.warn(`[Protocol] RAW Preview missing 'originalWidth' param for ${decodedPath}. Cannot scale crop box.`);
                                 }
                             }
 
@@ -169,22 +168,113 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
                         logger.warn(`[Protocol] Preview fallback failed for ${decodedPath}: ${fbErr}`);
                     }
 
-                    // Log to scan_errors for user visibility
-                    try {
-                        const db = getDB();
-                        // ... (existing logging logic) ->
-                        const photoParam = urlObj.searchParams.get('photoId');
-                        let photoId = photoParam ? parseInt(photoParam) : null;
+                    // RECOVERY STRATEGY: If this was a preview file that failed (corrupt?), try to find original source
+                    const match = decodedPath.match(/previews[\\\/]([a-f0-9]+)\.jpg/);
+                    if (match && match[1]) {
+                        try {
+                            const db = getDB();
+                            const row = db.prepare('SELECT file_path FROM photos WHERE preview_cache_path LIKE ?').get(`%${match[1]}%`) as { file_path: string };
+                            if (row && row.file_path) {
+                                const srcPath = row.file_path;
+                                // logger.info(`[Protocol] Inner Recovery: Preview corrupt, falling back to original: ${srcPath}`);
 
-                        if (!photoId) {
-                            const row = db.prepare('SELECT id FROM photos WHERE file_path = ?').get(decodedPath) as { id: number };
-                            if (row) photoId = row.id;
+                                // Recurse? No, explicit fallback logic for original
+                                const srcExt = path.extname(srcPath).toLowerCase();
+                                const isSrcRaw = ['.nef', '.arw', '.cr2', '.dng', '.orf', '.rw2'].includes(srcExt);
+
+                                if (isSrcRaw && fallbackGenerator) {
+                                    // For RAW, use Python. 
+                                    const fbWidth = width || 300;
+                                    // Pass box if available
+                                    const fbBuffer = await fallbackGenerator(srcPath, fbWidth, boxParam ? boxParam : undefined);
+                                    if (fbBuffer) {
+                                        return new Response(fbBuffer as any, { headers: { 'Content-Type': 'image/jpeg', 'X-Generated-By': 'Python-Recover-RAW' } });
+                                    }
+                                } else {
+                                    // For non-RAW, use Sharp or Net fetch
+                                    // If box provided, use Sharp on original
+                                    if (boxParam) {
+                                        // Re-run sharp pipeline on ORIGINAL
+                                        // logger.info(`[Protocol] Re-trying crop on original: ${srcPath}`);
+                                        let pipeline = sharp(srcPath).rotate();
+
+                                        const [x, y, w, h] = boxParam.split(',').map(Number);
+                                        if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
+                                            pipeline = pipeline.extract({ left: x, top: y, width: w, height: h });
+                                        }
+                                        if (width) {
+                                            pipeline = pipeline.resize(width, width, { fit: 'cover' }); // Thumbnail crops are usually square
+                                        }
+
+                                        const buffer = await pipeline.toBuffer();
+                                        return new Response(buffer as any, { headers: { 'Content-Type': 'image/jpeg' } });
+                                    } else {
+                                        return await net.fetch(pathToFileURL(srcPath).toString());
+                                    }
+                                }
+                            }
+                        } catch (recErr) {
+                            logger.warn(`[Protocol] Inner Recovery failed: ${recErr}`);
                         }
+                    }
 
-                        db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, ?, ?, ?)').run(photoId, decodedPath, errMessage, 'Preview Generation');
 
-                    } catch (dbErr) {
-                        logger.error("[Protocol] Failed to log error to DB", dbErr);
+                    // Try Python Fallback (mainly for RAW files that Sharp cannot handle)
+                    // This runs if decodedPath is the RAW file itself and sharp failed
+                    if (fallbackGenerator) {
+                        try {
+                            // If it's a RAW file request (no preview in path)
+                            const ext = path.extname(decodedPath).toLowerCase();
+                            const isRaw = ['.nef', '.arw', '.cr2', '.dng', '.orf', '.rw2'].includes(ext);
+
+                            if (isRaw || boxParam || !boxParam) { // ALWAYS try Python fallback if Sharp failed, especially for RAW or complex crops
+                                const fbWidth = width || 300;
+                                // logger.debug(`[Protocol] Attempting Python Fallback for ${decodedPath} (box=${boxParam})`);
+                                const fbBuffer = await fallbackGenerator(decodedPath, fbWidth, boxParam ? boxParam : undefined);
+                                if (fbBuffer) {
+                                    return new Response(fbBuffer as any, {
+                                        headers: {
+                                            'Content-Type': 'image/jpeg',
+                                            'X-Generated-By': 'Python-Fallback'
+                                        }
+                                    });
+                                }
+                            }
+                        } catch (pyErr) {
+                            logger.warn(`[Protocol] Python Fallback (Resize) failed: ${pyErr}`);
+                        }
+                    }
+
+                    // Check for silent 404
+                    const isSilent404 = request.url.includes('silent_404=true');
+                    if (isSilent404) {
+                        return new Response(TRANSPARENT_1X1_PNG, {
+                            status: 200,
+                            headers: {
+                                'Content-Type': 'image/png',
+                                'Cache-Control': 'no-cache'
+                            }
+                        });
+                    }
+
+                    // Log to scan_errors for user visibility
+                    if (!isSilent404) {
+                        try {
+                            const db = getDB();
+                            const photoParam = urlObj.searchParams.get('photoId');
+                            let photoId = photoParam ? parseInt(photoParam) : null;
+
+                            if (!photoId) {
+                                const row = db.prepare('SELECT id FROM photos WHERE file_path = ?').get(decodedPath) as { id: number };
+                                if (row) photoId = row.id;
+                            }
+
+                            if (photoId) {
+                                db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, ?, ?, ?)').run(photoId, decodedPath, errMessage, 'Preview Generation');
+                            }
+                        } catch (dbErr) {
+                            logger.error("[Protocol] Failed to log error to DB", dbErr);
+                        }
                     }
 
                     return new Response('Thumbnail Generation Failed', { status: 500 });
@@ -215,13 +305,13 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
                     }
 
                     // 2. Fallback: Convert RAW on the fly (Slow but valid)
-                    logger.info(`[Protocol] Converting RAW on-the-fly: ${decodedPath}`);
+                    // logger.info(`[Protocol] Converting RAW on-the-fly: ${decodedPath}`);
                     const startRaw = Date.now();
                     const buffer = await sharp(decodedPath)
                         .rotate()
                         .toFormat('jpeg', { quality: 80 })
                         .toBuffer();
-                    logger.info(`[Protocol] RAW Conversion done (${Date.now() - startRaw}ms): ${decodedPath}`);
+                    // logger.info(`[Protocol] RAW Conversion done (${Date.now() - startRaw}ms): ${decodedPath}`);
 
                     return new Response(buffer as any, { headers: { 'Content-Type': 'image/jpeg' } });
 
@@ -347,7 +437,7 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
                     });
                 }
 
-                logger.info(`[Protocol] File missing: ${decodedPath}`);
+                // logger.info(`[Protocol] File missing: ${decodedPath}`);
             } else {
                 logger.error(`[Protocol] Failed to handle request: ${request.url}`, e);
             }

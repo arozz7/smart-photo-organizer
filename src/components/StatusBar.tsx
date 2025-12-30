@@ -11,7 +11,8 @@ export default function StatusBar() {
         processingQueue,
         isThrottled,
         isProcessing,
-        isPaused
+        isPaused,
+        setIsPaused
     } = useAI();
     const { scanning, scanCount } = useScan();
 
@@ -74,6 +75,25 @@ export default function StatusBar() {
             </div>
 
             <div className="flex items-center gap-4">
+                <button
+                    onClick={() => setIsPaused(!isPaused)}
+                    className={`px-3 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-2 border ${isPaused
+                        ? 'bg-amber-500/10 text-amber-500 border-amber-500/30 hover:bg-amber-500/20'
+                        : 'bg-green-500/10 text-green-500 border-green-500/30 hover:bg-green-500/20'
+                        }`}
+                >
+                    {isPaused ? (
+                        <>
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                            Resume
+                        </>
+                    ) : (
+                        <>
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                            Pause AI
+                        </>
+                    )}
+                </button>
                 {isThrottled && (
                     <span className="flex items-center gap-1.5 text-yellow-500/80 font-medium" title="Background processing slowed down to keep UI responsive">
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">

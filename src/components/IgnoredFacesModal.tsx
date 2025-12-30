@@ -92,7 +92,8 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                     min_samples: 2
                 })
 
-                if (res.success && res.clusters) {
+                // Backend might not return 'success: true' for this specific command, just 'clusters'
+                if (res.clusters) {
                     const idMap = new Map(faces.map(f => [f.id, f]))
 
                     const newClusters = res.clusters.map((clusterIds: number[], idx: number) => ({
@@ -101,13 +102,16 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                     }))
 
                     // Identify singles (faces not in any cluster)
-                    // Note: clusterFaces usually returns ALL valid IDs, singles too
-                    // But if our py logic doesn't, we calc diff
                     const clusteredIds = new Set(res.clusters.flat())
                     const newSingles = faces.filter(f => !clusteredIds.has(f.id))
 
                     setClusters(newClusters)
                     setSingles(newSingles)
+                } else {
+                    // No clusters found or unexpected response
+                    console.warn("Clustering returned no clusters or invalid format:", res)
+                    setClusters([])
+                    setSingles(faces) // Show all as singles
                 }
             } catch (e) {
                 console.error("Clustering failed", e)

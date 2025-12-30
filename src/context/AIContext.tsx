@@ -119,7 +119,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [isProcessing, setIsProcessing] = useState(false);
 
     // Queue Control State
-    const [isPaused, setIsPaused] = useState(false);
+    const [isPaused, setIsPaused] = useState(true);
 
     // Persistence for Queue Config
     const [queueConfig, setQueueConfig] = useState<QueueConfig>({ batchSize: 0, cooldownSeconds: 60 });
@@ -585,19 +585,36 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setCurrentBatchCount(0);
     };
 
+    // Load AI Profile to determine default mode
+    const aiProfileRef = useRef<'balanced' | 'high'>('balanced');
+
+    useEffect(() => {
+        // @ts-ignore
+        window.ipcRenderer.invoke('ai:getSettings').then((settings: any) => {
+            if (settings && settings.aiProfile) {
+                aiProfileRef.current = settings.aiProfile;
+                console.log('[AIContext] Loaded AI Profile:', settings.aiProfile);
+            }
+        });
+    }, []);
+
     // Add items to queue (deduplicate based on ID + Mode)
     const addToQueue = useCallback((newPhotos: any[]) => {
         setProcessingQueue(prev => {
+            // Determine default mode based on profile
+            const defaultMode = aiProfileRef.current === 'high' ? 'MACRO' : 'FAST';
+
             // Create a set of composite keys "ID:MODE" for existing items
-            const existingKeys = new Set(prev.map(p => `${p.id}:${p.scanMode || 'FAST'}`));
+            const existingKeys = new Set(prev.map(p => `${p.id}:${p.scanMode || defaultMode}`));
 
             const unique = newPhotos.filter(p => {
-                const key = `${p.id}:${p.scanMode || 'FAST'}`;
+                const mode = p.scanMode || defaultMode;
+                const key = `${p.id}:${mode}`;
                 return !existingKeys.has(key);
-            });
+            }).map(p => ({ ...p, scanMode: p.scanMode || defaultMode }));
 
             if (unique.length > 0) {
-                console.log(`[AI] Added ${unique.length} items to queue`);
+                console.log(`[AI] Added ${unique.length} items to queue (Default Mode: ${defaultMode})`);
             }
 
             return [...prev, ...unique];
@@ -657,17 +674,22 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             // - BALANCED: Faces + Tags (Maybe?)
             // - HIGH: Faces + Tags
 
-            const isHighAccuracy = photo.scanMode === 'BALANCED' || photo.scanMode === 'MACRO' || aiMode === 'GPU';
-            const enableVLM = vlmEnabled && isHighAccuracy && photo.scanMode !== 'FAST';
+            // Dynamic Mode Upgrade
+            // If profile is High Accuracy but item is FAST (e.g. race condition on startup), upgrade it.
+            let effectiveMode = photo.scanMode || 'FAST';
+            if (aiProfileRef.current === 'high' && effectiveMode === 'FAST') {
+                effectiveMode = 'MACRO';
+                console.log(`[AI] Auto-upgraded ${photo.id} to MACRO mode based on profile.`);
+            }
 
-            // If explicit "FORCE TAGS" task, we might need a separate mode.
-            // For now, follow the heuristic.
+            const isHighAccuracy = effectiveMode === 'BALANCED' || effectiveMode === 'MACRO' || aiMode === 'GPU';
+            const enableVLM = vlmEnabled && isHighAccuracy && effectiveMode !== 'FAST';
 
             try {
                 // @ts-ignore
                 await window.ipcRenderer.invoke('ai:analyzeImage', {
                     photoId: photo.id,
-                    scanMode: photo.scanMode || 'FAST',
+                    scanMode: effectiveMode,
                     enableVLM
                 });
 

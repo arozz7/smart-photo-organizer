@@ -127,6 +127,12 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     // Column likely already exists
   }
 
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN description TEXT');
+  } catch (e) {
+    // Column likely already exists
+  }
+
   // --- MIGRATION: Smart Face Storage (BLOBs + Pruning) ---
   try {
     // 1. Add new columns
@@ -850,23 +856,37 @@ export function getFacesByIds(ids: number[]) {
 
     const placeholders = ids.map(() => '?').join(',');
     const faces = db.prepare(`
-      SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
+      SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height, p.metadata_json
       FROM faces f
       JOIN photos p ON f.photo_id = p.id
       WHERE f.id IN (${placeholders})
     `).all(...ids);
 
-    const formatted = faces.map((f: any) => ({
-      id: f.id,
-      photo_id: f.photo_id,
-      descriptor: [], // Not needed for display
-      blur_score: f.blur_score,
-      box: JSON.parse(f.box_json),
-      file_path: f.file_path,
-      preview_cache_path: f.preview_cache_path,
-      width: f.width,
-      height: f.height
-    }));
+    const formatted = faces.map((f: any) => {
+      let width = f.width;
+      let height = f.height;
+
+      // Fallback: If dimensions missing, try metadata
+      if ((!width || !height) && f.metadata_json) {
+        try {
+          const meta = JSON.parse(f.metadata_json);
+          width = width || meta.ImageWidth || meta.SourceImageWidth || meta.ExifImageWidth;
+          height = height || meta.ImageHeight || meta.SourceImageHeight || meta.ExifImageHeight;
+        } catch (e) { /* ignore */ }
+      }
+
+      return {
+        id: f.id,
+        photo_id: f.photo_id,
+        descriptor: [], // Not needed for display
+        blur_score: f.blur_score,
+        box: JSON.parse(f.box_json),
+        file_path: f.file_path,
+        preview_cache_path: f.preview_cache_path,
+        width: width,
+        height: height
+      };
+    });
 
     return { success: true, faces: formatted };
   } catch (e) {
