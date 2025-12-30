@@ -47,7 +47,7 @@ export class PhotoService {
         return this._exiftoolInitPromise;
     }
 
-    static async extractPreview(filePath: string, previewDir: string, forceRescan: boolean = false): Promise<string | null> {
+    static async extractPreview(filePath: string, previewDir: string, forceRescan: boolean = false, throwOnError: boolean = false): Promise<string | null> {
         // Use hash of NORMALIZED filePath to ensure consistency (Forward Slashes)
         const normalizedPath = filePath.replace(/\\/g, '/');
         const fileName = path.basename(filePath);
@@ -109,7 +109,7 @@ export class PhotoService {
                             if (shouldRotate) pipeline.rotate(rotationDegrees);
 
                             await pipeline
-                                .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+                                .resize(2560, 2560, { fit: 'inside', withoutEnlargement: true })
                                 .jpeg({ quality: 80 })
                                 .toFile(previewPath);
 
@@ -117,38 +117,74 @@ export class PhotoService {
                             try {
                                 const stats = await fs.stat(previewPath);
                                 if (stats.size === 0) throw new Error("Zero byte preview file");
-                                logger.info(`Valid preview generated at ${previewPath} (${stats.size} bytes)`);
+                                if (stats.size === 0) throw new Error("Zero byte preview file");
+                                logger.debug(`Valid preview generated at ${previewPath} (${stats.size} bytes)`);
                             } catch (verifyErr) {
                                 logger.error(`Preview verification failed for ${previewPath}`, verifyErr);
                                 throw verifyErr; // Trigger fallback
                             }
 
                             try { await fs.unlink(tempPreviewPath); } catch { /* ignore */ }
-                            logger.info(`Extracted and normalized preview for ${fileName}`);
+                            try { await fs.unlink(tempPreviewPath); } catch { /* ignore */ }
+                            logger.debug(`Extracted and normalized preview for ${fileName}`);
                             extracted = true;
                         }
                     } catch (e: any) {
-                        logger.warn(`ExifTool preview extraction failed for ${fileName}: ${e.message || JSON.stringify(e)}`);
+                        logger.debug(`ExifTool preview extraction failed for ${fileName}: ${e.message || JSON.stringify(e)}`);
                         try { await fs.unlink(`${previewPath}.tmp`); } catch { /* ignore */ }
                     }
                 }
 
                 if (!extracted) {
                     try {
-                        logger.info(`Generating preview with Sharp for ${fileName}...`);
+                        logger.debug(`Generating preview with Sharp for ${fileName}...`);
                         const pipeline = sharp(filePath);
                         if (shouldRotate) pipeline.rotate(rotationDegrees);
 
                         await pipeline
-                            .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+                            .resize(2560, 2560, { fit: 'inside', withoutEnlargement: true })
                             .jpeg({ quality: 80 })
                             .toFile(previewPath);
-                        logger.info(`Generated preview with Sharp for ${fileName}`);
+                        logger.debug(`Generated preview with Sharp for ${fileName}`);
                         extracted = true;
                     } catch (sharpErr) {
-                        logger.error(`Sharp conversion failed for ${fileName}:`, sharpErr);
+                        logger.debug(`Sharp conversion failed for ${fileName}:`, sharpErr);
+                        // Store error for potential throw
+                        if (!extracted && !['.tif', '.tiff'].includes(ext)) {
+                            // Only throw if this was the last resort for RAW? 
+                            // No, we have Python fallback.
+                        }
                     }
                 }
+
+                // Python Fallback for RAW
+                if (!extracted) {
+                    let pythonError = null;
+                    try {
+                        logger.debug(`Attempting Python fallback execution for ${fileName}...`);
+                        // @ts-ignore
+                        const res = await sendRequestToPython('generate_thumbnail', {
+                            path: filePath,
+                            width: 2560
+                        }, 60000);
+
+                        if (res && res.success && res.data) {
+                            await fs.writeFile(previewPath, Buffer.from(res.data, 'base64'));
+                            logger.debug(`Generated preview with Python for ${fileName}`);
+                            extracted = true;
+                        } else if (res && !res.success) {
+                            pythonError = res.error;
+                        }
+                    } catch (pyErr) {
+                        logger.error(`Python fallback failed for ${fileName}`, pyErr);
+                        pythonError = pyErr;
+                    }
+
+                    if (!extracted && throwOnError && pythonError) {
+                        throw new Error(`Python fallback failed: ${pythonError}`);
+                    }
+                }
+
                 if (extracted) return previewPath;
             } else {
                 try {
@@ -157,7 +193,7 @@ export class PhotoService {
                     if (shouldRotate) pipeline.rotate(rotationDegrees);
 
                     await pipeline
-                        .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+                        .resize(2560, 2560, { fit: 'inside', withoutEnlargement: true })
                         .jpeg({ quality: 80 })
                         .toFile(previewPath);
                     return previewPath;
@@ -169,21 +205,23 @@ export class PhotoService {
                     // Final ditch: Try strict validation off?
                     try {
                         await sharp(filePath, { failOnError: false })
-                            .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+                            .resize(2560, 2560, { fit: 'inside', withoutEnlargement: true })
                             .jpeg({ quality: 80 })
                             .toFile(previewPath);
                         logger.info(`Generated preview (failOnError: false) for ${fileName}`);
                         return previewPath;
                     } catch (e2) {
                         logger.error(`Hard fail preview ${fileName}`, e2);
+                        if (throwOnError) throw e2;
                     }
                 }
             }
 
-        } catch (e) {
-            logger.error(`Failed to extract/generate preview for ${filePath}`, e);
+        } catch (e: any) {
+            logger.error(`Failed to extract/generate preview for ${filePath}: ${e}`);
+            if (throwOnError) throw e;
         }
-        return null;
+        return null; // Implicit null if we didn't throw and didn't return
     }
 
     static async rotatePhoto(photoId: number, filePath: string, rotationDegrees: number): Promise<{ success: boolean; width?: number; height?: number; error?: string }> {

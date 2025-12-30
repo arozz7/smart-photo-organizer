@@ -1181,5 +1181,45 @@ export function registerDBHandlers() {
     }
     );
 
+
+    ipcMain.handle('db:repairPhotoDimensions', async () => {
+        const { getDB } = await import('../db');
+        const db = getDB();
+        let fixedCount = 0;
+        try {
+            // Find all photos with missing dimensions but having metadata
+            const photos = db.prepare(`
+                SELECT id, metadata_json, file_path 
+                FROM photos 
+                WHERE (width IS NULL OR height IS NULL) AND metadata_json IS NOT NULL
+            `).all();
+
+            const update = db.prepare('UPDATE photos SET width = ?, height = ? WHERE id = ?');
+
+            const transaction = db.transaction(() => {
+                for (const p of photos) {
+                    try {
+                        const meta = JSON.parse(p.metadata_json);
+                        const width = meta.ImageWidth || meta.SourceImageWidth || meta.ExifImageWidth || null;
+                        const height = meta.ImageHeight || meta.SourceImageHeight || meta.ExifImageHeight || null;
+
+                        if (width && height) {
+                            update.run(width, height, p.id);
+                            fixedCount++;
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+            });
+
+            transaction();
+            logger.info(`[DB] Repaired dimensions for ${fixedCount} photos.`);
+            return { success: true, fixedCount };
+        } catch (e) {
+            logger.error('Failed to repair photo dimensions:', e);
+            return { success: false, error: String(e) };
+        }
+    });
 }
 

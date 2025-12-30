@@ -15,25 +15,26 @@ const SUPPORTED_EXTS = ['.jpg', '.jpeg', '.png', '.arw', '.cr2', '.nef', '.dng',
 // Helper to extract preview (delegated to PhotoService)
 export async function extractPreview(filePath: string, previewDir: string, forceRescan: boolean = false): Promise<string | null> {
     const { PhotoService } = await import('./services/photoService');
-    return PhotoService.extractPreview(filePath, previewDir, forceRescan);
+    // Enable Throw on Error to capture corruption details
+    return PhotoService.extractPreview(filePath, previewDir, forceRescan, true);
 }
 
 // Shared processing logic for a single file
 async function processFile(fullPath: string, previewDir: string, db: any, options: { forceRescan?: boolean } = {}) {
     const { forceRescan } = options;
-    if (fullPath.includes('_DSC7405')) {
-        logger.info(`[TRACE] Processing _DSC7405. ForceRescan: ${forceRescan}`);
-    }
     const ext = path.extname(fullPath).toLowerCase();
 
     if (!SUPPORTED_EXTS.includes(ext)) return null;
 
     const selectStmt = db.prepare('SELECT * FROM photos WHERE file_path = ?');
     const insertStmt = db.prepare(`
-        INSERT INTO photos (file_path, preview_cache_path, created_at, metadata_json) 
-        VALUES (@file_path, @preview_cache_path, @created_at, @metadata_json)
+        INSERT INTO photos (file_path, preview_cache_path, created_at, metadata_json, width, height) 
+        VALUES (@file_path, @preview_cache_path, @created_at, @metadata_json, @width, @height)
         ON CONFLICT(file_path) DO NOTHING
     `);
+
+    // Check if error already logged? (Optional: prevent duplicate error logs? Unique constrain on photo_id?)
+    // scan_errors has ID pk.
 
     let photo = selectStmt.get(fullPath);
     let needsUpdate = false;
@@ -52,37 +53,39 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
             if (photo.preview_cache_path) {
                 try {
                     await fs.access(photo.preview_cache_path);
-                    // DEBUG: Check stats
                     const stats = await fs.stat(photo.preview_cache_path);
                     if (stats.size === 0) {
-                        logger.warn(`[Scanner] Preview exists but is 0 bytes: ${photo.preview_cache_path}`);
+                        logger.debug(`[Scanner] Preview exists but is 0 bytes: ${photo.preview_cache_path}`);
                         previewMissing = true;
-                    } else {
-                        logger.info(`[Scanner] Preview verified for ${path.basename(fullPath)} matches ${photo.preview_cache_path}`);
                     }
                 } catch (accessErr) {
-                    logger.warn(`[Scanner] Preview missing (access failed) for ${fullPath} at ${photo.preview_cache_path}`);
+                    logger.debug(`[Scanner] Preview missing (access failed) for ${fullPath} at ${photo.preview_cache_path}`);
                     previewMissing = true;
                 }
             } else {
-                logger.warn(`[Scanner] Preview path null in DB for ${fullPath}`);
                 previewMissing = true;
             }
 
             if (previewMissing || forceRescan) {
                 const tool = await getExifTool();
                 if (tool) {
-                    logger.info(`[Scanner] Starting RAW extraction for ${path.basename(fullPath)}`);
-                    const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
-                    if (previewPath) {
-                        db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
-                        photo.preview_cache_path = previewPath;
-                        needsUpdate = true;
+                    try {
+                        const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
+                        if (previewPath) {
+                            db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
+                            photo.preview_cache_path = previewPath;
+                            needsUpdate = true;
+                            // Clear previous errors if successful
+                            db.prepare('DELETE FROM scan_errors WHERE photo_id = ?').run(photo.id);
+                        }
+                    } catch (e: any) {
+                        logger.error(`[Scanner] Preview generation failed for ${path.basename(fullPath)}`, e);
+                        db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, ?, ?, ?)').run(photo.id, fullPath, e.message || String(e), 'Preview Generation');
                     }
                 }
             }
         } else {
-            // Standard Image (JPG/PNG) - Verify existence too
+            // Standard Image (JPG/PNG)
             if (photo.preview_cache_path) {
                 try {
                     await fs.access(photo.preview_cache_path);
@@ -96,11 +99,17 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
             }
 
             if (previewMissing || forceRescan) {
-                const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
-                if (previewPath) {
-                    db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
-                    photo.preview_cache_path = previewPath;
-                    needsUpdate = true;
+                try {
+                    const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
+                    if (previewPath) {
+                        db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
+                        photo.preview_cache_path = previewPath;
+                        needsUpdate = true;
+                        db.prepare('DELETE FROM scan_errors WHERE photo_id = ?').run(photo.id);
+                    }
+                } catch (e: any) {
+                    logger.error(`[Scanner] Preview generation failed for ${path.basename(fullPath)}`, e);
+                    db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, ?, ?, ?)').run(photo.id, fullPath, e.message || String(e), 'Preview Generation');
                 }
             }
         }
@@ -110,8 +119,13 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
                 const tool = await getExifTool();
                 if (tool) {
                     const metadata = await tool.read(fullPath);
-                    db.prepare('UPDATE photos SET metadata_json = ? WHERE id = ?').run(JSON.stringify(metadata), photo.id);
+                    const width = (metadata as any)?.ImageWidth || (metadata as any)?.SourceImageWidth || (metadata as any)?.ExifImageWidth || null;
+                    const height = (metadata as any)?.ImageHeight || (metadata as any)?.SourceImageHeight || (metadata as any)?.ExifImageHeight || null;
+
+                    db.prepare('UPDATE photos SET metadata_json = ?, width = ?, height = ? WHERE id = ?').run(JSON.stringify(metadata), width, height, photo.id);
                     photo.metadata_json = JSON.stringify(metadata);
+                    photo.width = width;
+                    photo.height = height;
                     needsUpdate = true;
                 }
             } catch (e) {
@@ -121,28 +135,52 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
     }
 
     if (!photo) {
-        logger.info(`[Scanner] New photo found: ${path.basename(fullPath)}`);
-        const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
+        logger.debug(`[Scanner] New photo found: ${path.basename(fullPath)}`);
+        let previewPath = null;
+        let previewError = null;
+
+        try {
+            previewPath = await extractPreview(fullPath, previewDir, forceRescan);
+        } catch (e: any) {
+            // Capture error but continue to insert photo so we can log the error
+            previewError = e;
+            logger.error(`[Scanner] Initial preview failed for ${path.basename(fullPath)}`, e);
+        }
 
         try {
             let metadata = {};
+            let width = null;
+            let height = null;
+
             try {
                 const tool = await getExifTool();
                 if (tool) {
                     metadata = await tool.read(fullPath);
+                    width = (metadata as any)?.ImageWidth || (metadata as any)?.SourceImageWidth || (metadata as any)?.ExifImageWidth || null;
+                    height = (metadata as any)?.ImageHeight || (metadata as any)?.SourceImageHeight || (metadata as any)?.ExifImageHeight || null;
                 }
             } catch (e) {
                 logger.error(`Failed to read metadata for ${fullPath}`, e);
             }
 
-            insertStmt.run({
+            const info = insertStmt.run({
                 file_path: fullPath,
-                preview_cache_path: previewPath,
+                preview_cache_path: previewPath, // Might be null
                 created_at: new Date().toISOString(),
-                metadata_json: JSON.stringify(metadata)
+                metadata_json: JSON.stringify(metadata),
+                width,
+                height
             });
-            photo = selectStmt.get(fullPath);
+
+            const newPhotoId = info.lastInsertRowid;
+            photo = selectStmt.get(fullPath); // Retrieve full object
             isNew = true;
+
+            // Log error if one occurred
+            if (previewError) {
+                db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, ?, ?, ?)').run(newPhotoId, fullPath, previewError.message || String(previewError), 'Initial Scan');
+            }
+
         } catch (e) {
             logger.error('Insert failed', e);
         }
@@ -166,13 +204,7 @@ export async function scanFiles(filePaths: string[], libraryPath: string, onProg
     await fs.mkdir(previewDir, { recursive: true });
 
     logger.info(`Scanning ${filePaths.length} specific files...`);
-    // TRACE DEBUG
-    const traceFile = filePaths.find(p => p.includes('_DSC7405'));
-    if (traceFile) {
-        logger.info(`[TRACE] Found target file in flush list: ${traceFile}`);
-    } else {
-        logger.info(`[TRACE] Target file _DSC7405 NOT found in current batch.`);
-    }
+    // logger.info(`[Scanner] Scanning directory: ${currentPath}`);
 
     for (const filePath of filePaths) {
         try {
@@ -240,7 +272,7 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
     }
 
     await scan(dirPath);
-    logger.info(`[Scanner] Total files: ${totalFiles}, Processed: ${count}, Returned: ${photos.length}`);
-    logger.info(`[Scanner] Skipped Extensions:`, skippedStats);
+    await scan(dirPath);
+    logger.info(`[Scanner] Scanning Finished. Details: Total=${totalFiles}, New=${count}, Returned=${photos.length}, Skipped=${JSON.stringify(skippedStats)}`);
     return photos;
 }

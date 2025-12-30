@@ -75,6 +75,10 @@ The application uses a small Vision-Language Model (SmolVLM) to "see" your photo
 ### How it works
 - **Captioning:** The AI looks at the photo and generates a descriptive caption (e.g., "A golden retriever running in a park on a sunny day").
 - **Tag Extraction:** It parses the caption to extract keywords (e.g., `dog`, `park`, `running`, `sunny`).
+- **Reliable Scanning**: 
+    - **Smart Queue**: Prevents concurrent scans from clobbering each other. Requests are processed serially.
+    - **Corruption Handling**: Failed files are logged to `scan_errors` instead of crashing the process, ready for future recovery tools.
+- **High-Res Thumbnails**: Preview generation resolution increased to 2560px for sharper face crops.
 - **Storage:** These tags are saved to the database and linked to the photo.
 
 ### Search

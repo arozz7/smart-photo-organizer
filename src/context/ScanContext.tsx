@@ -42,7 +42,8 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     // Actually, I can do this in two chunks with multi_replace if needed, or just carefully target.
     // I will replace the Interface definition first.
 
-    const [scanning, setScanning] = useState(false)
+    const [activeScanRequests, setActiveScanRequests] = useState(0)
+    const scanning = activeScanRequests > 0
     const [scanCount, setScanCount] = useState(0)
     const [scanPath, setScanPath] = useState('')
     const [photos, setPhotos] = useState<any[]>([])
@@ -269,7 +270,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     }
 
     const startScan = async (path: string, options: { forceRescan?: boolean } = {}) => {
-        setScanning(true)
+        setActiveScanRequests(prev => prev + 1)
         setScanCount(0)
         setScanPath(path)
         try {
@@ -299,7 +300,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             console.error('Scan error:', err)
             throw err
         } finally {
-            setScanning(false)
+            setActiveScanRequests(prev => Math.max(0, prev - 1))
             // Switch to folder view for the scanned path
             setFilterState({ folder: path })
             // Refresh current view if needed
@@ -312,7 +313,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
     const rescanFiles = async (ids: number[]) => {
         if (ids.length === 0) return;
-        setScanning(true)
+        setActiveScanRequests(prev => prev + 1)
         try {
             // @ts-ignore
             const filesData = await window.ipcRenderer.invoke('db:getFilePaths', ids);
@@ -338,7 +339,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         } catch (e) {
             console.error('Rescan files failed', e);
         } finally {
-            setScanning(false);
+            setActiveScanRequests(prev => Math.max(0, prev - 1))
         }
     }
 

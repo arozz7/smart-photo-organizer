@@ -1,19 +1,14 @@
 import { ipcMain, dialog } from 'electron';
-import { scanDirectory, scanFiles } from '../scanner';
-import { getLibraryPath } from '../store';
+import { scanQueue } from '../scanQueue'; // Use Queue
 import logger from '../logger';
 
 export function registerFileHandlers() {
     ipcMain.handle('scan-directory', async (event, dirPath, options = {}) => {
-        return await scanDirectory(dirPath, getLibraryPath(), (count) => {
-            event.sender.send('scan-progress', count)
-        }, options)
+        return await scanQueue.enqueueDirectory(dirPath, options, event.sender);
     });
 
     ipcMain.handle('scan-files', async (event, filePaths: string[], options = {}) => {
-        return await scanFiles(filePaths, getLibraryPath(), (count) => {
-            event.sender.send('scan-progress', count)
-        }, options)
+        return await scanQueue.enqueueFiles(filePaths, options, event.sender);
     });
 
     ipcMain.handle('dialog:openDirectory', async () => {
