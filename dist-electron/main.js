@@ -1,5 +1,5 @@
 import "electron";
-import { M, R, V } from "./main-DE-ilcjB.js";
+import { M, R, V } from "./main-yEpI5Nyd.js";
 import "node:url";
 import "node:path";
 import "node:fs/promises";
