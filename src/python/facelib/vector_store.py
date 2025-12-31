@@ -77,6 +77,7 @@ def search_index(descriptor, k=10, threshold=0.6):
     Returns: List of matches [{"id":..., "distance":...}]
     """
     faiss_lib = get_faiss()
+    
     if not faiss_lib: return []
     
     if not descriptor or index is None or index.ntotal == 0:
@@ -86,6 +87,9 @@ def search_index(descriptor, k=10, threshold=0.6):
     faiss_lib.normalize_L2(X)
     distances, indices = index.search(X, k)
     
+    # DEBUG LOG
+    logger.info(f"SEARCH DEBUG: Query Shape {X.shape}, Thresh {threshold}. Top 3 Dists: {distances[0][:3]} Indices: {indices[0][:3]}")
+
     matches = []
     for dist, idx in zip(distances[0], indices[0]):
         if idx == -1: continue
@@ -95,6 +99,43 @@ def search_index(descriptor, k=10, threshold=0.6):
             matches.append({"id": face_id, "distance": float(dist)})
             
     return matches
+
+def search_index_batch(descriptors, k=10, threshold=0.6):
+    """
+    Searches the index for a batch of descriptors.
+    descriptors: List of lists/arrays (batch_size, dim)
+    Returns: List of Lists of matches
+    """
+    faiss_lib = get_faiss()
+    if not faiss_lib: return [[] for _ in descriptors]
+    
+    if not descriptors or index is None or index.ntotal == 0:
+        return [[] for _ in descriptors]
+
+    X = np.array(descriptors).astype('float32')
+    faiss_lib.normalize_L2(X)
+    
+    # Batch Search
+    D, I = index.search(X, k)
+    
+    results = []
+    
+    for i in range(len(descriptors)):
+        matches = []
+        distances = D[i]
+        indices = I[i]
+        
+        for dist, idx in zip(distances, indices):
+            if idx == -1: continue
+            if dist > threshold: continue
+            
+            face_id = id_map.get(int(idx))
+            if face_id is not None:
+                matches.append({"id": face_id, "distance": float(dist)})
+        
+        results.append(matches)
+            
+    return results
 
 def rebuild_index(descriptors, ids):
     """

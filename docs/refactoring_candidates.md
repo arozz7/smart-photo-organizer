@@ -44,11 +44,10 @@ Based on `refactoring-protocol.md`:
 
 ## Priority 3: Complex Contexts
 
-### 5. `src/context/ScanContext.tsx`
-- **Status**: WATCHLIST (371 lines)
-- **Issues**:
-  - Handles Scanning, Folder Loading, Tag Loading, Error Management.
-  - Mixed responsibilities.
-- **Refactoring Plan**:
-  - Split `ScanError` management to separate context or hook.
-  - Separate `PhotoView` logic from `Scan` logic.
+### 5. `src/context/ScanContext.tsx` (Refactored)
+- **Status**: ✅ RESOLVED
+- **Changes**:
+  - Extracted `useScanErrors` hook for error management.
+  - Extracted `usePhotoNavigation` hook for viewing/refreshing photos.
+  - Extracted `useLibraryMetadata` hook for tags/folders/people loaders.
+  - Main context file simplified to focus on state orchestration.

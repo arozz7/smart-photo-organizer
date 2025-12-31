@@ -656,6 +656,26 @@ def handle_command(command):
     elif cmd_type == 'rebuild_index':
         descriptors = payload.get('descriptors', [])
         ids = payload.get('ids', [])
+        
+        # Support file-based payload for large datasets
+        if 'dataPath' in payload:
+             dpath = payload['dataPath']
+             if os.path.exists(dpath):
+                 try:
+                     logger.info(f"Loading rebuild data from {dpath}...")
+                     with open(dpath, 'r') as f:
+                         file_payload = json.load(f)
+                         # Expecting {"faces": [{"id": 1, "descriptor": [...]}, ...]}
+                         # OR {"descriptors": [...], "ids": [...]}
+                         if 'faces' in file_payload:
+                             descriptors = [x['descriptor'] for x in file_payload['faces']]
+                             ids = [x['id'] for x in file_payload['faces']]
+                         else:
+                             descriptors = file_payload.get('descriptors', descriptors)
+                             ids = file_payload.get('ids', ids)
+                 except Exception as e:
+                     logger.error(f"Failed to read data path: {e}")
+
         logger.info(f"Rebuilding FAISS index with {len(descriptors)} vectors...")
         try:
             count = vector_store.rebuild_index(descriptors, ids)
@@ -675,6 +695,17 @@ def handle_command(command):
             logger.exception("Search failed")
             response = {"error": str(e), "reqId": req_id}
 
+    elif cmd_type == 'batch_search_index':
+        descriptors = payload.get('descriptors', [])
+        k = payload.get('k', 10)
+        threshold = payload.get('threshold', 0.6)
+        try:
+            results = vector_store.search_index_batch(descriptors, k, threshold)
+            response = {"type": "batch_search_result", "results": results, "reqId": req_id}
+        except Exception as e:
+            logger.exception("Batch search failed")
+            response = {"error": str(e), "reqId": req_id}
+
     elif cmd_type == 'get_system_status':
         status = {}
         try:
@@ -686,7 +717,11 @@ def handle_command(command):
                 'providers': faces.CURRENT_PROVIDERS,
                 'det_thresh': faces.DET_THRESH
             }
-            status['faiss'] = {'loaded': (vector_store.index is not None), 'count': vector_store.index.ntotal if vector_store.index else 0}
+            status['faiss'] = {
+                'loaded': (vector_store.index is not None), 
+                'count': vector_store.index.ntotal if vector_store.index else 0,
+                'dimensions': vector_store.index.d if vector_store.index else 0
+            }
             status['vlm'] = {'loaded': (vlm.vlm_model is not None)}
             
             # System

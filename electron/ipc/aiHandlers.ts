@@ -9,7 +9,7 @@ import { getDB } from '../db';
 export function registerAIHandlers() {
     // Generic Proxy for Legacy/Dynamic Commands
     ipcMain.handle('ai:command', async (_event, command) => {
-        const { type, ...payload } = command;
+        const { type, payload } = command;
         // Default timeout 30s, extend for certain types if needed
         let timeout = 30000;
         if (type === 'cluster_faces' || type === 'analyze_image') timeout = 300000; // 5 min
@@ -226,7 +226,19 @@ export function registerAIHandlers() {
     ipcMain.handle('face:findPotentialMatches', async (_event, { faceIds, threshold }) => {
         try {
             const { findPotentialMatches } = await import('../db');
-            return findPotentialMatches(faceIds, threshold);
+
+            // Inject FAISS Search
+            const searchFn = async (descriptors: number[][], k?: number, threshold?: number) => {
+                const res = await sendRequestToPython('batch_search_index', {
+                    descriptors,
+                    k: k || 10,
+                    threshold: threshold || 0.6
+                }, 60000);
+                if (res.error) throw new Error(res.error);
+                return res.results;
+            };
+
+            return await findPotentialMatches(faceIds, threshold, searchFn);
         } catch (e) {
             return { success: false, error: String(e) };
         }
@@ -391,6 +403,66 @@ COUNT(*) as total,
     ipcMain.handle('ai:saveVectorIndex', async () => {
         logger.info('[IPC] Requesting Vector Index Save...');
         return await sendRequestToPython('save_vector_index', {}, 60000);
+    });
+
+    ipcMain.handle('ai:rebuildIndex', async () => {
+        const { getDB } = await import('../db');
+        const db = getDB();
+        const crypto = await import('node:crypto');
+
+        logger.info('[IPC] Requesting Vector Index Rebuild...');
+
+        try {
+            // 1. Fetch All Valid Descriptors
+            const faces = db.prepare('SELECT id, descriptor FROM faces WHERE descriptor IS NOT NULL').all();
+            logger.info(`[IPC] Fetched ${faces.length} faces for Index Rebuild.`);
+
+            if (faces.length === 0) {
+                return await sendRequestToPython('rebuild_index', { descriptors: [], ids: [] }, 60000);
+            }
+
+            // 2. Format
+            const formattedFaces = faces.map((f: any) => ({
+                id: f.id,
+                descriptor: Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4))
+            }));
+
+            // 3. Write to Temp File
+            const reqId = crypto.randomUUID();
+            const tempFile = path.join(app.getPath('temp'), `rebuild_index_${reqId}.json`);
+
+            const fileHandle = await fs.open(tempFile, 'w');
+            try {
+                // Determine format based on what Python expects. Python's new logic handles "faces" list or "descriptors"/"ids" lists.
+                // "faces" list is more memory efficient to write streamingly if needed, but here we mapped it already.
+                // Let's write { faces: [...] }
+                await fileHandle.write('{"faces":[');
+                for (let i = 0; i < formattedFaces.length; i++) {
+                    if (i > 0) await fileHandle.write(',');
+                    await fileHandle.write(JSON.stringify(formattedFaces[i]));
+                }
+                await fileHandle.write(']}');
+            } finally {
+                await fileHandle.close();
+            }
+
+            logger.info(`[IPC] Rebuild Payload written to ${tempFile} (${faces.length} faces). Invoking Python...`);
+
+            // 4. Send Command
+            const res: any = await sendRequestToPython('rebuild_index', {
+                dataPath: tempFile,
+                count: faces.length
+            }, 300000); // 5 min timeout
+
+            // Clean up
+            try { await fs.unlink(tempFile); } catch { }
+
+            return res;
+
+        } catch (e) {
+            logger.error("Failed to rebuild index:", e);
+            return { success: false, error: String(e) };
+        }
     });
 
     ipcMain.handle('ai:addFacesToVectorIndex', async (_event, { faces }) => {

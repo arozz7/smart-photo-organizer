@@ -599,7 +599,11 @@ export function findBestMatch(descriptor: number[], candidates: { id: number, na
   return { success: false, distance: minDist, similarity };
 }
 
-export function autoAssignFaces(faceIds: number[], threshold = 0.65) {
+
+// Type extension for the injected search function
+type SearchFn = (descriptors: number[][], k?: number, threshold?: number) => Promise<{ id: number, distance: number }[][]>;
+
+export async function autoAssignFaces(faceIds: number[], threshold = 0.65, searchFn?: SearchFn) {
   const db = getDB();
   try {
     let totalAssigned = 0;
@@ -609,21 +613,9 @@ export function autoAssignFaces(faceIds: number[], threshold = 0.65) {
 
     // Loop until no more matches are found or max passes reached
     while (pass <= MAX_PASSES) {
-      // 1. Refresh Candidates (Means might have changed in previous pass)
-      const people = db.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
-
-      if (people.length === 0) break;
-
-      const candidates = people.map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        mean: JSON.parse(p.descriptor_mean_json)
-      }));
-
-      // 2. Refresh Unassigned Faces
+      // 1. Refresh Unassigned Faces
       let faces;
       if (faceIds && faceIds.length > 0) {
-        // If specific faceIds were requested, we only want to process those that are STILL unassigned
         const placeholders = faceIds.map(() => '?').join(',');
         faces = db.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND person_id IS NULL AND descriptor IS NOT NULL`).all(...faceIds);
       } else {
@@ -635,33 +627,135 @@ export function autoAssignFaces(faceIds: number[], threshold = 0.65) {
         break;
       }
 
-      logger.info(`[AutoAssign] Pass ${pass}: Processing ${faces.length} faces against ${candidates.length} people...`);
+      logger.info(`[AutoAssign] Pass ${pass}: Processing ${faces.length} faces...`);
 
       let passAssignedCount = 0;
       const passAssigned: any[] = [];
       const updateFace = db.prepare("UPDATE faces SET person_id = ? WHERE id = ?");
 
-      const transaction = db.transaction(() => {
+      // Mode A: FAISS / Python Search (Preferred)
+      if (searchFn) {
+        // Prepare Batch
+        const descriptors: number[][] = [];
+        const validFaces: any[] = [];
+
         for (const face of faces) {
-          if (!face.descriptor) continue;
-          const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
-
-          const match = findBestMatch(rawDescriptor, candidates, threshold);
-
-          if (match.success && match.personId) {
-            updateFace.run(match.personId, face.id);
-            passAssignedCount++;
-            passAssigned.push({ faceId: face.id, personId: match.personId, personName: match.personName, distance: match.distance, similarity: match.similarity });
-
-            // Log details only if small batch or first few
-            if (passAssignedCount <= 5) {
-              logger.info(`[AutoAssign] Matched Face ${face.id} to ${match.personName} (Sim: ${match.similarity?.toFixed(4)})`);
-            }
+          if (face.descriptor) {
+            const desc = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+            descriptors.push(desc);
+            validFaces.push(face);
           }
         }
-      });
 
-      transaction();
+        if (descriptors.length === 0) break;
+
+        // Perform Search (k=10 neighbors)
+        // Threshold note: DB linear was similarity (0-1). FAISS uses L2 Distance (0-inf).
+        // Threshold input is typically Distance if using FAISS, or Similarity if using DB?
+        // Let's assume input 'threshold' is SIMILARITY (high is good, e.g. 0.65)
+        // Converted to Distance: dist = (1/sim) - 1. E.g. 1/0.65 - 1 = 0.53.
+        const distThreshold = (1 / Math.max(0.01, threshold)) - 1;
+
+        logger.info(`[AutoAssign] Invoking FAISS Matcher for ${descriptors.length} faces (SimThresh: ${threshold}, DistThresh: ${distThreshold.toFixed(3)})`);
+
+        const batchResults = await searchFn(descriptors, 10, distThreshold);
+
+        // Resolve Person IDs from Face IDs
+        // We need a map of FaceID -> PersonID for all returned matches
+        const allMatchFaceIds = new Set<number>();
+        batchResults.forEach(matches => matches.forEach(m => allMatchFaceIds.add(m.id)));
+
+        const faceToPersonMap = new Map<number, number>();
+        if (allMatchFaceIds.size > 0) {
+          const ids = Array.from(allMatchFaceIds);
+          // sqlite limit is usually 999 vars. Chunking might be needed if HUGE number of matches.
+          const CHUNK = 900;
+          for (let i = 0; i < ids.length; i += CHUNK) {
+            const chunk = ids.slice(i, i + CHUNK);
+            const holders = chunk.map(() => '?').join(',');
+            const rows = db.prepare(`SELECT id, person_id FROM faces WHERE id IN (${holders}) AND person_id IS NOT NULL`).all(...chunk);
+            rows.forEach((r: any) => faceToPersonMap.set(r.id, r.person_id));
+          }
+        }
+
+        const transaction = db.transaction(() => {
+          for (let i = 0; i < validFaces.length; i++) {
+            const face = validFaces[i];
+            const matches = batchResults[i];
+
+            // Voting Logic
+            const votes: Record<number, number> = {};
+
+            for (const m of matches) {
+              const pid = faceToPersonMap.get(m.id);
+              if (!pid) continue;
+
+              // Weight vote by similarity? 
+              // Sim = 1/(1+dist).
+              const sim = 1 / (1 + m.distance);
+              // Simple Sum of Similarities
+              votes[pid] = (votes[pid] || 0) + sim;
+            }
+
+            // Find Winner
+            let bestPid = -1;
+            let bestScore = 0;
+            for (const [pidStr, score] of Object.entries(votes)) {
+              if (score > bestScore) {
+                bestScore = score;
+                bestPid = Number(pidStr);
+              }
+            }
+
+            // Heuristic: If bestScore > X? 
+            // Logic: If we have 1 very good match (Sim 0.8), score is 0.8.
+            // If we have 5 weak matches (Sim 0.4), score is 2.0.
+            // We want to avoid assigning if it's just noise.
+            // But threshold was applied at search level.
+            // Let's require at least one match > output threshold? 
+            // Actually `search_index_batch` already filters by threshold.
+            // So any match returned is "Valid".
+            // We just pick the person with MOST valid mass.
+
+            if (bestPid !== -1) {
+              updateFace.run(bestPid, face.id);
+              passAssignedCount++;
+              passAssigned.push({ faceId: face.id, personId: bestPid, similarity: bestScore }); // Score isn't normalized 0-1 but >0
+
+              // if (passAssignedCount <= 5) logger.info(`[AutoAssign] Assigned Face ${face.id} -> Person ${bestPid} (VoteScore: ${bestScore.toFixed(2)})`);
+            }
+          }
+        });
+        transaction();
+
+      } else {
+        // Mode B: Legacy Linear Scan (DB-Side JS)
+        // 1. Refresh Candidates (Means)
+        const people = db.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
+        if (people.length === 0) break;
+
+        const candidates = people.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          mean: JSON.parse(p.descriptor_mean_json)
+        }));
+
+        const transaction = db.transaction(() => {
+          for (const face of faces) {
+            if (!face.descriptor) continue;
+            const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+
+            const match = findBestMatch(rawDescriptor, candidates, threshold);
+
+            if (match.success && match.personId) {
+              updateFace.run(match.personId, face.id);
+              passAssignedCount++;
+              passAssigned.push({ faceId: face.id, personId: match.personId, personName: match.personName, distance: match.distance, similarity: match.similarity });
+            }
+          }
+        });
+        transaction();
+      }
 
       // If nothing found in this pass, we are done
       if (passAssignedCount === 0) break;
@@ -675,6 +769,11 @@ export function autoAssignFaces(faceIds: number[], threshold = 0.65) {
       for (const pid of uniquePeople) {
         recalculatePersonMean(db, pid);
       }
+
+      // If we used FAISS, we might need to Update the Index with the newly assigned faces implies...
+      // No, FAISS has the Faces. We just updated their labels in DB.
+      // The VectorSearch doesn't care about labels, it finds FaceIDs.
+      // So no need to sync FAISS in between passes unless we rely on PersonMEANS in FAISS (which we don't).
 
       pass++;
     }
@@ -895,41 +994,114 @@ export function getFacesByIds(ids: number[]) {
 }
 
 
-export function findPotentialMatches(faceIds: number[], threshold = 0.40) {
+export async function findPotentialMatches(faceIds: number[], threshold = 0.40, searchFn?: SearchFn) {
   const db = getDB();
   try {
-    // 1. Get Candidates (People with means)
-    const people = db.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
-    if (people.length === 0) return { success: true, matches: [] };
-
-    const candidates = people.map((p: any) => ({
-      id: p.id,
-      name: p.name,
-      mean: JSON.parse(p.descriptor_mean_json)
-    }));
-
-    // 2. Get Faces
+    // 1. Get Faces
     const placeholders = faceIds.map(() => '?').join(',');
     const faces = db.prepare(`SELECT id, descriptor FROM faces WHERE id IN (${placeholders}) AND descriptor IS NOT NULL`).all(...faceIds);
-
     const matches: any[] = [];
 
-    for (const face of faces) {
-      // @ts-ignore
-      const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
-      // @ts-ignore
-      const match = findBestMatch(rawDescriptor, candidates, threshold);
+    if (searchFn) {
+      // Mode A: FAISS
+      const descriptors: number[][] = [];
+      const validFaces: any[] = [];
+      for (const face of faces) {
+        // @ts-ignore
+        if (face.descriptor) {
+          // @ts-ignore
+          const desc = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+          descriptors.push(desc);
+          validFaces.push(face);
+        }
+      }
 
-      if (match.success) {
-        matches.push({
-          faceId: face.id,
-          match: {
-            personId: match.personId,
-            personName: match.personName,
-            similarity: match.similarity,
-            distance: match.distance
+      if (descriptors.length > 0) {
+        // Threshold conversion logic
+        const distThreshold = (1 / Math.max(0.01, threshold)) - 1;
+        const results = await searchFn(descriptors, 10, distThreshold);
+
+        // Need to look up Person Names for results
+        const allMatchFaceIds = new Set<number>();
+        results.forEach(r => r.forEach(m => allMatchFaceIds.add(m.id)));
+
+        const faceInfoMap = new Map<number, { personId: number, personName: string }>();
+        if (allMatchFaceIds.size > 0) {
+          const ids = Array.from(allMatchFaceIds);
+          const CHUNK = 900;
+          for (let i = 0; i < ids.length; i += CHUNK) {
+            const chunk = ids.slice(i, i + CHUNK);
+            const holders = chunk.map(() => '?').join(',');
+            // Map FaceID -> Person Name directly
+            const rows = db.prepare(`
+                        SELECT f.id, f.person_id, p.name 
+                        FROM faces f 
+                        JOIN people p ON f.person_id = p.id 
+                        WHERE f.id IN (${holders})
+                    `).all(...chunk);
+            rows.forEach((r: any) => faceInfoMap.set(r.id, { personId: r.person_id, personName: r.name }));
           }
-        });
+        }
+
+        for (let i = 0; i < validFaces.length; i++) {
+          const face = validFaces[i];
+          const res = results[i];
+
+          // For UI "Potential Matches", we probably just want the BEST one? 
+          // Or a list?
+          // Returning best single match for now to match UI expectation
+
+          let bestMatch = null;
+          let bestScore = 0;
+
+          for (const m of res) {
+            const info = faceInfoMap.get(m.id);
+            if (!info) continue;
+
+            const sim = 1 / (1 + m.distance);
+            if (sim > bestScore) {
+              bestScore = sim;
+              bestMatch = { personId: info.personId, personName: info.personName, similarity: sim, distance: m.distance };
+            }
+          }
+
+          if (bestMatch) {
+            matches.push({
+              faceId: face.id,
+              match: bestMatch
+            });
+          }
+        }
+      }
+
+    } else {
+      // Mode B: Legacy
+      const people = db.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
+      if (people.length === 0) return { success: true, matches: [] };
+
+      const candidates = people.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        mean: JSON.parse(p.descriptor_mean_json)
+      }));
+
+      for (const face of faces) {
+        // @ts-ignore
+        const rawDescriptor = Array.from(new Float32Array(face.descriptor.buffer, face.descriptor.byteOffset, face.descriptor.byteLength / 4));
+        // @ts-ignore
+        const match = findBestMatch(rawDescriptor, candidates, threshold);
+
+        if (match.success) {
+          matches.push({
+            faceId: face.id,
+            match: {
+              personId: match.personId,
+              personName: match.personName,
+              similarity: match.similarity,
+              distance: match.distance
+            }
+          });
+        }
       }
     }
 

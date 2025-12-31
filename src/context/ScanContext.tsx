@@ -1,5 +1,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { useAI } from './AIContext'
+import { useScanErrors } from '../hooks/useScanErrors'
+import { usePhotoNavigation } from '../hooks/usePhotoNavigation'
+import { useLibraryMetadata } from '../hooks/useLibraryMetadata'
 
 interface ScanContextType {
     scanning: boolean
@@ -11,37 +14,31 @@ interface ScanContextType {
     hasMore: boolean
     filter: any
     setFilter: (filter: any) => void
+    loadingPhotos: boolean
+    rescanFiles: (ids: number[]) => Promise<void>
+    // From useLibraryMetadata
     availableTags: any[]
     loadTags: () => Promise<void>
     availableFolders: any[]
     loadFolders: () => Promise<void>
     availablePeople: any[]
     loadPeople: () => Promise<void>
-    // Error Tracking
+    // From useScanErrors
     scanErrors: any[]
     loadScanErrors: () => Promise<void>
     retryErrors: () => Promise<void>
     clearErrors: () => Promise<void>
-    loadingPhotos: boolean
+    // From usePhotoNavigation
     refreshPhoto: (photoId: number) => Promise<void>
     viewingPhoto: any | null
     viewPhoto: (photoId: number) => Promise<void>
     setViewingPhoto: (photo: any | null) => void
     navigateToPhoto: (direction: number) => void
-    rescanFiles: (ids: number[]) => Promise<void>
 }
 
 const ScanContext = createContext<ScanContextType | undefined>(undefined)
 
 export function ScanProvider({ children }: { children: ReactNode }) {
-    // ... lines 31-240 ...
-    // Note: I cannot replace the middle lines easily without re-stating them if I use huge block.
-    // I will target the Return statement to add refreshPhoto to value.
-    // But first I must update interface at the top.
-
-    // Actually, I can do this in two chunks with multi_replace if needed, or just carefully target.
-    // I will replace the Interface definition first.
-
     const [activeScanRequests, setActiveScanRequests] = useState(0)
     const scanning = activeScanRequests > 0
     const [scanCount, setScanCount] = useState(0)
@@ -51,12 +48,13 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     const [offset, setOffset] = useState(0)
     const [loadingPhotos, setLoadingPhotos] = useState(false)
     const [filter, setFilterState] = useState<any>({ initial: true })
-    const [availableTags, setAvailableTags] = useState<any[]>([])
-    const [availableFolders, setAvailableFolders] = useState<any[]>([])
-    const [availablePeople, setAvailablePeople] = useState<any[]>([])
-    const [scanErrors, setScanErrors] = useState<any[]>([])
-    const [viewingPhoto, setViewingPhoto] = useState<any | null>(null)
+
     const { addToQueue } = useAI()
+
+    // Hooks
+    const metadata = useLibraryMetadata()
+    const errors = useScanErrors()
+    const navigation = usePhotoNavigation(photos, setPhotos)
 
     useEffect(() => {
         // Global listener for progress
@@ -71,61 +69,6 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             }
         }
     }, [])
-
-    const loadTags = async () => {
-        try {
-            // @ts-ignore
-            const tags = await window.ipcRenderer.invoke('db:getAllTags')
-            setAvailableTags(tags)
-        } catch (e) {
-            console.error('Failed to load tags', e)
-        }
-    }
-
-    const loadFolders = async () => {
-        try {
-            // @ts-ignore
-            const folders = await window.ipcRenderer.invoke('db:getFolders')
-            setAvailableFolders(folders)
-        } catch (e) {
-            console.error('Failed to load folders', e)
-        }
-    }
-
-    const loadScanErrors = async () => {
-        try {
-            // @ts-ignore
-            const errors = await window.ipcRenderer.invoke('db:getScanErrors')
-            setScanErrors(errors)
-        } catch (e) {
-            console.error('Failed to load scan errors', e)
-        }
-    }
-
-    const retryErrors = async () => {
-        try {
-            // @ts-ignore
-            const photosToRetry = await window.ipcRenderer.invoke('db:retryScanErrors')
-            if (photosToRetry && photosToRetry.length > 0) {
-                console.log(`Retrying ${photosToRetry.length} failed scans...`)
-                addToQueue(photosToRetry)
-            }
-            loadScanErrors() // Refresh (should be empty)
-        } catch (e) {
-            console.error('Failed to retry errors', e)
-        }
-    }
-
-    const clearErrors = async () => {
-        try {
-            // @ts-ignore
-            await window.ipcRenderer.invoke('db:clearScanErrors')
-            setScanErrors([])
-        } catch (e) {
-            console.error('Failed to clear errors', e)
-        }
-    }
-
 
     const isFilterComplete = (f: any) => {
         if (f.initial) return false
@@ -152,9 +95,9 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             setHasMore(false)
             setLoadingPhotos(false)
             // Still load metadata for selection dropdowns
-            loadTags()
-            loadFolders()
-            loadPeople()
+            metadata.loadTags()
+            metadata.loadFolders()
+            metadata.loadPeople()
             return
         }
 
@@ -173,9 +116,6 @@ export function ScanProvider({ children }: { children: ReactNode }) {
                     setPhotos(newPhotos)
                     setOffset(50)
                     setHasMore(newPhotos.length >= 50)
-                    if (newPhotos.length > 0) {
-                        // addToQueue(newPhotos); // FIX: Do not auto-queue on load
-                    }
                 }
             } catch (e) {
                 if (!didCancel) console.error("Filter load failed", e)
@@ -219,56 +159,6 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         }
     }
 
-    const refreshPhoto = async (photoId: number) => {
-        try {
-            console.log(`[ScanContext] Refreshing photo ${photoId}`);
-            // @ts-ignore
-            const newPhoto = await window.ipcRenderer.invoke('db:getPhoto', photoId);
-            if (newPhoto) {
-                const timestamp = new Date().getTime();
-                newPhoto.preview_cache_path = newPhoto.preview_cache_path ? `${newPhoto.preview_cache_path}?t=${timestamp}` : null;
-
-                setPhotos(prev => prev.map(p => {
-                    if (p.id === photoId) {
-                        return { ...newPhoto, _cacheBust: timestamp };
-                    }
-                    return p;
-                }));
-
-                // Also update viewing photo if it's the same one
-                if (viewingPhoto && viewingPhoto.id === photoId) {
-                    setViewingPhoto({ ...newPhoto, _cacheBust: timestamp });
-                }
-            }
-        } catch (e) {
-            console.error('Failed to refresh photo', e);
-        }
-    }
-
-    const viewPhoto = async (photoId: number) => {
-        try {
-            // @ts-ignore
-            const p = await window.ipcRenderer.invoke('db:getPhoto', photoId)
-            if (p) {
-                setViewingPhoto(p)
-            }
-        } catch (e) {
-            console.error('Failed to view photo', e)
-        }
-    }
-
-    const navigateToPhoto = (direction: number) => {
-        if (!viewingPhoto || photos.length === 0) return;
-
-        const index = photos.findIndex(p => p.id === viewingPhoto.id);
-        if (index !== -1) {
-            const nextIndex = index + direction;
-            if (nextIndex >= 0 && nextIndex < photos.length) {
-                setViewingPhoto(photos[nextIndex]);
-            }
-        }
-    }
-
     const startScan = async (path: string, options: { forceRescan?: boolean } = {}) => {
         setActiveScanRequests(prev => prev + 1)
         setScanCount(0)
@@ -294,7 +184,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             }
 
             // Also refresh errors if any occurred during scan
-            loadScanErrors()
+            errors.loadScanErrors()
 
         } catch (err) {
             console.error('Scan error:', err)
@@ -305,7 +195,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             setFilterState({ folder: path })
             // Refresh current view if needed
             if (isFilterComplete(filter)) {
-                // Trigger reload by setting filter again or separate reload
+                // Trigger reload by setting filter again
                 setFilter({ ...filter }); // Hack trigger
             }
         }
@@ -343,22 +233,22 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         }
     }
 
-    const loadPeople = async () => {
-        try {
-            // @ts-ignore
-            const people = await window.ipcRenderer.invoke('db:getPeople')
-            setAvailablePeople(people)
-        } catch (e) {
-            console.error('Failed to load people', e)
-        }
-    }
-
     return (
         <ScanContext.Provider value={{
-            scanning, scanCount, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter,
-            availableTags, loadTags, availableFolders, loadFolders, availablePeople, loadPeople,
-            scanErrors, loadScanErrors, retryErrors, clearErrors, loadingPhotos, refreshPhoto,
-            viewingPhoto, viewPhoto, setViewingPhoto, navigateToPhoto, rescanFiles
+            scanning,
+            scanCount,
+            startScan,
+            scanPath,
+            photos,
+            loadMorePhotos,
+            hasMore,
+            filter,
+            setFilter,
+            loadingPhotos,
+            rescanFiles,
+            ...metadata,
+            ...errors,
+            ...navigation
         }}>
             {children}
         </ScanContext.Provider>

@@ -240,6 +240,8 @@ async function processAnalysisResult(db: any, message: any) {
     }
 
     const insertedIds: number[] = [];
+    const facesForFaiss: { id: number, descriptor: number[] }[] = [];
+
     const runTransaction = db.transaction(() => {
         for (const face of message.faces) {
             let descriptorBuffer = null;
@@ -270,9 +272,12 @@ async function processAnalysisResult(db: any, message: any) {
                 } catch (e) { }
             }
 
+            let finalId = 0;
+
             if (bestMatch) {
                 updateFaceStmt.run(descriptorBuffer, JSON.stringify(face.box), face.blurScore, bestMatch.id);
-                insertedIds.push(bestMatch.id);
+                finalId = bestMatch.id;
+                insertedIds.push(finalId);
             } else {
                 const info = insertFace.run(
                     message.photoId,
@@ -282,12 +287,26 @@ async function processAnalysisResult(db: any, message: any) {
                     face.blurScore
                 );
                 if (info.changes > 0) {
-                    insertedIds.push(Number(info.lastInsertRowid));
+                    finalId = Number(info.lastInsertRowid);
+                    insertedIds.push(finalId);
                 }
+            }
+
+            if (finalId > 0 && face.descriptor && face.descriptor.length > 0) {
+                facesForFaiss.push({ id: finalId, descriptor: face.descriptor });
             }
         }
     });
     runTransaction();
+
+    // Populate FAISS Index
+    if (facesForFaiss.length > 0) {
+        sendToPython({
+            type: 'add_faces_to_vector_index',
+            payload: { faces: facesForFaiss }
+        });
+        logger.info(`[PythonService] Sent ${facesForFaiss.length} faces to FAISS index.`);
+    }
     logger.info(`[PythonService] Processed ${message.faces.length} faces. (Updated/Inserted: ${insertedIds.length})`);
 
     // Auto-Match
@@ -295,7 +314,19 @@ async function processAnalysisResult(db: any, message: any) {
         try {
             const settings = getAISettings();
             const threshold = settings.faceSimilarityThreshold || 0.65;
-            const matchRes = await autoAssignFaces(insertedIds, threshold);
+
+            // Define Search Injector
+            const searchFn = async (descriptors: number[][], k?: number, threshold?: number) => {
+                const res = await sendRequestToPython('batch_search_index', {
+                    descriptors,
+                    k: k || 10,
+                    threshold: threshold || 0.6
+                }, 60000);
+                if (res.error) throw new Error(res.error);
+                return res.results; // Expecting { id, distance }[][]
+            };
+
+            const matchRes = await autoAssignFaces(insertedIds, threshold, searchFn);
 
             if (matchRes.success && (matchRes.count || 0) > 0) {
                 logger.info(`[AutoMatch] Automatically assigned ${matchRes.count} faces for photo ${message.photoId} (Threshold: ${threshold})`);
