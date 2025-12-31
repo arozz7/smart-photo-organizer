@@ -1,0 +1,59 @@
+# Refactoring Candidates
+
+## Criteria
+Based on `refactoring-protocol.md`:
+- **Hard Limit**: > 600 lines
+- **Soft Limit**: > 400 lines
+- **Protocol Violations**: Mixed concerns, Monolithic files, Circular dependencies.
+
+## Priority 1: Critical Monoliths
+
+### 1. `electron/main.ts` (Refactored)
+- **Status**: ✅ RESOLVED
+- **Changes**:
+  - Extracted IPC handlers to `electron/ipc/`.
+  - Extracted Window management to `electron/windows/windowManager.ts`.
+  - Extracted Image Protocol to `electron/services/imageProtocol.ts`.
+  - Extracted Python entry point to `electron/services/pythonService.ts`.
+  - Main file reduced from 3000+ lines to ~100 lines.
+
+### 2. `src/python/main.py` (Refactored)
+- **Status**: ✅ RESOLVED
+- **Changes**:
+  - Extracted Face Logic to `src/python/facelib/faces.py`.
+  - Extracted VLM Logic to `src/python/facelib/vlm.py`.
+  - Extracted Image Ops to `src/python/facelib/image_ops.py`.
+  - Extracted Vector Store to `src/python/facelib/vector_store.py`.
+  - Main file reduced to orchestrator.
+
+## Priority 2: UI/Logic Layout Violations
+
+### 3. `src/views/People.tsx` (Refactored)
+- **Status**: ✅ RESOLVED
+- **Changes**:
+  - Extracted `ClusterList` component.
+  - Moved logic to `usePeopleCluster` custom hook.
+  - Reduced complexity and line count.
+
+### 4. `src/views/PersonDetail.tsx` (Refactored)
+- **Status**: ✅ RESOLVED
+- **Changes**:
+  - Extracted sub-components: `PersonHeader`, `PersonPhotoGrid`, `PersonFaceGrid`.
+  - Moved data fetching logic to `usePersonDetail` hook.
+  - Reduced main file complexity significanty.
+
+## Priority 3: Complex Contexts
+
+### 5. `src/context/ScanContext.tsx` (Refactored)
+- **Status**: ✅ RESOLVED
+- **Changes**:
+  - Extracted `useScanErrors` hook for error management.
+  - Extracted `usePhotoNavigation` hook for viewing/refreshing photos.
+  - Extracted `useLibraryMetadata` hook for tags/folders/people loaders.
+  - Main context file simplified to focus on state orchestration.
+
+### 6. `electron/services/imageProtocol.ts` (Refactored)
+- **Status**: ✅ RESOLVED
+- **Changes**:
+  - Decomposed into `ImageService` (Reasoning), `MetadataRepository` (Memory), and `ImageProcessor` (Tools).
+  - Implemented modular layers with dependency injection.

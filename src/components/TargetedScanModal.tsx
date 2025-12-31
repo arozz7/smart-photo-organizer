@@ -90,14 +90,20 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
                         // @ts-ignore
                         const searchResult = await window.ipcRenderer.invoke('ai:command', {
                             type: 'search_index',
-                            payload: { descriptor: p.descriptor, k: 500, threshold: 0.6 }
+                            payload: { descriptor: p.descriptor, k: 500, threshold: 1.2 }
                         });
+
 
                         if (searchResult?.matches) {
                             for (const match of searchResult.matches) {
+                                // Calculate similarity score from distance (1 / (1 + distance))
+                                // FAISS returns distance (L2), lower is better.
+                                const distance = match.distance !== undefined ? match.distance : 100;
+                                const score = 1 / (1 + distance);
+
                                 const existing = bestMatches.get(match.id);
-                                if (!existing || match.score > existing.score) {
-                                    bestMatches.set(match.id, { personId: p.id, score: match.score });
+                                if (!existing || score > existing.score) {
+                                    bestMatches.set(match.id, { personId: p.id, score: score });
                                 }
                             }
                         }

@@ -119,12 +119,21 @@ export default function Settings() {
     const { calculatingBlur, blurProgress, calculateBlurScores } = useAI();
     const { showAlert, showConfirm } = useAlert();
 
+    const [aiProfile, setAiProfile] = useState<'balanced' | 'high'>('balanced');
+
     useEffect(() => {
         // @ts-ignore
         window.ipcRenderer.invoke('settings:getLibraryPath').then(path => {
             setLibraryPath(path)
             localStorage.setItem('libraryPath', path)
-        })
+        });
+
+        // @ts-ignore
+        window.ipcRenderer.invoke('ai:getSettings').then((settings: any) => {
+            if (settings && settings.aiProfile) {
+                setAiProfile(settings.aiProfile);
+            }
+        });
     }, [])
 
     const handleClearAITags = async () => {
@@ -269,9 +278,19 @@ export default function Settings() {
                                 </div>
                                 <select
                                     className="bg-gray-700 text-white text-sm px-3 py-2 rounded focus:ring-1 focus:ring-indigo-500 outline-none border border-gray-600"
-                                    value={localStorage.getItem('ai_profile') || 'balanced'}
-                                    onChange={(e) => {
-                                        localStorage.setItem('ai_profile', e.target.value)
+                                    value={aiProfile}
+                                    onChange={async (e) => {
+                                        const newProfile = e.target.value as 'balanced' | 'high';
+                                        setAiProfile(newProfile);
+
+                                        // Fetch current settings to merge
+                                        // @ts-ignore
+                                        const current = await window.ipcRenderer.invoke('ai:getSettings');
+                                        const updated = { ...current, aiProfile: newProfile };
+
+                                        // @ts-ignore
+                                        await window.ipcRenderer.invoke('ai:saveSettings', updated);
+
                                         showConfirm({
                                             title: 'Reload Required',
                                             description: 'Changing the AI profile requires a reload to load the new models. Reload now?',
@@ -530,7 +549,6 @@ export default function Settings() {
                 isOpen={showWarningsModal}
                 onClose={() => setShowWarningsModal(false)}
             />
-        </div >
+        </div>
     )
 }
-

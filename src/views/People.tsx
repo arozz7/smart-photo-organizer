@@ -1,82 +1,30 @@
-import { useState, useEffect, useRef, useLayoutEffect, memo, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePeople } from '../context/PeopleContext'
 import PersonCard from '../components/PersonCard'
-
-import { Virtuoso } from 'react-virtuoso'
-
-import ClusterRow from '../components/ClusterRow'
-
+import ClusterList from '../components/ClusterList'
 import BlurryFacesModal from '../components/BlurryFacesModal'
 import GroupNamingModal from '../components/GroupNamingModal'
 import TargetedScanModal from '../components/TargetedScanModal'
 import IgnoredFacesModal from '../components/IgnoredFacesModal'
 import UnmatchedFacesModal from '../components/UnmatchedFacesModal'
 import { useAI } from '../context/AIContext'
-import { Face } from '../types'
 import { useAlert } from '../context/AlertContext'
-import { useToast } from '../context/ToastContext'
-
-
-interface ClusterListProps {
-    clusters: { faces: number[] }[]
-    selectedFaceIds: Set<number>
-    toggleFace: (id: number) => void
-    toggleGroup: (ids: number[]) => void
-    fetchFacesByIds: (ids: number[]) => Promise<Face[]>
-    handleNameGroup: (ids: number[], name: string) => Promise<void>
-    handleIgnoreGroup: (ids: number[]) => void
-    handleOpenNaming: (ids: number[]) => Promise<void>
-}
-
-const ClusterList = memo(({
-    clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleOpenNaming
-}: ClusterListProps) => {
-
-    const renderClusterRow = useCallback((index: number) => {
-        const cluster = clusters[index];
-        if (!cluster || !cluster.faces) return null;
-
-        return (
-            <div className="border-b border-gray-800 pb-4 pr-2">
-                <ClusterRow
-                    faceIds={cluster.faces}
-                    index={index}
-                    selectedFaceIds={selectedFaceIds}
-                    toggleFace={toggleFace}
-                    toggleGroup={toggleGroup}
-                    fetchFacesByIds={fetchFacesByIds}
-                    onNameGroup={handleNameGroup}
-                    onIgnoreGroup={handleIgnoreGroup}
-                    onOpenNaming={handleOpenNaming}
-                />
-            </div>
-        );
-    }, [clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleOpenNaming]);
-
-    // Use memo for style to prevent re-renders on every parent render
-    const style = useMemo(() => ({ height: '100%', width: '100%' }), []);
-
-    return (
-        <div className="h-[65vh] w-full relative">
-            <Virtuoso
-                style={style}
-                totalCount={clusters.length}
-                itemContent={renderClusterRow}
-                components={{
-                    Footer: () => <div className="h-20" /> // Extra space at bottom
-                }}
-            />
-        </div>
-    )
-})
+import { usePeopleCluster } from '../hooks/usePeopleCluster'
 
 export default function People() {
     const navigate = useNavigate()
-    const { people, loadPeople, loadUnnamedFaces, autoNameFaces, fetchFacesByIds, loading } = usePeople()
+    const { people, loadPeople, fetchFacesByIds, loading } = usePeople()
     const { onPhotoProcessed, addToQueue, setThrottled } = useAI()
-    const { showAlert, showConfirm } = useAlert()
-    const { addToast } = useToast()
+    const { showAlert } = useAlert()
+
+    // Extracted Hook
+    const {
+        clusters, singles, totalFaces, isClustering, isAutoAssigning,
+        selectedFaceIds, namingGroup, setNamingGroup,
+        loadClusteredFaces, toggleFace, toggleGroup, clearSelection,
+        handleAutoAssign, handleNameGroup, handleConfirmName, handleOpenNaming, handleIgnoreGroup
+    } = usePeopleCluster()
 
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
     const [showBlurryModal, setShowBlurryModal] = useState(false)
@@ -86,53 +34,18 @@ export default function People() {
     const [isScanning, setIsScanning] = useState(false)
     const [isScanModalOpen, setIsScanModalOpen] = useState(false)
 
-    // Clustering State
-    const [clusters, setClusters] = useState<{ faces: number[] }[]>([])
-    const [singles, setSingles] = useState<number[]>([])
-
-    // Selection State
-    const [selectedFaceIds, setSelectedFaceIds] = useState<Set<number>>(new Set())
-
-    const toggleFace = useCallback((id: number) => {
-        const newSet = new Set(selectedFaceIds)
-        if (newSet.has(id)) newSet.delete(id)
-        else newSet.add(id)
-        setSelectedFaceIds(newSet)
-    }, [selectedFaceIds])
-
-    const toggleGroup = useCallback((ids: number[]) => {
-        const newSet = new Set(selectedFaceIds)
-        const allSelected = ids.every(id => newSet.has(id))
-
-        if (allSelected) {
-            ids.forEach(id => newSet.delete(id))
-        } else {
-            ids.forEach(id => newSet.add(id))
-        }
-        setSelectedFaceIds(newSet)
-    }, [selectedFaceIds])
-
-    const clearSelection = useCallback(() => setSelectedFaceIds(new Set()), [])
-
-    const [totalFaces, setTotalFaces] = useState(0)
-    const [isClustering, setIsClustering] = useState(false)
-    const [isAutoAssigning, setIsAutoAssigning] = useState(false);
-
-    // Group Naming Modal State
-    const [namingGroup, setNamingGroup] = useState<{ faces: Face[], name: string } | null>(null)
-
     // Load initial batch when tab changes
     useEffect(() => {
         if (activeTab === 'unnamed') {
             loadClusteredFaces()
         }
-    }, [activeTab])
+    }, [activeTab, loadClusteredFaces])
 
     // Enable throttling while this complex view is active
     useEffect(() => {
         setThrottled(true);
         return () => setThrottled(false);
-    }, []);
+    }, [setThrottled]);
 
     useEffect(() => {
         const cleanup = onPhotoProcessed((_photoId) => {
@@ -145,76 +58,7 @@ export default function People() {
 
     useEffect(() => {
         loadPeople()
-    }, [])
-
-    const loadClusteredFaces = async () => {
-        setIsClustering(true)
-        try {
-            const res = await loadUnnamedFaces()
-            if (res) {
-                // Sort clusters by size (descending)
-                const sortedClusters = res.clusters.sort((a, b) => b.length - a.length).map(ids => ({ faces: ids }));
-                setClusters(sortedClusters)
-                setSingles(res.singles)
-
-                const clusterCount = res.clusters.reduce((acc, c) => acc + c.length, 0);
-                setTotalFaces(clusterCount + res.singles.length);
-            }
-        } catch (e) {
-            console.error("Failed to load clusters", e)
-        } finally {
-            setIsClustering(false)
-        }
-    }
-
-    const handleAutoAssign = async () => {
-        if (totalFaces === 0) return;
-
-        showConfirm({
-            title: 'Auto-Identify All Faces',
-            description: `This will cross-check ALL unassigned faces in your library against your identified people. This may take a while depending on the number of faces.`,
-            confirmLabel: 'Run Auto-Identify All',
-            onConfirm: async () => {
-                console.log("[People] User confirmed Auto-Identify All. Starting...");
-                setIsAutoAssigning(true);
-                try {
-                    console.log(`[People] Invoking db:autoAssignFaces for ALL unassigned faces...`);
-                    // @ts-ignore
-                    const res = await window.ipcRenderer.invoke('db:autoAssignFaces', { faceIds: [] });
-                    console.log("[People] db:autoAssignFaces result:", res);
-
-                    if (res.success) {
-                        if (res.count > 0) {
-                            setTimeout(() => {
-                                showAlert({
-                                    title: 'Auto-ID Complete',
-                                    description: `Successfully assigned ${res.count} faces.`,
-                                    variant: 'primary'
-                                });
-                            }, 100);
-                            loadClusteredFaces();
-                            loadPeople();
-                        } else {
-                            setTimeout(() => {
-                                showAlert({
-                                    title: 'No Matches',
-                                    description: 'No confident matches found among visible faces.',
-                                    variant: 'primary'
-                                });
-                            }, 100);
-                        }
-                    }
-                } catch (e) {
-                    console.error(e);
-                    setTimeout(() => {
-                        showAlert({ title: 'Error', description: 'Auto-Assign failed', variant: 'danger' });
-                    }, 100);
-                } finally {
-                    setIsAutoAssigning(false);
-                }
-            }
-        });
-    }
+    }, [loadPeople])
 
     // Scroll Restoration
     const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -247,91 +91,6 @@ export default function People() {
         }
         navigate(`/people/${personId}`)
     }
-
-    const handleNameGroup = useCallback(async (ids: number[], name: string) => {
-        // Optimistic: Remove from clusters immediately
-        const idsSet = new Set(ids)
-        setClusters(prev => prev.map(c => ({
-            faces: c.faces.filter(id => !idsSet.has(id))
-        })).filter(c => c.faces.length > 0))
-        setSingles(prev => prev.filter(id => !idsSet.has(id)))
-        setTotalFaces(prev => prev - ids.length)
-        setSelectedFaceIds(prev => {
-            const next = new Set(prev)
-            ids.forEach(id => next.delete(id))
-            return next
-        })
-
-        // API Call
-        await autoNameFaces(ids, name)
-        addToast({ type: 'success', description: `Named ${ids.length} faces.` })
-    }, [autoNameFaces, addToast])
-
-    const handleConfirmName = useCallback(async (selectedIds: number[], name: string) => {
-        if (!name || selectedIds.length === 0) return
-        setNamingGroup(null)
-        await handleNameGroup(selectedIds, name)
-    }, [handleNameGroup])
-
-    const handleOpenNaming = useCallback(async (ids: number[]) => {
-        // Fetch faces if needed (or if passed, use them? For now, fetch to be safe/consistent)
-        try {
-            const faces = await fetchFacesByIds(ids);
-            setNamingGroup({ faces, name: '' });
-        } catch (e) {
-            console.error("Failed to load faces for naming", e);
-            addToast({ type: 'error', description: 'Failed to load faces.' })
-        }
-    }, [fetchFacesByIds, addToast])
-
-    const handleIgnoreGroup = useCallback((ids: number[]) => {
-        showConfirm({
-            title: 'Ignore Faces',
-            description: `Ignore ${ids.length} faces? They will be hidden from unnamed faces.`,
-            confirmLabel: 'Ignore',
-            variant: 'danger',
-            onConfirm: async () => {
-                // Optimistic Update
-                const idsSet = new Set(ids)
-                setClusters(prev => prev.map(c => ({
-                    faces: c.faces.filter(id => !idsSet.has(id))
-                })).filter(c => c.faces.length > 0))
-                setSingles(prev => prev.filter(id => !idsSet.has(id)))
-                setTotalFaces(prev => prev - ids.length)
-                setSelectedFaceIds(prev => {
-                    const next = new Set(prev)
-                    ids.forEach(id => next.delete(id))
-                    return next
-                })
-
-                // @ts-ignore
-                await window.ipcRenderer.invoke('db:ignoreFaces', ids)
-                addToast({ type: 'success', description: `Ignored ${ids.length} faces.` })
-            }
-        })
-    }, [showConfirm, addToast])
-
-
-    const renderClusterRow = useCallback((index: number) => {
-        const cluster = clusters[index];
-        if (!cluster || !cluster.faces) return null;
-
-        return (
-            <div className="border-b border-gray-800 pb-4 pr-2">
-                <ClusterRow
-                    faceIds={cluster.faces}
-                    index={index}
-                    selectedFaceIds={selectedFaceIds}
-                    toggleFace={toggleFace}
-                    toggleGroup={toggleGroup}
-                    fetchFacesByIds={fetchFacesByIds}
-                    onNameGroup={handleNameGroup}
-                    onIgnoreGroup={handleIgnoreGroup}
-                    onOpenNaming={handleOpenNaming}
-                />
-            </div>
-        );
-    }, [clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleOpenNaming]);
 
     return (
         <div className="flex flex-col h-full bg-gray-950 text-white overflow-hidden">
@@ -484,7 +243,6 @@ export default function People() {
                         ) : (
                             <div className="space-y-6">
                                 {/* Clusters */}
-                                {/* Clusters */}
                                 {clusters.length > 0 && (
                                     <ClusterList
                                         clusters={clusters}
@@ -497,9 +255,7 @@ export default function People() {
                                         handleOpenNaming={handleOpenNaming}
                                     />
                                 )}
-                                {/* Duplicate FAB removed */}
 
-                                {/* Modals */}
                                 {singles.length > 0 && (
                                     <div className="mt-8 pt-8 border-t border-gray-800">
                                         <h3 className="text-lg font-medium text-white mb-4 flex items-center gap-2">
@@ -632,8 +388,6 @@ export default function People() {
                     </div>
                 </div>
             )}
-
-
         </div>
     )
 }

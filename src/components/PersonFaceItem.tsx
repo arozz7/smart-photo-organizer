@@ -19,10 +19,12 @@ const PersonFaceItem = memo(({ face, isSelected, toggleSelection }: PersonFaceIt
                 onClick={() => toggleSelection(face.id)}
             >
                 <FaceThumbnail
-                    src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
-                    fallbackSrc={`local-resource://${encodeURIComponent(face.file_path)}`}
+                    // optimization: Use original file path + server crop to get high quality face from RAW
+                    src={`local-resource://${encodeURIComponent(face.file_path)}`}
+                    fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
                     box={face.box}
                     originalImageWidth={face.width}
+                    useServerCrop={true}
                     className="w-full h-full pointer-events-none"
                 />
 

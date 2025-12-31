@@ -23,3 +23,10 @@ trigger: glob
 - Do not use mutable default arguments (e.g., `def func(list=[])`).
 - Do not use `from module import *` (wildcard imports).
 - Do not print to stdout in production code. Use the `logging` module.
+
+
+## Code Organization & Size Limits
+- **Soft Limit:** 300 lines.
+- **Hard Limit:** 600 lines.
+- **Action:** If a file exceeds the hard limit during editing, you MUST stop and suggest a refactor using `@RefactoringProtocol`.
+- **Single Responsibility:** Each file should export one main component/class or a cohesive set of utilities.

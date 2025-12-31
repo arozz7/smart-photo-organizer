@@ -40,7 +40,6 @@ graph TD
   - **Window Management:** Creates and manages the browser window.
   - **IPC Handlers:** `ipcMain.handle` receives requests from the UI.
   - **Database:** Manages `photos.db`, storing metadata, faces, and tags.
-  - **Scanning:** `scanner.ts` recursively scans directories, extracting metadata (via `exiftool`) and generating previews (via `sharp` or `exiftool`).
   - **Process Management:** Spawns and manages the persistent `python.exe` process (AI Engine). Pipes `stdin`/`stdout` for communication.
 
 ### 3. AI Engine (Python)

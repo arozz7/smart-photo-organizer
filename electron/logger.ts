@@ -58,6 +58,14 @@ const logger = {
         console.error(...args);
         logStream.write(formatted);
     },
+    debug: (...args: any[]) => {
+        if (process.env.DEBUG) {
+            rotateLogIfNeeded();
+            const formatted = formatMsg('DEBUG', ...args);
+            console.log(...args);
+            logStream.write(formatted);
+        }
+    },
     getLogPath: () => logFile
 };
 

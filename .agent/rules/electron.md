@@ -25,3 +25,9 @@ trigger: glob
 - Do not use `remote` module (it is deprecated and insecure).
 - Do not execute arbitrary code sent from the Renderer in the Main process.
 - Do not load remote content (websites) with `nodeIntegration` enabled.
+
+## Code Organization & Size Limits
+- **Soft Limit:** 300 lines.
+- **Hard Limit:** 600 lines.
+- **Action:** If a file exceeds the hard limit during editing, you MUST stop and suggest a refactor using `@RefactoringProtocol`.
+- **Single Responsibility:** Each file should export one main component/class or a cohesive set of utilities.

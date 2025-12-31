@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { CheckIcon } from '@radix-ui/react-icons';
 import FaceThumbnail from './FaceThumbnail';
 import { BlurryFace } from '../types/index';

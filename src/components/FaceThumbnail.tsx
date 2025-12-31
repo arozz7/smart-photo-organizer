@@ -82,6 +82,9 @@ const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(
     };
 
     // Safety check for empty paths
+    // DEBUG: Check params
+    if (!originalImageWidth) console.warn('[FaceThumbnail] Missing originalWidth for', src);
+
     if (!src || src === 'local-resource://' || src.startsWith('local-resource://?')) {
         return <div className={`bg-gray-800 flex items-center justify-center ${className || ''}`}><span className="text-gray-600 text-[10px]">No Image</span></div>;
     }
@@ -97,7 +100,30 @@ const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(
                 </div>
             )}
             <img
-                src={hasRetried ? (fallbackSrc || src) : `${src}?silent_404=true`}
+                src={(() => {
+                    if (hasRetried) return fallbackSrc || src;
+
+                    const separator = src.includes('?') ? '&' : '?';
+                    let finalSrc = `${src}${separator}silent_404=true`;
+
+                    if (originalImageWidth) {
+                        finalSrc += `&originalWidth=${originalImageWidth}`;
+                    }
+
+                    if (useServerCrop && box) {
+                        finalSrc += `&box=${box.x},${box.y},${box.width},${box.height}`;
+                        // Request HQ if it's likely a RAW file or high-detail needed
+                        finalSrc += `&hq=true&width=${Math.round(box.width)}`; // Request closer to original resolution or valid thumb size?
+                        // Actually, 'width' in protocol is "resize to this".
+                        // If we want a thumbnail, we should ask for a reasonable size (e.g. 150) to prompt Python to downscale AFTER crop.
+                        // But wait, if we ask for 150, Python will crop then resize to 150.
+                        // That's what we want for a thumbnail. The 'box.width' might be 30px or 300px.
+                        // Let's cap it at 300 for thumbnails to ensure quality but save bandwidth.
+                        finalSrc += `&width=300`;
+                    }
+
+                    return finalSrc;
+                })()}
                 alt={alt || "face"}
                 onLoad={(e) => {
                     const img = e.currentTarget;

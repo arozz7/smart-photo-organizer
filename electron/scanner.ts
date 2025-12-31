@@ -1,163 +1,22 @@
 import { promises as fs } from 'node:fs';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { ExifTool } from 'exiftool-vendored';
-import { getDB } from './db';
-import sharp from 'sharp';
 import logger from './logger';
+import { getDB } from './db';
 
-// Lazy load ExifTool
-let _exiftool: ExifTool | null = null;
-let _exiftoolInitPromise: Promise<ExifTool | null> | null = null;
-
-async function getExifTool(): Promise<ExifTool | null> {
-    if (_exiftool) return _exiftool;
-    if (_exiftoolInitPromise) return _exiftoolInitPromise;
-
-    _exiftoolInitPromise = (async () => {
-        try {
-            logger.info('Initializing ExifTool...');
-            // Create instance with timeout
-            const tool = new ExifTool({
-                taskTimeoutMillis: 5000,
-                maxProcs: 1
-            });
-
-            // Verify it works with a timeout
-            const initCheck = new Promise<string>((resolve, reject) => {
-                const timer = setTimeout(() => reject(new Error('ExifTool startup timed out')), 30000);
-                tool.version()
-                    .then(v => { clearTimeout(timer); resolve(v); })
-                    .catch(e => { clearTimeout(timer); reject(e); });
-            });
-
-            const version = await initCheck;
-            logger.info(`ExifTool started successfully. Version: ${version}`);
-            _exiftool = tool;
-            return tool;
-        } catch (err) {
-            logger.error('FAILED to initialize ExifTool. RAW support will be disabled.', err);
-            return null;
-        }
-    })();
-
-    return _exiftoolInitPromise;
+// Helper to get ExifTool from service
+export async function getExifTool(): Promise<ExifTool | null> {
+    const { PhotoService } = await import('./services/photoService');
+    return PhotoService.getExifTool();
 }
 
 const SUPPORTED_EXTS = ['.jpg', '.jpeg', '.png', '.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.tif', '.tiff'];
 
-// Helper to extract preview
-async function extractPreview(filePath: string, previewDir: string, forceRescan: boolean = false): Promise<string | null> {
-    // Use hash of filePath to ensure uniqueness across folders
-    const fileName = path.basename(filePath);
-    const hash = createHash('md5').update(filePath).digest('hex');
-    const previewName = `${hash}.jpg`;
-    const previewPath = path.join(previewDir, previewName);
-
-    try {
-        // Check if already exists (skip if forceRescan is FALSE)
-        if (!forceRescan) {
-            try {
-                await fs.access(previewPath);
-                return previewPath;
-            } catch {
-                // Start extraction
-            }
-        }
-
-        // Determine if RAW or TIF
-        const ext = path.extname(filePath).toLowerCase();
-        const isRaw = !['.jpg', '.jpeg', '.png'].includes(ext);
-
-        let rotationDegrees = 0;
-        let shouldRotate = false;
-
-        try {
-            const tool = await getExifTool();
-            if (tool) {
-                const tags = await tool.read(filePath, ['Orientation']);
-                if (tags?.Orientation) {
-                    const val = tags.Orientation as any;
-                    if (val === 1 || val === 'Horizontal (normal)') { rotationDegrees = 0; shouldRotate = false; }
-                    else if (val === 3 || val === 'Rotate 180') { rotationDegrees = 180; shouldRotate = true; }
-                    else if (val === 6 || val === 'Rotate 90 CW') { rotationDegrees = 90; shouldRotate = true; }
-                    else if (val === 8 || val === 'Rotate 270 CW') { rotationDegrees = 270; shouldRotate = true; }
-                }
-            }
-        } catch (e) {
-            logger.warn(`Failed to read orientation for ${fileName}, assuming upright.`);
-        }
-
-
-        if (isRaw) {
-            let extracted = false;
-            if (!['.tif', '.tiff'].includes(ext)) {
-                try {
-                    const tool = await getExifTool();
-                    if (tool) {
-                        const tempPreviewPath = `${previewPath}.tmp`;
-                        const timeoutPromise = new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error('Preview extraction timed out')), 15000)
-                        );
-                        await Promise.race([
-                            tool.extractPreview(filePath, tempPreviewPath),
-                            timeoutPromise
-                        ]);
-                        await fs.access(tempPreviewPath);
-
-                        const pipeline = sharp(tempPreviewPath);
-                        if (shouldRotate) pipeline.rotate(rotationDegrees);
-
-                        await pipeline
-                            .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
-                            .jpeg({ quality: 80 })
-                            .toFile(previewPath);
-
-                        try { await fs.unlink(tempPreviewPath); } catch { /* ignore */ }
-                        logger.info(`Extracted and normalized preview for ${fileName}`);
-                        extracted = true;
-                    }
-                } catch (e) {
-                    try { await fs.unlink(`${previewPath}.tmp`); } catch { /* ignore */ }
-                }
-            }
-
-            if (!extracted) {
-                try {
-                    logger.info(`Generating preview with Sharp for ${fileName}...`);
-                    const pipeline = sharp(filePath);
-                    if (shouldRotate) pipeline.rotate(rotationDegrees);
-
-                    await pipeline
-                        .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
-                        .jpeg({ quality: 80 })
-                        .toFile(previewPath);
-                    logger.info(`Generated preview with Sharp for ${fileName}`);
-                    extracted = true;
-                } catch (sharpErr) {
-                    logger.error(`Sharp conversion failed for ${fileName}:`, sharpErr);
-                }
-            }
-            if (extracted) return previewPath;
-        } else {
-            try {
-                const pipeline = sharp(filePath);
-                if (shouldRotate) pipeline.rotate(rotationDegrees);
-
-                await pipeline
-                    .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
-                    .jpeg({ quality: 80 })
-                    .toFile(previewPath);
-                return previewPath;
-            } catch (e) {
-                logger.error(`Failed to generate preview for image ${fileName}`, e);
-            }
-        }
-
-    } catch (e) {
-        logger.error(`Failed to extract/generate preview for ${filePath}`, e);
-    }
-    return null;
+// Helper to extract preview (delegated to PhotoService)
+export async function extractPreview(filePath: string, previewDir: string, forceRescan: boolean = false): Promise<string | null> {
+    const { PhotoService } = await import('./services/photoService');
+    // Enable Throw on Error to capture corruption details
+    return PhotoService.extractPreview(filePath, previewDir, forceRescan, true);
 }
 
 // Shared processing logic for a single file
@@ -169,10 +28,13 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
 
     const selectStmt = db.prepare('SELECT * FROM photos WHERE file_path = ?');
     const insertStmt = db.prepare(`
-        INSERT INTO photos (file_path, preview_cache_path, created_at, metadata_json) 
-        VALUES (@file_path, @preview_cache_path, @created_at, @metadata_json)
+        INSERT INTO photos (file_path, preview_cache_path, created_at, metadata_json, width, height) 
+        VALUES (@file_path, @preview_cache_path, @created_at, @metadata_json, @width, @height)
         ON CONFLICT(file_path) DO NOTHING
     `);
+
+    // Check if error already logged? (Optional: prevent duplicate error logs? Unique constrain on photo_id?)
+    // scan_errors has ID pk.
 
     let photo = selectStmt.get(fullPath);
     let needsUpdate = false;
@@ -191,7 +53,13 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
             if (photo.preview_cache_path) {
                 try {
                     await fs.access(photo.preview_cache_path);
-                } catch {
+                    const stats = await fs.stat(photo.preview_cache_path);
+                    if (stats.size === 0) {
+                        logger.debug(`[Scanner] Preview exists but is 0 bytes: ${photo.preview_cache_path}`);
+                        previewMissing = true;
+                    }
+                } catch (accessErr) {
+                    logger.debug(`[Scanner] Preview missing (access failed) for ${fullPath} at ${photo.preview_cache_path}`);
                     previewMissing = true;
                 }
             } else {
@@ -201,21 +69,47 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
             if (previewMissing || forceRescan) {
                 const tool = await getExifTool();
                 if (tool) {
+                    try {
+                        const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
+                        if (previewPath) {
+                            db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
+                            photo.preview_cache_path = previewPath;
+                            needsUpdate = true;
+                            // Clear previous errors if successful
+                            db.prepare('DELETE FROM scan_errors WHERE photo_id = ?').run(photo.id);
+                        }
+                    } catch (e: any) {
+                        logger.error(`[Scanner] Preview generation failed for ${path.basename(fullPath)}`, e);
+                        db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, ?, ?, ?)').run(photo.id, fullPath, e.message || String(e), 'Preview Generation');
+                    }
+                }
+            }
+        } else {
+            // Standard Image (JPG/PNG)
+            if (photo.preview_cache_path) {
+                try {
+                    await fs.access(photo.preview_cache_path);
+                    const stats = await fs.stat(photo.preview_cache_path);
+                    if (stats.size === 0) previewMissing = true;
+                } catch {
+                    previewMissing = true;
+                }
+            } else {
+                previewMissing = true;
+            }
+
+            if (previewMissing || forceRescan) {
+                try {
                     const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
                     if (previewPath) {
                         db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
                         photo.preview_cache_path = previewPath;
                         needsUpdate = true;
+                        db.prepare('DELETE FROM scan_errors WHERE photo_id = ?').run(photo.id);
                     }
-                }
-            }
-        } else {
-            if (forceRescan) {
-                const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
-                if (previewPath) {
-                    db.prepare('UPDATE photos SET preview_cache_path = ? WHERE id = ?').run(previewPath, photo.id);
-                    photo.preview_cache_path = previewPath;
-                    needsUpdate = true;
+                } catch (e: any) {
+                    logger.error(`[Scanner] Preview generation failed for ${path.basename(fullPath)}`, e);
+                    db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, ?, ?, ?)').run(photo.id, fullPath, e.message || String(e), 'Preview Generation');
                 }
             }
         }
@@ -225,8 +119,28 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
                 const tool = await getExifTool();
                 if (tool) {
                     const metadata = await tool.read(fullPath);
-                    db.prepare('UPDATE photos SET metadata_json = ? WHERE id = ?').run(JSON.stringify(metadata), photo.id);
+                    let width = (metadata as any)?.ImageWidth || (metadata as any)?.SourceImageWidth || (metadata as any)?.ExifImageWidth || null;
+                    let height = (metadata as any)?.ImageHeight || (metadata as any)?.SourceImageHeight || (metadata as any)?.ExifImageHeight || null;
+
+                    // SWAP Dimensions for Rotated Images (RAW/Phone)
+                    // Orientation: 6 (Rot 90), 8 (Rot 270), 5 (Transponse), 7 (Transverse)
+                    const orientation = (metadata as any)?.Orientation;
+                    const isRotated = orientation === 6 || orientation === 8 || orientation === 5 || orientation === 7 ||
+                        orientation === 'Rotate 90 CW' || orientation === 'Rotate 270 CW';
+
+                    if (isRotated && width && height) {
+                        logger.info(`[Scanner] Detected Rotation for ${path.basename(fullPath)}: ${orientation}. Swapping ${width}x${height} -> ${height}x${width}`);
+                        const temp = width;
+                        width = height;
+                        height = temp;
+                    } else {
+                        logger.debug(`[Scanner] No Rotation detected for ${path.basename(fullPath)}: ${orientation} (W:${width}, H:${height})`);
+                    }
+
+                    db.prepare('UPDATE photos SET metadata_json = ?, width = ?, height = ? WHERE id = ?').run(JSON.stringify(metadata), width, height, photo.id);
                     photo.metadata_json = JSON.stringify(metadata);
+                    photo.width = width;
+                    photo.height = height;
                     needsUpdate = true;
                 }
             } catch (e) {
@@ -236,28 +150,64 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
     }
 
     if (!photo) {
-        logger.info(`[Scanner] New photo found: ${path.basename(fullPath)}`);
-        const previewPath = await extractPreview(fullPath, previewDir, forceRescan);
+        logger.debug(`[Scanner] New photo found: ${path.basename(fullPath)}`);
+        let previewPath = null;
+        let previewError = null;
+
+        try {
+            previewPath = await extractPreview(fullPath, previewDir, forceRescan);
+        } catch (e: any) {
+            // Capture error but continue to insert photo so we can log the error
+            previewError = e;
+            logger.error(`[Scanner] Initial preview failed for ${path.basename(fullPath)}`, e);
+        }
 
         try {
             let metadata = {};
+            let width = null;
+            let height = null;
+
             try {
                 const tool = await getExifTool();
                 if (tool) {
                     metadata = await tool.read(fullPath);
+                    width = (metadata as any)?.ImageWidth || (metadata as any)?.SourceImageWidth || (metadata as any)?.ExifImageWidth || null;
+                    height = (metadata as any)?.ImageHeight || (metadata as any)?.SourceImageHeight || (metadata as any)?.ExifImageHeight || null;
+
+                    // SWAP Dimensions for Rotated Images
+                    const orientation = (metadata as any)?.Orientation;
+                    const isRotated = orientation === 6 || orientation === 8 || orientation === 5 || orientation === 7 ||
+                        orientation === 'Rotate 90 CW' || orientation === 'Rotate 270 CW';
+
+                    if (isRotated && width && height) {
+                        const temp = width;
+                        width = height;
+                        height = temp;
+                        logger.debug(`[Scanner] Swapped dimensions for ${path.basename(fullPath)} (Orientation: ${orientation})`);
+                    }
                 }
             } catch (e) {
                 logger.error(`Failed to read metadata for ${fullPath}`, e);
             }
 
-            insertStmt.run({
+            const info = insertStmt.run({
                 file_path: fullPath,
-                preview_cache_path: previewPath,
+                preview_cache_path: previewPath, // Might be null
                 created_at: new Date().toISOString(),
-                metadata_json: JSON.stringify(metadata)
+                metadata_json: JSON.stringify(metadata),
+                width,
+                height
             });
-            photo = selectStmt.get(fullPath);
+
+            const newPhotoId = info.lastInsertRowid;
+            photo = selectStmt.get(fullPath); // Retrieve full object
             isNew = true;
+
+            // Log error if one occurred
+            if (previewError) {
+                db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, ?, ?, ?)').run(newPhotoId, fullPath, previewError.message || String(previewError), 'Initial Scan');
+            }
+
         } catch (e) {
             logger.error('Insert failed', e);
         }
@@ -281,6 +231,7 @@ export async function scanFiles(filePaths: string[], libraryPath: string, onProg
     await fs.mkdir(previewDir, { recursive: true });
 
     logger.info(`Scanning ${filePaths.length} specific files...`);
+    // logger.info(`[Scanner] Scanning directory: ${currentPath}`);
 
     for (const filePath of filePaths) {
         try {
@@ -348,7 +299,7 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
     }
 
     await scan(dirPath);
-    logger.info(`[Scanner] Total files: ${totalFiles}, Processed: ${count}, Returned: ${photos.length}`);
-    logger.info(`[Scanner] Skipped Extensions:`, skippedStats);
+    await scan(dirPath);
+    logger.info(`[Scanner] Scanning Finished. Details: Total=${totalFiles}, New=${count}, Returned=${photos.length}, Skipped=${JSON.stringify(skippedStats)}`);
     return photos;
 }
