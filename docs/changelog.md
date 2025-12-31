@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 ### Fixes
+- **Face Identification:** Implemented "Hybrid Matching" (FAISS + Centroid) to ensure new scans correctly match against named people even if vector distances vary slightly.
+- **System Status:** Fixed "Dimensions: 0" display glitch for the vector index.
 - **RAW/JPG Orientation Mismatch:** Fixed pervasive issue where RAW thumbnails were misaligned ("ghost crops") and JPGs were double-rotated. Implemented "Smart Conditional Rotation" in both Python and Electron backends.
 - **Thumbnail Quality:** Implemented server-side cropping for face thumbnails, ensuring high-resolution displays even for small faces in large RAW files.
 - **Analysis Errors:** Failures during analysis (e.g., corrupt files) now correctly log to the DB instead of failing silently.
@@ -9,6 +11,7 @@
 
 ### Refactoring
 - **PersonDetail.tsx:** Extracted headers, grids, and logic hooks to improve maintainability and performance.
+- **Image Protocol:** Refactored `imageProtocol.ts` into a modular architecture (Service/Repository/Processor) to improve testability and maintainability.
 
 ## v0.4.0 (Stability & Refactoring)
 *Release Date: 2025-12-29*

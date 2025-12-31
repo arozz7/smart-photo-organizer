@@ -650,25 +650,27 @@ export async function autoAssignFaces(faceIds: number[], threshold = 0.65, searc
         if (descriptors.length === 0) break;
 
         // Perform Search (k=10 neighbors)
-        // Threshold note: DB linear was similarity (0-1). FAISS uses L2 Distance (0-inf).
-        // Threshold input is typically Distance if using FAISS, or Similarity if using DB?
-        // Let's assume input 'threshold' is SIMILARITY (high is good, e.g. 0.65)
-        // Converted to Distance: dist = (1/sim) - 1. E.g. 1/0.65 - 1 = 0.53.
         const distThreshold = (1 / Math.max(0.01, threshold)) - 1;
 
-        logger.info(`[AutoAssign] Invoking FAISS Matcher for ${descriptors.length} faces (SimThresh: ${threshold}, DistThresh: ${distThreshold.toFixed(3)})`);
-
+        // logger.info(`[AutoAssign] Invoking FAISS Matcher for ${descriptors.length} faces...`);
         const batchResults = await searchFn(descriptors, 10, distThreshold);
 
-        // Resolve Person IDs from Face IDs
-        // We need a map of FaceID -> PersonID for all returned matches
+        // HYBRID: Also load Person Means for Centroid Matching
+        // This ensures we match against the "Concept" of the person, not just individual weak faces.
+        const people = db.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
+        const candidates = people.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          mean: JSON.parse(p.descriptor_mean_json)
+        }));
+
+        // Resolve Person IDs for FAISS matches
         const allMatchFaceIds = new Set<number>();
         batchResults.forEach(matches => matches.forEach(m => allMatchFaceIds.add(m.id)));
 
         const faceToPersonMap = new Map<number, number>();
         if (allMatchFaceIds.size > 0) {
           const ids = Array.from(allMatchFaceIds);
-          // sqlite limit is usually 999 vars. Chunking might be needed if HUGE number of matches.
           const CHUNK = 900;
           for (let i = 0; i < ids.length; i += CHUNK) {
             const chunk = ids.slice(i, i + CHUNK);
@@ -681,20 +683,31 @@ export async function autoAssignFaces(faceIds: number[], threshold = 0.65, searc
         const transaction = db.transaction(() => {
           for (let i = 0; i < validFaces.length; i++) {
             const face = validFaces[i];
+            const descriptor = descriptors[i];
             const matches = batchResults[i];
 
             // Voting Logic
             const votes: Record<number, number> = {};
 
+            // 1. FAISS Votes (Detailed)
             for (const m of matches) {
               const pid = faceToPersonMap.get(m.id);
               if (!pid) continue;
-
-              // Weight vote by similarity? 
-              // Sim = 1/(1+dist).
               const sim = 1 / (1 + m.distance);
-              // Simple Sum of Similarities
               votes[pid] = (votes[pid] || 0) + sim;
+            }
+
+            // 2. Centroid Vote (Global)
+            // Run legacy matcher against means
+            if (candidates.length > 0) {
+              const centroidMatch = findBestMatch(descriptor, candidates, threshold);
+              if (centroidMatch.success && centroidMatch.personId) {
+                // Add a strong vote (or weighted)
+                // Since Centroid is 1:1, we value it. 
+                // Let's add the similarity score directly.
+                votes[centroidMatch.personId] = (votes[centroidMatch.personId] || 0) + centroidMatch.similarity;
+                // logger.info(`[AutoAssign] Face ${face.id} matched Centroid of Person ${centroidMatch.personId} (${centroidMatch.personName}) with sim ${centroidMatch.similarity.toFixed(2)}`);
+              }
             }
 
             // Find Winner
@@ -707,22 +720,10 @@ export async function autoAssignFaces(faceIds: number[], threshold = 0.65, searc
               }
             }
 
-            // Heuristic: If bestScore > X? 
-            // Logic: If we have 1 very good match (Sim 0.8), score is 0.8.
-            // If we have 5 weak matches (Sim 0.4), score is 2.0.
-            // We want to avoid assigning if it's just noise.
-            // But threshold was applied at search level.
-            // Let's require at least one match > output threshold? 
-            // Actually `search_index_batch` already filters by threshold.
-            // So any match returned is "Valid".
-            // We just pick the person with MOST valid mass.
-
             if (bestPid !== -1) {
               updateFace.run(bestPid, face.id);
               passAssignedCount++;
-              passAssigned.push({ faceId: face.id, personId: bestPid, similarity: bestScore }); // Score isn't normalized 0-1 but >0
-
-              // if (passAssignedCount <= 5) logger.info(`[AutoAssign] Assigned Face ${face.id} -> Person ${bestPid} (VoteScore: ${bestScore.toFixed(2)})`);
+              passAssigned.push({ faceId: face.id, personId: bestPid, similarity: bestScore });
             }
           }
         });

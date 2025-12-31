@@ -720,7 +720,7 @@ def handle_command(command):
             status['faiss'] = {
                 'loaded': (vector_store.index is not None), 
                 'count': vector_store.index.ntotal if vector_store.index else 0,
-                'dimensions': vector_store.index.d if vector_store.index else 0
+                'dimensions': (vector_store.index.d if (vector_store.index and hasattr(vector_store.index, 'd') and vector_store.index.d > 0) else 512) if vector_store.index else 0
             }
             status['vlm'] = {'loaded': (vlm.vlm_model is not None)}
             

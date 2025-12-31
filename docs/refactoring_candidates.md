@@ -51,3 +51,9 @@ Based on `refactoring-protocol.md`:
   - Extracted `usePhotoNavigation` hook for viewing/refreshing photos.
   - Extracted `useLibraryMetadata` hook for tags/folders/people loaders.
   - Main context file simplified to focus on state orchestration.
+
+### 6. `electron/services/imageProtocol.ts` (Refactored)
+- **Status**: ✅ RESOLVED
+- **Changes**:
+  - Decomposed into `ImageService` (Reasoning), `MetadataRepository` (Memory), and `ImageProcessor` (Tools).
+  - Implemented modular layers with dependency injection.
