@@ -119,8 +119,23 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
                 const tool = await getExifTool();
                 if (tool) {
                     const metadata = await tool.read(fullPath);
-                    const width = (metadata as any)?.ImageWidth || (metadata as any)?.SourceImageWidth || (metadata as any)?.ExifImageWidth || null;
-                    const height = (metadata as any)?.ImageHeight || (metadata as any)?.SourceImageHeight || (metadata as any)?.ExifImageHeight || null;
+                    let width = (metadata as any)?.ImageWidth || (metadata as any)?.SourceImageWidth || (metadata as any)?.ExifImageWidth || null;
+                    let height = (metadata as any)?.ImageHeight || (metadata as any)?.SourceImageHeight || (metadata as any)?.ExifImageHeight || null;
+
+                    // SWAP Dimensions for Rotated Images (RAW/Phone)
+                    // Orientation: 6 (Rot 90), 8 (Rot 270), 5 (Transponse), 7 (Transverse)
+                    const orientation = (metadata as any)?.Orientation;
+                    const isRotated = orientation === 6 || orientation === 8 || orientation === 5 || orientation === 7 ||
+                        orientation === 'Rotate 90 CW' || orientation === 'Rotate 270 CW';
+
+                    if (isRotated && width && height) {
+                        logger.info(`[Scanner] Detected Rotation for ${path.basename(fullPath)}: ${orientation}. Swapping ${width}x${height} -> ${height}x${width}`);
+                        const temp = width;
+                        width = height;
+                        height = temp;
+                    } else {
+                        logger.debug(`[Scanner] No Rotation detected for ${path.basename(fullPath)}: ${orientation} (W:${width}, H:${height})`);
+                    }
 
                     db.prepare('UPDATE photos SET metadata_json = ?, width = ?, height = ? WHERE id = ?').run(JSON.stringify(metadata), width, height, photo.id);
                     photo.metadata_json = JSON.stringify(metadata);
@@ -158,6 +173,18 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
                     metadata = await tool.read(fullPath);
                     width = (metadata as any)?.ImageWidth || (metadata as any)?.SourceImageWidth || (metadata as any)?.ExifImageWidth || null;
                     height = (metadata as any)?.ImageHeight || (metadata as any)?.SourceImageHeight || (metadata as any)?.ExifImageHeight || null;
+
+                    // SWAP Dimensions for Rotated Images
+                    const orientation = (metadata as any)?.Orientation;
+                    const isRotated = orientation === 6 || orientation === 8 || orientation === 5 || orientation === 7 ||
+                        orientation === 'Rotate 90 CW' || orientation === 'Rotate 270 CW';
+
+                    if (isRotated && width && height) {
+                        const temp = width;
+                        width = height;
+                        height = temp;
+                        logger.debug(`[Scanner] Swapped dimensions for ${path.basename(fullPath)} (Orientation: ${orientation})`);
+                    }
                 }
             } catch (e) {
                 logger.error(`Failed to read metadata for ${fullPath}`, e);

@@ -171,11 +171,11 @@ export function startPythonBackend() {
                 }
 
                 // Log Errors
-                if ((message.type === 'scan_result' || message.type === 'tags_result') && message.error && message.photoId) {
+                if ((message.type === 'scan_result' || message.type === 'tags_result' || message.type === 'analysis_result') && message.error && message.photoId) {
                     try {
                         const db = getDB();
                         const logError = db.prepare('INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, (SELECT file_path FROM photos WHERE id = ?), ?, ?)');
-                        const stage = message.type === 'scan_result' ? 'Face Scan' : 'Smart Tags';
+                        const stage = message.type === 'tags_result' ? 'Smart Tags' : (message.type === 'analysis_result' ? 'Unified Analysis' : 'Face Scan');
                         logError.run(message.photoId, message.photoId, message.error, stage);
                         logger.info(`[Main] Logged scan error for ${message.photoId}`);
                     } catch (err) {
@@ -229,6 +229,15 @@ async function processAnalysisResult(db: any, message: any) {
         INSERT INTO faces (photo_id, person_id, descriptor, box_json, blur_score, is_reference)
         VALUES (?, ?, ?, ?, ?, 0)
     `);
+
+    // Update Photo Dimensions if provided (Important for EXIF rotation syncing)
+    if (message.width && message.height) {
+        try {
+            db.prepare('UPDATE photos SET width = ?, height = ? WHERE id = ?').run(message.width, message.height, message.photoId);
+        } catch (e) {
+            console.error(`[PythonService] Failed to update dimensions for ${message.photoId}:`, e);
+        }
+    }
 
     const insertedIds: number[] = [];
     const runTransaction = db.transaction(() => {

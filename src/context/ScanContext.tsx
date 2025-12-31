@@ -288,7 +288,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
             if (photosToQueue.length > 0) {
                 console.log(`[ScanContext] Queueing ${photosToQueue.length} photos for AI (Total Scanned: ${scanResults.length})`);
-                addToQueue(photosToQueue)
+                addToQueue(photosToQueue, true)
             } else {
                 console.log(`[ScanContext] No new photos to queue for AI.`);
             }
@@ -326,7 +326,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
                 // Queue Logic: Queue ALL returned photos as they are forced
                 if (scannedPhotos.length > 0) {
-                    addToQueue(scannedPhotos);
+                    addToQueue(scannedPhotos, true);
                 }
 
                 // Refresh view hack

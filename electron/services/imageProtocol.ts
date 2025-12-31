@@ -10,7 +10,8 @@ import { pathToFileURL } from 'node:url';
 const TRANSPARENT_1X1_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 
 // Fallback generator provided by main process (calls Python)
-export function registerImageProtocol(fallbackGenerator?: (path: string, width?: number, box?: string) => Promise<Buffer | null>) {
+// Fallback generator provided by main process (calls Python)
+export function registerImageProtocol(fallbackGenerator?: (path: string, width?: number, box?: string, orientation?: number) => Promise<Buffer | null>) {
     protocol.handle('local-resource', async (request) => {
         let decodedPath = '';
         try {
@@ -48,19 +49,77 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
 
             if ((width && width > 0) || boxParam) {
                 try {
-                    // DEBUG LOG
-                    // logger.info(`[Protocol] Processing sharp transform for: '${decodedPath}'`);
+                    // Initialize pipeline WITHOUT auto-rotate first
+                    let pipeline = sharp(decodedPath);
 
-                    // Initialize pipeline with AUTO-ROTATION to match Python/EXIF coordinates
-                    let pipeline = sharp(decodedPath).rotate();
+                    // Fetch DB Orientation (Source of Truth)
+                    let dbOrientation = 1;
+                    try {
+                        const db = getDB();
+                        const row = db.prepare('SELECT metadata_json FROM photos WHERE file_path = ?').get(decodedPath) as { metadata_json: string };
+                        if (row && row.metadata_json) {
+                            const meta = JSON.parse(row.metadata_json);
+                            if (meta.Orientation) dbOrientation = parseInt(meta.Orientation);
+                            else if (meta.ExifImageOrientation) dbOrientation = parseInt(meta.ExifImageOrientation);
+                        }
+                    } catch (dbErr) { /* ignore */ }
 
-                    // 1. Crop if box provided (x,y,w,h)
+                    // Check INPUT metadata
+                    const inputMeta = await pipeline.metadata();
+                    const inputW = inputMeta.width || 0;
+                    const inputH = inputMeta.height || 0;
+                    const inputOri = inputMeta.orientation || 1;
+
+                    const isInputLandscape = inputW > inputH;
+                    const expectsPortrait = (dbOrientation === 6 || dbOrientation === 8);
+
+                    // LOGIC:
+                    // 1. If Image is Landscape AND we expect Portrait:
+                    //    - Check if Exif exists (inputOri > 1). If so, .rotate() should fix it.
+                    //    - If Exif missing, manual rotate based on DB.
+                    // 2. If Image is ALREADY Portrait AND we expect Portrait:
+                    //    - DO NOT ROTATE. (Avoid double-rotation if Exif is present but file is already upright).
+
+                    // Track if we swapped dimensions
+                    let dimsSwapped = false;
+
+                    if (expectsPortrait && isInputLandscape) {
+                        // Needs Rotation
+                        if (inputOri >= 5 && inputOri <= 8) {
+                            // Exif present and valid, trust Auto-Rotate
+                            pipeline = pipeline.rotate();
+                            // Auto-rotate from Landscape(Sensor) to Portrait(Visual) ALWAYS swaps dimensions
+                            dimsSwapped = true;
+                        } else {
+                            // Exif missing/invalid, Manual Rotate
+                            if (dbOrientation === 6) { pipeline = pipeline.rotate(90); dimsSwapped = true; }
+                            else if (dbOrientation === 8) { pipeline = pipeline.rotate(-90); dimsSwapped = true; }
+                        }
+                    } else if (dbOrientation === 3) {
+                        // 180 handling - No Dim Swap
+                        if (inputOri === 3) pipeline = pipeline.rotate();
+                        else pipeline = pipeline.rotate(180);
+                    }
+                    // Else: Already matches, or Landscape expected. Do nothing.
+
+                    // logger.info(`[ImageProtocol] Rotation Logic for ${path.basename(decodedPath)}: DB=${dbOrientation}, In=${inputW}x${inputH} (Ori=${inputOri}) -> Action: ${expectsPortrait && isInputLandscape ? 'ROTATE' : 'KEEP'}, Swapped=${dimsSwapped}`);
+
+                    // 1. Crop if requested (x,y,w,h)
                     if (boxParam) {
                         const [x, y, w, h] = boxParam.split(',').map(Number);
                         if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
                             // Validate/Clamp against image dimensions to prevent "extract_area" errors
                             const metadata = await pipeline.metadata();
-                            if (metadata.width && metadata.height) {
+
+                            // Correct dimensions if swapped
+                            let currentW = metadata.width || 0;
+                            let currentH = metadata.height || 0;
+
+                            if (dimsSwapped) {
+                                [currentW, currentH] = [currentH, currentW];
+                            }
+
+                            if (currentW && currentH) {
                                 let finalX = x;
                                 let finalY = y;
                                 let finalW = w;
@@ -69,18 +128,18 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
                                 // Checking for originalWidth to perform checking
                                 const originalWidth = urlObj.searchParams.get('originalWidth') ? parseInt(urlObj.searchParams.get('originalWidth')!) : null;
 
-                                if (originalWidth && originalWidth > 0 && metadata.width !== originalWidth) {
-                                    const scale = metadata.width / originalWidth;
+                                if (originalWidth && originalWidth > 0 && currentW !== originalWidth) {
+                                    const scale = currentW / originalWidth;
                                     finalX = x * scale;
                                     finalY = y * scale;
                                     finalW = w * scale;
                                     finalH = h * scale;
                                 }
 
-                                const safeX = Math.max(0, Math.min(Math.round(finalX), metadata.width - 1));
-                                const safeY = Math.max(0, Math.min(Math.round(finalY), metadata.height - 1));
-                                const safeW = Math.max(1, Math.min(Math.round(finalW), metadata.width - safeX));
-                                const safeH = Math.max(1, Math.min(Math.round(finalH), metadata.height - safeY));
+                                const safeX = Math.max(0, Math.min(Math.round(finalX), currentW - 1));
+                                const safeY = Math.max(0, Math.min(Math.round(finalY), currentH - 1));
+                                const safeW = Math.max(1, Math.min(Math.round(finalW), currentW - safeX));
+                                const safeH = Math.max(1, Math.min(Math.round(finalH), currentH - safeY));
 
                                 pipeline = pipeline.extract({ left: safeX, top: safeY, width: safeW, height: safeH });
                             }
@@ -110,35 +169,47 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
                         const row = db.prepare('SELECT preview_cache_path FROM photos WHERE file_path = ?').get(decodedPath) as { preview_cache_path: string };
 
                         if (row && row.preview_cache_path) {
-                            // logger.info(`[Protocol] Using Fallback Preview for ${decodedPath} -> ${row.preview_cache_path}`);
-                            // Verify preview file exists
-                            await fs.access(row.preview_cache_path);
+                            // Check HQ override
+                            const isHQ = urlObj.searchParams.get('hq') === 'true';
 
-                            // Serve the preview using sharp (to respect resize options if possible, or just raw)
-                            // Ideally, treat the preview as the new source and re-apply transform.
-                            // But careful about infinite loops if preview itself fails.
+                            // Only use preview if NOT HQ
+                            if (!isHQ) {
+                                // logger.info(`[Protocol] Using Fallback Preview for ${decodedPath} -> ${row.preview_cache_path}`);
+                                // Verify preview file exists
+                                await fs.access(row.preview_cache_path);
 
-                            // Simple: Just serve existing preview if no box/width, or try to resize preview.
-                            let previewPipeline = sharp(row.preview_cache_path).rotate(); // Previews are JPEGs, safe for sharp
+                                // Serve the preview using sharp (to respect resize options if possible, or just raw)
+                                // Ideally, treat the preview as the new source and re-apply transform.
+                                // But careful about infinite loops if preview itself fails.
 
-                            // Re-apply box/resize if needed on the preview?
-                            // Logic: The preview is FULL IMAGE (just converted). 
-                            // So x,y,w,h from original *should* map if preview matches aspect ratio.
-                            // Python side matches cached preview dimensions to original aspect ratio usually.
+                                // Simple: Just serve existing preview if no box/width, or try to resize preview.
+                                let previewPipeline = sharp(row.preview_cache_path).rotate(); // Previews are JPEGs, safe for sharp
 
-                            if (boxParam) {
-                                // We need to know if preview coords match original coords relative to size.
-                                // If preview is smaller, we must scale the box.
-                                const pMeta = await previewPipeline.metadata();
-                                const boxParts = boxParam.split(',').map(Number);
+                                // Re-apply box/resize if needed on the preview?
+                                // Logic: The preview is FULL IMAGE (just converted). 
+                                // So x,y,w,h from original *should* map if preview matches aspect ratio.
+                                // Python side matches cached preview dimensions to original aspect ratio usually.
 
-                                // We need original dimensions to scale.
-                                // We can fetch them from DB or pass in URL. URL has 'originalWidth'.
-                                const originalWidth = urlObj.searchParams.get('originalWidth') ? parseInt(urlObj.searchParams.get('originalWidth')!) : null;
+                                if (boxParam) {
+                                    const pMeta = await previewPipeline.metadata();
+                                    const boxParts = boxParam.split(',').map(Number);
 
-                                if (originalWidth && pMeta.width) {
-                                    const scale = pMeta.width / originalWidth;
-                                    logger.debug(`[Protocol] RAW Preview Scale for ${decodedPath}: Width=${pMeta.width}, Original=${originalWidth}, Scale=${scale}`);
+                                    // We need to know if preview coords match original coords relative to size.
+                                    // If preview is smaller, we must scale the box.
+
+                                    const originalWidth = urlObj.searchParams.get('originalWidth') ? parseInt(urlObj.searchParams.get('originalWidth')!) : null;
+                                    let scale = 1;
+
+                                    if (originalWidth && pMeta.width) {
+                                        scale = pMeta.width / originalWidth;
+                                        if (originalWidth !== pMeta.width) {
+                                            logger.info(`[ImageProtocol] Scaling Box for ${path.basename(decodedPath)}. Original: ${originalWidth}, Current: ${pMeta.width}. Scale: ${scale}`);
+                                        }
+                                        logger.debug(`[Protocol] RAW Preview Scale for ${decodedPath}: Width=${pMeta.width}, Original=${originalWidth}, Scale=${scale}`);
+                                    } else if (!originalWidth && pMeta.width) {
+                                        logger.warn(`[Protocol] RAW Preview missing 'originalWidth' param for ${decodedPath}. Cannot scale crop box.`);
+                                    }
+
                                     const [x, y, w, h] = boxParts;
                                     const nx = Math.round(x * scale);
                                     const ny = Math.round(y * scale);
@@ -151,17 +222,15 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
                                         width: Math.min(nw, pMeta.width! - nx),
                                         height: Math.min(nh, pMeta.height! - ny)
                                     });
-                                } else if (!originalWidth && pMeta.width) {
-                                    logger.warn(`[Protocol] RAW Preview missing 'originalWidth' param for ${decodedPath}. Cannot scale crop box.`);
                                 }
-                            }
 
-                            if (width && width > 0) {
-                                previewPipeline = previewPipeline.resize(width, null, { fit: 'inside', withoutEnlargement: true });
-                            }
+                                if (width && width > 0) {
+                                    previewPipeline = previewPipeline.resize(width, null, { fit: 'inside', withoutEnlargement: true });
+                                }
 
-                            const pBuffer = await previewPipeline.toBuffer();
-                            return new Response(pBuffer as any, { headers: { 'Content-Type': 'image/jpeg' } });
+                                const pBuffer = await previewPipeline.toBuffer();
+                                return new Response(pBuffer as any, { headers: { 'Content-Type': 'image/jpeg' } });
+                            } // End !isHQ check
                         }
                     } catch (fbErr) {
                         // Fallback failed, log original error to DB
@@ -229,8 +298,22 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
 
                             if (isRaw || boxParam || !boxParam) { // ALWAYS try Python fallback if Sharp failed, especially for RAW or complex crops
                                 const fbWidth = width || 300;
-                                // logger.debug(`[Protocol] Attempting Python Fallback for ${decodedPath} (box=${boxParam})`);
-                                const fbBuffer = await fallbackGenerator(decodedPath, fbWidth, boxParam ? boxParam : undefined);
+
+                                // Fetch Orientation from DB to help Python rotate correctly
+                                let orientation = 1;
+                                try {
+                                    const db = getDB();
+                                    const row = db.prepare('SELECT metadata_json FROM photos WHERE file_path = ?').get(decodedPath) as { metadata_json: string };
+                                    if (row && row.metadata_json) {
+                                        const meta = JSON.parse(row.metadata_json);
+                                        // Standard Exif Tags for Orientation
+                                        if (meta.Orientation) orientation = parseInt(meta.Orientation);
+                                        else if (meta.ExifImageOrientation) orientation = parseInt(meta.ExifImageOrientation);
+                                    }
+                                } catch (dbErr) { /* ignore */ }
+
+                                // logger.debug(`[Protocol] Attempting Python Fallback with Orient=${orientation} for ${decodedPath}`);
+                                const fbBuffer = await fallbackGenerator(decodedPath, fbWidth, boxParam ? boxParam : undefined, orientation);
                                 if (fbBuffer) {
                                     return new Response(fbBuffer as any, {
                                         headers: {
@@ -306,7 +389,6 @@ export function registerImageProtocol(fallbackGenerator?: (path: string, width?:
 
                     // 2. Fallback: Convert RAW on the fly (Slow but valid)
                     // logger.info(`[Protocol] Converting RAW on-the-fly: ${decodedPath}`);
-                    const startRaw = Date.now();
                     const buffer = await sharp(decodedPath)
                         .rotate()
                         .toFormat('jpeg', { quality: 80 })

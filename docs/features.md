@@ -19,6 +19,7 @@ The application features a robust scanning engine designed to handle large photo
    - If that fails, it uses `sharp` to decode and convert the image (slower but reliable).
    - Previews are stored locally to ensure fast UI performance (~1280px).
 4. **Metadata Extraction:** EXIF data (Date, Camera, ISO, etc.) is extracted and stored.
+5. **Smart Orientation:** The scanner automatically detects and corrects orientation issues, ensuring RAW files and mixed-orientation JPGs are displayed correctly without manual rotation.
 
 ## 2. AI Face Recognition
 

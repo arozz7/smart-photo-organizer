@@ -41,7 +41,7 @@ interface AIContextType {
     isModelReady: boolean;
     isProcessing: boolean; // Exposed status
     processingQueue: any[];
-    addToQueue: (photos: any[]) => void;
+    addToQueue: (photos: any[], autoStart?: boolean) => void;
     clearQueue: () => void;
     // Event subscription for specific or all photo updates
     onPhotoProcessed: (callback: (photoId: number) => void) => () => void;
@@ -558,9 +558,22 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         // Notify listeners
         processedCallbacks.current.forEach(cb => cb(photoId));
 
-        // Update state - Only remove the item that matches ID AND Mode
+        // Update state
         setProcessingQueue(prev => {
-            const next = prev.filter(p => !(p.id === photoId && (p.scanMode || 'FAST') === scanMode));
+            // Logic: remove the specific item.
+            // If we upgraded, payload.scanMode might be MACRO while queue item is FAST.
+            // First, try to remove exact match.
+            let next = prev.filter(p => !(p.id === photoId && (p.scanMode || 'FAST') === scanMode));
+
+            // Fallback: If nothing was removed (length same), force remove ANY item with this ID.
+            // This prevents infinite retries if modes mismatch (e.g. error response missing mode, or auto-upgrade).
+            if (next.length === prev.length) {
+                console.log(`[AI] Standard removal failed for ${photoId} (${scanMode}). Force removing by ID to prevent loop.`);
+                // Remove the first occurrence of this ID, or all? 
+                // To be safe against loops, we should probably remove the HEAD if it matches ID, or all for this ID.
+                // Let's remove all for this ID to be absolutely sure we clear the blockage.
+                next = prev.filter(p => p.id !== photoId);
+            }
 
             // Check if queue empty (Auto-Save Index)
             if (next.length === 0 && prev.length > 0) {
@@ -599,7 +612,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, []);
 
     // Add items to queue (deduplicate based on ID + Mode)
-    const addToQueue = useCallback((newPhotos: any[]) => {
+    const addToQueue = useCallback((newPhotos: any[], autoStart: boolean = false) => {
         setProcessingQueue(prev => {
             // Determine default mode based on profile
             const defaultMode = aiProfileRef.current === 'high' ? 'MACRO' : 'FAST';
@@ -615,6 +628,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
             if (unique.length > 0) {
                 console.log(`[AI] Added ${unique.length} items to queue (Default Mode: ${defaultMode})`);
+            }
+
+            // Auto-Start Logic
+            // FIX: If user requested auto-start, unpause even if items were already in queue (unique.length === 0)
+            if (autoStart && newPhotos.length > 0) {
+                setIsPaused(false);
+                console.log("[AI] Auto-Starting Queue (Action Triggered)");
             }
 
             return [...prev, ...unique];

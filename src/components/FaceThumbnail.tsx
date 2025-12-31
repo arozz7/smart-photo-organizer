@@ -110,6 +110,18 @@ const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(
                         finalSrc += `&originalWidth=${originalImageWidth}`;
                     }
 
+                    if (useServerCrop && box) {
+                        finalSrc += `&box=${box.x},${box.y},${box.width},${box.height}`;
+                        // Request HQ if it's likely a RAW file or high-detail needed
+                        finalSrc += `&hq=true&width=${Math.round(box.width)}`; // Request closer to original resolution or valid thumb size?
+                        // Actually, 'width' in protocol is "resize to this".
+                        // If we want a thumbnail, we should ask for a reasonable size (e.g. 150) to prompt Python to downscale AFTER crop.
+                        // But wait, if we ask for 150, Python will crop then resize to 150.
+                        // That's what we want for a thumbnail. The 'box.width' might be 30px or 300px.
+                        // Let's cap it at 300 for thumbnails to ensure quality but save bandwidth.
+                        finalSrc += `&width=300`;
+                    }
+
                     return finalSrc;
                 })()}
                 alt={alt || "face"}

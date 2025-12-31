@@ -31,7 +31,8 @@ vector_store.init_faiss()
 def load_image_cv2(file_path):
     """Loads an image into OpenCV BGR format with robust fallback."""
     try:
-        from PIL import Image, ImageOps as PILImageOps
+        from PIL import Image, ImageFile, ImageOps as PILImageOps
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
         
         try:
             pil_img = Image.open(file_path)
@@ -134,16 +135,13 @@ def handle_command(command):
     elif cmd_type == 'generate_thumbnail':
         path_str = payload.get('path')
         width = payload.get('width', 300)
-        box = payload.get('box') # Expected: {x, y, width, height} or [x, y, w, h] or "x,y,w,h" string?
-        # Protocol sends box param as string "x,y,w,h". 
-        # But payload here comes from IPC message. 
-        # We need to standardize how we send it from Electron.
-        # Let's assume Electron sends it as a dict or list for cleanliness, or we handle string.
-        # Based on my plan, I will update Electron to send {x,y,w,h} dict or list.
-        
-        logger.debug(f"Generating thumbnail for: {path_str} (Box: {box})")
+        box = payload.get('box') 
+        orientation = payload.get('orientation', 1) # Default 1 (Normal)
+
+        logger.debug(f"Generating thumbnail for: {path_str} (Box: {box}, Ori: {orientation})")
         try:
-            from PIL import Image, ImageOps as PILImageOps
+            from PIL import Image, ImageFile, ImageOps as PILImageOps
+            ImageFile.LOAD_TRUNCATED_IMAGES = True
             raw_scale_x, raw_scale_y = 1.0, 1.0
             try:
                 pil_img = Image.open(path_str)
@@ -189,6 +187,31 @@ def handle_command(command):
                      raise ValueError(f"Failed to load image: {e} | {raw_e}")
 
             if pil_img:
+                # --- Conditional Rotation Fix ---
+                # Check dimensions vs Orientation
+                w, h = pil_img.size
+                is_landscape_dims = w > h
+                expects_portrait = (orientation == 6 or orientation == 8)
+                
+                # If we rotate 90/270, we need to swap the scale factors
+                swapped_dims = False
+
+                if expects_portrait and is_landscape_dims:
+                    # logger.debug(f"Thumb Gen: Orientation {orientation} (Portrait) but Image is {w}x{h}. Rotating.")
+                    if orientation == 6:
+                        pil_img = pil_img.rotate(-90, expand=True) # -90 is CW
+                        swapped_dims = True
+                    elif orientation == 8:
+                        pil_img = pil_img.rotate(90, expand=True) # 90 CCW
+                        swapped_dims = True
+                elif orientation == 3:
+                     pil_img = pil_img.rotate(180, expand=True)
+                
+                if swapped_dims:
+                    raw_scale_x, raw_scale_y = raw_scale_y, raw_scale_x
+                
+                img_w, img_h = pil_img.size
+
                 # 1. Crop if requested
                 if box:
                     try:
@@ -199,9 +222,6 @@ def handle_command(command):
                             x, y, w, h = int(box['x']), int(box['y']), int(box['width']), int(box['height'])
                         elif isinstance(box, list):
                             x, y, w, h = map(int, box)
-                        
-                        # Validate bounds
-                        img_w, img_h = pil_img.size
                         
                         # Apply RAW Scaling (if any)
                         if raw_scale_x != 1.0 or raw_scale_y != 1.0:
@@ -271,25 +291,53 @@ def handle_command(command):
             response = {"success": False, "error": str(e)}
 
     elif cmd_type == 'analyze_image':
+
         t_start = time.time()
         
         photo_id = payload.get('photoId')
         file_path = payload.get('filePath')
         scan_mode = payload.get('scanMode', 'FAST')
         enable_vlm = payload.get('enableVLM', False)
+        orientation = payload.get('orientation', 1) # Default 1 (Normal)
         
         metrics = {'load': 0, 'scan': 0, 'tag': 0, 'total': 0}
         
-        logger.debug(f"Analyzing {photo_id} (Mode: {scan_mode}, VLM: {enable_vlm})...")
+        logger.debug(f"Analyzing {photo_id} (Mode: {scan_mode}, VLM: {enable_vlm}, Ori: {orientation})...")
         
         # 1. Image Loading
         t_load_start = time.time()
         img = load_image_cv2(file_path)
-            
+
         if img is None:
-            response = {"type": "analysis_result", "photoId": photo_id, "error": f"Image Load Failed"}
+            response = {"type": "analysis_result", "photoId": photo_id, "error": f"Image Load Failed", "scanMode": scan_mode}
             return response 
-            
+        
+        
+        # 2. Conditional Orientation Correction
+        # To avoid double-rotation (if PIL worked or RawPy flipped it), check dimensions.
+        h, w = img.shape[:2]
+        is_landscape_dims = w > h
+        is_portrait_dims = h > w
+        
+        # Orientation 6 (90 CW) or 8 (270 CW) implies Portrait final result
+        expects_portrait = (orientation == 6 or orientation == 8)
+        
+        if expects_portrait and is_landscape_dims:
+            logger.info(f"Orientation {orientation} (Portrait) but Image is {w}x{h} (Landscape). Applying Rotation.")
+            if orientation == 6:
+                img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+            elif orientation == 8:
+                img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        elif orientation == 3: # 180 Rotation (Landscape -> Landscape)
+             # Harder to detect by dims alone, but 180 usually means upsidedown. 
+             # We assume if explicit 180 passed, we should rotate 180 unless we have strong reason not to.
+             # But for safety, let's trust the flag if it's 180.
+             img = cv2.rotate(img, cv2.ROTATE_180)
+             logger.info("Applied Manual Rotation: 180")
+             
+        # Re-calc dimensions
+        h, w = img.shape[:2]
+
         metrics['load'] = (time.time() - t_load_start) * 1000
         
         # 2. Face Scanning
@@ -308,7 +356,8 @@ def handle_command(command):
                 det_thresh = 0.4
             elif scan_mode == 'MACRO':
                 target_size = (1280, 1280) 
-                det_thresh = 0.25
+                # Respect user setting for strictness, but use high-res
+                det_thresh = faces.DET_THRESH
                 
             faces.init_insightface(providers=faces.CURRENT_PROVIDERS, allowed_modules=faces.ALLOWED_MODULES, det_size=target_size, det_thresh=det_thresh)
             
@@ -492,7 +541,8 @@ def handle_command(command):
         
         logger.info(f"Rotating image {photo_id} by {rotation_angle} degrees...")
         try:
-            from PIL import Image, ImageOps as PILImageOps
+            from PIL import Image, ImageFile, ImageOps as PILImageOps
+            ImageFile.LOAD_TRUNCATED_IMAGES = True
             img = Image.open(file_path)
             img = PILImageOps.exif_transpose(img)
             

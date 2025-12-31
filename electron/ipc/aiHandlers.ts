@@ -19,6 +19,8 @@ export function registerAIHandlers() {
     ipcMain.handle('ai:analyzeImage', async (_event, options) => {
         // options: { photoId, filePath, scanMode, enableVLM, debug }
         let { photoId, filePath, ...rest } = options;
+        const { getDB } = await import('../db');
+        const db = getDB();
 
         // Ensure filePath exists
         if (!filePath && photoId) {
@@ -45,7 +47,20 @@ export function registerAIHandlers() {
             logger.info(`[Main] Analyze Request for ${photoId} - VLM: ${rest.enableVLM}`);
         }
 
-        return await sendRequestToPython('analyze_image', { photoId, filePath, ...rest }, 300000);
+        // Fetch Metadata to get Orientation
+        let orientation = 1;
+        try {
+            const getMeta = db.prepare('SELECT metadata_json FROM photos WHERE id = ?');
+            const row = getMeta.get(photoId) as { metadata_json: string };
+            if (row && row.metadata_json) {
+                const meta = JSON.parse(row.metadata_json);
+                orientation = meta.Orientation || meta.ExifImageOrientation || 1;
+            }
+        } catch (ignored) { }
+
+        logger.info(`[Main] Analyze Request for ${photoId} - VLM: ${rest.enableVLM}, Orientation: ${orientation}`);
+
+        return await sendRequestToPython('analyze_image', { photoId, filePath, orientation, ...rest }, 300000);
     });
 
     ipcMain.handle('ai:generateTags', async (_event, { photoId }) => {
@@ -340,10 +355,17 @@ COUNT(*) as total,
             logger.info(`[IPC] Descriptors written to ${tempFile}. Invoking Python...`);
 
             // 3. Call Python
+            const settings = getAISettings();
+            const threshold = settings.faceSimilarityThreshold || 0.65;
+            // Convert Similarity (1/(1+d)) back to Distance (d = 1/minSim - 1)
+            // Example: 0.65 -> 1/0.65 - 1 = 0.538 (Close to previous default 0.55)
+            // Example: 0.80 -> 1/0.8 - 1 = 0.25 (Very Strict)
+            const calculatedEps = (1 / Math.max(0.1, threshold)) - 1;
+
             const res: any = await sendRequestToPython('cluster_faces', {
                 reqId,
                 dataPath: tempFile,
-                eps: 0.55,
+                eps: calculatedEps,
                 min_samples: 2
             }, 300000);
 

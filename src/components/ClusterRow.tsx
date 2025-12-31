@@ -113,9 +113,11 @@ const ClusterRow = memo(({
                                 }`}
                         >
                             <FaceThumbnail
-                                src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}?width=400`}
+                                src={`local-resource://${encodeURIComponent(face.file_path)}`}
+                                fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
                                 box={face.box}
                                 originalImageWidth={face.width}
+                                useServerCrop={true}
                                 className="w-full h-full object-cover"
                             />
                             {isSelected && (

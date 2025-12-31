@@ -35,14 +35,12 @@ Based on `refactoring-protocol.md`:
   - Moved logic to `usePeopleCluster` custom hook.
   - Reduced complexity and line count.
 
-### 4. `src/views/PersonDetail.tsx` (524 lines)
-- **Status**: SOFT VIOLATION (High Priority)
-- **Issues**:
-  - Similar to `People.tsx`, mixes Modal logic with Page layout.
-  - `RenameModal` and `EditPersonNameModal` defined in same file.
-- **Refactoring Plan**:
-  - Move Modals to `src/components/modals/`.
-  - Extract data loading logic to custom hook.
+### 4. `src/views/PersonDetail.tsx` (Refactored)
+- **Status**: ✅ RESOLVED
+- **Changes**:
+  - Extracted sub-components: `PersonHeader`, `PersonPhotoGrid`, `PersonFaceGrid`.
+  - Moved data fetching logic to `usePersonDetail` hook.
+  - Reduced main file complexity significanty.
 
 ## Priority 3: Complex Contexts
 

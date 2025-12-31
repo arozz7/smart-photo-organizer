@@ -12,9 +12,10 @@ export default function PersonCard({ person, onClick }: { person: any, onClick: 
             <div className="aspect-square bg-gray-900 overflow-hidden relative">
                 {person.cover_path ? (
                     <FaceThumbnail
-                        src={`local-resource://${encodeURIComponent(person.cover_path)}?width=400`}
+                        src={`local-resource://${encodeURIComponent(person.cover_path)}`}
                         box={box}
                         originalImageWidth={person.cover_width}
+                        useServerCrop={true}
                         className="w-full h-full opacity-80 group-hover:opacity-100 transition-opacity duration-500"
                     />
                 ) : (

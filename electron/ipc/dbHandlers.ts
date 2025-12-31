@@ -524,6 +524,43 @@ export function registerDBHandlers() {
         }
     })
 
+    ipcMain.handle('db:renamePerson', async (_, { personId, newName }) => {
+        const db = getDB();
+        const trimmedName = newName.trim();
+
+        try {
+            // Check if target name exists
+            const existingPerson = db.prepare('SELECT id FROM people WHERE name = ? COLLATE NOCASE').get(trimmedName) as { id: number };
+
+            if (existingPerson && existingPerson.id !== personId) {
+                // MERGE SCENARIO
+                const targetId = existingPerson.id;
+
+                const transaction = db.transaction(() => {
+                    // 1. Move all faces to target person
+                    db.prepare('UPDATE faces SET person_id = ? WHERE person_id = ?').run(targetId, personId);
+
+                    // 2. Delete the old person
+                    db.prepare('DELETE FROM people WHERE id = ?').run(personId);
+
+                    // 3. Recalculate mean for target person
+                    scheduleMeanRecalc(db, targetId);
+                });
+
+                transaction();
+                return { success: true, merged: true, targetId };
+
+            } else {
+                // RENAME SCENARIO
+                db.prepare('UPDATE people SET name = ? WHERE id = ?').run(trimmedName, personId);
+                return { success: true, merged: false };
+            }
+        } catch (e) {
+            console.error('Failed to rename person:', e);
+            return { success: false, error: String(e) };
+        }
+    })
+
     ipcMain.handle('db:getLibraryStats', async () => {
         const db = getDB();
         const path = await import('node:path');

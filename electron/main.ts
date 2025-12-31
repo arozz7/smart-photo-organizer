@@ -75,10 +75,10 @@ app.whenReady().then(async () => {
   // App Handlers need window ref
   registerAppHandlers(() => WindowManager.getMainWindow());
 
-  registerImageProtocol(async (filePath, width, box) => {
+  registerImageProtocol(async (filePath, width, box, orientation) => {
     try {
       // logger.info(`[Main] Requesting Python thumbnail for: ${filePath}`);
-      const res = await sendRequestToPython('generate_thumbnail', { path: filePath, width: width || 300, box: box }, 60000);
+      const res = await sendRequestToPython('generate_thumbnail', { path: filePath, width: width || 300, box: box, orientation: orientation || 1 }, 60000);
       if (res.success && res.data) {
         return Buffer.from(res.data, 'base64');
       }
