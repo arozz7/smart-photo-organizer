@@ -13,6 +13,7 @@ export default function PersonCard({ person, onClick }: { person: any, onClick: 
                 {person.cover_path ? (
                     <FaceThumbnail
                         src={`local-resource://${encodeURIComponent(person.cover_path)}`}
+                        fallbackSrc={`local-resource://${encodeURIComponent(person.cover_path)}`}
                         box={box}
                         originalImageWidth={person.cover_width}
                         useServerCrop={true}

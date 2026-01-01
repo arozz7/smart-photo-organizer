@@ -156,10 +156,11 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
                                             onClick={() => toggleSelection(face.id)}
                                         >
                                             <FaceThumbnail
-                                                src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
-                                                fallbackSrc={`local-resource://${encodeURIComponent(face.file_path)}`}
+                                                src={`local-resource://${encodeURIComponent(face.file_path || '')}`}
+                                                fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
                                                 box={face.box}
                                                 originalImageWidth={face.width}
+                                                useServerCrop={true}
                                                 className={`w-full h-full object-cover transition-opacity ${selectedIds.has(face.id) ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'}`}
                                             />
                                             {selectedIds.has(face.id) && (

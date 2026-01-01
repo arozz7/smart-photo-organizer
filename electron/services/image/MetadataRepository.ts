@@ -61,6 +61,15 @@ export class SqliteMetadataRepository implements IMetadataRepository {
         }
     }
 
+    async clearPreviewPath(filePath: string): Promise<void> {
+        try {
+            const db = getDB();
+            db.prepare('UPDATE photos SET preview_cache_path = NULL WHERE file_path = ?').run(filePath);
+        } catch (err) {
+            logger.warn(`[MetadataRepository] Failed to clear preview path for ${filePath}`, err);
+        }
+    }
+
     async logError(photoId: number, filePath: string, errorMessage: string, stage: string): Promise<void> {
         try {
             const db = getDB();

@@ -73,9 +73,12 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
             <Dialog.Portal>
                 <Dialog.Overlay className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50" />
                 <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-4xl max-h-[85vh] bg-gray-900 border border-gray-700 p-6 rounded-xl shadow-2xl z-50 flex flex-col">
-                    <Dialog.Title className="text-xl font-bold text-white mb-4">
+                    <Dialog.Title className="text-xl font-bold text-white mb-2">
                         Name Group
                     </Dialog.Title>
+                    <Dialog.Description className="text-gray-400 mb-4 text-sm">
+                        Assign a name to the selected faces.
+                    </Dialog.Description>
 
                     <div className="flex-1 overflow-y-auto mb-6 custom-scrollbar pr-2">
                         <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-4">
@@ -86,9 +89,11 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
                                     onClick={() => toggleSelection(face.id)}
                                 >
                                     <FaceThumbnail
-                                        src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
+                                        src={`local-resource://${encodeURIComponent(face.file_path)}`}
+                                        fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
                                         box={face.box}
-                                        originalImageWidth={face.width} // Ensure width is passed if available!
+                                        originalImageWidth={face.width}
+                                        useServerCrop={true}
                                         className="w-full h-full object-cover"
                                     />
                                     {selectedIds.has(face.id) && (

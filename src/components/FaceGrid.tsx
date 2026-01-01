@@ -99,10 +99,11 @@ export default function FaceGrid({ faces, selectedIds, onToggleSelection }: Face
                                         onClick={() => toggleMatchSelection(face.id)}
                                     >
                                         <FaceThumbnail
-                                            src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
-                                            fallbackSrc={`local-resource://${encodeURIComponent(face.file_path)}`}
+                                            src={`local-resource://${encodeURIComponent(face.file_path)}`}
+                                            fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
                                             box={face.box}
                                             originalImageWidth={face.width}
+                                            useServerCrop={true}
                                             className="w-full h-full pointer-events-none"
                                         />
                                         <div className={`absolute top-2 right-2 w-5 h-5 rounded-full border border-white flex items-center justify-center transition-colors ${selectedMatchIds.has(face.id) ? 'bg-indigo-500' : 'bg-black/50'}`}>

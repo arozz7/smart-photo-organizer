@@ -35,6 +35,7 @@ const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(
     const handleLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
         setIsLoading(false);
 
+        // If using fallback, we assume it's NOT server cropped (it's the full thumbnail)
         const isServerCropped = useServerCrop && !hasRetried;
 
         if (!box || isServerCropped) {
@@ -51,10 +52,8 @@ const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(
         // Calculate Scale Factor if using a preview (smaller/larger than original)
         let scale = 1.0;
 
-        // If we fell back to the original image, force scale to 1.0 (assuming box is based on original)
-        const isUsingFallback = hasRetried && fallbackSrc;
-
-        if (!isUsingFallback && originalImageWidth && originalImageWidth > 0 && originalImageWidth !== naturalW) {
+        // Always calculate scale if we have original dimensions and current != original
+        if (originalImageWidth && originalImageWidth > 0 && originalImageWidth !== naturalW) {
             scale = naturalW / originalImageWidth;
         }
 
@@ -101,7 +100,7 @@ const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(
             )}
             <img
                 src={(() => {
-                    if (hasRetried) return fallbackSrc || src;
+                    if (hasRetried && fallbackSrc) return fallbackSrc;
 
                     const separator = src.includes('?') ? '&' : '?';
                     let finalSrc = `${src}${separator}silent_404=true`;

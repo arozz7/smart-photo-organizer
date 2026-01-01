@@ -80,6 +80,20 @@ export class ImageService {
             // 1. Fetch DB Orientation
             const { orientation } = await this.repo.getImageMetadata(filePath);
 
+            // Optimization: RAW Handling - Prefer Preview if available
+            // This prevents expensive RAW decode by Sharp for thumbnails
+            const ext = path.extname(filePath).toLowerCase();
+            const isRaw = ['.nef', '.arw', '.cr2', '.dng', '.orf', '.rw2'].includes(ext);
+
+            if (isRaw) {
+                try {
+                    const previewResponse = await this.attemptPreviewFallback(filePath, options, "Optimization: Use Preview");
+                    if (previewResponse) return previewResponse;
+                } catch (optErr) {
+                    // Ignore optimization error, fall through to main process
+                }
+            }
+
             // 2. Process with Sharp
             const buffer = await this.processor.process(filePath, options, orientation);
 
@@ -170,7 +184,12 @@ export class ImageService {
                 // Let's assume defaults.
 
                 return new Response(buffer as any, { headers: { 'Content-Type': 'image/jpeg' } });
-            } catch (e) {
+            } catch (e: any) {
+                if (e.code === 'ENOENT' || e.message.includes('ENOENT')) {
+                    logger.warn(`[Protocol] Stale preview path detected and removed for ${filePath}`);
+                    await this.repo.clearPreviewPath(filePath);
+                    return null;
+                }
                 throw e;
             }
         }

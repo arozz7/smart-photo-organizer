@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 
 import { VirtuosoGrid } from 'react-virtuoso';
 import PersonFaceItem from './PersonFaceItem';
@@ -108,15 +108,17 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
     };
 
     const gridComponents = useMemo(() => ({
-        List: ({ children, style }: any) => (
+        List: React.forwardRef(({ children, style, ...props }: any, ref: any) => (
             <div
+                ref={ref}
+                {...props}
                 style={style}
                 className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-4"
             >
                 {children}
             </div>
-        )
-    }), []);
+        ))
+    }), []) as any;
 
     if (!isOpen) return null;
 

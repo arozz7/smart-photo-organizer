@@ -39,6 +39,15 @@
 - **Location Heatmap:** World map visualization with "Trip" clustering.
 - **Library Analytics:** Extended graphs (Photos per Year, Top Cameras/Lenses).
 
+### System Utilities & Repair
+- **Corrupt File Recovery Center:**
+    - **Goal:** Smart recovery studio to attempt repairs on problematic files found during scans.
+    - **Integrated Tools:**
+        - **Preview Extraction:** Use `LibRaw`/`ExifTool` to salvage embedded JPEGs from corrupted RAW files.
+        - **Header Surgery:** Automated header reconstruction for ARW/NEF files using "healthy" reference files from the same camera (inspired by RAW-Repair-Tool).
+        - **Deep Carving:** Integration with `PhotoRec` for signature-based recovery of files from damaged sectors.
+    - **UI:** New "Tools" view with guided wizards for each recovery strategy.
+
 ### Creative Tools
 - **Collage Creator:** Masonry/Grid layouts, Face-Aware cropping.
 - **Static Gallery Generator:** Export album as a static HTML site.

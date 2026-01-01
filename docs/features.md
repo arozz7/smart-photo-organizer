@@ -37,6 +37,7 @@ The core feature of the application is local, privacy-focused face recognition.
   - **Identified People:** When a new face is found, it is compared against the *mean descriptor* of all known people using the FAISS index. If the distance is low (Similarity > ~0.4), it is auto-assigned.
   - **Unknowns:** If no match is found, it remains in the "Unnamed Faces" pool.
 - **Visual Confirmation:** The "Unnamed Faces" view groups similar faces together, allowing you to confirm matches before they are finalized.
+- **Persistence:** Your "Regroup" strictness preference (slider value) is automatically saved and applied on future loads.
 
 ### Management
 - **Naming:** You can click any unnamed face to assign it to a new or existing person.

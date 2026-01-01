@@ -373,10 +373,11 @@ function IgnoredFaceItem({ face, selected, onToggle }: { face: any, selected: bo
             onClick={onToggle}
         >
             <FaceThumbnail
-                src={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
-                fallbackSrc={`local-resource://${encodeURIComponent(face.file_path)}`}
+                src={`local-resource://${encodeURIComponent(face.file_path)}`}
+                fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
                 box={face.box}
                 originalImageWidth={face.width}
+                useServerCrop={true}
                 className={`w-full h-full object-cover transition-opacity ${selected ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'}`}
             />
             {selected && (
