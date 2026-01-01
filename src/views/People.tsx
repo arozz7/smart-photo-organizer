@@ -8,6 +8,7 @@ import GroupNamingModal from '../components/GroupNamingModal'
 import TargetedScanModal from '../components/TargetedScanModal'
 import IgnoredFacesModal from '../components/IgnoredFacesModal'
 import UnmatchedFacesModal from '../components/UnmatchedFacesModal'
+import ClusteringSettingsModal from '../components/ClusteringSettingsModal'
 import { useAI } from '../context/AIContext'
 import { useAlert } from '../context/AlertContext'
 import { usePeopleCluster } from '../hooks/usePeopleCluster'
@@ -33,6 +34,7 @@ export default function People() {
     const [hasNewFaces, setHasNewFaces] = useState(false)
     const [isScanning, setIsScanning] = useState(false)
     const [isScanModalOpen, setIsScanModalOpen] = useState(false)
+    const [showGroupingModal, setShowGroupingModal] = useState(false)
 
     // Load initial batch when tab changes
     useEffect(() => {
@@ -201,6 +203,15 @@ export default function People() {
                             </div>
                             <div className="flex items-center gap-3">
                                 <button
+                                    onClick={() => setShowGroupingModal(true)}
+                                    className="px-3 py-1.5 text-sm bg-gray-800/50 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-lg transition-colors flex items-center gap-2"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                                    </svg>
+                                    Regroup
+                                </button>
+                                <button
                                     onClick={handleAutoAssign}
                                     disabled={isAutoAssigning || totalFaces === 0}
                                     className="px-3 py-1.5 text-sm bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg transition-colors flex items-center gap-2"
@@ -352,6 +363,12 @@ export default function People() {
                 faceIds={singles}
                 onName={handleOpenNaming}
                 onIgnore={handleIgnoreGroup}
+            />
+
+            <ClusteringSettingsModal
+                open={showGroupingModal}
+                onOpenChange={setShowGroupingModal}
+                onRecluster={loadClusteredFaces}
             />
 
             {/* Selection Floating Action Bar */}

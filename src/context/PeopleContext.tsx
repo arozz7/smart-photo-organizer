@@ -25,7 +25,7 @@ interface PeopleContextType {
     loading: boolean
     loadPeople: () => Promise<void>
     loadFaces: (filter?: any) => Promise<void>
-    loadUnnamedFaces: () => Promise<{ clusters: number[][], singles: number[] }>
+    loadUnnamedFaces: (options?: { threshold?: number, min_samples?: number }) => Promise<{ clusters: number[][], singles: number[] }>
     fetchFacesByIds: (ids: number[]) => Promise<Face[]>
     assignPerson: (faceId: number, name: string) => Promise<any>
     ignoreFace: (faceId: number) => Promise<void>
@@ -67,11 +67,11 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         }
     }, [])
 
-    const loadUnnamedFaces = useCallback(async () => {
+    const loadUnnamedFaces = useCallback(async (options?: { threshold?: number, min_samples?: number }) => {
         try {
             // New Architecture: fetch CLUSTERS (IDs only)
             // @ts-ignore
-            const result = await window.ipcRenderer.invoke('ai:getClusteredFaces')
+            const result = await window.ipcRenderer.invoke('ai:getClusteredFaces', options)
             // result = { clusters: [[id...], ...], singles: [id...] }
             return result;
         } catch (e) {

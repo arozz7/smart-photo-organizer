@@ -24,10 +24,26 @@ export function usePeopleCluster() {
     // Group Naming Modal State
     const [namingGroup, setNamingGroup] = useState<{ faces: Face[], name: string } | null>(null)
 
-    const loadClusteredFaces = useCallback(async () => {
+    const loadClusteredFaces = useCallback(async (options?: { threshold?: number, min_samples?: number }) => {
         setIsClustering(true)
         try {
-            const res = await loadUnnamedFaces()
+            // Contextual Merge: 
+            // 1. passed options (highest priority)
+            // 2. localStorage persistence
+            // 3. undefined (falls back to backend defaults)
+
+            let finalThreshold = options?.threshold;
+            if (finalThreshold === undefined) {
+                const saved = localStorage.getItem('regroupThreshold');
+                if (saved) finalThreshold = parseFloat(saved);
+            }
+
+            const finalOptions = {
+                ...options,
+                threshold: finalThreshold
+            };
+
+            const res = await loadUnnamedFaces(finalOptions)
             if (res) {
                 // Sort clusters by size (descending)
                 const sortedClusters = res.clusters.sort((a: any, b: any) => b.length - a.length).map((ids: number[]) => ({ faces: ids }));

@@ -328,11 +328,11 @@ COUNT(*) as total,
         }
     });
 
-    ipcMain.handle('ai:getClusteredFaces', async () => {
+    ipcMain.handle('ai:getClusteredFaces', async (_event, options) => {
         try {
             const { getFacesForClustering } = await import('../db');
             const crypto = await import('node:crypto');
-            logger.info('[IPC] Starting Full Face Clustering...');
+            logger.info('[IPC] Starting Full Face Clustering...', options || '');
 
             // 1. Fetch RAW descriptors
             const dbRes = getFacesForClustering();
@@ -368,17 +368,24 @@ COUNT(*) as total,
 
             // 3. Call Python
             const settings = getAISettings();
-            const threshold = settings.faceSimilarityThreshold || 0.65;
+
+            // Allow override from options (UI Slider)
+            let threshold = settings.faceSimilarityThreshold || 0.65;
+            let min_samples = 2; // Default
+
+            if (options && typeof options === 'object') {
+                if (typeof options.threshold === 'number') threshold = options.threshold;
+                if (typeof options.min_samples === 'number') min_samples = options.min_samples;
+            }
+
             // Convert Similarity (1/(1+d)) back to Distance (d = 1/minSim - 1)
-            // Example: 0.65 -> 1/0.65 - 1 = 0.538 (Close to previous default 0.55)
-            // Example: 0.80 -> 1/0.8 - 1 = 0.25 (Very Strict)
             const calculatedEps = (1 / Math.max(0.1, threshold)) - 1;
 
             const res: any = await sendRequestToPython('cluster_faces', {
                 reqId,
                 dataPath: tempFile,
                 eps: calculatedEps,
-                min_samples: 2
+                min_samples: min_samples
             }, 300000);
 
             // Clean up temp file

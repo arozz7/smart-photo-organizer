@@ -17,10 +17,8 @@ const FaceItem = ({ face, isSelected, onToggle, onPreview }: FaceItemProps) => {
             onClick={() => onToggle(face.id)}
         >
             <FaceThumbnail
-                src={face.preview_cache_path
-                    ? `local-resource://${encodeURIComponent(face.preview_cache_path)}?box=${face.box.x},${face.box.y},${face.box.width},${face.box.height}&originalWidth=${face.original_width || 0}&width=200`
-                    : `local-resource://${encodeURIComponent(face.file_path || '')}?box=${face.box.x},${face.box.y},${face.box.width},${face.box.height}&originalWidth=${face.original_width || 0}&width=200`}
-                fallbackSrc={`local-resource://${encodeURIComponent(face.file_path || '')}?width=300`}
+                src={`local-resource://${encodeURIComponent(face.file_path || '')}`}
+                fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
                 box={face.box}
                 originalImageWidth={face.original_width || 0}
                 useServerCrop={true}

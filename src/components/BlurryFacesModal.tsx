@@ -502,10 +502,8 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                                                         <div key={pm.faceId} className="flex items-center gap-3 bg-gray-900/50 p-2 rounded border border-gray-700/50 hover:border-gray-600 transition-colors">
                                                             <div className="w-12 h-12 rounded overflow-hidden shrink-0">
                                                                 <FaceThumbnail
-                                                                    src={face.preview_cache_path
-                                                                        ? `local-resource://${encodeURIComponent(face.preview_cache_path)}?box=${face.box.x},${face.box.y},${face.box.width},${face.box.height}&originalWidth=${face.original_width || 0}&width=100`
-                                                                        : `local-resource://${encodeURIComponent(face.file_path || '')}?box=${face.box.x},${face.box.y},${face.box.width},${face.box.height}&originalWidth=${face.original_width || 0}&width=100`}
-                                                                    fallbackSrc={`local-resource://${encodeURIComponent(face.file_path || '')}?width=300`}
+                                                                    src={`local-resource://${encodeURIComponent(face.file_path || '')}`}
+                                                                    fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
                                                                     box={face.box}
                                                                     originalImageWidth={face.original_width || 0}
                                                                     useServerCrop={true}

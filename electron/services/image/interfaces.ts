@@ -20,6 +20,7 @@ export interface IMetadataRepository {
     getPreviewPath(filePath: string): Promise<string | null>;
     getFilePathFromPreview(previewPathSubstr: string): Promise<string | null>;
     getPhotoId(filePath: string): Promise<number | null>;
+    clearPreviewPath(filePath: string): Promise<void>;
     logError(photoId: number, filePath: string, errorMessage: string, stage: string): Promise<void>;
 }
 
