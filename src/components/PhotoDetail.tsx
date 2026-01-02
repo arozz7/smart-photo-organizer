@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useAI } from '../context/AIContext'
 import { useScan } from '../context/ScanContext'
@@ -278,8 +279,9 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
 
     if (!photo) return null
 
-    return (
-        <div className="fixed inset-0 z-50 flex bg-black/95 backdrop-blur-sm">
+    // Portal the detail view to body to escape inert containers
+    return createPortal(
+        <div className="fixed inset-0 z-[100] flex bg-black/95 backdrop-blur-sm pointer-events-auto">
             {/* Close Button */}
             <button
                 onClick={onClose}
@@ -884,6 +886,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                     </div>
                 </div>
             )}
-        </div >
+        </div >,
+        document.body
     )
 }

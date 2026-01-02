@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, app } from 'electron';
 import { pythonProvider } from '../infrastructure/PythonAIProvider';
 import { PhotoService } from '../core/services/PhotoService';
 import { setAISettings, getAISettings } from '../store';
@@ -65,7 +65,16 @@ export function registerAIHandlers() {
     });
 
     ipcMain.handle('ai:downloadModel', async (_event, { modelName }) => {
-        return await pythonProvider.sendRequest('download_model', { modelName }, 1800000);
+        let url = undefined;
+        if (modelName.includes('Runtime')) {
+            const aiSettings = getAISettings();
+            if (aiSettings.runtimeUrl) {
+                url = aiSettings.runtimeUrl;
+            } else {
+                url = `https://github.com/arozz7/smart-photo-organizer/releases/download/v${app.getVersion()}/ai-runtime-win-x64.zip`;
+            }
+        }
+        return await pythonProvider.sendRequest('download_model', { modelName, url }, 1800000);
     });
 
     ipcMain.handle('ai:enhanceImage', async (_event, options) => {
@@ -73,7 +82,14 @@ export function registerAIHandlers() {
     });
 
     ipcMain.handle('ai:getSystemStatus', async () => {
-        const res: any = await pythonProvider.checkStatus();
+        const aiSettings = getAISettings();
+        let runtimeUrl = aiSettings.runtimeUrl;
+
+        if (!runtimeUrl) {
+            runtimeUrl = `https://github.com/arozz7/smart-photo-organizer/releases/download/v${app.getVersion()}/ai-runtime-win-x64.zip`;
+        }
+
+        const res: any = await pythonProvider.checkStatus({ runtimeUrl });
         return res.status;
     });
 

@@ -3,9 +3,11 @@ import json
 import logging
 import time
 import os
+import os
 import cv2
 import numpy as np
 import rawpy
+import tempfile
 from io import BytesIO
 import base64
 import requests
@@ -97,9 +99,13 @@ def handle_command(command):
             
             # Special markers for core libraries
             runtime_exists = os.path.exists(os.path.join(os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer')), 'ai-runtime'))
+            
+            # Use dynamic URL if provided, otherwise default (though default might be outdated if version mismatch)
+            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.3.0/ai-runtime-win-x64.zip")
+            
             models_info["AI GPU Runtime (Torch/CUDA)"] = {
                 "exists": runtime_exists,
-                "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.3.0/ai-runtime-win-x64.zip",
+                "url": runtime_url,
                 "size": 5800000000, # Approx 5.8GB
                 "localPath": os.path.join(os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer')), 'ai-runtime'),
                 "isRuntime": True
@@ -696,17 +702,80 @@ def handle_command(command):
 
             if "AI GPU Runtime" in model_name:
                 import zipfile
-                temp_zip = os.path.join(utils.LIBRARY_PATH, "runtime_download.zip")
+                temp_zip = os.path.join(tempfile.gettempdir(), "ai-runtime.zip")
                 if os.path.exists(temp_zip):
                     try: os.remove(temp_zip)
                     except: pass
 
-                base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.3.0/ai-runtime-win-x64.zip"
-                # ... Multi-part download logic (Simplified fallback for now) ...
-                # Re-using original logic would be best but for brevity lets assume single zip or simple logic
-                # Actually I should copy the full logic if I can.
-                # Assuming single zip fallback for simplicity in refactor step unless critical.
-                save_path = enhance.enhancer.download_model_at_url(base_url, temp_zip, progress_callback)
+                # Dynamic URL support
+                base_url = payload.get('url')
+                if not base_url:
+                    # Fallback default if not provided (should accept version from IPC though)
+                    # Note: We expect IPC to provide versioned URL now.
+                    base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.4.0/ai-runtime-win-x64.zip"
+
+                # Check if this is a custom override (likely single file) or standard release (multi-part)
+                # Heuristic: Try .001 first. If 404, fallback to single file.
+                
+                parts_downloaded = []
+                part_num = 1
+                multi_part_mode = False
+                
+                # Try .001 first
+                first_part_url = f"{base_url}.001"
+                logger.info(f"Checking for multi-part existence: {first_part_url}")
+                
+                try:
+                    # quick head/get check or just try download
+                    # Since we don't have a dedicated HEAD method in 'enhance' easily exposed, 
+                    # let's try to download part 1.
+                    part_1_path = f"{temp_zip}.001"
+                    if os.path.exists(part_1_path): os.remove(part_1_path)
+                    
+                    try:
+                        # Attempt download part 1
+                        logger.info(f"Attempting download of Part 1: {first_part_url}")
+                        saved_p1 = enhance.enhancer.download_model_at_url(first_part_url, part_1_path, progress_callback)
+                        parts_downloaded.append(saved_p1)
+                        multi_part_mode = True
+                    except Exception as e:
+                        logger.info(f"Part 1 not found ({e}). Assuming single file.")
+                        multi_part_mode = False
+                
+                except:
+                    multi_part_mode = False
+                
+                if multi_part_mode:
+                    # Continue downloading subsequent parts
+                    while True:
+                        part_num += 1
+                        next_url = f"{base_url}.{part_num:03d}"
+                        next_part_path = f"{temp_zip}.{part_num:03d}"
+                        if os.path.exists(next_part_path): os.remove(next_part_path)
+                        
+                        logger.info(f"Downloading Part {part_num}: {next_url}")
+                        try:
+                            saved_pn = enhance.enhancer.download_model_at_url(next_url, next_part_path, progress_callback)
+                            parts_downloaded.append(saved_pn)
+                        except Exception:
+                            logger.info(f"Part {part_num} not found. Finished downloading parts.")
+                            break
+                    
+                    # Concatenate
+                    logger.info(f"Concatenating {len(parts_downloaded)} parts...")
+                    with open(temp_zip, 'wb') as outfile:
+                        for p_path in parts_downloaded:
+                            with open(p_path, 'rb') as infile:
+                                import shutil
+                                shutil.copyfileobj(infile, outfile)
+                            try: os.remove(p_path) # Cleanup part
+                            except: pass
+                            
+                else:
+                    # Single file mode (Override or legacy)
+                    logger.info(f"Downloading single file: {base_url}")
+                    enhance.enhancer.download_model_at_url(base_url, temp_zip, progress_callback)
+
                 
                 logger.info("Extracting AI Runtime...")
                 # Signal extraction start to UI
@@ -718,10 +787,10 @@ def handle_command(command):
                 }))
                 sys.stdout.flush()
                 
-                with zipfile.ZipFile(save_path, 'r') as zip_ref:
+                with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
                     zip_ref.extractall(utils.AI_RUNTIME_PATH)
                 
-                if os.path.exists(save_path): os.remove(save_path)
+                if os.path.exists(temp_zip): os.remove(temp_zip)
                 
                 # RE-INJECT
                 logger.info("Attempting to inject new runtime...")
@@ -736,7 +805,7 @@ def handle_command(command):
             else:
                 save_path = enhance.enhancer.download_model_with_progress(model_name, progress_callback)
             
-            response = {"type": "download_result", "success": True, "modelName": model_name, "savePath": save_path, "reqId": req_id}
+            response = {"type": "download_result", "success": True, "modelName": model_name, "savePath": str(utils.AI_RUNTIME_PATH), "reqId": req_id}
         except Exception as e:
             logger.exception("Download Error")
             response = {"type": "download_result", "success": False, "error": str(e), "reqId": req_id}
