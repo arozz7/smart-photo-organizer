@@ -35,6 +35,13 @@ const ClusterRow = memo(({
 
     useEffect(() => {
         let mounted = true;
+
+        // Reset state when faceIds changes to prevent data from previous row appearing
+        // especially when Virtuoso reuses the component.
+        setLoaded(false)
+        setClusterFaces([])
+        setSuggestion(null)
+
         fetchFacesByIds(faceIds).then(res => {
             if (mounted) {
                 setClusterFaces(res)

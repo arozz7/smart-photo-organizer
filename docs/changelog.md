@@ -10,6 +10,11 @@
 - **Scan for All Named People:** Fixed "0 matches found" issue by correcting IPC payload nesting for `search_index` command. Improved vector search reliability.
 - **Cluster Settings Persistence:** The "Regroup" similarity threshold now persists across sessions, page reloads, and auto-identifications.
 - **UI Standardization:** Unified face thumbnail loading logic across all modals (Blurry, Ignored, Unmatched, Group Naming) to eliminate "Failed to load" errors and improve performance by leveraging backend caching.
+- **Unnamed Faces:** Fixed state leak where naming suggestions persisted across rows when a group was accepted and removed (Virtualized list component reuse fix).
+- **Unmatched Faces Modal:** 
+    - Fixed non-functional "Use Suggestion" button by correctly routing actions through the state hook.
+    - Added loading indicators and better UX feedback during batch naming/ignoring.
+- **Batch Processing:** Optimized `autoNameFaces` to use bulk database updates, significantly improving performance when naming many faces simultaneously.
 
 ### Refactoring
 - **Core Architecture Refactor (Modularization):** Completed a major transition of the Electron backend to a modular Service/Repository architecture.
