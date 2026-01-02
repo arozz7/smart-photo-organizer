@@ -2169,7 +2169,7 @@ function registerAIHandlers() {
   });
   ipcMain.handle("ai:getSystemStatus", async () => {
     const res = await pythonProvider.checkStatus();
-    return res;
+    return res.status;
   });
   ipcMain.handle("face:getBlurry", async (_event, args) => {
     return FaceRepository.getBlurryFaces(args);

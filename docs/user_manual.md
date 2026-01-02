@@ -38,10 +38,12 @@ The AI automatically detects faces during the scan. Your job is to give them nam
 1.  **Unnamed Faces:** Go to the **People** tab. You'll see groups of similar looking faces that haven't been named yet.
 2.  **Naming:** Click a group, type a name (e.g., "Mom"), and hit Enter. The AI will now know what "Mom" looks like and will attempt to auto-assign her to other photos.
 3.  **Merging:** If you accidentally created two entries for the same person (e.g., "John" and "John Doe"), simply rename one to match the other. The app will ask if you want to **merge** them.
-4.  **Cleaning Up:** Use the **"Cleanup Blurry Faces"** tool to bulk-manage low-quality captures. 
     - **Performance:** Optimized to handle selecting thousands of faces without slowing down.
     - **RAW Support:** View original "Context" photos even for RAW files (ARW, CR2, etc.).
-5.  **Ignored Faces:** Managing ignored faces is easy. Open the Ignored Faces modal to review hidden faces. 
+5.  **Refining Groups:**
+    - **Ungroup:** If a suggested group contains mixed faces, click the **"Ungroup"** button on the row to break it apart and return the faces to the "Unmatched" pool for individual sorting.
+    - **Ignore All Groups:** Use the **"Ignore All Groups"** button in the header if you want to quickly clear all current suggestions (e.g., if they are all non-faces or irrelevant background people).
+6.  **Ignored Faces:** Managing ignored faces is easy. Open the Ignored Faces modal to review hidden faces. 
     - **Group Similar**: Automatically cluster the "ignored" pile to quickly find accidental ignores.
     - **Sensitivity Slider**: Use the slider to increase matching sensitivity if you don't see suggestions for blurry or lower-quality photos.
     - **AI Readiness**: Look for small **green dots** on the thumbnails; these indicate that the face has high-quality AI fingerprint data ready for matching.

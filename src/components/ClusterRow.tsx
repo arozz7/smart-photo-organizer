@@ -13,6 +13,7 @@ interface ClusterRowProps {
     fetchFacesByIds: (ids: number[]) => Promise<Face[]>
     onNameGroup: (ids: number[], name: string) => Promise<void>
     onIgnoreGroup: (ids: number[]) => void
+    onUngroup: (index: number) => void
     onOpenNaming: (ids: number[]) => void
 }
 
@@ -25,6 +26,7 @@ const ClusterRow = memo(({
     fetchFacesByIds,
     onNameGroup,
     onIgnoreGroup,
+    onUngroup,
     onOpenNaming
 }: ClusterRowProps) => { // Removed 'export' from here, added it to the end or declared it as export const
     const [clusterFaces, setClusterFaces] = useState<Face[]>([])
@@ -135,6 +137,13 @@ const ClusterRow = memo(({
                     <span className="text-gray-400 text-sm">{clusterFaces.length} faces</span>
                 </div>
                 <div className="flex gap-2">
+                    <button
+                        onClick={() => onUngroup(index)}
+                        className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 px-3 py-1.5 rounded-md transition-colors"
+                        title="Ungroup these faces (move back to singles)"
+                    >
+                        Ungroup
+                    </button>
                     <button
                         onClick={() => onIgnoreGroup(faceIds)}
                         className="text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 border border-red-900/50 px-3 py-1.5 rounded-md transition-colors"

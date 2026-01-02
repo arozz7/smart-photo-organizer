@@ -11,11 +11,12 @@ interface ClusterListProps {
     fetchFacesByIds: (ids: number[]) => Promise<Face[]>
     handleNameGroup: (ids: number[], name: string) => Promise<void>
     handleIgnoreGroup: (ids: number[]) => void
+    handleUngroup: (index: number) => void
     handleOpenNaming: (ids: number[]) => Promise<void>
 }
 
 const ClusterList = memo(({
-    clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleOpenNaming
+    clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleUngroup, handleOpenNaming
 }: ClusterListProps) => {
 
     const renderClusterRow = useCallback((index: number) => {
@@ -33,11 +34,12 @@ const ClusterList = memo(({
                     fetchFacesByIds={fetchFacesByIds}
                     onNameGroup={handleNameGroup}
                     onIgnoreGroup={handleIgnoreGroup}
+                    onUngroup={handleUngroup}
                     onOpenNaming={handleOpenNaming}
                 />
             </div>
         );
-    }, [clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleOpenNaming]);
+    }, [clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleUngroup, handleOpenNaming]);
 
     // Use memo for style to prevent re-renders on every parent render
     const style = useMemo(() => ({ height: '100%', width: '100%' }), []);
