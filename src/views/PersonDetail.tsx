@@ -59,6 +59,32 @@ const PersonDetail = () => {
         await actions.startTargetedScan(options);
     };
 
+    const onSetCover = async (faceId: number) => {
+        await actions.setCover(faceId);
+    };
+
+    const onShuffleCover = async () => {
+        // Pick a random face from the top 50 sharpest faces to ensure quality
+        if (faces.length === 0) return;
+
+        // Filter valid candidates (sharp enough)
+        const candidates = faces
+            .filter(f => !f.is_ignored && (f.blur_score || 0) > 20)
+            .sort((a, b) => (b.blur_score || 0) - (a.blur_score || 0))
+            .slice(0, 50);
+
+        const pool = candidates.length > 0 ? candidates : faces;
+        const randomFace = pool[Math.floor(Math.random() * pool.length)];
+
+        if (randomFace) {
+            await actions.setCover(randomFace.id);
+        }
+    };
+
+    const onUnpinCover = async () => {
+        await actions.setCover(null);
+    };
+
     if (loading) return <div className="p-8 text-white">Loading...</div>;
     if (!person) return <div className="p-8 text-white">Person not found</div>;
 
@@ -88,6 +114,30 @@ const PersonDetail = () => {
                 </div>
 
                 <div className="flex gap-2">
+                    <div className="flex gap-2 mr-4 border-r border-gray-700 pr-4">
+                        {person.cover_face_id ? (
+                            <button
+                                onClick={onUnpinCover}
+                                className="p-2 text-yellow-500 hover:text-yellow-400 hover:bg-yellow-400/10 rounded-lg transition-colors"
+                                title="Unpin Cover Photo (Revert to Auto)"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
+                                </svg>
+                            </button>
+                        ) : (
+                            <button
+                                onClick={onShuffleCover}
+                                className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+                                title="Shuffle Cover Photo"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            </button>
+                        )}
+                    </div>
+
                     <button
                         onClick={() => setIsBlurryModalOpen(true)}
                         className="bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
@@ -189,6 +239,8 @@ const PersonDetail = () => {
                             face={face}
                             isSelected={selectedFaces.has(face.id)}
                             toggleSelection={toggleSelection}
+                            isCover={person.cover_face_id === face.id}
+                            onSetCover={onSetCover}
                         />
                     ))}
                 </div>

@@ -8,8 +8,9 @@ interface ConfirmationModalProps {
     description: string;
     confirmLabel: string;
     cancelLabel?: string;
-    onConfirm: () => void;
+    onConfirm: (val?: string) => void | Promise<void>;
     variant?: 'danger' | 'primary';
+    defaultValue?: string;
 }
 
 const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
@@ -20,9 +21,20 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     confirmLabel,
     cancelLabel = 'Cancel',
     onConfirm,
-    variant = 'primary'
+    variant = 'primary',
+    defaultValue
 }) => {
     const [isLoading, setIsLoading] = React.useState(false);
+    const [inputValue, setInputValue] = React.useState(defaultValue || '');
+
+    // Focus input on open if present
+    const inputRef = React.useRef<HTMLInputElement>(null);
+    React.useEffect(() => {
+        if (open && defaultValue !== undefined) {
+            setInputValue(defaultValue);
+            setTimeout(() => inputRef.current?.focus(), 100);
+        }
+    }, [open, defaultValue]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -35,6 +47,22 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                     <Dialog.Description className="text-gray-400 mb-6 leading-relaxed">
                         {description}
                     </Dialog.Description>
+
+                    {defaultValue !== undefined && (
+                        <input
+                            ref={inputRef}
+                            type="text"
+                            className="w-full bg-gray-800 border border-gray-700 rounded p-2 mb-6 text-white focus:outline-none focus:border-indigo-500"
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    // Trigger confirm
+                                    onConfirm(inputValue);
+                                }
+                            }}
+                        />
+                    )}
 
                     <div className="flex justify-end gap-3">
                         {cancelLabel && !isLoading && (
@@ -49,7 +77,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                             onClick={async () => {
                                 setIsLoading(true);
                                 try {
-                                    await onConfirm();
+                                    await onConfirm(defaultValue !== undefined ? inputValue : undefined);
                                 } finally {
                                     if (open) setIsLoading(false);
                                 }

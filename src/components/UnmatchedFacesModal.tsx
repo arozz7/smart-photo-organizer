@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import FaceThumbnail from './FaceThumbnail'
 import { usePeople } from '../context/PeopleContext'
+import { useScan } from '../context/ScanContext'
 
 interface UnmatchedFacesModalProps {
     isOpen: boolean
@@ -14,6 +15,7 @@ interface UnmatchedFacesModalProps {
 
 export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, onAutoName, onIgnore }: UnmatchedFacesModalProps) {
     const { fetchFacesByIds, matchBatch } = usePeople()
+    const { viewPhoto, viewingPhoto } = useScan()
     const [faces, setFaces] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -122,7 +124,24 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
         <Dialog.Root open={isOpen} onOpenChange={open => !open && onClose()}>
             <Dialog.Portal>
                 <Dialog.Overlay className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 animate-fade-in" />
-                <Dialog.Content className="fixed inset-4 md:inset-10 bg-gray-900 rounded-xl border border-gray-800 shadow-2xl z-50 flex flex-col overflow-hidden animate-scale-in">
+                <Dialog.Content
+                    onEscapeKeyDown={(e) => {
+                        if (viewingPhoto) {
+                            e.preventDefault();
+                        }
+                    }}
+                    onPointerDownOutside={(e) => {
+                        if (viewingPhoto) {
+                            e.preventDefault();
+                        }
+                    }}
+                    onInteractOutside={(e) => {
+                        if (viewingPhoto) {
+                            e.preventDefault();
+                        }
+                    }}
+                    className="fixed inset-4 md:inset-10 bg-gray-900 rounded-xl border border-gray-800 shadow-2xl z-50 flex flex-col overflow-hidden animate-scale-in"
+                >
 
                     {/* Header */}
                     <div className="flex-none p-4 border-b border-gray-800 flex items-center justify-between text-white bg-gray-900/50 backdrop-blur">
@@ -240,6 +259,20 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
                                                     </svg>
                                                 </div>
                                             )}
+
+                                            {/* Preview Button */}
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    viewPhoto(face.photo_id);
+                                                }}
+                                                className="absolute bottom-1 right-1 bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-all z-20 shadow-lg"
+                                                title="View Original Photo"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                                    <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
+                                                </svg>
+                                            </button>
                                         </div>
                                     ))}
                                 </div>

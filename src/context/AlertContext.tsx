@@ -7,14 +7,16 @@ interface AlertOptions {
     confirmLabel?: string;
     cancelLabel?: string;
     variant?: 'primary' | 'danger';
-    onConfirm?: () => void | Promise<void>;
+    onConfirm?: (val?: string) => void | Promise<void>;
     onCancel?: () => void;
     showCancel?: boolean;
+    defaultValue?: string; // For prompts
 }
 
 interface AlertContextType {
     showAlert: (options: AlertOptions) => void;
     showConfirm: (options: AlertOptions) => void;
+    promptUser: (options: AlertOptions) => void;
 }
 
 const AlertContext = createContext<AlertContextType | undefined>(undefined);
@@ -47,14 +49,25 @@ export const AlertProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         });
     };
 
-    const handleConfirm = async () => {
+    const promptUser = (options: AlertOptions) => {
+        setModal({
+            ...options,
+            open: true,
+            showCancel: true,
+            confirmLabel: options.confirmLabel || 'OK',
+            cancelLabel: options.cancelLabel || 'Cancel',
+            defaultValue: options.defaultValue || ''
+        });
+    };
+
+    const handleConfirm = async (val?: string) => {
         const onConfirmAction = modal?.onConfirm;
 
-        // Close the current modal first so that if onConfirm triggers another alert, it isn't immediately closed.
+        // Close the current modal
         setModal(null);
 
         if (onConfirmAction) {
-            await onConfirmAction();
+            await onConfirmAction(val);
         }
 
         // Ensure window focus restoration in Electron
@@ -73,7 +86,7 @@ export const AlertProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
 
     return (
-        <AlertContext.Provider value={{ showAlert, showConfirm }}>
+        <AlertContext.Provider value={{ showAlert, showConfirm, promptUser }}>
             {children}
             {modal && (
                 <ConfirmationModal
@@ -85,6 +98,7 @@ export const AlertProvider: React.FC<{ children: ReactNode }> = ({ children }) =
                     cancelLabel={modal.showCancel ? modal.cancelLabel : undefined}
                     onConfirm={handleConfirm}
                     variant={modal.variant}
+                    defaultValue={modal.defaultValue}
                 />
             )}
         </AlertContext.Provider>

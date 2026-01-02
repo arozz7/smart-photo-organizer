@@ -25,14 +25,17 @@ export class PersonRepository {
                 SELECT 
                     p.*, 
                     COALESCE(pc.face_count, 0) as face_count,
-                    COALESCE(ph.preview_cache_path, ph.file_path) as cover_path,
-                    bf.box_json as cover_box,
-                    ph.width as cover_width,
-                    ph.height as cover_height
+                    COALESCE(fixed_photo.preview_cache_path, fixed_photo.file_path, ph.preview_cache_path, ph.file_path) as cover_path,
+                    COALESCE(fixed_face.box_json, bf.box_json) as cover_box,
+                    COALESCE(fixed_photo.width, ph.width) as cover_width,
+                    COALESCE(fixed_photo.height, ph.height) as cover_height,
+                    p.cover_face_id
                 FROM people p
                 LEFT JOIN PersonCounts pc ON p.id = pc.person_id
                 LEFT JOIN BestFaces bf ON p.id = bf.person_id AND bf.rn = 1
                 LEFT JOIN photos ph ON bf.photo_id = ph.id
+                LEFT JOIN faces fixed_face ON p.cover_face_id = fixed_face.id
+                LEFT JOIN photos fixed_photo ON fixed_face.photo_id = fixed_photo.id
                 ORDER BY face_count DESC
             `);
             return stmt.all();
@@ -85,5 +88,10 @@ export class PersonRepository {
     static deletePerson(id: number) {
         const db = getDB();
         db.prepare('DELETE FROM people WHERE id = ?').run(id);
+    }
+
+    static setPersonCover(personId: number, faceId: number | null) {
+        const db = getDB();
+        db.prepare('UPDATE people SET cover_face_id = ? WHERE id = ?').run(faceId, personId);
     }
 }

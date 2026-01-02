@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Cross2Icon, DownloadIcon } from '@radix-ui/react-icons';
+import { Cross2Icon, DownloadIcon, Pencil1Icon } from '@radix-ui/react-icons';
+import { useAlert } from '../context/AlertContext';
 
 interface ModelInfo {
     exists: boolean;
@@ -18,6 +19,33 @@ export default function ModelDownloader({ open, onOpenChange }: { open: boolean,
     const [downloading, setDownloading] = useState<string | null>(null);
     const [progress, setProgress] = useState<{ current: number, total: number, percent: number, status?: string } | null>(null);
     const [error, setError] = useState<string | null>(null);
+
+    // Inject alert for input
+    const { promptUser } = useAlert();
+
+    const handleEditRuntimeUrl = async () => {
+        // @ts-ignore
+        const settings = await window.ipcRenderer.invoke('ai:getSettings');
+
+        // Find effective URL from status to show as default if no override exists
+        const runtimeEntry = status?.models ? Object.entries(status.models).find(([k]) => k.includes('Runtime')) : null;
+        const defaultEffectiveUrl = runtimeEntry ? runtimeEntry[1].url : '';
+
+        const currentUrl = settings.runtimeUrl || defaultEffectiveUrl;
+
+        promptUser({
+            title: 'Edit AI Runtime URL',
+            description: 'Provide a custom direct download link for the AI Runtime (zip). Leave empty to use the default version-matched link.',
+            defaultValue: currentUrl,
+            confirmLabel: 'Save',
+            onConfirm: async (val?: string) => {
+                const newUrl = val?.trim() || undefined; // undefined deletes it in config
+                // @ts-ignore
+                await window.ipcRenderer.invoke('ai:saveSettings', { ...settings, runtimeUrl: newUrl });
+                fetchStatus(); // Refresh to see updated URL in list
+            }
+        });
+    };
 
     const fetchStatus = async () => {
         try {
@@ -130,6 +158,15 @@ export default function ModelDownloader({ open, onOpenChange }: { open: boolean,
                                                     {name.includes('Runtime') && <span className="text-[10px] bg-indigo-500 text-white px-1.5 rounded-full font-bold">REQUIRED FOR GPU</span>}
                                                 </div>
                                                 <span className="text-[10px] text-gray-500 truncate max-w-[250px]">{info.url}</span>
+                                                {name.includes('Runtime') && (
+                                                    <button
+                                                        onClick={handleEditRuntimeUrl}
+                                                        className="ml-2 text-[10px] text-indigo-400 hover:text-indigo-300 underline flex items-center gap-1"
+                                                    >
+                                                        <Pencil1Icon className="w-3 h-3" />
+                                                        Edit Link
+                                                    </button>
+                                                )}
                                             </div>
 
                                             {info.exists ? (

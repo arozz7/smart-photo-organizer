@@ -14,12 +14,18 @@ export interface Face {
     width: number;
     height: number;
     is_ignored: boolean;
+    blur_score?: number; // Added
 }
 
 export interface Person {
     id: number;
     name: string;
+    cover_face_id?: number | null; // Added
 }
+
+// ... hook logic ...
+
+
 
 export const usePersonDetail = (personId: string | undefined) => {
     const navigate = useNavigate();
@@ -214,7 +220,20 @@ export const usePersonDetail = (personId: string | undefined) => {
             moveFaces: handleReassign,
             // @ts-ignore
             removeFaces: handleUnassign,
-            startTargetedScan: handleTargetedScan
+            startTargetedScan: handleTargetedScan,
+            setCover: async (faceId: number | null) => {
+                if (!person) return false;
+                try {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:setPersonCover', { personId: person.id, faceId });
+                    await loadData();
+                    return true;
+                } catch (e) {
+                    console.error('Failed to set cover', e);
+                    showAlert({ title: 'Error', description: 'Failed to set cover photo', variant: 'danger' });
+                    return false;
+                }
+            }
         }
     };
 };
