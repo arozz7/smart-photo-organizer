@@ -135,6 +135,12 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     // Column likely already exists
   }
 
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN cover_face_id INTEGER');
+  } catch (e) {
+    // Column likely already exists
+  }
+
   // --- MIGRATION: Smart Face Storage (BLOBs + Pruning) ---
   try {
     // 1. Add new columns

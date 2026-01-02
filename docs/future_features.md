@@ -3,13 +3,9 @@
 ## 🚀 Priority Roadmap
 
 
-### 1. Face Management & Productivity
-- **Person Thumbnail Management**
-    - **Goal:** Customize the representative image for a person.
-    - **Plan:** "Set as Cover" button, Smart Variety algorithms for "Top Faces", and "Shuffle" option.
-
-
-### 2. Advanced Library Filtering
+### 1. Advanced Library Filtering
+- **Goal:** Combine multiple filter types with conditional logic (AND/OR).
+- **New Filters:** Blur Score, Date (Year/Month), Compound Logic.
 - **Goal:** Combine multiple filter types with conditional logic (AND/OR).
 - **New Filters:** Blur Score, Date (Year/Month), Compound Logic.
 
@@ -62,6 +58,12 @@
 ---
 
 # ✅ Implemented Features
+
+## v0.4.5 (In Development)
+- **Person Thumbnail Management:**
+    - **Custom Covers:** Manually "Pin" any face as the person's cover photo.
+    - **Shuffle:** Instantly pick a random high-quality face as the cover.
+    - **Smart Fallback:** Auto-reverts to the sharpest available face if unpinned.
 
 ## v0.4.0 (Stability Release)
 - **Architecture Refactor:** Modularized Main Process for better stability.

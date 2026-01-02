@@ -17,6 +17,7 @@ export interface Person {
     name: string;
     face_count?: number;
     cover_photo?: string;
+    cover_face_id?: number | null;
 }
 
 export interface BlurryFace extends Face {

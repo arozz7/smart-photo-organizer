@@ -185,6 +185,11 @@ export function registerDBHandlers() {
     // --- PEOPLE ---
     ipcMain.handle('db:getPeople', async () => PersonRepository.getPeople());
 
+    ipcMain.handle('db:setPersonCover', async (_, { personId, faceId }) => {
+        PersonRepository.setPersonCover(personId, faceId);
+        return { success: true };
+    });
+
     ipcMain.handle('db:getPerson', async (_, id) => PersonRepository.getPersonById(id));
 
     ipcMain.handle('db:assignPerson', async (_, { faceId, personName }) => {

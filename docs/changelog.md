@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+### Features
+- **Person Thumbnail Management:** Added ability to manually "Pin" a cover photo, randomize it ("Shuffle"), or revert to the auto-selected best face.
 ### Fixes
 - **Face Identification:** Implemented "Hybrid Matching" (FAISS + Centroid) to ensure new scans correctly match against named people even if vector distances vary slightly.
 - **System Status:** Fixed "Dimensions: 0" display glitch for the vector index.
