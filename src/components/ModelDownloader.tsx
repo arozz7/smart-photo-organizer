@@ -16,7 +16,7 @@ interface SystemStatus {
 export default function ModelDownloader({ open, onOpenChange }: { open: boolean, onOpenChange: (open: boolean) => void }) {
     const [status, setStatus] = useState<SystemStatus | null>(null);
     const [downloading, setDownloading] = useState<string | null>(null);
-    const [progress, setProgress] = useState<{ current: number, total: number, percent: number } | null>(null);
+    const [progress, setProgress] = useState<{ current: number, total: number, percent: number, status?: string } | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     const fetchStatus = async () => {
@@ -40,9 +40,10 @@ export default function ModelDownloader({ open, onOpenChange }: { open: boolean,
         const cleanup = window.ipcRenderer.on('ai:model-progress', (message: any) => {
             if (message.type === 'download_progress') {
                 setProgress({
-                    current: message.current,
-                    total: message.total,
-                    percent: message.percent
+                    current: message.current || 0,
+                    total: message.total || 0,
+                    percent: message.percent || 0,
+                    status: message.status
                 });
             } else if (message.type === 'download_result') {
                 setDownloading(null);
@@ -150,7 +151,6 @@ export default function ModelDownloader({ open, onOpenChange }: { open: boolean,
                                                     {downloading === name ? (
                                                         <>
                                                             <div className="animate-spin h-3 w-3 border-2 border-blue-400 border-t-transparent rounded-full"></div>
-                                                            {/* @ts-ignore */}
                                                             {progress?.status === 'extracting' ? 'Extracting...' : 'Downloading...'}
                                                         </>
                                                     ) : (
@@ -166,24 +166,22 @@ export default function ModelDownloader({ open, onOpenChange }: { open: boolean,
                                         {downloading === name && progress && (
                                             <div className="space-y-1 mt-1">
                                                 <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
-                                                    {/* @ts-ignore */}
-                                                    {progress.status === 'extracting' ? (
+                                                    {progress?.status === 'extracting' ? (
                                                         <div className="bg-indigo-500 h-1.5 rounded-full w-full animate-pulse"></div>
                                                     ) : (
                                                         <div
                                                             className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
-                                                            style={{ width: `${progress.percent}%` }}
+                                                            style={{ width: `${progress?.percent || 0}%` }}
                                                         ></div>
                                                     )}
                                                 </div>
                                                 <div className="flex justify-between text-[10px] text-gray-500">
-                                                    {/* @ts-ignore */}
-                                                    {progress.status === 'extracting' ? (
+                                                    {progress?.status === 'extracting' ? (
                                                         <span className="text-indigo-400 font-semibold animate-pulse">Extracting files... (This may take a minute)</span>
                                                     ) : (
                                                         <>
-                                                            <span>{progress.percent.toFixed(1)}%</span>
-                                                            <span>{formatSize(progress.current)} / {formatSize(progress.total)}</span>
+                                                            <span>{progress?.percent.toFixed(1)}%</span>
+                                                            <span>{formatSize(progress?.current || 0)} / {formatSize(progress?.total || 0)}</span>
                                                         </>
                                                     )}
                                                 </div>

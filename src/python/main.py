@@ -709,6 +709,15 @@ def handle_command(command):
                 save_path = enhance.enhancer.download_model_at_url(base_url, temp_zip, progress_callback)
                 
                 logger.info("Extracting AI Runtime...")
+                # Signal extraction start to UI
+                print(json.dumps({
+                    "type": "download_progress",
+                    "modelName": model_name,
+                    "status": "extracting",
+                    "reqId": req_id
+                }))
+                sys.stdout.flush()
+                
                 with zipfile.ZipFile(save_path, 'r') as zip_ref:
                     zip_ref.extractall(utils.AI_RUNTIME_PATH)
                 
