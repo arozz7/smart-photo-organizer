@@ -74,7 +74,7 @@ export function registerAIHandlers() {
 
     ipcMain.handle('ai:getSystemStatus', async () => {
         const res: any = await pythonProvider.checkStatus();
-        return res;
+        return res.status;
     });
 
     // Face Quality / AI Queries - keeping raw SQL for READ queries is fine? 

@@ -14,6 +14,9 @@
 - **Unmatched Faces Modal:** 
     - Fixed non-functional "Use Suggestion" button by correctly routing actions through the state hook.
     - Added loading indicators and better UX feedback during batch naming/ignoring.
+- **AI Model Management:** 
+    - Fixed issue where available models were not displaying in the management modal.
+    - Added an "Extracting..." status indicator during the final phase of model installation to improve UX feedback.
 - **Batch Processing:** Optimized `autoNameFaces` to use bulk database updates, significantly improving performance when naming many faces simultaneously.
 
 ### Refactoring
