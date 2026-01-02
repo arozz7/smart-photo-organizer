@@ -8,16 +8,18 @@ interface UnmatchedFacesModalProps {
     onClose: () => void
     faceIds: number[]
     onName: (ids: number[]) => void
+    onAutoName: (ids: number[], name: string) => Promise<void>
     onIgnore: (ids: number[]) => void
 }
 
-export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, onIgnore }: UnmatchedFacesModalProps) {
-    const { fetchFacesByIds, matchBatch, autoNameFaces } = usePeople()
+export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, onAutoName, onIgnore }: UnmatchedFacesModalProps) {
+    const { fetchFacesByIds, matchBatch } = usePeople()
     const [faces, setFaces] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
     const [threshold, setThreshold] = useState(0.65)
     const [suggestion, setSuggestion] = useState<any>(null)
+    const [actionLoading, setActionLoading] = useState(false)
 
     // Pagination
     const [displayedCount, setDisplayedCount] = useState(0)
@@ -95,15 +97,25 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
         }
     }, [selectedIds, faces, matchBatch, threshold]);
 
-    const handleAction = (action: 'name' | 'ignore') => {
+    const handleAction = async (action: 'name' | 'ignore' | 'autoName') => {
         const ids = Array.from(selectedIds)
         if (ids.length === 0) return
 
-        if (action === 'name') onName(ids)
-        if (action === 'ignore') onIgnore(ids)
-        // Note: We don't close immediately or clear selection here depending on UX preference.
-        // Usually the parent will handle refreshing logic which might close or update this modal.
-        // For smoother UX, let's keep it open until parent updates the 'faceIds' prop (which should trigger a reload/cleanup).
+        setActionLoading(true)
+        try {
+            if (action === 'name') onName(ids)
+            if (action === 'autoName' && suggestion) await onAutoName(ids, suggestion.personName)
+            if (action === 'ignore') await onIgnore(ids)
+
+            // Clear selection on success for these actions
+            if (action !== 'name') {
+                setSelectedIds(new Set())
+            }
+        } catch (e) {
+            console.error(e)
+        } finally {
+            setActionLoading(false)
+        }
     }
 
     return (
@@ -139,22 +151,26 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
                             <div className="flex items-center gap-2 animate-fade-in">
                                 <button
                                     onClick={() => handleAction('name')}
-                                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-indigo-900/20"
+                                    disabled={actionLoading}
+                                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-indigo-900/20 disabled:opacity-50"
                                 >
                                     Name Selected
                                 </button>
                                 {suggestion && (
                                     <button
-                                        onClick={() => autoNameFaces(Array.from(selectedIds), suggestion.personName)}
-                                        className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-green-900/20 flex items-center gap-2"
+                                        onClick={() => handleAction('autoName')}
+                                        disabled={actionLoading}
+                                        className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-green-900/20 flex items-center gap-2 disabled:opacity-50"
                                     >
+                                        {actionLoading && <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full" />}
                                         <span>Use Suggestion: <strong>{suggestion.personName}</strong></span>
                                         <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">{Math.round(suggestion.similarity * 100)}%</span>
                                     </button>
                                 )}
                                 <button
                                     onClick={() => handleAction('ignore')}
-                                    className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-red-900/20"
+                                    disabled={actionLoading}
+                                    className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-red-900/20 disabled:opacity-50"
                                 >
                                     Ignore Selected
                                 </button>

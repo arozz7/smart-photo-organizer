@@ -124,10 +124,10 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
 
     const autoNameFaces = useCallback(async (faceIds: number[], name: string) => {
         try {
-            for (const id of faceIds) {
-                // @ts-ignore
-                await window.ipcRenderer.invoke('db:assignPerson', { faceId: id, personName: name })
-            }
+            // Use batch handler for efficiency
+            // @ts-ignore
+            await window.ipcRenderer.invoke('db:reassignFaces', { faceIds, personName: name })
+
             await loadPeople()
             setFaces(prev => prev.filter(f => !faceIds.includes(f.id)))
         } catch (e) {

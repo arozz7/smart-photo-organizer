@@ -362,6 +362,7 @@ export default function People() {
                 onClose={() => setShowUnmatchedModal(false)}
                 faceIds={singles}
                 onName={handleOpenNaming}
+                onAutoName={handleNameGroup}
                 onIgnore={handleIgnoreGroup}
             />
 
