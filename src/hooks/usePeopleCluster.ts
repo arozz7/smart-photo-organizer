@@ -192,6 +192,58 @@ export function usePeopleCluster() {
         })
     }, [showConfirm, addToast])
 
+    const handleUngroup = useCallback((clusterIndex: number) => {
+        const cluster = clusters[clusterIndex];
+        if (!cluster) return;
+
+        const ids = cluster.faces;
+
+        // Optimistic Update: Move from clusters to singles
+        setClusters(prev => prev.filter((_, idx) => idx !== clusterIndex));
+        setSingles(prev => [...prev, ...ids]);
+
+        // Clean up selection if any of these were selected
+        setSelectedFaceIds(prev => {
+            const next = new Set(prev);
+            let changed = false;
+            ids.forEach(id => {
+                if (next.has(id)) {
+                    next.delete(id);
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
+
+        addToast({ type: 'info', description: `Ungrouped ${ids.length} faces` });
+
+    }, [clusters, addToast]);
+
+    const handleIgnoreAllGroups = useCallback(() => {
+        if (clusters.length === 0) return;
+
+        showConfirm({
+            title: 'Ignore All Groups',
+            description: `This will ignore ALL ${clusters.length} currently visible groups (${clusters.reduce((acc, c) => acc + c.faces.length, 0)} faces). They will be hidden.`,
+            confirmLabel: 'Ignore All',
+            variant: 'danger',
+            onConfirm: async () => {
+                const allIds: number[] = [];
+                clusters.forEach(c => allIds.push(...c.faces));
+
+                // Optimistic Clear
+                setClusters([]);
+                setTotalFaces(prev => prev - allIds.length);
+                setSelectedFaceIds(new Set()); // Clear all selection
+
+                // API Call
+                // @ts-ignore
+                await window.ipcRenderer.invoke('db:ignoreFaces', allIds);
+                addToast({ type: 'success', description: `Ignored all ${clusters.length} groups.` });
+            }
+        });
+    }, [clusters, showConfirm, addToast]);
+
     return {
         clusters,
         singles,
@@ -210,6 +262,8 @@ export function usePeopleCluster() {
         handleConfirmName,
         handleOpenNaming,
         handleIgnoreGroup,
+        handleUngroup,
+        handleIgnoreAllGroups,
         setClusters, // Exposed in case view needs manual manipulation, though ideally avoided
         setSingles,
         setTotalFaces,

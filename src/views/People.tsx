@@ -24,7 +24,8 @@ export default function People() {
         clusters, singles, totalFaces, isClustering, isAutoAssigning,
         selectedFaceIds, namingGroup, setNamingGroup,
         loadClusteredFaces, toggleFace, toggleGroup, clearSelection,
-        handleAutoAssign, handleNameGroup, handleConfirmName, handleOpenNaming, handleIgnoreGroup
+        handleAutoAssign, handleNameGroup, handleConfirmName, handleOpenNaming, handleIgnoreGroup,
+        handleUngroup, handleIgnoreAllGroups
     } = usePeopleCluster()
 
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
@@ -235,6 +236,16 @@ export default function People() {
                                     Cleanup Blurry
                                 </button>
                                 <button
+                                    onClick={handleIgnoreAllGroups}
+                                    className="px-3 py-1.5 text-sm bg-red-900/10 hover:bg-red-900/30 text-red-400 border border-red-900/30 rounded-lg transition-colors flex items-center gap-2"
+                                    title="Ignore all currently suggested groups"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                    </svg>
+                                    Ignore All Groups
+                                </button>
+                                <button
                                     onClick={() => setShowIgnoredModal(true)}
                                     className="px-3 py-1.5 text-sm bg-gray-800/50 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-lg transition-colors flex items-center gap-2"
                                 >
@@ -263,6 +274,7 @@ export default function People() {
                                         fetchFacesByIds={fetchFacesByIds}
                                         handleNameGroup={handleNameGroup}
                                         handleIgnoreGroup={handleIgnoreGroup}
+                                        handleUngroup={handleUngroup}
                                         handleOpenNaming={handleOpenNaming}
                                     />
                                 )}

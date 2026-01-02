@@ -18,6 +18,8 @@
     - Fixed issue where available models were not displaying in the management modal.
     - Added an "Extracting..." status indicator during the final phase of model installation to improve UX feedback.
 - **Batch Processing:** Optimized `autoNameFaces` to use bulk database updates, significantly improving performance when naming many faces simultaneously.
+- **Ungroup Faces:** Implemented the ability to break up incorrect clusters in the "Unnamed Faces" page, moving faces back to the single pool.
+- **Ignore All Groups:** Added a bulk action to ignore all currently visible suggested face groups for faster cleanup.
 
 ### Refactoring
 - **Core Architecture Refactor (Modularization):** Completed a major transition of the Electron backend to a modular Service/Repository architecture.
