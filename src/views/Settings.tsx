@@ -3,6 +3,7 @@ import SettingsModal from '../components/SettingsModal';
 import ScanWarningsModal from '../components/ScanWarningsModal';
 import { useAI } from '../context/AIContext';
 import { useAlert } from '../context/AlertContext';
+import { useToast } from '../context/ToastContext';
 
 function PreviewManager() {
     const [stats, setStats] = useState<{ count: number, size: number } | null>(null)
@@ -118,8 +119,10 @@ export default function Settings() {
     const [showWarningsModal, setShowWarningsModal] = useState(false);
     const { calculatingBlur, blurProgress, calculateBlurScores } = useAI();
     const { showAlert, showConfirm } = useAlert();
+    const { addToast } = useToast();
 
     const [aiProfile, setAiProfile] = useState<'balanced' | 'high'>('balanced');
+    const [vlmEnabled, setVlmEnabled] = useState(false);
 
     useEffect(() => {
         // @ts-ignore
@@ -130,8 +133,9 @@ export default function Settings() {
 
         // @ts-ignore
         window.ipcRenderer.invoke('ai:getSettings').then((settings: any) => {
-            if (settings && settings.aiProfile) {
-                setAiProfile(settings.aiProfile);
+            if (settings) {
+                if (settings.aiProfile) setAiProfile(settings.aiProfile);
+                if (settings.vlmEnabled !== undefined) setVlmEnabled(settings.vlmEnabled);
             }
         });
     }, [])
@@ -196,12 +200,6 @@ export default function Settings() {
         <div className="p-8 h-full overflow-y-auto bg-gray-900 text-gray-100 relative">
             <h2 className="text-3xl font-bold mb-8 text-white flex items-center justify-between">
                 <span>Settings</span>
-                <button
-                    onClick={() => setShowSettingsModal(true)}
-                    className="px-4 py-2 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-sm font-medium transition-colors"
-                >
-                    Configure AI Models
-                </button>
             </h2>
 
             <SettingsModal
@@ -308,6 +306,62 @@ export default function Settings() {
                                     <li><strong>Balanced:</strong> Uses standard models. Good for most users. Fast scanning.</li>
                                     <li><strong>High Accuracy:</strong> Uses <code>clip-vit-large</code> for superior tagging. Scanning will be slower.</li>
                                 </ul>
+                            </div>
+
+                            {/* Smart Tags Toggle (Added for visibility) */}
+                            <div className="flex items-center justify-between pt-4 border-t border-gray-700">
+                                <div className="flex flex-col gap-1">
+                                    <h4 className="font-medium text-white">Smart Tags (VLM)</h4>
+                                    <p className="text-sm text-gray-400">
+                                        Use AI (SmolVLM) to describe photos and generate search tags.
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className={`text-xs font-bold ${vlmEnabled ? 'text-green-500' : 'text-gray-500'}`}>
+                                        {vlmEnabled ? 'ENABLED' : 'DISABLED'}
+                                    </span>
+                                    <button
+                                        onClick={async () => {
+                                            const newState = !vlmEnabled;
+                                            setVlmEnabled(newState);
+                                            // @ts-ignore
+                                            const current = await window.ipcRenderer.invoke('ai:getSettings');
+                                            const updated = { ...current, vlmEnabled: newState };
+                                            // @ts-ignore
+                                            await window.ipcRenderer.invoke('ai:saveSettings', updated);
+
+                                            showConfirm({
+                                                title: 'Reload Required',
+                                                description: `You have ${newState ? 'Enabled' : 'Disabled'} Smart Tags. Please reload the application to apply this change.`,
+                                                confirmLabel: 'Reload Now',
+                                                onConfirm: () => window.location.reload()
+                                            });
+                                        }}
+                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${vlmEnabled ? 'bg-indigo-600' : 'bg-gray-700'
+                                            }`}
+                                    >
+                                        <span
+                                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${vlmEnabled ? 'translate-x-6' : 'translate-x-1'
+                                                }`}
+                                        />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Advanced Configuration (Moved from Header) */}
+                            <div className="flex items-center justify-between pt-4 border-t border-gray-700">
+                                <div>
+                                    <h4 className="font-medium text-white">Advanced Configuration</h4>
+                                    <p className="text-sm text-gray-400">
+                                        Manage downloaded models and fine-tune detection thresholds.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => setShowSettingsModal(true)}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm font-medium transition-colors border border-blue-500/50"
+                                >
+                                    Configure Models
+                                </button>
                             </div>
                         </div>
                     </section>

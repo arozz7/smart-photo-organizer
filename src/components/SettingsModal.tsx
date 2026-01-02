@@ -20,6 +20,7 @@ interface AISettings {
     vlmTemperature: number;
     vlmMaxTokens: number;
     hideUnnamedFacesByDefault: boolean;
+    vlmEnabled: boolean;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => {
@@ -32,7 +33,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
         faceBlurThreshold: 20.0,
         vlmTemperature: 0.2,
         vlmMaxTokens: 100,
-        hideUnnamedFacesByDefault: false
+        hideUnnamedFacesByDefault: false,
+        vlmEnabled: false
     });
 
     useEffect(() => {
@@ -88,7 +90,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                     faceBlurThreshold: 20.0,
                     vlmTemperature: 0.2,
                     vlmMaxTokens: 100,
-                    hideUnnamedFacesByDefault: false
+                    hideUnnamedFacesByDefault: false,
+                    vlmEnabled: false
                 });
             }
         });
@@ -177,30 +180,34 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
 
                             <Tabs.Content value="tagging" className="space-y-6 focus:outline-none">
                                 <div className="space-y-6">
-                                    <h3 className="text-lg font-semibold text-purple-400">AI Tagging (VLM)</h3>
+                                    <div className="p-3 bg-blue-900/20 border border-blue-500/20 rounded text-sm text-blue-200">
+                                        To enable/disable <strong>Smart Tags</strong>, use the main <strong>AI Performance Profile</strong> settings.
+                                    </div>
 
-                                    <SettingSlider
-                                        label="Creativity (Temperature)"
-                                        value={settings.vlmTemperature}
-                                        min={0.0} max={1.5} step={0.1}
-                                        onChange={(v) => handleChange('vlmTemperature', v)}
-                                        tooltip="Controls randomness in tag generation. Lower (0.1) is more factual/deterministic. Higher (0.8+) is more creative but can hallucinate."
-                                    />
-
-                                    <div className="flex flex-col space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <label className="text-sm font-medium text-gray-300">Max Tagging Tokens</label>
-                                                <InfoTooltip text="Maximum length of the generated description/tags. 100 is usually enough for concise tags." />
-                                            </div>
-                                            <span className="text-xs text-blue-400 font-mono bg-blue-900/30 px-2 py-0.5 rounded border border-blue-500/20">{settings.vlmMaxTokens}</span>
-                                        </div>
-                                        <input
-                                            type="number"
-                                            className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm w-full focus:outline-none focus:border-purple-500"
-                                            value={settings.vlmMaxTokens}
-                                            onChange={(e) => handleChange('vlmMaxTokens', parseInt(e.target.value))}
+                                    <div className="space-y-6">
+                                        <SettingSlider
+                                            label="Creativity (Temperature)"
+                                            value={settings.vlmTemperature}
+                                            min={0.0} max={1.5} step={0.1}
+                                            onChange={(v) => handleChange('vlmTemperature', v)}
+                                            tooltip="Controls randomness in tag generation. Lower (0.1) is more factual/deterministic. Higher (0.8+) is more creative but can hallucinate."
                                         />
+
+                                        <div className="flex flex-col space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-sm font-medium text-gray-300">Max Tagging Tokens</label>
+                                                    <InfoTooltip text="Maximum length of the generated description/tags. 100 is usually enough for concise tags." />
+                                                </div>
+                                                <span className="text-xs text-blue-400 font-mono bg-blue-900/30 px-2 py-0.5 rounded border border-blue-500/20">{settings.vlmMaxTokens}</span>
+                                            </div>
+                                            <input
+                                                type="number"
+                                                className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm w-full focus:outline-none focus:border-purple-500"
+                                                value={settings.vlmMaxTokens}
+                                                onChange={(e) => handleChange('vlmMaxTokens', parseInt(e.target.value))}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </Tabs.Content>

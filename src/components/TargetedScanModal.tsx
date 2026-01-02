@@ -26,14 +26,18 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
     const [matchedFaceIds, setMatchedFaceIds] = useState<number[]>([]);
     const [matchedAssociations, setMatchedAssociations] = useState<{ personId: number, faceId: number }[]>([]);
 
+    // Initial configuration on open
+    useEffect(() => {
+        if (isOpen && availableFolders.length > 0 && !selectedFolder) {
+            const root = availableFolders.find(f => f.folder === '' || f.folder === '.');
+            setSelectedFolder(root ? root.folder : availableFolders[0].folder);
+        }
+    }, [isOpen, availableFolders]);
+
+    // Update count when parameters change
     useEffect(() => {
         if (isOpen) {
             updateCount();
-            if (availableFolders.length > 0 && !selectedFolder) {
-                // Find index 0 or root
-                const root = availableFolders.find(f => f.folder === '' || f.folder === '.');
-                setSelectedFolder(root ? root.folder : availableFolders[0].folder);
-            }
         }
     }, [isOpen, mode, scope, selectedFolder, onlyWithFaces]);
 
@@ -51,21 +55,23 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
                         return;
                     }
 
-                    // @ts-ignore
                     const searchResult = await window.ipcRenderer.invoke('ai:command', {
                         type: 'search_index',
-                        payload: { descriptor, k: 1000, threshold: 0.6 }
+                        payload: { descriptor, k: 1000, threshold: 0.8 }
                     });
 
                     if (searchResult?.matches?.length > 0) {
                         const ids = searchResult.matches.map((m: any) => m.id);
+
                         // @ts-ignore
                         const metadata = await window.ipcRenderer.invoke('db:getFaceMetadata', ids);
+
                         const unnamedMatches = metadata.filter((m: any) => {
-                            const isUnnamed = m.person_id === null;
+                            const isUnnamed = m.person_id === null || m.person_id === undefined;
                             const inFolder = scope === 'folder' ? m.file_path.startsWith(selectedFolder) : true;
                             return isUnnamed && inFolder;
                         });
+
                         setCount(unnamedMatches.length);
                         setMatchedFaceIds(unnamedMatches.map((m: any) => m.id));
                     } else {
@@ -79,6 +85,11 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
                     if (peopleWithDescs.length === 0) {
                         setCount(0);
                         setMatchedAssociations([]);
+                        showAlert({
+                            title: 'No Reference Models',
+                            description: 'No person models found for quick scanning. This means your faces might not have been fully analyzed. Please try a "Deep (Photo Re-detect)" scan to build these models.',
+                            variant: 'danger'
+                        });
                         return;
                     }
 
@@ -90,7 +101,7 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
                         // @ts-ignore
                         const searchResult = await window.ipcRenderer.invoke('ai:command', {
                             type: 'search_index',
-                            payload: { descriptor: p.descriptor, k: 500, threshold: 1.2 }
+                            payload: { descriptor: p.descriptor, k: 500, threshold: 0.8 }
                         });
 
 
@@ -116,7 +127,7 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
 
                         const filteredAssociations: { personId: number, faceId: number }[] = [];
                         for (const m of metadata) {
-                            const isUnnamed = m.person_id === null;
+                            const isUnnamed = m.person_id === null || m.person_id === undefined;
                             const inFolder = scope === 'folder' ? m.file_path.startsWith(selectedFolder) : true;
                             if (isUnnamed && inFolder) {
                                 const best = bestMatches.get(m.id);
@@ -278,8 +289,8 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
                         {mode === 'deep' && (
                             <div className="flex items-center justify-between p-4 bg-gray-800/30 rounded-lg border border-gray-800">
                                 <div>
-                                    <label className="text-sm font-medium text-gray-200 block">Filter Unnamed Only</label>
-                                    <p className="text-[11px] text-gray-500">Only scan photos that already have detected faces.</p>
+                                    <label className="text-sm font-medium text-gray-200 block">Only with Faces</label>
+                                    <p className="text-[11px] text-gray-500">Only scan photos where at least one face was already found.</p>
                                 </div>
                                 <input
                                     type="checkbox"

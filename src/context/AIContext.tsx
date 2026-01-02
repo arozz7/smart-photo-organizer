@@ -226,9 +226,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             // Also check ping for live mode
             // @ts-ignore
             const ping = await window.ipcRenderer.invoke('ai:command', { type: 'ping' });
-            if (ping) {
-                if (ping.aiMode) setAiMode(ping.aiMode);
-                if (ping.vlmEnabled !== undefined) setVlmEnabled(ping.vlmEnabled);
+            if (ping && ping.aiMode) {
+                setAiMode(ping.aiMode);
             }
         } catch (error) {
             console.error("Failed to fetch system status:", error);
@@ -237,26 +236,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     // Status Polling Effect
     useEffect(() => {
-        let intervalId: NodeJS.Timeout;
+        // Run once on mount
+        fetchSystemStatus();
 
-        const pollStatus = async () => {
-            // If we already have a mode, stop polling (unless we want to detect crashes?)
-            // For now, just poll until we get out of UNKNOWN
-            await fetchSystemStatus();
-        };
+        // Determine interval: 
+        // - 5s if we are processing OR if aiMode is unknown (initializing)
+        // - 30s if idle
+        const interval = (isProcessing || aiMode === 'UNKNOWN') ? 5000 : 30000;
+        const intervalId = setInterval(fetchSystemStatus, interval);
 
-        // Initial fetch
-        pollStatus();
-
-        // Start polling if UNKNOWN
-        if (aiMode === 'UNKNOWN') {
-            intervalId = setInterval(pollStatus, 2000);
-        }
-
-        return () => {
-            if (intervalId) clearInterval(intervalId);
-        };
-    }, [aiMode, fetchSystemStatus]);
+        return () => clearInterval(intervalId);
+    }, [fetchSystemStatus, isProcessing, aiMode]);
 
     // Blur Calculation State
     const [calculatingBlur, setCalculatingBlur] = useState(false);
@@ -284,6 +274,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             } else {
                 addToast({ type: 'error', description: "Failed to find photos: " + res.error });
             }
+
+            // Save FAISS Index after batch operation to ensure persistence
+            // @ts-ignore
+            await window.ipcRenderer.invoke('ai:saveVectorIndex');
+            console.log("[AI] Blur Scores Calculated. Vector Index Saved.");
+
         } catch (e) {
             addToast({ type: 'error', description: "Error calculating blur" });
         } finally {
@@ -560,31 +556,50 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
         // Update state
         setProcessingQueue(prev => {
-            // Logic: remove the specific item.
-            // If we upgraded, payload.scanMode might be MACRO while queue item is FAST.
-            // First, try to remove exact match.
-            let next = prev.filter(p => !(p.id === photoId && (p.scanMode || 'FAST') === scanMode));
+            if (prev.length === 0) return prev;
 
-            // Fallback: If nothing was removed (length same), force remove ANY item with this ID.
-            // This prevents infinite retries if modes mismatch (e.g. error response missing mode, or auto-upgrade).
-            if (next.length === prev.length) {
-                console.log(`[AI] Standard removal failed for ${photoId} (${scanMode}). Force removing by ID to prevent loop.`);
-                // Remove the first occurrence of this ID, or all? 
-                // To be safe against loops, we should probably remove the HEAD if it matches ID, or all for this ID.
-                // Let's remove all for this ID to be absolutely sure we clear the blockage.
-                next = prev.filter(p => p.id !== photoId);
+            // Strict Serial Processing Check
+            // We only remove the item if it matches the HEAD of the queue.
+            // If we receive a result for an ID that is not at the head, it implies an off-queue operation (like Blur Calc)
+            // or a race condition. In either case, we generally shouldn't modify the queue order for non-head items 
+            // to maintain FIFO and prevent accidental removal of pending items.
+            const head = prev[0];
+            if (head.id !== photoId) {
+                // Result does not match current queue task. Ignore it.
+                return prev;
             }
 
-            // Check if queue empty (Auto-Save Index)
-            if (next.length === 0 && prev.length > 0) {
-                console.log("[AI] Queue empty. Saving Vector Index...");
-                // @ts-ignore
-                window.ipcRenderer.invoke('ai:saveVectorIndex').then(res => {
-                    if (res.success) console.log("[AI] Vector Index Saved.");
-                    else console.error("[AI] Failed to save Vector Index:", res.error);
-                });
+            // Mode Satisfaction Check
+            // FAST = 1, BALANCED = 2, MACRO = 3
+            const getScore = (m?: string) => {
+                if (m === 'MACRO') return 3;
+                if (m === 'BALANCED') return 2;
+                return 1; // FAST or undefined
+            };
+
+            const queueScore = getScore(head.scanMode);
+            const resultScore = getScore(scanMode);
+
+            if (resultScore >= queueScore) {
+                // The result satisfies the queue requirement (Equal or Better). Remove it.
+                const next = prev.slice(1);
+
+                // Check if queue empty (Auto-Save Index)
+                if (next.length === 0 && prev.length > 0) {
+                    console.log("[AI] Queue empty. Saving Vector Index...");
+                    // @ts-ignore
+                    window.ipcRenderer.invoke('ai:saveVectorIndex').then(res => {
+                        if (res.success) console.log("[AI] Vector Index Saved.");
+                        else console.error("[AI] Failed to save Vector Index:", res.error);
+                    });
+                }
+                return next;
+            } else {
+                // The result was lower quality (e.g. Blur Calc running FAST while Queue wants BALANCED).
+                // Keep the queue item so it processes with high quality.
+                console.log(`[AI] Result for ${photoId} (Mode: ${scanMode}) insufficient for Queue (Mode: ${head.scanMode}). Keeping in queue.`);
+                return prev;
             }
-            return next;
         });
 
         setIsProcessing(false);
@@ -604,9 +619,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     useEffect(() => {
         // @ts-ignore
         window.ipcRenderer.invoke('ai:getSettings').then((settings: any) => {
-            if (settings && settings.aiProfile) {
-                aiProfileRef.current = settings.aiProfile;
-                console.log('[AIContext] Loaded AI Profile:', settings.aiProfile);
+            if (settings) {
+                if (settings.aiProfile) {
+                    aiProfileRef.current = settings.aiProfile;
+                    console.log('[AIContext] Loaded AI Profile:', settings.aiProfile);
+                }
+                // Load VLM Enabled Preference
+                if (settings.vlmEnabled !== undefined) {
+                    setVlmEnabled(settings.vlmEnabled);
+                    console.log('[AIContext] Loaded VLM Preference:', settings.vlmEnabled);
+                }
             }
         });
     }, []);

@@ -41,7 +41,11 @@ The AI automatically detects faces during the scan. Your job is to give them nam
 4.  **Cleaning Up:** Use the **"Cleanup Blurry Faces"** tool to bulk-manage low-quality captures. 
     - **Performance:** Optimized to handle selecting thousands of faces without slowing down.
     - **RAW Support:** View original "Context" photos even for RAW files (ARW, CR2, etc.).
-5.  **Ignored Faces:** Managing ignored faces is easy. Open the Ignored Faces modal to review hidden faces. Use the **"Group Similar"** button to automatically cluster them, making it much faster to find and restore a specific person you accidentally ignored.
+5.  **Ignored Faces:** Managing ignored faces is easy. Open the Ignored Faces modal to review hidden faces. 
+    - **Group Similar**: Automatically cluster the "ignored" pile to quickly find accidental ignores.
+    - **Sensitivity Slider**: Use the slider to increase matching sensitivity if you don't see suggestions for blurry or lower-quality photos.
+    - **AI Readiness**: Look for small **green dots** on the thumbnails; these indicate that the face has high-quality AI fingerprint data ready for matching.
+    - **Restore as [Name]**: One-click action to restore and correctly name faces simultaneously.
 
 ---
 

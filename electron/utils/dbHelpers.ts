@@ -1,17 +1,17 @@
-import { recalculatePersonMean } from '../db';
+import { PersonService } from '../core/services/PersonService';
 
 const pendingMeanRecalcs = new Map<number, NodeJS.Timeout>();
 
-export const scheduleMeanRecalc = (db: any, personId: number) => {
+export const scheduleMeanRecalc = (personId: number) => {
     if (pendingMeanRecalcs.has(personId)) {
         clearTimeout(pendingMeanRecalcs.get(personId)!);
     }
 
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
         pendingMeanRecalcs.delete(personId);
         try {
             console.log(`[Main] Running scheduled mean recalc for person ${personId}`);
-            recalculatePersonMean(db, personId);
+            await PersonService.recalculatePersonMean(personId);
         } catch (e) {
             console.error(`[Main] Scheduled mean recalc failed for ${personId}`, e);
         }
