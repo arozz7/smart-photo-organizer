@@ -3,7 +3,6 @@ import SettingsModal from '../components/SettingsModal';
 import ScanWarningsModal from '../components/ScanWarningsModal';
 import { useAI } from '../context/AIContext';
 import { useAlert } from '../context/AlertContext';
-import { useToast } from '../context/ToastContext';
 
 function PreviewManager() {
     const [stats, setStats] = useState<{ count: number, size: number } | null>(null)
@@ -119,7 +118,6 @@ export default function Settings() {
     const [showWarningsModal, setShowWarningsModal] = useState(false);
     const { calculatingBlur, blurProgress, calculateBlurScores } = useAI();
     const { showAlert, showConfirm } = useAlert();
-    const { addToast } = useToast();
 
     const [aiProfile, setAiProfile] = useState<'balanced' | 'high'>('balanced');
     const [vlmEnabled, setVlmEnabled] = useState(false);
