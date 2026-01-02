@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Cross2Icon } from '@radix-ui/react-icons';
 import FaceThumbnail from './FaceThumbnail';
+import { usePeople } from '../context/PeopleContext';
 
 interface GroupNamingModalProps {
     open: boolean;
@@ -12,7 +13,9 @@ interface GroupNamingModalProps {
 }
 
 const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange, faces, onConfirm, people = [] }) => {
+    const { matchBatch } = usePeople();
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set(faces.map(f => f.id)));
+    const [suggestion, setSuggestion] = useState<any>(null);
     const [name, setName] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -22,6 +25,23 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
         if (open) {
             setSelectedIds(new Set(faces.map(f => f.id)));
             setName('');
+            setSuggestion(null);
+
+            // Fetch suggestion
+            const sample = faces.slice(0, 5).map(f => f.descriptor).filter(Boolean);
+            if (sample.length > 0) {
+                matchBatch(sample).then(results => {
+                    const counts: any = {};
+                    results.forEach(r => {
+                        if (r && r.personId) {
+                            if (!counts[r.personId]) counts[r.personId] = { person: r, count: 0 };
+                            counts[r.personId].count++;
+                        }
+                    });
+                    const winner = Object.values(counts).sort((a: any, b: any) => b.count - a.count)[0] as any;
+                    if (winner) setSuggestion(winner.person);
+                });
+            }
 
             // Electronic workaround: ensure window focus before targeting input
             if (window.focus) window.focus();
@@ -128,6 +148,20 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
                                     <option key={p.id} value={p.name} />
                                 ))}
                             </datalist>
+
+                            {suggestion && (
+                                <div className="mt-2 flex items-center gap-2">
+                                    <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Suggested:</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setName(suggestion.personName)}
+                                        className="bg-green-600/20 hover:bg-green-600/40 border border-green-500/30 text-green-300 px-2 py-1 rounded text-xs transition-all flex items-center gap-1.5 animate-fade-in group"
+                                    >
+                                        <span className="font-bold underline">{suggestion.personName}</span>
+                                        <span className="text-[10px] opacity-60 group-hover:opacity-100">Click to use</span>
+                                    </button>
+                                </div>
+                            )}
                         </div>
                         <button
                             type="button"

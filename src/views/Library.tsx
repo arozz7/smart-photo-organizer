@@ -256,9 +256,11 @@ export default function Library() {
                         >
                             <option className="bg-gray-800 text-white" value="">Select Folder...</option>
                             {availableFolders.map((t: any) => (
-                                <option className="bg-gray-800 text-white" key={t.folder} value={t.folder} title={t.folder}>
-                                    {t.folder.split(/[\\/]/).pop()}
-                                </option>
+                                t && t.folder ? (
+                                    <option className="bg-gray-800 text-white" key={t.folder} value={t.folder} title={t.folder}>
+                                        {t.folder.split(/[\\/]/).pop()}
+                                    </option>
+                                ) : null
                             ))}
                         </select>
                     )}

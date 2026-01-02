@@ -117,7 +117,7 @@ export default function ModelDownloader({ open, onOpenChange }: { open: boolean,
                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                             </div>
                         ) : (
-                            Object.entries(status.models)
+                            (status?.models ? Object.entries(status.models) : [])
                                 .sort(([a], [b]) => a.includes('Runtime') ? -1 : b.includes('Runtime') ? 1 : 0)
                                 .map(([name, info]) => (
                                     <div key={name} className={`p-3 rounded border flex flex-col gap-2 transition-all hover:border-gray-600 ${name.includes('Runtime') ? 'bg-indigo-900/20 border-indigo-500/30' : 'bg-gray-900/50 border-gray-700/50'
@@ -212,6 +212,6 @@ export default function ModelDownloader({ open, onOpenChange }: { open: boolean,
                     </div>
                 </Dialog.Content>
             </Dialog.Portal>
-        </Dialog.Root>
+        </Dialog.Root >
     );
 }

@@ -25,7 +25,10 @@ export default function ScanWarningsModal({ isOpen, onClose }: ScanWarningsModal
         try {
             // @ts-ignore
             const res = await window.ipcRenderer.invoke('db:getScanErrors')
-            if (res.success) {
+            if (Array.isArray(res)) {
+                setErrors(res)
+            } else if (res && res.success) {
+                // Fallback if we ever change it back to object
                 setErrors(res.errors)
             }
         } catch (e) {

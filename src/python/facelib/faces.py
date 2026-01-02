@@ -10,6 +10,7 @@ app = None
 AI_MODE = "CPU"
 CURRENT_PROVIDERS = None
 ALLOWED_MODULES = None
+LAST_CONFIG = None
 
 # Default Config
 DET_THRESH = 0.5
@@ -24,15 +25,26 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
     if allowed_modules is None:
         allowed_modules = ['detection', 'recognition']
 
-    logger.info(f"Initializing InsightFace with ctx_id={ctx_id}, modules={allowed_modules}, det_size={det_size}...")
+    # [OPTIMIZATION] Avoid re-initializing if already loaded with same config
+    global LAST_CONFIG
+    current_config = (ctx_id, det_size, det_thresh, allowed_modules)
     
-    # [OPTIMIZATION] Avoid re-initializing if already loaded with same config (simplified check)
     if app is not None:
+        # Check if config matches last used config
+        if 'LAST_CONFIG' in globals() and LAST_CONFIG == current_config:
+            return # Truly no-op
+
         try:
+             # Only re-prepare if params changed
+             logger.info(f"Re-preparing InsightFace with ctx_id={ctx_id}, modules={allowed_modules}...")
              app.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=det_thresh)
+             LAST_CONFIG = current_config
              return
         except Exception as e:
              logger.warning(f"Failed to re-prepare existing app (will re-init): {e}")
+
+    # Fresh Init starts here
+    logger.info(f"Initializing InsightFace with ctx_id={ctx_id}, modules={allowed_modules}, det_size={det_size}...")
 
     try:
         from contextlib import redirect_stdout
@@ -78,6 +90,8 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
                  AI_MODE = "SAFE_MODE"
              else:
                  AI_MODE = "CPU"
+                 
+             LAST_CONFIG = (ctx_id, det_size, det_thresh, allowed_modules)
                  
         logger.info(f"InsightFace initialized. Mode: {AI_MODE}")
     except Exception as e:

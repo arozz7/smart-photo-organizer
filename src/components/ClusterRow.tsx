@@ -2,6 +2,7 @@ import { useState, useEffect, memo } from 'react'
 import { Face } from '../types'
 import FaceThumbnail from './FaceThumbnail'
 import { useScan } from '../context/ScanContext'
+import { usePeople } from '../context/PeopleContext'
 
 interface ClusterRowProps {
     faceIds: number[]
@@ -10,7 +11,7 @@ interface ClusterRowProps {
     toggleFace: (id: number) => void
     toggleGroup: (ids: number[]) => void
     fetchFacesByIds: (ids: number[]) => Promise<Face[]>
-    onNameGroup: (ids: number[], name: string) => void
+    onNameGroup: (ids: number[], name: string) => Promise<void>
     onIgnoreGroup: (ids: number[]) => void
     onOpenNaming: (ids: number[]) => void
 }
@@ -22,13 +23,15 @@ const ClusterRow = memo(({
     toggleFace,
     toggleGroup,
     fetchFacesByIds,
-
+    onNameGroup,
     onIgnoreGroup,
     onOpenNaming
 }: ClusterRowProps) => { // Removed 'export' from here, added it to the end or declared it as export const
     const [clusterFaces, setClusterFaces] = useState<Face[]>([])
     const [loaded, setLoaded] = useState(false)
+    const [suggestion, setSuggestion] = useState<any>(null)
     const { viewPhoto } = useScan()
+    const { matchBatch } = usePeople()
 
     useEffect(() => {
         let mounted = true;
@@ -40,6 +43,33 @@ const ClusterRow = memo(({
         })
         return () => { mounted = false }
     }, [faceIds, fetchFacesByIds])
+
+    // Get Suggestions
+    useEffect(() => {
+        if (!loaded || clusterFaces.length === 0) return;
+
+        const sampleDescriptors = clusterFaces
+            .slice(0, 5)
+            .map(f => f.descriptor)
+            .filter(d => d && d.length > 0);
+
+        if (sampleDescriptors.length > 0) {
+            matchBatch(sampleDescriptors).then(results => {
+                const counts: any = {};
+                results.forEach(r => {
+                    if (r && r.personId) {
+                        if (!counts[r.personId]) counts[r.personId] = { person: r, count: 0, maxSim: 0 };
+                        counts[r.personId].count++;
+                        counts[r.personId].maxSim = Math.max(counts[r.personId].maxSim, r.similarity);
+                    }
+                });
+                const winner = Object.values(counts).sort((a: any, b: any) => b.count - a.count || b.maxSim - a.maxSim)[0] as any;
+                if (winner && winner.maxSim > 0.6) {
+                    setSuggestion(winner.person);
+                }
+            });
+        }
+    }, [loaded, clusterFaces, matchBatch]);
 
     // Memoize selection calculation to avoid recalc on every render if not needed
     // But since selectedFaceIds changes, this will run. The key is that React.memo on the COMPONENT 
@@ -81,6 +111,20 @@ const ClusterRow = memo(({
                     <div className="bg-indigo-500/20 text-indigo-300 px-3 py-1 rounded-full text-xs font-bold">
                         Group {index + 1}
                     </div>
+                    {suggestion && (
+                        <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 text-green-300 px-2 py-1 rounded text-xs animate-fade-in shadow-sm">
+                            <span className="opacity-70">Suggested:</span>
+                            <span className="font-bold underline cursor-help" title={`Match confidence: ${Math.round(suggestion.similarity * 100)}%`}>
+                                {suggestion.personName}
+                            </span>
+                            <button
+                                onClick={() => onNameGroup(faceIds, suggestion.personName)}
+                                className="ml-1 bg-green-600 hover:bg-green-500 text-white rounded px-1.5 py-0.5 text-[10px] uppercase font-bold transition-colors"
+                            >
+                                Accept
+                            </button>
+                        </div>
+                    )}
                     <span className="text-gray-400 text-sm">{clusterFaces.length} faces</span>
                 </div>
                 <div className="flex gap-2">

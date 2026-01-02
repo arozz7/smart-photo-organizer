@@ -1,6 +1,6 @@
 ﻿import { app, BrowserWindow } from 'electron'
 import { registerImageProtocol } from './services/imageProtocol';
-import { startPythonBackend, killPythonBackend, sendRequestToPython } from './services/pythonService';
+import { pythonProvider } from './infrastructure/PythonAIProvider';
 import { registerAIHandlers } from './ipc/aiHandlers';
 import { registerDBHandlers } from './ipc/dbHandlers';
 import { registerSettingsHandlers } from './ipc/settingsHandlers';
@@ -28,9 +28,7 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
-// Quit when all windows are closed, except on macOS.
 app.on('window-all-closed', () => {
-  killPythonBackend();
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -51,7 +49,7 @@ app.whenReady().then(async () => {
 
   WindowManager.createSplashWindow();
 
-  // Initialize DB (Async with Progress)
+  // Initialize DB
   try {
     await initDB(LIBRARY_PATH, (status: string) => {
       WindowManager.updateSplashStatus(status);
@@ -61,41 +59,40 @@ app.whenReady().then(async () => {
   }
 
   // Start Services
-  startPythonBackend();
+  // Old: startPythonBackend();
+  pythonProvider.start();
+
   registerAIHandlers();
   registerDBHandlers();
   registerSettingsHandlers();
   registerFileHandlers();
-
-  // App Handlers need window ref, but now WindowManager holds it.
-  // We can pass a getter or just modify AppHandlers to use WindowManager
-  // For now, let's pass a function that gets it from WindowManager
-
-
-  // App Handlers need window ref
   registerAppHandlers(() => WindowManager.getMainWindow());
 
+  // Pass mainWindow reference to Provider when available
+  // We can hook into WindowManager or set it when created.
+  // Ideally WindowManager sets it. 
+  // For now, we can poll or use the getter in a loop? 
+  // Better: We just pass the getter? PythonProvider needs actual instance for send.
+  // WindowManager.createMainWindow() returns it.
+
+  // Register Protocol using Provider
   registerImageProtocol(async (filePath, width, box, orientation) => {
     try {
-      // logger.info(`[Main] Requesting Python thumbnail for: ${filePath}`);
-      const res = await sendRequestToPython('generate_thumbnail', { path: filePath, width: width || 300, box: box, orientation: orientation || 1 }, 60000);
+      const res = await pythonProvider.generateThumbnail(filePath, { width: width || 300, box, orientation: orientation || 1 });
       if (res.success && res.data) {
         return Buffer.from(res.data, 'base64');
       }
-      if (!res.success) {
-        logger.warn(`[Main] Python thumbnail error: ${res.error}`);
-      }
     } catch (e) {
-      logger.error(`[Main] Python fallback refused: ${e}`);
+      logger.error(`[Main] Python thumbnail error: ${e}`);
     }
     return null;
   });
 
-  WindowManager.createMainWindow();
+  const win = await WindowManager.createMainWindow();
+  if (win) pythonProvider.setMainWindow(win);
 
 });
 
-// Global Error Handlers
 process.on('uncaughtException', (error) => {
   logger.error('Uncaught Exception:', error);
 });

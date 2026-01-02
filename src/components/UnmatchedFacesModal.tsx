@@ -12,10 +12,12 @@ interface UnmatchedFacesModalProps {
 }
 
 export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, onIgnore }: UnmatchedFacesModalProps) {
-    const { fetchFacesByIds } = usePeople()
+    const { fetchFacesByIds, matchBatch, autoNameFaces } = usePeople()
     const [faces, setFaces] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+    const [threshold, setThreshold] = useState(0.65)
+    const [suggestion, setSuggestion] = useState<any>(null)
 
     // Pagination
     const [displayedCount, setDisplayedCount] = useState(0)
@@ -66,6 +68,33 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
         setSelectedIds(next)
     }
 
+    // Update Suggestion on selection change
+    useEffect(() => {
+        if (selectedIds.size === 0) {
+            setSuggestion(null);
+            return;
+        }
+
+        const selectedFaces = faces.filter(f => selectedIds.has(f.id));
+        const sample = selectedFaces.slice(0, 5).map(f => f.descriptor).filter(Boolean);
+
+        if (sample.length > 0) {
+            matchBatch(sample, { threshold }).then(results => {
+                const counts: any = {};
+                results.forEach(r => {
+                    if (r && r.personId) {
+                        if (!counts[r.personId]) counts[r.personId] = { person: r, count: 0, maxSim: 0 };
+                        counts[r.personId].count++;
+                        counts[r.personId].maxSim = Math.max(counts[r.personId].maxSim, r.similarity);
+                    }
+                });
+                const winner = Object.values(counts).sort((a: any, b: any) => b.count - a.count || b.maxSim - a.maxSim)[0] as any;
+                if (winner) setSuggestion(winner.person);
+                else setSuggestion(null);
+            });
+        }
+    }, [selectedIds, faces, matchBatch, threshold]);
+
     const handleAction = (action: 'name' | 'ignore') => {
         const ids = Array.from(selectedIds)
         if (ids.length === 0) return
@@ -114,6 +143,15 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
                                 >
                                     Name Selected
                                 </button>
+                                {suggestion && (
+                                    <button
+                                        onClick={() => autoNameFaces(Array.from(selectedIds), suggestion.personName)}
+                                        className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-green-900/20 flex items-center gap-2"
+                                    >
+                                        <span>Use Suggestion: <strong>{suggestion.personName}</strong></span>
+                                        <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">{Math.round(suggestion.similarity * 100)}%</span>
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => handleAction('ignore')}
                                     className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-red-900/20"
@@ -123,6 +161,22 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
                             </div>
                         )}
                         <div className="flex-1" />
+
+                        {/* Local Threshold Setting */}
+                        <div className="flex items-center gap-3 px-3 py-1 bg-gray-900/50 rounded-lg border border-gray-700">
+                            <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Sensitivity</span>
+                            <input
+                                type="range"
+                                min="0.4"
+                                max="0.95"
+                                step="0.05"
+                                value={threshold}
+                                onChange={(e) => setThreshold(parseFloat(e.target.value))}
+                                className="w-24 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                            />
+                            <span className="text-xs font-mono text-indigo-400 w-8">{threshold.toFixed(2)}</span>
+                        </div>
+
                         <button
                             onClick={() => {
                                 // Select all LOADED faces

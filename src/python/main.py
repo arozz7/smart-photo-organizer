@@ -10,8 +10,15 @@ from io import BytesIO
 import base64
 import requests
 
-# Modules
-from facelib import utils, image_ops, faces, vlm, vector_store
+# Configure PyTorch Allocator for Windows to prevent expandable_segments warning
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:False"
+
+# Internal Modules
+import facelib.faces as faces
+import facelib.vlm as vlm
+import facelib.utils as utils
+import facelib.vector_store as vector_store
+import facelib.image_ops as image_ops
 import enhance # Local module
 
 # Configure logging
@@ -75,6 +82,74 @@ def handle_command(command):
             "vlmEnabled": vlm.VLM_ENABLED if hasattr(vlm, 'VLM_ENABLED') else (utils.get_torch() is not None)
         }
 
+
+
+
+    elif cmd_type == 'health_check':
+        response = {
+            "type": "health_check", 
+            "status": "ok",
+        }
+        
+        try:
+            # 1. Models Status (Transparent listing)
+            models_info = {}
+            
+            # Special markers for core libraries
+            runtime_exists = os.path.exists(os.path.join(os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer')), 'ai-runtime'))
+            models_info["AI GPU Runtime (Torch/CUDA)"] = {
+                "exists": runtime_exists,
+                "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.3.0/ai-runtime-win-x64.zip",
+                "size": 5800000000, # Approx 5.8GB
+                "localPath": os.path.join(os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer')), 'ai-runtime'),
+                "isRuntime": True
+            }
+
+            for name, url in enhance.MODEL_URLS.items():
+                m_path = os.path.join(enhance.WEIGHTS_DIR, f"{name}.pth")
+                exists = os.path.exists(m_path)
+                models_info[name] = {
+                    "exists": exists,
+                    "url": url,
+                    "size": os.path.getsize(m_path) if exists else 0,
+                    "localPath": m_path
+                }
+            
+            # Special markers for core models
+            models_info["Buffalo_L (InsightFace)"] = {
+                "exists": os.path.exists(os.path.expanduser('~/.insightface/models/buffalo_l')),
+                "url": "InsightFace Internal (Buffalo_L)",
+                "size": 0,
+                "localPath": os.path.expanduser('~/.insightface/models/buffalo_l')
+            }
+            models_info["SmolVLM-Instruct"] = {
+                "exists": os.path.exists(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')),
+                "url": "HuggingFace (SmolVLM-Instruct)",
+                "size": 0,
+                "localPath": os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')
+            }
+            response['models'] = models_info
+
+            # 2. InsightFace Status
+            insightface_status = {'loaded': False}
+            if faces.app:
+                providers = []
+                try:
+                    if hasattr(faces.app, 'models') and 'detection' in faces.app.models:
+                        det_model = faces.app.models['detection']
+                        if hasattr(det_model, 'session'):
+                            providers = det_model.session.get_providers()
+                except Exception:
+                    providers = ["Unknown"]
+                insightface_status = {'loaded': True, 'providers': providers}
+            response['insightface'] = insightface_status
+            
+        except Exception as e:
+            logger.error(f"Health Check Partial Error: {e}")
+            # Fallback
+            response['models'] = response.get('models', {})
+
+
     elif cmd_type == 'update_config':
         config = payload.get('config', {})
         logger.info(f"Updating Config: {config}")
@@ -106,7 +181,7 @@ def handle_command(command):
             
         if 'vlmEnabled' in config and config['vlmEnabled'] is True:
              logger.info("Enabling VLM (Lazy Load)...")
-             vlm.init_vlm()
+             # vlm.init_vlm() # Keep lazy! Don't init here.
 
         response = {"type": "config_updated"}
 
@@ -133,7 +208,7 @@ def handle_command(command):
             response = {"type": "add_to_index_result", "success": False, "error": str(e)}
 
     elif cmd_type == 'generate_thumbnail':
-        path_str = payload.get('path')
+        path_str = payload.get('filePath') or payload.get('path')
         width = payload.get('width', 300)
         box = payload.get('box') 
         orientation = payload.get('orientation', 1) # Default 1 (Normal)
@@ -282,6 +357,7 @@ def handle_command(command):
             
             if new_vectors:
                 count = vector_store.add_vectors(new_vectors, new_ids)
+                vector_store.save_faiss() # Persistent index
                 response = {"success": True, "count": count}
             else:
                  response = {"success": True, "count": 0}
@@ -402,6 +478,8 @@ def handle_command(command):
                     "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
                     "blurScore": float(f_blur)
                 })
+            
+            logger.info(f"[Face] Initial scan found {len(f_results)} faces.")
                 
         except Exception as e:
             logger.error(f"Analysis (Scan) Error: {e}")
@@ -487,6 +565,7 @@ def handle_command(command):
             scan_results = unique_faces
         
         metrics['scan'] = (time.time() - t_scan_start) * 1000
+        logger.info(f"[Face] Analysis complete. Total unique faces: {len(scan_results)}")
         
         # 3. VLM Tagging
         t_tag_start = time.time()
@@ -709,30 +788,65 @@ def handle_command(command):
     elif cmd_type == 'get_system_status':
         status = {}
         try:
-            # Gather status
-            status['models'] = {} # Populate as needed (omitted for brevity, should use enhance.MODEL_URLS)
-            
+            # Check Models (Robustly)
+            try:
+                status['models'] = utils.get_model_status(enhance.MODEL_URLS, enhance.WEIGHTS_DIR)
+            except Exception as e:
+                logger.error(f"Status Check (Models) failed: {e}")
+                status['models'] = {"error": str(e)}
+
+            # InsightFace
             status['insightface'] = {
                 'loaded': (faces.app is not None),
-                'providers': faces.CURRENT_PROVIDERS,
+                'providers': faces.CURRENT_PROVIDERS if faces.CURRENT_PROVIDERS else [],
                 'det_thresh': faces.DET_THRESH
             }
-            status['faiss'] = {
-                'loaded': (vector_store.index is not None), 
-                'count': vector_store.index.ntotal if vector_store.index else 0,
-                'dimensions': (vector_store.index.d if (vector_store.index and hasattr(vector_store.index, 'd') and vector_store.index.d > 0) else 512) if vector_store.index else 0
+
+            # FAISS
+            try:
+                status['faiss'] = {
+                    'loaded': (vector_store.index is not None), 
+                    'count': vector_store.index.ntotal if vector_store.index else 0,
+                    'dim': (vector_store.index.d if (vector_store.index and hasattr(vector_store.index, 'd') and vector_store.index.d > 0) else 512) if vector_store.index else 0
+                }
+            except Exception as e:
+                logger.error(f"Status Check (FAISS) failed: {e}")
+                status['faiss'] = {'loaded': False, 'error': str(e)}
+
+            # VLM
+            status['vlm'] = {
+                'loaded': (vlm.vlm_model is not None),
+                'device': "cuda" if torch_lib and torch_lib.cuda.is_available() else "cpu",
+                'model': 'SmolVLM-Instruct'
             }
-            status['vlm'] = {'loaded': (vlm.vlm_model is not None)}
             
             # System
             status['system'] = {
                 'python': sys.version.split()[0],
-                'torch': torch_lib.__version__ if torch_lib else "Missing",
-                'cuda_available': torch_lib.cuda.is_available() if torch_lib else False,
+                'torch': "Unknown",
+                'cuda_available': False,
+                'cuda_device': "N/A",
+                'onnxruntime': "Unknown",
+                'opencv': cv2.__version__ if hasattr(cv2, '__version__') else "Unknown",
                 'ai_runtime_path': utils.AI_RUNTIME_PATH
             }
+            try:
+                import onnxruntime
+                status['system']['onnxruntime'] = onnxruntime.__version__
+            except: pass
+
+            try:
+                if torch_lib:
+                    status['system']['torch'] = torch_lib.__version__
+                    if torch_lib.cuda.is_available():
+                        status['system']['cuda_available'] = True
+                        status['system']['cuda_device'] = torch_lib.cuda.get_device_name(0)
+            except: pass
+
             response = {"type": "system_status_result", "status": status, "reqId": req_id}
+            
         except Exception as e:
+             logger.exception("FATAL in get_system_status")
              response = {"type": "system_status_result", "error": str(e), "reqId": req_id}
 
     elif cmd_type == 'cluster_faces':

@@ -87,8 +87,7 @@ def search_index(descriptor, k=10, threshold=0.6):
     faiss_lib.normalize_L2(X)
     distances, indices = index.search(X, k)
     
-    # DEBUG LOG
-    logger.info(f"SEARCH DEBUG: Query Shape {X.shape}, Thresh {threshold}. Top 3 Dists: {distances[0][:3]} Indices: {indices[0][:3]}")
+    # Results
 
     matches = []
     for dist, idx in zip(distances[0], indices[0]):

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
 import { useAI } from './AIContext'
 import { useScanErrors } from '../hooks/useScanErrors'
 import { usePhotoNavigation } from '../hooks/usePhotoNavigation'
@@ -47,6 +47,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     const [hasMore, setHasMore] = useState(false)
     const [offset, setOffset] = useState(0)
     const [loadingPhotos, setLoadingPhotos] = useState(false)
+    const loadingRef = useRef(false); // Lock for race conditions
     const [filter, setFilterState] = useState<any>({ initial: true })
 
     const { addToQueue } = useAI()
@@ -94,6 +95,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             setPhotos([])
             setHasMore(false)
             setLoadingPhotos(false)
+            loadingRef.current = false;
             // Still load metadata for selection dropdowns
             metadata.loadTags()
             metadata.loadFolders()
@@ -104,10 +106,13 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         setPhotos([])
         setOffset(0)
         setHasMore(true)
+        loadingRef.current = false;
 
         const initialLoad = async () => {
+            if (loadingRef.current) return;
             try {
                 setLoadingPhotos(true)
+                loadingRef.current = true;
                 // @ts-ignore
                 const result = await window.ipcRenderer.invoke('db:getPhotos', { limit: 50, offset: 0, filter })
                 const newPhotos = result.photos || []
@@ -120,12 +125,15 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             } catch (e) {
                 if (!didCancel) console.error("Filter load failed", e)
             } finally {
-                if (!didCancel) setLoadingPhotos(false)
+                if (!didCancel) {
+                    setLoadingPhotos(false)
+                    loadingRef.current = false;
+                }
             }
         }
         initialLoad()
 
-        return () => { didCancel = true; }
+        return () => { didCancel = true; loadingRef.current = false; }
     }, [filter])
 
     const setFilter = (newFilter: any) => {
@@ -133,14 +141,15 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     }
 
     const loadMorePhotos = async () => {
-        if (scanning || loadingPhotos || !isFilterComplete(filter) || !hasMore) {
-            console.log(`[ScanContext] loadMorePhotos skipped: scanning=${scanning}, loading=${loadingPhotos}, filterComplete=${isFilterComplete(filter)}, hasMore=${hasMore}`);
+        if (scanning || loadingPhotos || loadingRef.current || !isFilterComplete(filter) || !hasMore) {
+            // console.log(`[ScanContext] loadMorePhotos skipped`);
             return
         }
 
         try {
             console.log(`[ScanContext] Loading more photos... Offset: ${offset}`);
             setLoadingPhotos(true)
+            loadingRef.current = true;
             // @ts-ignore
             const result = await window.ipcRenderer.invoke('db:getPhotos', { limit: 50, offset, filter })
             const newPhotos = result.photos || []
@@ -156,6 +165,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             console.error('Load photos error:', err)
         } finally {
             setLoadingPhotos(false)
+            loadingRef.current = false;
         }
     }
 

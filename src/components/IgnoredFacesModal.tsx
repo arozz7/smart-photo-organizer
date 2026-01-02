@@ -9,12 +9,14 @@ interface IgnoredFacesModalProps {
 }
 
 export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModalProps) {
-    const { loadFaces } = usePeople()
+    const { loadFaces, matchBatch } = usePeople()
     const [faces, setFaces] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+    const [suggestion, setSuggestion] = useState<any>(null)
 
     // Pagination
+    const [threshold, setThreshold] = useState(0.4)
     const [page, setPage] = useState(0)
     const [totalCount, setTotalCount] = useState(0)
     const [loadingMore, setLoadingMore] = useState(false)
@@ -132,6 +134,50 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
         setSelectedIds(next)
     }
 
+    // Toggle Suggestion on selection change
+    useEffect(() => {
+        if (selectedIds.size === 0) {
+            setSuggestion(null);
+            return;
+        }
+
+        const selectedFaces = faces.filter(f => selectedIds.has(f.id));
+        const sample = selectedFaces.map(f => f.descriptor).filter(Boolean).slice(0, 10);
+
+        console.log(`[IgnoredFaces] Selection changed. Selected: ${selectedIds.size}, Descriptors: ${sample.length}`);
+
+        if (sample.length > 0) {
+            matchBatch(sample, { threshold }).then(results => {
+                console.log("[IgnoredFaces] matchBatch results:", results);
+                const counts: any = {};
+                results.forEach(r => {
+                    if (r && r.personId) {
+                        if (!counts[r.personId]) counts[r.personId] = { person: r, count: 0, maxSim: 0 };
+                        counts[r.personId].count++;
+                        counts[r.personId].maxSim = Math.max(counts[r.personId].maxSim, r.similarity);
+                    }
+                });
+
+                const sorted = Object.values(counts).sort((a: any, b: any) => b.count - a.count || b.maxSim - a.maxSim) as any[];
+                const winner = sorted[0];
+
+                if (winner) {
+                    console.log(`[IgnoredFaces] Best match: ${winner.person.personName} (Sim: ${winner.maxSim.toFixed(3)}, Count: ${winner.count})`);
+                } else {
+                    console.log("[IgnoredFaces] No matches found in library.");
+                }
+
+                if (winner && winner.maxSim >= threshold) {
+                    setSuggestion(winner.person);
+                } else {
+                    setSuggestion(null);
+                }
+            }).catch(err => {
+                console.error("[IgnoredFaces] matchBatch failed:", err);
+            });
+        }
+    }, [selectedIds, faces, matchBatch, threshold]);
+
     const toggleGroupSelection = (facesInGroup: any[]) => {
         const ids = facesInGroup.map(f => f.id)
         const allSelected = ids.every(id => selectedIds.has(id))
@@ -145,6 +191,31 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
         setSelectedIds(next)
     }
 
+    const removeFacesFromState = (idsToRemove: number[]) => {
+        const idSet = new Set(idsToRemove);
+
+        // 1. Update flat list
+        const remaining = faces.filter(f => !idSet.has(f.id));
+        setFaces(remaining);
+        setTotalCount(prev => Math.max(0, prev - idsToRemove.length));
+
+        // 2. Clear selection
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            idsToRemove.forEach(id => next.delete(id));
+            return next;
+        });
+
+        // 3. Update grouped view if active
+        if (isGrouping) {
+            setClusters(prev => prev.map(c => ({
+                ...c,
+                faces: c.faces.filter(f => !idSet.has(f.id))
+            })).filter(c => c.faces.length > 0));
+            setSingles(prev => prev.filter(f => !idSet.has(f.id)));
+        }
+    };
+
     const handleRestore = async (targetPersonId?: number) => {
         const ids = Array.from(selectedIds)
         if (ids.length === 0) return
@@ -153,26 +224,12 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
             // @ts-ignore
             await window.ipcRenderer.invoke('db:restoreFaces', {
                 faceIds: ids,
-                targetPersonId
+                personId: targetPersonId
             })
 
-            // Refresh local list (remove restored)
-            // We do NOT reload from DB to keep scroll position
-            const remaining = faces.filter(f => !selectedIds.has(f.id))
-            setFaces(remaining)
-            setTotalCount(prev => Math.max(0, prev - ids.length)) // Optimistic count update
-            setSelectedIds(new Set())
+            removeFacesFromState(ids);
 
-            // Re-calc clusters if needed
-            if (isGrouping) {
-                setClusters(prev => prev.map(c => ({
-                    ...c,
-                    faces: c.faces.filter(f => !selectedIds.has(f.id))
-                })).filter(c => c.faces.length > 0))
-                setSingles(prev => prev.filter(f => !selectedIds.has(f.id)))
-            }
-
-            // Trigger main app refresh
+            // Trigger main app refresh to show restored faces in Library/Unnamed
             loadFaces({ unnamed: true })
         } catch (e) {
             console.error("Restore failed", e)
@@ -239,17 +296,65 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                             {selectedIds.size} selected
                         </div>
                         {selectedIds.size > 0 && (
-                            <div className="flex items-center gap-2 animate-fade-in">
-                                <button
-                                    onClick={() => handleRestore()}
-                                    className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-green-900/20"
-                                >
-                                    Restore Selected
-                                </button>
-                                {/* Future: Add 'Restore & Assign' dropdown here */}
+                            <div className="flex flex-col gap-0.5 animate-fade-in">
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => handleRestore()}
+                                        className="bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-lg shadow-green-900/40"
+                                    >
+                                        Restore Selected
+                                    </button>
+                                    {suggestion && (
+                                        <button
+                                            onClick={async () => {
+                                                const ids = Array.from(selectedIds);
+                                                try {
+                                                    // Use the updated backend handler that restores and assigns in one go
+                                                    // @ts-ignore
+                                                    await window.ipcRenderer.invoke('db:restoreFaces', {
+                                                        faceIds: ids,
+                                                        personId: suggestion.personId
+                                                    });
+
+                                                    removeFacesFromState(ids);
+                                                    loadFaces({ unnamed: true });
+                                                } catch (err) {
+                                                    console.error("Smart restore failed:", err);
+                                                }
+                                            }}
+                                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-lg shadow-indigo-900/40 flex items-center gap-2 group"
+                                        >
+                                            <span>Restore as <strong>{suggestion.personName}</strong></span>
+                                            <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded text-indigo-200">{Math.round(suggestion.similarity * 100)}%</span>
+                                        </button>
+                                    )}
+                                </div>
+                                {!suggestion && (
+                                    <div className="text-[10px] text-gray-500 italic ml-1 mt-1">
+                                        {faces.filter(f => selectedIds.has(f.id) && f.descriptor).length === 0
+                                            ? "No face data found (needs scan)"
+                                            : `No matches found at ${Math.round(threshold * 100)}% sensitivity.`}
+                                    </div>
+                                )}
                             </div>
                         )}
+
                         <div className="flex-1" />
+
+                        <div className="flex items-center gap-3 px-3 py-1 bg-gray-900/50 rounded-lg border border-gray-700 mx-2">
+                            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Sensitivity</span>
+                            <input
+                                type="range"
+                                min="0.1"
+                                max="0.95"
+                                step="0.05"
+                                value={threshold}
+                                onChange={(e) => setThreshold(parseFloat(e.target.value))}
+                                className="w-20 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                            />
+                            <span className="text-xs font-mono text-indigo-400 w-8">{threshold.toFixed(2)}</span>
+                        </div>
+
                         <button
                             onClick={() => setSelectedIds(new Set(faces.map(f => f.id)))}
                             className="text-xs text-gray-500 hover:text-white"
@@ -380,6 +485,9 @@ function IgnoredFaceItem({ face, selected, onToggle }: { face: any, selected: bo
                 useServerCrop={true}
                 className={`w-full h-full object-cover transition-opacity ${selected ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'}`}
             />
+            {face.descriptor && (
+                <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-green-500 rounded-full border border-gray-900 shadow-sm z-10" title="AI Data Ready" />
+            )}
             {selected && (
                 <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-400 drop-shadow-md" viewBox="0 0 20 20" fill="currentColor">

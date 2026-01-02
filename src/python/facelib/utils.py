@@ -167,3 +167,53 @@ def get_faiss():
         return faiss
     except ImportError:
         return None
+
+def get_model_status(model_urls, weights_dir):
+    """
+    Returns a dictionary of model status information.
+    Required by ModelDownloader.tsx.
+    """
+    models_info = {}
+    
+    # 1. AI Runtime (Special Case)
+    library_path = os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer'))
+    runtime_path = os.path.join(library_path, 'ai-runtime')
+    models_info["AI GPU Runtime (Torch/CUDA)"] = {
+        "exists": os.path.exists(runtime_path),
+        "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.3.0/ai-runtime-win-x64.zip",
+        "size": 5800000000, # Approx 5.8GB
+        "localPath": runtime_path,
+        "isRuntime": True
+    }
+
+    # 2. Enhancement Models (GFPGAN, etc) from enhance module
+    for name, url in model_urls.items():
+        m_path = os.path.join(weights_dir, f"{name}.pth")
+        exists = os.path.exists(m_path)
+        models_info[name] = {
+            "exists": exists,
+            "url": url,
+            "size": os.path.getsize(m_path) if exists else 0,
+            "localPath": m_path
+        }
+    
+    # 3. InsightFace Core Models (Hardcoded locations)
+    buffalo_path = os.path.expanduser('~/.insightface/models/buffalo_l')
+    models_info["Buffalo_L (InsightFace)"] = {
+        "exists": os.path.exists(buffalo_path),
+        "url": "InsightFace Internal (Buffalo_L)",
+        "size": 0,
+        "localPath": buffalo_path
+    }
+
+    # 4. SmolVLM (HuggingFace)
+    # Note: Path is approx, actual HF path varies by has. We check the concept.
+    vlm_path = os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')
+    models_info["SmolVLM-Instruct"] = {
+        "exists": os.path.exists(vlm_path),
+        "url": "HuggingFace (SmolVLM-Instruct)",
+        "size": 0,
+        "localPath": vlm_path
+    }
+    
+    return models_info

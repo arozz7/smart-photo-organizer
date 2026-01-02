@@ -13,6 +13,7 @@ interface ClusteringSettingsModalProps {
 const ClusteringSettingsModal: React.FC<ClusteringSettingsModalProps> = ({ open, onOpenChange, onRecluster }) => {
     const [threshold, setThreshold] = useState(0.65);
     const [loading, setLoading] = useState(false);
+    const [rebuildStatus, setRebuildStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
     // Initial load: Prefer LocalStorage (Last used), else Global
     useEffect(() => {
@@ -79,6 +80,49 @@ const ClusteringSettingsModal: React.FC<ClusteringSettingsModalProps> = ({ open,
 
                         <div className="bg-indigo-900/20 border border-indigo-500/20 rounded p-4 text-xs text-indigo-200">
                             <strong>Note:</strong> Re-clustering will regroup ALL unnamed faces currently in the view. It does not affect faces you have already named.
+                        </div>
+
+                        <div className="pt-4 border-t border-gray-800">
+                            <h4 className="text-sm font-medium text-gray-300 mb-2">Troubleshooting</h4>
+
+                            {rebuildStatus && (
+                                <div className={`mb-3 p-3 rounded text-xs border ${rebuildStatus.type === 'success' ? 'bg-green-900/20 border-green-900/50 text-green-200' : 'bg-red-900/20 border-red-900/50 text-red-200'
+                                    }`}>
+                                    {rebuildStatus.message}
+                                </div>
+                            )}
+
+                            <button
+                                onClick={async () => {
+                                    setLoading(true);
+                                    setRebuildStatus(null);
+                                    try {
+                                        // @ts-ignore
+                                        const res = await window.ipcRenderer.invoke('ai:rebuildIndex');
+                                        // PythonProvider usually returns raw result from Python script or wrapped.
+                                        // rebuild_index returns index.ntotal (number).
+                                        // But sendRequest might wrap it. 
+                                        // If res is object with 'count', use that.
+                                        const count = (typeof res === 'number') ? res : (res.count || res.ntotal || 0);
+
+                                        if (res && (count > 0 || res.success)) {
+                                            setRebuildStatus({ type: 'success', message: `Index Rebuilt Successfully. Count: ${count}` });
+                                        } else {
+                                            setRebuildStatus({ type: 'error', message: 'Index Rebuild Failed or Empty.' });
+                                        }
+                                    } catch (e) {
+                                        setRebuildStatus({ type: 'error', message: 'Error: ' + e });
+                                    } finally {
+                                        setLoading(false);
+                                    }
+                                }}
+                                disabled={loading}
+                                className="w-full px-4 py-2 bg-red-900/10 hover:bg-red-900/20 border border-red-900/30 text-red-200 rounded text-xs font-medium transition-colors flex items-center justify-center gap-2"
+                            >
+                                {loading && <div className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />}
+                                Rebuild Face Search Index
+                            </button>
+                            <p className="text-[10px] text-gray-500 mt-1 text-center">Use this if search returns 0 matches incorrectly.</p>
                         </div>
                     </div>
 

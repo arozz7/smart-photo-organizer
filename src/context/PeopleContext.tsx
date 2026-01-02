@@ -32,6 +32,8 @@ interface PeopleContextType {
     ignoreFaces: (faceIds: number[]) => Promise<void>
     autoNameFaces: (faceIds: number[], name: string) => Promise<void>
     rebuildIndex: () => Promise<{ success: boolean; count?: number; error?: string }>
+    matchFace: (descriptor: any, options?: any) => Promise<any>
+    matchBatch: (descriptors: any[], options?: any) => Promise<any[]>
 }
 
 const PeopleContext = createContext<PeopleContextType | undefined>(undefined)
@@ -84,7 +86,8 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         try {
             // @ts-ignore
             const result = await window.ipcRenderer.invoke('db:getFacesByIds', ids);
-            if (result.success) return result.faces;
+            if (Array.isArray(result)) return result;
+            if (result && result.success && Array.isArray(result.faces)) return result.faces;
             return [];
         } catch (e) {
             console.error("Failed to fetch faces by IDs", e);
@@ -140,6 +143,16 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
             console.log(`[PeopleContext] Index rebuilt with ${res.count} vectors.`);
         }
         return res;
+    }, []);
+
+    const matchFace = useCallback(async (descriptor: any, options?: any) => {
+        // @ts-ignore
+        return await window.ipcRenderer.invoke('ai:matchFace', { descriptor, options });
+    }, []);
+
+    const matchBatch = useCallback(async (descriptors: any[], options?: any) => {
+        // @ts-ignore
+        return await window.ipcRenderer.invoke('ai:matchBatch', { descriptors, options });
     }, []);
 
     const assignPerson = useCallback(async (faceId: number, name: string) => {
@@ -201,8 +214,9 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         people, faces, loading,
         loadPeople, loadFaces, loadUnnamedFaces, fetchFacesByIds, assignPerson,
         ignoreFace, ignoreFaces, autoNameFaces,
-        rebuildIndex
-    }), [people, faces, loading])
+        rebuildIndex,
+        matchFace, matchBatch
+    }), [people, faces, loading, matchFace, matchBatch])
 
     return (
         <PeopleContext.Provider value={value}>

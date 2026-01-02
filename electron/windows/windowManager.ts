@@ -2,15 +2,15 @@ import { BrowserWindow, screen } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as fs from 'node:fs/promises';
-import { getWindowBounds, setWindowBounds } from '../store';
-import { setMainWindow } from '../services/pythonService';
+import { getWindowBounds, setWindowBounds } from '../store'; // Store uses ConfigService now
+import { pythonProvider } from '../infrastructure/PythonAIProvider';
 import logger from '../logger';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL'];
-export const APP_ROOT = process.env.APP_ROOT || path.join(__dirname, '..'); // Adjusted: dist-electron -> root is just one level up
+export const APP_ROOT = process.env.APP_ROOT || path.join(__dirname, '..');
 export const RENDERER_DIST = path.join(APP_ROOT, 'dist');
 export const VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(APP_ROOT, 'public') : RENDERER_DIST;
 
@@ -41,14 +41,12 @@ export class WindowManager {
             this.splash.loadFile(splashFile);
         } catch (e) {
             logger.error(`[WindowManager] Splash file not found at ${splashFile}:`, e);
-            // Try loading URL if file access fails (e.g. dev server)
             if (VITE_DEV_SERVER_URL) {
                 this.splash.loadURL(`${VITE_DEV_SERVER_URL}/splash.html`);
             }
         }
 
         this.splash.on('closed', () => (this.splash = null));
-
         logger.info('[WindowManager] Splash window created');
     }
 
@@ -73,7 +71,6 @@ export class WindowManager {
         const savedBounds = getWindowBounds();
         const defaults: { width: number; height: number; x?: number; y?: number } = { width: 1200, height: 800 };
 
-        // Validate bounds
         let bounds = defaults;
         if (savedBounds && savedBounds.width && savedBounds.height) {
             const display = screen.getDisplayMatching({
@@ -100,18 +97,19 @@ export class WindowManager {
             height: bounds.height,
             x: bounds.x,
             y: bounds.y,
-            show: false, // Hide initially
-            backgroundColor: '#111827', // Set dark background
+            show: false,
+            backgroundColor: '#111827',
             webPreferences: {
                 preload: preloadPath,
                 webSecurity: false,
+                // @ts-ignore
+                enableAutofill: false, // Fixes DevTools console error
             },
         });
 
-        // Pass reference to PythonService (legacy requirement?)
-        setMainWindow(this.win);
+        // Use Provider
+        pythonProvider.setMainWindow(this.win);
 
-        // Save bounds on resize/move
         const saveBounds = () => {
             if (!this.win) return;
             const { x, y, width, height } = this.win.getBounds();
@@ -122,10 +120,8 @@ export class WindowManager {
         this.win.on('moved', saveBounds);
         this.win.on('close', saveBounds);
 
-        // Remove the file menu
         this.win.setMenu(null);
 
-        // Local shortcut for DevTools
         this.win.webContents.on('before-input-event', (event, input) => {
             if (input.control && input.shift && input.key.toLowerCase() === 'i') {
                 this.win?.webContents.toggleDevTools();
@@ -138,7 +134,6 @@ export class WindowManager {
             this.closeSplash();
         });
 
-        // Test active push message to Renderer-process.
         this.win.webContents.on('did-finish-load', () => {
             this.win?.webContents.send('main-process-message', (new Date).toLocaleString())
         })

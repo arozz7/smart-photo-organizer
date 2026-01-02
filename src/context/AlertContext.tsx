@@ -48,10 +48,15 @@ export const AlertProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
 
     const handleConfirm = async () => {
-        if (modal?.onConfirm) {
-            await modal.onConfirm();
-        }
+        const onConfirmAction = modal?.onConfirm;
+
+        // Close the current modal first so that if onConfirm triggers another alert, it isn't immediately closed.
         setModal(null);
+
+        if (onConfirmAction) {
+            await onConfirmAction();
+        }
+
         // Ensure window focus restoration in Electron
         // @ts-ignore
         if (window.ipcRenderer) window.ipcRenderer.invoke('app:focusWindow');

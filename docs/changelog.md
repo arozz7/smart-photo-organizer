@@ -12,8 +12,21 @@
 - **UI Standardization:** Unified face thumbnail loading logic across all modals (Blurry, Ignored, Unmatched, Group Naming) to eliminate "Failed to load" errors and improve performance by leveraging backend caching.
 
 ### Refactoring
-- **PersonDetail.tsx:** Extracted headers, grids, and logic hooks to improve maintainability and performance.
-- **Image Protocol:** Refactored `imageProtocol.ts` into a modular architecture (Service/Repository/Processor) to improve testability and maintainability.
+- **Core Architecture Refactor (Modularization):** Completed a major transition of the Electron backend to a modular Service/Repository architecture.
+    - Moved all SQLite logic from IPC handlers to dedicated Repositories (`FaceRepository`, `PersonRepository`, `PhotoRepository`).
+    - Centralized business logic in Services (`FaceService`, `PersonService`).
+    - Decoupled AI provider logic into a dedicated Infrastructure layer (`PythonAIProvider`).
+- **IPC Layer:** Slimmed down `aiHandlers.ts` and `dbHandlers.ts` to focus solely on request routing, significantly improving maintainability.
+
+### Fixes
+- **Ignored Faces Modal:**
+    - Fixed identity "suggestions" not appearing by ensuring descriptors are fetched from the DB.
+    - Implemented a **Sensitivity Slider** (0.1 - 0.95) to allow matching blurry or low-quality ignored faces.
+    - Added **AI Data Indicators** (green dots) to visually confirm which faces are ready for matching.
+    - Fixed UI sync issues where assigned faces remained in the grid, particularly in clustered/grouped views.
+    - Fixed a `SyntaxError` in clustering caused by incorrect binary descriptor parsing.
+- **Blurry Faces Modal:** Added missing matching support (`face:findPotentialMatches`) to enable the "Identify Matches" feature.
+- **Match Consistency:** Implemented simultaneous restore-and-assign logic to prevent data inconsistencies when naming ignored faces.
 
 ## v0.4.0 (Stability & Refactoring)
 *Release Date: 2025-12-29*
