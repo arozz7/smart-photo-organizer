@@ -712,7 +712,7 @@ def handle_command(command):
                 if not base_url:
                     # Fallback default if not provided (should accept version from IPC though)
                     # Note: We expect IPC to provide versioned URL now.
-                    base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.4.0/ai-runtime-win-x64.zip"
+                    base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.4.5/ai-runtime-win-x64.zip"
 
                 # Check if this is a custom override (likely single file) or standard release (multi-part)
                 # Heuristic: Try .001 first. If 404, fallback to single file.
@@ -958,6 +958,42 @@ def handle_command(command):
         except Exception as e:
             logger.error(f"Clustering error: {e}")
             response = {"type": "cluster_result", "error": str(e), "reqId": req_id}
+
+    elif cmd_type == 'detect_background_faces':
+        faces_data = payload.get('faces', [])
+        centroids = payload.get('centroids', [])
+        
+        # Support file-based payload for large datasets
+        if 'dataPath' in payload:
+            dpath = payload['dataPath']
+            if os.path.exists(dpath):
+                try:
+                    with open(dpath, 'r') as f:
+                        file_payload = json.load(f)
+                        faces_data = file_payload.get('faces', faces_data)
+                        centroids = file_payload.get('centroids', centroids)
+                except Exception as e:
+                    logger.error(f"Failed to read data path: {e}")
+        
+        # Thresholds from settings (with defaults)
+        min_photo_appearances = payload.get('minPhotoAppearances', 3)
+        max_cluster_size = payload.get('maxClusterSize', 2)
+        distance_threshold = payload.get('centroidDistanceThreshold', 0.7)
+        
+        logger.info(f"Detecting background faces from {len(faces_data)} unnamed faces (centroids: {len(centroids)})...")
+        
+        try:
+            result = faces.detect_background_faces(
+                faces_data,
+                centroids,
+                min_photo_appearances=min_photo_appearances,
+                max_cluster_size=max_cluster_size,
+                distance_threshold=distance_threshold
+            )
+            response = {"type": "background_faces_result", "success": True, **result, "reqId": req_id}
+        except Exception as e:
+            logger.error(f"Background face detection error: {e}")
+            response = {"type": "background_faces_result", "success": False, "error": str(e), "reqId": req_id}
 
     else:
         response = {"error": f"Unknown command: {cmd_type}", "reqId": req_id}

@@ -295,4 +295,106 @@ export class FaceRepository {
             descriptor: Array.from(new Float32Array(r.descriptor.buffer, r.descriptor.byteOffset, r.descriptor.byteLength / 4))
         }));
     }
+
+    /**
+     * Get faces with their descriptors for a specific person.
+     * Used for outlier detection analysis.
+     * Includes photo data for direct display without additional lookups.
+     */
+    static getFacesWithDescriptorsByPerson(personId: number): Array<{
+        id: number;
+        descriptor: Buffer | null;
+        blur_score: number | null;
+        box_json: string;
+        photo_id: number;
+        file_path: string;
+        preview_cache_path: string | null;
+        width: number;
+        height: number;
+    }> {
+        const db = getDB();
+        try {
+            const rows = db.prepare(`
+                SELECT 
+                    f.id, 
+                    f.descriptor, 
+                    f.blur_score,
+                    f.box_json,
+                    f.photo_id,
+                    p.file_path,
+                    p.preview_cache_path,
+                    p.width,
+                    p.height
+                FROM faces f
+                JOIN photos p ON f.photo_id = p.id
+                WHERE f.person_id = ?
+                  AND f.descriptor IS NOT NULL
+                  AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
+            `).all(personId) as Array<{
+                id: number;
+                descriptor: Buffer | null;
+                blur_score: number | null;
+                box_json: string;
+                photo_id: number;
+                file_path: string;
+                preview_cache_path: string | null;
+                width: number;
+                height: number;
+            }>;
+
+            return rows;
+        } catch (error) {
+            throw new Error(`FaceRepository.getFacesWithDescriptorsByPerson failed: ${String(error)}`);
+        }
+    }
+
+    /**
+     * Get unnamed faces with descriptors and photo appearance counts.
+     * Used for Background Face Filter to identify noise candidates.
+     * Photo count represents how often faces in this photo's cluster appear.
+     */
+    static getUnnamedFacesForNoiseDetection(): Array<{
+        id: number;
+        descriptor: Buffer | null;
+        box_json: string;
+        file_path: string;
+        preview_cache_path: string | null;
+        width: number;
+        height: number;
+        photo_id: number;
+    }> {
+        const db = getDB();
+        try {
+            const rows = db.prepare(`
+                SELECT 
+                    f.id, 
+                    f.descriptor, 
+                    f.box_json,
+                    f.photo_id,
+                    p.file_path,
+                    p.preview_cache_path,
+                    p.width,
+                    p.height
+                FROM faces f
+                JOIN photos p ON f.photo_id = p.id
+                WHERE f.person_id IS NULL 
+                  AND f.descriptor IS NOT NULL
+                  AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
+                  AND (f.blur_score IS NULL OR f.blur_score >= 10)
+            `).all() as Array<{
+                id: number;
+                descriptor: Buffer | null;
+                box_json: string;
+                file_path: string;
+                preview_cache_path: string | null;
+                width: number;
+                height: number;
+                photo_id: number;
+            }>;
+
+            return rows;
+        } catch (error) {
+            throw new Error(`FaceRepository.getUnnamedFacesForNoiseDetection failed: ${String(error)}`);
+        }
+    }
 }

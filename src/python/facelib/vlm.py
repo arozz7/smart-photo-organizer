@@ -222,7 +222,7 @@ def generate_captions(image_path):
         words = full_text.split()
         for w in words:
              clean = w.lower().strip('.,-!?:;"()[]{}')
-             if len(clean) > 3 and clean not in stopwords:
+             if len(clean) > 2 and clean not in stopwords:
                  normalized_tags.append(clean)
 
         # Deduplicate

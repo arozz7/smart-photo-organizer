@@ -9,6 +9,7 @@ import TargetedScanModal from '../components/TargetedScanModal'
 import IgnoredFacesModal from '../components/IgnoredFacesModal'
 import UnmatchedFacesModal from '../components/UnmatchedFacesModal'
 import ClusteringSettingsModal from '../components/ClusteringSettingsModal'
+import BackgroundFaceFilterModal from '../components/BackgroundFaceFilterModal'
 import { useAI } from '../context/AIContext'
 import { useAlert } from '../context/AlertContext'
 import { usePeopleCluster } from '../hooks/usePeopleCluster'
@@ -32,6 +33,7 @@ export default function People() {
     const [showBlurryModal, setShowBlurryModal] = useState(false)
     const [showIgnoredModal, setShowIgnoredModal] = useState(false)
     const [showUnmatchedModal, setShowUnmatchedModal] = useState(false)
+    const [showBackgroundFilterModal, setShowBackgroundFilterModal] = useState(false)
     const [hasNewFaces, setHasNewFaces] = useState(false)
     const [isScanning, setIsScanning] = useState(false)
     const [isScanModalOpen, setIsScanModalOpen] = useState(false)
@@ -236,6 +238,16 @@ export default function People() {
                                     Cleanup Blurry
                                 </button>
                                 <button
+                                    onClick={() => setShowBackgroundFilterModal(true)}
+                                    className="px-3 py-1.5 text-sm bg-amber-900/10 hover:bg-amber-900/30 text-amber-400 border border-amber-900/30 rounded-lg transition-colors flex items-center gap-2"
+                                    title="Find and ignore background faces that appear rarely"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 01-.659 1.591l-5.432 5.432a2.25 2.25 0 00-.659 1.591v2.927a2.25 2.25 0 01-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 00-.659-1.591L3.659 7.409A2.25 2.25 0 013 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0112 3z" />
+                                    </svg>
+                                    Filter Background
+                                </button>
+                                <button
                                     onClick={handleIgnoreAllGroups}
                                     className="px-3 py-1.5 text-sm bg-red-900/10 hover:bg-red-900/30 text-red-400 border border-red-900/30 rounded-lg transition-colors flex items-center gap-2"
                                     title="Ignore all currently suggested groups"
@@ -382,6 +394,14 @@ export default function People() {
                 open={showGroupingModal}
                 onOpenChange={setShowGroupingModal}
                 onRecluster={loadClusteredFaces}
+            />
+
+            <BackgroundFaceFilterModal
+                isOpen={showBackgroundFilterModal}
+                onClose={() => {
+                    setShowBackgroundFilterModal(false)
+                    if (activeTab === 'unnamed') loadClusteredFaces()
+                }}
             />
 
             {/* Selection Floating Action Bar */}

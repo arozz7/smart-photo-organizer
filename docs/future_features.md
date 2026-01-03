@@ -20,6 +20,40 @@
 - **Custom AI Models:** Load user-provided `.pth` models from a `models/` directory.
 - **Batch Enhancement:** Background queue for upscaling multiple photos.
 
+### Smart Face Management
+*Goal: Drastically reduce user effort and improve accuracy when managing faces (filtering noise, identifying misassignments, and matching profiles).*
+
+**Details:** See [Smart Ignore Implementation Plan](file:///j:/Projects/smart-photo-organizer/docs/smart-ignore-implementation-plan.md) for full technical specs.
+
+- **Background Face Filter (Phase 1):**
+    - **Goal:** Auto-identify and bulk-ignore "noise" faces (background strangers, one-time appearances).
+    - **Status:** ✅ Implemented in v0.4.5.
+- **Scan-Time Confidence Tiering (Phase 2):**
+    - **Goal:** Auto-classify new faces at scan time into high-confidence, review, or unknown tiers.
+    - **Status:** Specification Complete.
+- **Smart Ignore UI Panel (Phase 3):**
+    - **Goal:** Unified dashboard for managing thresholds and bulk actions.
+    - **Status:** Specification Complete (UI Drafted).
+- **Misassigned Face Detection (Phase 4):**
+    - **Goal:** Identify faces incorrectly assigned to a person using distance-to-centroid analysis.
+    - **Status:** Specification Complete.
+- **Challenging Face Recognition (Phase 5):**
+    - **Goal:** Improve matches for side profiles, partial faces, and occlusions using pose-aware matching and multi-sample voting.
+    - **Status:** Specification Complete.
+- **Unified Person Name Input (Phase 6):**
+    - **Goal:** Standardize AI-powered name suggestions and autocomplete across all assignment interfaces.
+    - **Status:** Specification Complete.
+
+- **Burst Photo Face Tracking (Future Consideration):**
+    - **Goal:** Optimize face processing for burst/sports photography by tracking faces across consecutive frames.
+    - **Approach:** Integrate a face tracker (ByteTrack or DCF-based) between detection and recognition stages.
+    - **Benefit:** Only run embedding extraction for newly detected face IDs, not every frame.
+    - **Considerations:**
+        - Implementation complexity: High (requires frame-by-frame tracking logic).
+        - Performance cost: Tracker adds overhead per-frame, but saves on redundant embeddings.
+        - Use case: Primarily benefits burst sports photography, high-FPS captures.
+    - **Status:** Deferred pending performance analysis of typical library composition.
+
 ### Organization & Metadata
 - **Blurry Photo List Export:**
     - **Goal:** Generate and export lists of photos with blur scores below a threshold.

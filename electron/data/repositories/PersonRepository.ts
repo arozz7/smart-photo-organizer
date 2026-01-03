@@ -94,4 +94,23 @@ export class PersonRepository {
         const db = getDB();
         db.prepare('UPDATE people SET cover_face_id = ? WHERE id = ?').run(faceId, personId);
     }
+
+    /**
+     * Get person with their descriptor mean (centroid) for outlier analysis.
+     */
+    static getPersonWithDescriptor(personId: number): {
+        id: number;
+        name: string;
+        descriptor_mean_json: string | null;
+    } | null {
+        const db = getDB();
+        try {
+            const row = db.prepare(
+                'SELECT id, name, descriptor_mean_json FROM people WHERE id = ?'
+            ).get(personId) as { id: number; name: string; descriptor_mean_json: string | null } | undefined;
+            return row || null;
+        } catch (error) {
+            throw new Error(`PersonRepository.getPersonWithDescriptor failed: ${String(error)}`);
+        }
+    }
 }
