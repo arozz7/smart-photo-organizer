@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 ### Features
+- **Background Face Filter (New!):** A powerful tool to detect and bulk-ignore "noise" faces (strangers in background, crowds).
+    - Uses DBSCAN clustering and distance analysis to identify irrelevant faces.
+    - Performance-optimized modal handles thousands of candidates instantly.
+    - Includes "Safe Ignore" logic (checks cluster size and distance from known people).
 - **Person Thumbnail Management:** Added ability to manually "Pin" a cover photo, randomize it ("Shuffle"), or revert to the auto-selected best face.
 - **AI Runtime:** Implemented dynamic versioning for the AI Runtime download link, ensuring it matches the application version. Added a manual override option in Settings.
 - **Unmatched Faces Preview:** Added a "View Original" button to face thumbnails in the Unmatched Faces modal, allowing users to inspect the full-size source image.

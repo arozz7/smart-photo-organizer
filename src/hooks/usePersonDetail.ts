@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAlert } from '../context/AlertContext';
+import { useToast } from '../context/ToastContext';
 import { useAI } from '../context/AIContext';
 
 export interface Face {
@@ -23,6 +24,20 @@ export interface Person {
     cover_face_id?: number | null; // Added
 }
 
+// Outlier detection result from backend
+export interface OutlierResult {
+    faceId: number;
+    distance: number;
+    blurScore: number | null;
+    // Embedded face data for direct display
+    box: { x: number; y: number; width: number; height: number };
+    photo_id: number; // Added
+    file_path: string;
+    preview_cache_path: string | null;
+    photo_width: number;
+    photo_height: number;
+}
+
 // ... hook logic ...
 
 
@@ -30,6 +45,7 @@ export interface Person {
 export const usePersonDetail = (personId: string | undefined) => {
     const navigate = useNavigate();
     const { showAlert, showConfirm } = useAlert();
+    const { addToast } = useToast();
     const { addToQueue } = useAI();
 
     const [person, setPerson] = useState<Person | null>(null);
@@ -37,6 +53,11 @@ export const usePersonDetail = (personId: string | undefined) => {
     const [loading, setLoading] = useState(false);
     const [selectedFaces, setSelectedFaces] = useState<Set<number>>(new Set());
     const [isScanning, setIsScanning] = useState(false);
+
+    // Outlier detection state (Phase 1: Misassigned Face Detection)
+    const [outliers, setOutliers] = useState<OutlierResult[]>([]);
+    const [isAnalyzingOutliers, setIsAnalyzingOutliers] = useState(false);
+    const [outlierThreshold, setOutlierThreshold] = useState(1.2);
 
     // Initial load
     useEffect(() => {
@@ -82,6 +103,7 @@ export const usePersonDetail = (personId: string | undefined) => {
 
     const handleReassign = async (name: string): Promise<boolean> => {
         if (!name) return false;
+        const count = selectedFaces.size;
 
         try {
             // @ts-ignore
@@ -93,6 +115,12 @@ export const usePersonDetail = (personId: string | undefined) => {
             if (result.success) {
                 clearSelection();
                 loadData();
+                addToast({
+                    title: 'Faces Moved',
+                    description: `Moved ${count} face${count !== 1 ? 's' : ''} to ${name}.`,
+                    type: 'success',
+                    duration: 3000
+                });
                 return true;
             } else {
                 showAlert({
@@ -153,6 +181,8 @@ export const usePersonDetail = (personId: string | undefined) => {
 
     const handleUnassign = async () => {
         if (selectedFaces.size === 0) return;
+        const count = selectedFaces.size;
+        const personName = person?.name || 'this person';
 
         showConfirm({
             title: 'Remove Faces',
@@ -165,6 +195,12 @@ export const usePersonDetail = (personId: string | undefined) => {
                     await window.ipcRenderer.invoke('db:unassignFaces', Array.from(selectedFaces));
                     clearSelection();
                     loadData(); // Refresh
+                    addToast({
+                        title: 'Faces Removed',
+                        description: `Removed ${count} face${count !== 1 ? 's' : ''} from ${personName}.`,
+                        type: 'success',
+                        duration: 3000
+                    });
                 } catch (err) {
                     console.error(err);
                     showAlert({
@@ -206,6 +242,70 @@ export const usePersonDetail = (personId: string | undefined) => {
         }
     };
 
+    // Find potentially misassigned faces (Phase 1)
+    const findOutliers = useCallback(async (threshold?: number) => {
+        if (!personId) return;
+
+        setIsAnalyzingOutliers(true);
+        setOutliers([]);
+
+        try {
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('person:findOutliers', {
+                personId: parseInt(personId),
+                threshold: threshold ?? outlierThreshold
+            });
+
+            if (result.success) {
+                setOutliers(result.outliers || []);
+                if (!result.centroidValid) {
+                    showAlert({
+                        title: 'No Reference Available',
+                        description: `${person?.name} has no valid face embeddings to compare against. Try running an AI scan first.`
+                    });
+                } else if (result.outliers.length === 0) {
+                    showAlert({
+                        title: 'All Faces Match',
+                        description: `All ${result.totalFaces} faces appear to be correctly assigned.`
+                    });
+                }
+                return result.outliers;
+            } else {
+                showAlert({
+                    title: 'Analysis Failed',
+                    description: result.error || 'Unknown error',
+                    variant: 'danger'
+                });
+                return [];
+            }
+        } catch (err) {
+            console.error('findOutliers error:', err);
+            showAlert({
+                title: 'Error',
+                description: 'Failed to analyze faces for outliers',
+                variant: 'danger'
+            });
+            return [];
+        } finally {
+            setIsAnalyzingOutliers(false);
+        }
+    }, [personId, outlierThreshold, person, showAlert]);
+
+    const clearOutliers = useCallback(() => {
+        setOutliers([]);
+    }, []);
+
+    const resolveOutliers = useCallback((resolvedFaceIds: number[]) => {
+        setOutliers(prev => prev.filter(o => !resolvedFaceIds.includes(o.faceId)));
+        loadData();
+        addToast({
+            title: 'Faces Updated',
+            description: `Successfully updated ${resolvedFaceIds.length} face${resolvedFaceIds.length !== 1 ? 's' : ''}.`,
+            type: 'success',
+            duration: 3000
+        });
+    }, [loadData, addToast]);
+
     return {
         person,
         faces,
@@ -215,12 +315,22 @@ export const usePersonDetail = (personId: string | undefined) => {
         toggleSelection,
         clearSelection,
         refresh: loadData,
+
+        // Outlier detection (Phase 1)
+        outliers,
+        isAnalyzingOutliers,
+        outlierThreshold,
+        setOutlierThreshold,
+
         actions: {
             renamePerson: handleRenamePerson,
             moveFaces: handleReassign,
             // @ts-ignore
             removeFaces: handleUnassign,
             startTargetedScan: handleTargetedScan,
+            findOutliers,
+            clearOutliers,
+            resolveOutliers,
             setCover: async (faceId: number | null) => {
                 if (!person) return false;
                 try {

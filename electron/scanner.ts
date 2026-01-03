@@ -299,7 +299,6 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
     }
 
     await scan(dirPath);
-    await scan(dirPath);
     logger.info(`[Scanner] Scanning Finished. Details: Total=${totalFiles}, New=${count}, Returned=${photos.length}, Skipped=${JSON.stringify(skippedStats)}`);
     return photos;
 }

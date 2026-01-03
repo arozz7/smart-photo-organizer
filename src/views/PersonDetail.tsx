@@ -6,6 +6,7 @@ import AllFacesModal from '../components/AllFacesModal';
 import TargetedScanModal from '../components/TargetedScanModal';
 import RenameModal from '../components/modals/RenameModal';
 import EditPersonNameModal from '../components/modals/EditPersonNameModal';
+import OutlierReviewModal from '../components/OutlierReviewModal';
 import { useAI } from '../context/AIContext';
 import { usePersonDetail } from '../hooks/usePersonDetail';
 
@@ -20,6 +21,7 @@ const PersonDetail = () => {
     const [isNameEditOpen, setIsNameEditOpen] = useState(false);
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     const [isScanModalOpen, setIsScanModalOpen] = useState(false);
+    const [isOutlierModalOpen, setIsOutlierModalOpen] = useState(false);
 
     // Business Logic from Hook
     const {
@@ -30,7 +32,10 @@ const PersonDetail = () => {
         isScanning,
         toggleSelection,
         refresh,
-        actions
+        actions,
+        // Outlier detection (Phase 1)
+        outliers,
+        isAnalyzingOutliers
     } = usePersonDetail(personId);
 
     // AI Throttling on mount
@@ -85,7 +90,7 @@ const PersonDetail = () => {
         await actions.setCover(null);
     };
 
-    if (loading) return <div className="p-8 text-white">Loading...</div>;
+    if (loading && !person) return <div className="p-8 text-white">Loading...</div>;
     if (!person) return <div className="p-8 text-white">Person not found</div>;
 
     return (
@@ -160,6 +165,27 @@ const PersonDetail = () => {
                     </button>
 
                     <button
+                        onClick={async () => {
+                            const found = await actions.findOutliers();
+                            if (found && found.length > 0) {
+                                setIsOutlierModalOpen(true);
+                            }
+                        }}
+                        disabled={isAnalyzingOutliers}
+                        className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 border border-amber-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
+                        title="Find faces that may have been incorrectly assigned to this person"
+                    >
+                        {isAnalyzingOutliers ? (
+                            <div className="animate-spin h-4 w-4 border-2 border-amber-400 border-t-transparent rounded-full" />
+                        ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                        )}
+                        {isAnalyzingOutliers ? 'Analyzing...' : 'Find Misassigned'}
+                    </button>
+
+                    <button
                         onClick={() => setIsScanModalOpen(true)}
                         disabled={isScanning}
                         className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
@@ -228,6 +254,24 @@ const PersonDetail = () => {
                 onClose={() => setIsNameEditOpen(false)}
                 currentName={person.name}
                 onRename={onRenamePerson}
+            />
+
+            <OutlierReviewModal
+                isOpen={isOutlierModalOpen}
+                onClose={() => setIsOutlierModalOpen(false)}
+                personName={person.name}
+                outliers={outliers}
+                onRemoveFaces={async (faceIds) => {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:unassignFaces', faceIds);
+                    actions.resolveOutliers(faceIds);
+                }}
+                onMoveFaces={async (faceIds, targetName) => {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:moveFacesToPerson', faceIds, targetName);
+                    actions.resolveOutliers(faceIds);
+                }}
+                onRefresh={refresh}
             />
 
             {/* Faces Grid */}

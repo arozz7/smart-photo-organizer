@@ -89,19 +89,50 @@ export class PersonService {
 
         // Recalc
         this.recalculatePersonMean(person.id);
-        // Note: We don't know the OLD person ID easily without querying first. 
-        // If we want to be strict, we query face first.
-        // Assuming strictness is secondary to Getting It Done for now, or we rely on periodic cleanup?
-        // No, we should recalc old mean.
-        // But updating FaceRepository to return old personId is complex.
-        // Let's assume UI handles refresh or we start a "Recalc All" job periodically?
-        // Better: Query face before update.
-        // Better: Query face before update.
-        // const face = FaceRepository.getFacesByPhoto(-1); // Wait, we don't have getFaceById.
-        // const face = FaceRepository.getFaceById(faceId); // Unused
-        // Need FaceRepository.getFaceById(faceId).
 
         return { success: true, person };
+    }
+
+    /**
+     * Move faces to a target person by name, handling creation if needed.
+     * Recalculates means for both source(s) and target.
+     */
+    static async moveFacesToPerson(faceIds: number[], targetName: string) {
+        if (faceIds.length === 0) return { success: true };
+
+        const normalizedName = targetName.trim();
+
+        // 1. Get/Create Target Person
+        let targetPerson = PersonRepository.getPersonByName(normalizedName);
+        if (!targetPerson) {
+            targetPerson = PersonRepository.createPerson(normalizedName);
+        }
+
+        // 2. Identify Source Persons (for mean recalc)
+        // We query the faces BEFORE moving them to knwow who they belonged to
+        const faces = FaceRepository.getFacesByIds(faceIds);
+        const sourcePersonIds = new Set<number>();
+        for (const face of faces) {
+            //@ts-ignore - face parse typing issue
+            if (face.person_id && face.person_id !== targetPerson.id) {
+                //@ts-ignore
+                sourcePersonIds.add(face.person_id);
+            }
+        }
+
+        // 3. Move Faces
+        FaceRepository.updateFacePerson(faceIds, targetPerson.id);
+
+        // 4. Recalculate Means
+        // Target
+        await this.recalculatePersonMean(targetPerson.id);
+
+        // Sources
+        for (const sourceId of sourcePersonIds) {
+            await this.recalculatePersonMean(sourceId);
+        }
+
+        return { success: true, person: targetPerson };
     }
 
     static async renamePerson(personId: number, newName: string) {
@@ -115,9 +146,25 @@ export class PersonService {
     }
 
     static async unassignFaces(faceIds: number[]) {
-        // Need to know which people were affected for recalc.
-        // ... Logic repeated ...
-        // Shortcuts:
-        FaceRepository.updateFacePerson(faceIds, null as any); // Type cast until we fix strict typing
+        if (faceIds.length === 0) return;
+
+        // 1. Identify Source Persons (for mean recalc)
+        const faces = FaceRepository.getFacesByIds(faceIds);
+        const sourcePersonIds = new Set<number>();
+        for (const face of faces) {
+            //@ts-ignore
+            if (face.person_id) {
+                //@ts-ignore
+                sourcePersonIds.add(face.person_id);
+            }
+        }
+
+        // 2. Unassign
+        FaceRepository.updateFacePerson(faceIds, null as any);
+
+        // 3. Recalculate Source Means
+        for (const sourceId of sourcePersonIds) {
+            await this.recalculatePersonMean(sourceId);
+        }
     }
 }

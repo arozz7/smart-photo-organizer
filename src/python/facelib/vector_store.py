@@ -80,7 +80,7 @@ def search_index(descriptor, k=10, threshold=0.6):
     
     if not faiss_lib: return []
     
-    if not descriptor or index is None or index.ntotal == 0:
+    if descriptor is None or index is None or index.ntotal == 0:
         return []
 
     X = np.array([descriptor]).astype('float32')
@@ -108,8 +108,8 @@ def search_index_batch(descriptors, k=10, threshold=0.6):
     faiss_lib = get_faiss()
     if not faiss_lib: return [[] for _ in descriptors]
     
-    if not descriptors or index is None or index.ntotal == 0:
-        return [[] for _ in descriptors]
+    if descriptors is None or len(descriptors) == 0 or index is None or index.ntotal == 0:
+        return [[] for _ in descriptors] if descriptors is not None else []
 
     X = np.array(descriptors).astype('float32')
     faiss_lib.normalize_L2(X)

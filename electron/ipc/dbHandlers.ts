@@ -4,6 +4,7 @@ import { FaceRepository } from '../data/repositories/FaceRepository';
 import { PersonRepository } from '../data/repositories/PersonRepository';
 import { PersonService } from '../core/services/PersonService';
 import { FaceService } from '../core/services/FaceService';
+import { FaceAnalysisService } from '../core/services/FaceAnalysisService';
 import { pythonProvider } from '../infrastructure/PythonAIProvider';
 import { getDB } from '../db';
 import { ConfigService } from '../core/services/ConfigService';
@@ -253,10 +254,9 @@ export function registerDBHandlers() {
     ipcMain.handle('db:getMetricsHistory', async (_, limit) => PhotoRepository.getMetricsHistory(limit));
 
     // db:reassignFaces (Bulk Assign)
+    // db:reassignFaces (Bulk Assign via ID lookup internally?) 
+    // Kept for backward compat if needed, but db:moveFacesToPerson is better
     ipcMain.handle('db:reassignFaces', async (_, { faceIds, personName }) => {
-        // Need PersonService.reassignFaces
-        // We only implemented assignPerson (single).
-        // Reuse:
         const normalizedName = personName.trim();
         let person = PersonRepository.getPersonByName(normalizedName);
         if (!person) person = PersonRepository.createPerson(normalizedName);
@@ -264,6 +264,13 @@ export function registerDBHandlers() {
         FaceRepository.updateFacePerson(faceIds, person.id);
         await PersonService.recalculatePersonMean(person.id);
         return { success: true, person };
+    });
+
+    // New more robust handler that recalculates source means too
+
+
+    ipcMain.handle('db:moveFacesToPerson', async (_event, faceIds: number[], targetName: string) => {
+        return PersonService.moveFacesToPerson(faceIds, targetName);
     });
 
     // --- DEBUG ---
@@ -321,4 +328,36 @@ export function registerDBHandlers() {
         return { success: true };
     });
 
+    // --- MISASSIGNED FACE DETECTION (Phase 1) ---
+    ipcMain.handle('person:findOutliers', async (_, { personId, threshold }) => {
+        try {
+            const result = FaceAnalysisService.findOutliersForPerson(
+                personId,
+                threshold ?? 0.6
+            );
+            return { success: true, ...result };
+        } catch (error) {
+            console.error('[Main] person:findOutliers failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    // --- BACKGROUND FACE FILTER (Phase 1) ---
+    ipcMain.handle('db:detectBackgroundFaces', async (_, options) => {
+        try {
+            const settings = ConfigService.getSmartIgnoreSettings();
+            const merged = {
+                minPhotoAppearances: options?.minPhotoAppearances ?? settings.minPhotoAppearances,
+                maxClusterSize: options?.maxClusterSize ?? settings.maxClusterSize,
+                centroidDistanceThreshold: options?.centroidDistanceThreshold ?? settings.centroidDistanceThreshold
+            };
+            const result = await FaceAnalysisService.detectBackgroundFaces(merged, pythonProvider);
+            return { success: true, ...result };
+        } catch (error) {
+            console.error('[Main] db:detectBackgroundFaces failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
 }
+

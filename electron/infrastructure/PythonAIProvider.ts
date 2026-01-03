@@ -187,8 +187,8 @@ export class PythonAIProvider implements IAIProvider {
         return Promise.resolve();
     }
 
-    async checkStatus(): Promise<any> {
-        return this.sendRequest('get_system_status', {}, 5000);
+    async checkStatus(options: any = {}): Promise<any> {
+        return this.sendRequest('get_system_status', options, 5000);
     }
 
     // Custom helper

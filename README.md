@@ -17,6 +17,7 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
     ![People Interactions](docs/assets/PeopleSectionInteractions.gif)
 *   **⚙️ Configurable AI & Storage:** Fine-tune face detection, blur sensitivity, and tagging creativity settings. Choose where your library data (DB, previews, indices) is stored.
 *   **🧼 Blur Detection & Cleanup:** Automatically filters out blurry faces and provides tools to bulk-cleanup low-quality captures.
+*   **🚫 Smart Background Filter:** One-click tool to automatically detect and ignore unwanted background faces (crowds, strangers) using advanced clustering.
 *   **🏷️ Smart Tagging:** "Reads" your photos using vision models (VLM) to generate searchable tags and descriptions.
     
     ![Smart Tagging Details](docs/assets/ViewPictureDetailsLibrary.gif)

@@ -11,6 +11,7 @@ export interface AISettings {
     aiProfile: 'fast' | 'balanced' | 'high';
     useGpu: boolean;
     vlmEnabled: boolean;
+    runtimeUrl?: string;
 }
 
 export interface WindowBounds {
@@ -25,12 +26,28 @@ export interface QueueConfig {
     cooldownSeconds: number;
 }
 
+/**
+ * Settings for Smart Ignore features (Background Face Filter, Outlier Detection)
+ * All thresholds are configurable with sensible defaults.
+ */
+export interface SmartIgnoreSettings {
+    /** Faces appearing in fewer than this many photos are noise candidates. Default: 3 */
+    minPhotoAppearances: number;
+    /** Clusters with this many faces or fewer are noise candidates. Default: 2 */
+    maxClusterSize: number;
+    /** Faces further than this from any named person centroid are candidates. Default: 0.7 */
+    centroidDistanceThreshold: number;
+    /** Distance threshold for outlier (misassigned face) detection. Default: 1.2 */
+    outlierThreshold: number;
+}
+
 export interface AppConfig {
     libraryPath: string;
     aiSettings: AISettings;
     windowBounds: WindowBounds;
     firstRun: boolean;
     queue: QueueConfig;
+    smartIgnore: SmartIgnoreSettings;
     ai_queue: any[]; // Queue items
 }
 
@@ -44,11 +61,18 @@ const DEFAULT_CONFIG: AppConfig = {
         modelSize: 'medium',
         aiProfile: 'balanced',
         useGpu: true,
-        vlmEnabled: false // Default to off for performance
+        vlmEnabled: false, // Default to off for performance
+        runtimeUrl: undefined
     },
     windowBounds: { width: 1200, height: 800, x: 0, y: 0 },
     firstRun: true,
     queue: { batchSize: 0, cooldownSeconds: 60 },
+    smartIgnore: {
+        minPhotoAppearances: 3,
+        maxClusterSize: 2,
+        centroidDistanceThreshold: 0.7,
+        outlierThreshold: 1.2
+    },
     ai_queue: []
 };
 
@@ -63,9 +87,10 @@ export class ConfigService {
                 const raw = fs.readFileSync(this.configPath, 'utf8');
                 const parsed = JSON.parse(raw);
                 this.config = { ...DEFAULT_CONFIG, ...parsed };
-                // Deep merge needed generally, simplified here
+                // Deep merge nested objects
                 this.config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...(parsed.aiSettings || {}) };
                 this.config.queue = { ...DEFAULT_CONFIG.queue, ...(parsed.queue || {}) };
+                this.config.smartIgnore = { ...DEFAULT_CONFIG.smartIgnore, ...(parsed.smartIgnore || {}) };
             } else {
                 this.config = { ...DEFAULT_CONFIG };
                 this.save();
@@ -120,5 +145,16 @@ export class ConfigService {
 
     static setLibraryPath(p: string) {
         this.updateSettings({ libraryPath: p });
+    }
+
+    // Smart Ignore Helpers
+    static getSmartIgnoreSettings(): SmartIgnoreSettings {
+        return this.getSettings().smartIgnore;
+    }
+
+    static updateSmartIgnoreSettings(settings: Partial<SmartIgnoreSettings>) {
+        this.load();
+        this.config.smartIgnore = { ...this.config.smartIgnore, ...settings };
+        this.save();
     }
 }
