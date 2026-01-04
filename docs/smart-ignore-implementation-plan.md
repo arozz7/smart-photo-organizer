@@ -1377,25 +1377,25 @@ No existing automated tests found for face ignore functionality. Manual verifica
 4. Add session statistics tracking
 5. Polish UX and add tooltips
 
-### Phase 5: Challenging Face Recognition
-1. Add pose data columns to `faces` table
-2. Modify Python scan to store pose angles
-3. Implement multi-sample voting in `FaceAnalysisService.ts`
-4. Add quality-aware threshold adjustment
-5. Create pose-aware matching logic
-6. Add "Low Confidence" visual indicators
-7. Test with profile and occluded face samples
+### Phase 5: Challenging Face Recognition (✅ Implemented)
+1. [x] Add pose data columns to `faces` table
+2. [x] Modify Python scan to store pose angles
+3. [x] Implement multi-sample voting in `FaceAnalysisService.ts`
+4. [x] Add quality-aware threshold adjustment
+5. [x] Create pose-aware matching logic
+6. [x] Add "Low Confidence" visual indicators
+7. [x] Test with profile and occluded face samples
 
-### Phase 6: Unified Person Name Input
-1. Create `PersonNameInput.tsx` reusable component
-2. Implement AI suggestion logic using `matchBatch`
-3. Implement autocomplete for existing people
-4. Add CSS styling for suggestions bar and autocomplete
-5. Integrate into `PhotoDetail.tsx`
-6. Integrate into `AllFacesModal.tsx`
-7. Integrate into `PersonDetail.tsx` (reassign flow)
-8. Optionally refactor `GroupNamingModal.tsx` to use unified component
-9. Add configuration settings
+### Phase 6: Unified Person Name Input (🚀 Next Up)
+1. [ ] Create `PersonNameInput.tsx` reusable component
+2. [ ] Implement AI suggestion logic using `matchBatch`
+3. [ ] Implement autocomplete for existing people
+4. [ ] Add CSS styling for suggestions bar and autocomplete
+5. [ ] Integrate into `PhotoDetail.tsx`
+6. [ ] Integrate into `AllFacesModal.tsx`
+7. [ ] Integrate into `PersonDetail.tsx` (reassign flow)
+8. [ ] Optionally refactor `GroupNamingModal.tsx` to use unified component
+9. [ ] Add configuration settings
 
 ---
 

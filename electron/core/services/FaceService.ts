@@ -374,6 +374,7 @@ export class FaceService {
                     const dist = matchData.distance;
                     matchDistance = dist;
 
+
                     // Phase 5: Quality-Adjusted Thresholds
                     // Dynamic threshold based on face quality (e.g. side profile gets relaxed threshold)
                     const fQuality = face.faceQuality ?? 0.5;

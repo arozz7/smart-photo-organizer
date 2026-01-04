@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { PersonNameInput } from '../PersonNameInput';
+import { usePeople } from '../../context/PeopleContext';
 
 interface RenameModalProps {
     isOpen: boolean;
@@ -7,6 +9,7 @@ interface RenameModalProps {
     onConfirm: (name: string) => void;
     initialValue: string;
     count: number;
+    faceIds?: number[];
 }
 
 const RenameModal = ({
@@ -14,80 +17,28 @@ const RenameModal = ({
     onClose,
     onConfirm,
     initialValue,
-    count
+    count,
+    faceIds
 }: RenameModalProps) => {
     const [name, setName] = useState(initialValue);
-    const [suggestions, setSuggestions] = useState<string[]>([]);
-    const [allPeopleNames, setAllPeopleNames] = useState<string[]>([]);
-    const [selectedIndex, setSelectedIndex] = useState(-1);
-    const scrollRef = useRef<HTMLDivElement>(null);
+    const [descriptors, setDescriptors] = useState<number[][] | undefined>(undefined);
+    const { fetchFacesByIds } = usePeople();
 
     useEffect(() => {
         if (isOpen) {
             setName(initialValue);
-            setSelectedIndex(-1);
-            fetchPeople();
-        }
-    }, [isOpen, initialValue]);
+            setDescriptors(undefined);
 
-    const fetchPeople = async () => {
-        try {
-            // @ts-ignore
-            const people = await window.ipcRenderer.invoke('db:getPeople');
-            setAllPeopleNames(people.map((p: any) => p.name));
-        } catch (err) {
-            console.error('Failed to fetch people', err);
-        }
-    };
-
-    useEffect(() => {
-        if (name.length > 0) {
-            const filtered = allPeopleNames
-                .filter(p => p.toLowerCase().includes(name.toLowerCase()) && p !== name)
-                .slice(0, 50);
-            setSuggestions(filtered);
-            setSelectedIndex(-1);
-        } else {
-            setSuggestions(allPeopleNames.slice(0, 50));
-        }
-    }, [name, allPeopleNames]);
-
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Escape') return; // Let Dialog handle it
-
-        if (suggestions.length > 0) {
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setSelectedIndex(prev => (prev + 1) % suggestions.length);
-                return;
-            }
-            if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setSelectedIndex(prev => (prev - 1 + suggestions.length) % suggestions.length);
-                return;
+            if (faceIds && faceIds.length > 0) {
+                fetchFacesByIds(faceIds.slice(0, 5)).then(faces => {
+                    const descs = faces.map(f => f.descriptor).filter(d => !!d) as number[][];
+                    if (descs.length > 0) {
+                        setDescriptors(descs);
+                    }
+                });
             }
         }
-
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            if (selectedIndex >= 0 && suggestions[selectedIndex]) {
-                setName(suggestions[selectedIndex]);
-                setSelectedIndex(-1);
-            } else {
-                onConfirm(name);
-            }
-        }
-    };
-
-    // Auto-scroll to selected item
-    useEffect(() => {
-        if (selectedIndex >= 0 && scrollRef.current) {
-            const selectedElement = scrollRef.current.children[selectedIndex] as HTMLElement;
-            if (selectedElement) {
-                selectedElement.scrollIntoView({ block: 'nearest' });
-            }
-        }
-    }, [selectedIndex]);
+    }, [isOpen, initialValue, faceIds, fetchFacesByIds]);
 
     return (
         <Dialog.Root open={isOpen} onOpenChange={open => !open && onClose()}>
@@ -109,38 +60,20 @@ const RenameModal = ({
                     </div>
 
                     {/* Input + Suggestions - Scrollable middle */}
-                    <div className="flex-1 min-h-0 px-6 flex flex-col">
-                        <input
-                            type="text"
-                            value={name}
-                            onChange={e => setName(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            placeholder="Person Name"
-                            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none placeholder-gray-500 flex-none"
+                    <div className="flex-1 min-h-0 px-6 flex flex-col pt-2">
+                        <PersonNameInput
                             autoFocus
+                            value={name}
+                            onChange={setName}
+                            onCommit={() => name.trim() && onConfirm(name)}
+                            descriptors={descriptors}
+                            placeholder="Person Name"
+                            className="w-full"
+                            onSelect={(_id, selectedName) => {
+                                setName(selectedName);
+                            }}
                         />
-                        {suggestions.length > 0 && (
-                            <div
-                                className="mt-2 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-y-auto custom-scrollbar flex-1 min-h-0 max-h-40"
-                                ref={scrollRef}
-                            >
-                                {suggestions.map((suggestion, idx) => (
-                                    <div
-                                        key={idx}
-                                        className={`px-4 py-2 cursor-pointer transition-colors ${idx === selectedIndex
-                                            ? 'bg-indigo-600 text-white'
-                                            : 'text-gray-200 hover:bg-gray-700'
-                                            }`}
-                                        onClick={() => {
-                                            setName(suggestion);
-                                            setSelectedIndex(-1);
-                                        }}
-                                    >
-                                        {suggestion}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+                        <div className='flex-1 pb-4'></div>
                     </div>
 
                     {/* Footer - Fixed */}

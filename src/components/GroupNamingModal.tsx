@@ -1,72 +1,29 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Cross2Icon } from '@radix-ui/react-icons';
 import FaceThumbnail from './FaceThumbnail';
-import { usePeople } from '../context/PeopleContext';
+import { PersonNameInput } from './PersonNameInput';
 
 interface GroupNamingModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     faces: any[];
     onConfirm: (selectedIds: number[], name: string) => Promise<void>;
-    people?: any[]; // Optional for now to avoid breaking other usages if any
+    people?: any[]; // Keep interface compatible
 }
 
-const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange, faces, onConfirm, people = [] }) => {
-    const { matchBatch } = usePeople();
-    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set(faces.map(f => f.id)));
-    const [suggestion, setSuggestion] = useState<any>(null);
+const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange, faces, onConfirm }) => {
+    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [name, setName] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const inputRef = useRef<HTMLInputElement>(null);
 
-    // Reset selection and force focus when opening
+    // Reset selection when opening
     useEffect(() => {
         if (open) {
             setSelectedIds(new Set(faces.map(f => f.id)));
             setName('');
-            setSuggestion(null);
-
-            // Fetch suggestion
-            const sample = faces.slice(0, 5).map(f => f.descriptor).filter(Boolean);
-            if (sample.length > 0) {
-                matchBatch(sample).then(results => {
-                    const counts: any = {};
-                    results.forEach(r => {
-                        if (r && r.personId) {
-                            if (!counts[r.personId]) counts[r.personId] = { person: r, count: 0 };
-                            counts[r.personId].count++;
-                        }
-                    });
-                    const winner = Object.values(counts).sort((a: any, b: any) => b.count - a.count)[0] as any;
-                    if (winner) setSuggestion(winner.person);
-                });
-            }
-
-            // Electronic workaround: ensure window focus before targeting input
-            if (window.focus) window.focus();
-
-            const timer = setTimeout(() => {
-                if (inputRef.current) inputRef.current.focus();
-            }, 150);
-            return () => clearTimeout(timer);
         }
     }, [open, faces]);
-
-    // Handle window focus events to restore input focus if modal is active
-    useEffect(() => {
-        if (!open) return;
-
-        const handleWindowFocus = () => {
-            // Explicitly request app window focus in Electron first
-            // @ts-ignore
-            if (window.ipcRenderer) window.ipcRenderer.invoke('app:focusWindow');
-            if (inputRef.current) inputRef.current.focus();
-        };
-
-        window.addEventListener('focus', handleWindowFocus);
-        return () => window.removeEventListener('focus', handleWindowFocus);
-    }, [open]);
 
     const toggleSelection = (id: number) => {
         const next = new Set(selectedIds);
@@ -75,8 +32,19 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
         setSelectedIds(next);
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const selectedFaces = useMemo(() => {
+        return faces.filter(f => selectedIds.has(f.id));
+    }, [faces, selectedIds]);
+
+    // Derive descriptors from selected faces for AI suggestions
+    const descriptors = useMemo(() => {
+        return selectedFaces
+            .slice(0, 5) // Use up to 5 samples for speed
+            .map(f => f.descriptor)
+            .filter(d => !!d) as number[][];
+    }, [selectedFaces]);
+
+    const handleSubmit = async () => {
         if (!name.trim() || selectedIds.size === 0) return;
 
         setIsSubmitting(true);
@@ -128,40 +96,24 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
                         </div>
                     </div>
 
-                    <form onSubmit={handleSubmit} className="flex gap-4 items-end border-t border-gray-800 pt-4">
+                    <div className="flex gap-4 items-end border-t border-gray-800 pt-4">
                         <div className="flex-1">
                             <label className="block text-sm font-medium text-gray-400 mb-1">
                                 Who is this? ({selectedIds.size} faces selected)
                             </label>
-                            <input
-                                ref={inputRef}
-                                list="people-suggestions"
-                                type="text"
-                                value={name}
-                                onChange={e => setName(e.target.value)}
-                                placeholder="Enter name..."
-                                className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                autoFocus
-                            />
-                            <datalist id="people-suggestions">
-                                {people.map((p: any) => (
-                                    <option key={p.id} value={p.name} />
-                                ))}
-                            </datalist>
 
-                            {suggestion && (
-                                <div className="mt-2 flex items-center gap-2">
-                                    <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Suggested:</span>
-                                    <button
-                                        type="button"
-                                        onClick={() => setName(suggestion.personName)}
-                                        className="bg-green-600/20 hover:bg-green-600/40 border border-green-500/30 text-green-300 px-2 py-1 rounded text-xs transition-all flex items-center gap-1.5 animate-fade-in group"
-                                    >
-                                        <span className="font-bold underline">{suggestion.personName}</span>
-                                        <span className="text-[10px] opacity-60 group-hover:opacity-100">Click to use</span>
-                                    </button>
-                                </div>
-                            )}
+                            <PersonNameInput
+                                autoFocus
+                                value={name}
+                                onChange={setName}
+                                onCommit={handleSubmit}
+                                descriptors={descriptors}
+                                placeholder="Enter name..."
+                                className="w-full"
+                                onSelect={(_id, selectedName) => {
+                                    setName(selectedName);
+                                }}
+                            />
                         </div>
                         <button
                             type="button"
@@ -171,13 +123,13 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
                             Cancel
                         </button>
                         <button
-                            type="submit"
+                            onClick={handleSubmit}
                             disabled={!name.trim() || selectedIds.size === 0 || isSubmitting}
                             className="px-6 py-2 rounded-md bg-indigo-600 text-white font-medium hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-lg shadow-indigo-900/20"
                         >
                             {isSubmitting ? 'Saving...' : 'Confirm & Save'}
                         </button>
-                    </form>
+                    </div>
 
                     <Dialog.Close asChild>
                         <button className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors">

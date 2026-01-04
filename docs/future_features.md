@@ -42,7 +42,8 @@
     - **Status:** ✅ Implemented in v0.4.5 [See Changelog](aiChangeLog/phase-23-challenging-recognition.md)
 - **Unified Person Name Input (Phase 6):**
     - **Goal:** Standardize AI-powered name suggestions and autocomplete across all assignment interfaces.
-    - **Status:** Specification Complete.
+    - **Goal:** Standardize AI-powered name suggestions and autocomplete across all assignment interfaces.
+    - **Status:** ✅ Implemented in v0.4.5 [See Changelog](aiChangeLog/phase-24-unified-input.md)
 
 - **Burst Photo Face Tracking (Future Consideration):**
     - **Goal:** Optimize face processing for burst/sports photography by tracking faces across consecutive frames.

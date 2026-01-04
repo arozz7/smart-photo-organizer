@@ -573,11 +573,36 @@ def handle_command(command):
                             face_crop = img[int(ny1):int(ny2), int(nx1):int(nx2)]
                             f_blur = image_ops.estimate_blur(face_crop, target_size=112)
                             
+
+                            pose_yaw, pose_pitch, pose_roll = None, None, None
+                            if hasattr(face, 'pose') and face.pose is not None:
+                                try:
+                                    pose = face.pose
+                                    pose_pitch = float(pose[0]) if len(pose) > 0 else None
+                                    pose_yaw = float(pose[1]) if len(pose) > 1 else None
+                                    pose_roll = float(pose[2]) if len(pose) > 2 else None
+                                except (TypeError, IndexError): pass
+
+                            face_quality = None
+                            if f_blur is not None:
+                                blur_factor = min(f_blur / 100.0, 1.0)
+                                pose_factor = 0.5 
+                                if pose_yaw is not None:
+                                    pose_factor = max(0, 1.0 - (abs(pose_yaw) / 90.0))
+                                det_score = float(face.det_score) if hasattr(face, 'det_score') else 0.5
+                                face_size = nx2 - nx1 
+                                size_factor = min(face_size / 200.0, 1.0)
+                                face_quality = (blur_factor * 0.3 + pose_factor * 0.3 + det_score * 0.2 + size_factor * 0.2)
+
                             scan_results.append({
                                 "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
                                 "descriptor": face.embedding.tolist() if hasattr(face, 'embedding') else [],
                                 "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
                                 "blurScore": float(f_blur),
+                                "poseYaw": pose_yaw,
+                                "posePitch": pose_pitch,
+                                "poseRoll": pose_roll,
+                                "faceQuality": face_quality,
                                 "rotation_fix": rot_angle
                             })
 

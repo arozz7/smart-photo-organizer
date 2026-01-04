@@ -1,6 +1,7 @@
 # Changelog
 
-## [Unreleased]
+## v0.4.5
+*Release Date: 2026-01-04*
 ### Features
 - **Background Face Filter (New!):** A powerful tool to detect and bulk-ignore "noise" faces (strangers in background, crowds).
     - Uses DBSCAN clustering and distance analysis to identify irrelevant faces.
@@ -8,6 +9,10 @@
     - Includes "Safe Ignore" logic (checks cluster size and distance from known people).
 - **Person Thumbnail Management:** Added ability to manually "Pin" a cover photo, randomize it ("Shuffle"), or revert to the auto-selected best face.
 - **AI Runtime:** Implemented dynamic versioning for the AI Runtime download link, ensuring it matches the application version. Added a manual override option in Settings.
+- **Unified Person Name Input (Phase 6):** Standardized name assignment across the app with a new "Smart Input" component.
+    - **AI Suggestions:** Real-time suggestion bar showing likely matches based on facial similarity (even for unnamed faces).
+    - **Smart Autocomplete:** Keyboard-navigable autocomplete for existing people, sorted by frequency.
+    - **Consistent UI:** Replaces disparate inputs in Photo Detail, All Faces, and Person Detail views.
 - **Unmatched Faces Preview:** Added a "View Original" button to face thumbnails in the Unmatched Faces modal, allowing users to inspect the full-size source image.
 ### Fixes
 - **Face Identification:** Implemented "Hybrid Matching" (FAISS + Centroid) to ensure new scans correctly match against named people even if vector distances vary slightly.

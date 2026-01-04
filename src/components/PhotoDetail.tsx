@@ -5,6 +5,7 @@ import { useAI } from '../context/AIContext'
 import { useScan } from '../context/ScanContext'
 import { usePeople } from '../context/PeopleContext'
 import { useAlert } from '../context/AlertContext'
+import { PersonNameInput } from './PersonNameInput'
 
 interface PhotoDetailProps {
     photo: any
@@ -29,7 +30,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
     // Face Naming State
     const [namingFaceId, setNamingFaceId] = useState<number | null>(null)
     const [nameFilter, setNameFilter] = useState('')
-    const [showSuggestions, setShowSuggestions] = useState(false)
+
 
     // Ensure people list is loaded for type-ahead
     useEffect(() => {
@@ -618,17 +619,22 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                             <div key={group.id} className="relative group inline-flex items-center justify-center">
                                                 {isEditing ? (
                                                     <div className="flex items-center gap-1 bg-gray-800 p-1 rounded-full border border-indigo-500/50 relative z-10">
-                                                        <input
+                                                        <PersonNameInput
                                                             autoFocus
-                                                            type="text"
-                                                            className="bg-transparent text-white text-[10px] px-2 py-0.5 outline-none w-24"
-                                                            placeholder="New name..."
                                                             value={reassignName}
-                                                            onChange={(e) => setReassignName(e.target.value)}
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter') handleReassign();
-                                                                if (e.key === 'Escape') setReassigningGroup(null);
+                                                            onChange={setReassignName}
+                                                            onCommit={handleReassign}
+                                                            onSelect={(_id, name) => {
+
+                                                                setReassignName(name);
+                                                                // We need to trigger save after state update, but React state might not be ready.
+                                                                // Actually onSelect already sets name.
+                                                                // We can just set state. The user can hit enter or click save.
+                                                                // Or we can auto-save? The inline editor usually requires explicit save or Enter.
                                                             }}
+                                                            className="min-w-[12rem]"
+                                                            placeholder="New name..."
+                                                            showSuggestions={false} // Too cramped for AI suggestions probably
                                                         />
                                                         <button
                                                             onClick={handleReassign}
@@ -814,50 +820,34 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                         <div className="space-y-4">
                             <div>
                                 <div className="relative">
-                                    <input
+                                    <PersonNameInput
                                         autoFocus
-                                        type="text"
-                                        className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-indigo-500 outline-none"
-                                        placeholder="Search or enter name..."
                                         value={nameFilter}
-                                        onChange={(e) => {
-                                            setNameFilter(e.target.value);
-                                            setShowSuggestions(true);
+                                        onChange={setNameFilter}
+                                        onSelect={(_id, name) => {
+
+                                            // Handle immediate selection
+                                            assignPerson(namingFaceId, name);
+                                            setNamingFaceId(null);
+                                            setTimeout(fetchTags, 500);
                                         }}
-                                        onFocus={() => setShowSuggestions(true)}
-                                        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && nameFilter.trim()) {
+                                        onCommit={() => {
+                                            if (nameFilter.trim()) {
                                                 assignPerson(namingFaceId, nameFilter.trim());
                                                 setNamingFaceId(null);
                                                 setTimeout(fetchTags, 500);
                                             }
-                                            if (e.key === 'Escape') setNamingFaceId(null);
                                         }}
+                                        // Pass filtered descriptors for AI suggestions
+                                        descriptors={
+                                            // Find the face being named
+                                            faces.find(f => f.id === namingFaceId)?.descriptor ?
+                                                [faces.find(f => f.id === namingFaceId).descriptor] :
+                                                undefined
+                                        }
+                                        placeholder="Search or enter name..."
+                                        className="w-full"
                                     />
-                                    {showSuggestions && (
-                                        <div className="absolute top-full left-0 w-full mt-1 bg-gray-900 border border-gray-700 rounded shadow-xl max-h-48 overflow-y-auto z-50">
-                                            {people
-                                                .filter(p => !nameFilter || p.name.toLowerCase().includes(nameFilter.toLowerCase()))
-                                                .slice(0, 50)
-                                                .map(person => (
-                                                    <button
-                                                        key={person.id}
-                                                        onClick={() => {
-                                                            assignPerson(namingFaceId, person.name);
-                                                            setNamingFaceId(null);
-                                                            setTimeout(fetchTags, 500);
-                                                        }}
-                                                        className="w-full text-left p-2 hover:bg-gray-800 text-gray-300 hover:text-white flex items-center gap-2 transition-colors border-b border-gray-800 last:border-0"
-                                                    >
-                                                        <div className="w-6 h-6 bg-indigo-900 rounded-full flex items-center justify-center text-[10px] shrink-0 text-white font-bold">
-                                                            {person.name[0]}
-                                                        </div>
-                                                        <span className="truncate">{person.name}</span>
-                                                    </button>
-                                                ))}
-                                        </div>
-                                    )}
                                 </div>
                             </div>
 
