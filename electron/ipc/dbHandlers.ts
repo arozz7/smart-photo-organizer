@@ -391,7 +391,7 @@ export function registerDBHandlers() {
                 try {
                     const box = JSON.parse(face.box_json);
                     const filePath = face.file_path;
-                    const orientation = face.orientation;
+                    const orientation = (face as any).orientation || 1;
 
                     // Call Python to extract pose
                     const result = await pythonProvider.sendRequest('extract_face_pose', {

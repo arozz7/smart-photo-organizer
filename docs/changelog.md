@@ -1,6 +1,7 @@
 # Changelog
 
-## [Unreleased]
+## v0.4.5
+*Release Date: 2026-01-04*
 ### Features
 - **Background Face Filter (New!):** A powerful tool to detect and bulk-ignore "noise" faces (strangers in background, crowds).
     - Uses DBSCAN clustering and distance analysis to identify irrelevant faces.

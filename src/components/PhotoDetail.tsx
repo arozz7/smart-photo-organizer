@@ -624,7 +624,8 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                                             value={reassignName}
                                                             onChange={setReassignName}
                                                             onCommit={handleReassign}
-                                                            onSelect={(id, name) => {
+                                                            onSelect={(_id, name) => {
+
                                                                 setReassignName(name);
                                                                 // We need to trigger save after state update, but React state might not be ready.
                                                                 // Actually onSelect already sets name.
@@ -823,7 +824,8 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                         autoFocus
                                         value={nameFilter}
                                         onChange={setNameFilter}
-                                        onSelect={(id, name) => {
+                                        onSelect={(_id, name) => {
+
                                             // Handle immediate selection
                                             assignPerson(namingFaceId, name);
                                             setNamingFaceId(null);
