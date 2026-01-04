@@ -135,8 +135,12 @@ def configure_logging(log_path=None):
             backupCount=1
         ))
 
+    # Determine log level from environment
+    log_level_str = os.environ.get('LOG_LEVEL', 'INFO').upper()
+    log_level = getattr(logging, log_level_str, logging.INFO)
+
     logging.basicConfig(
-        level=logging.INFO,
+        level=log_level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=handlers
     )

@@ -323,5 +323,69 @@ export class FaceAnalysisService {
             stats: result.stats || { totalUnnamed: 0, singlePhotoCount: 0, twoPhotoCount: 0, noiseCount: 0 }
         };
     }
+
+    /**
+     * Quality-adjusted threshold for challenging faces (Phase 5).
+     * Low quality faces (side profiles, occlusions) get a more relaxed threshold.
+     * 
+     * @param baseThreshold - Standard threshold (e.g., 0.6)
+     * @param faceQuality - Quality score from 0-1 (from Python backend)
+     * @returns Adjusted threshold
+     */
+    static getQualityAdjustedThreshold(baseThreshold: number, faceQuality: number): number {
+        // Low quality (0.3) -> threshold + 0.15 = 0.75 (more relaxed)
+        // High quality (0.9) -> threshold - 0.05 = 0.55 (more strict)
+        const adjustment = (0.6 - faceQuality) * 0.25;
+        return Math.max(0.3, Math.min(0.9, baseThreshold + adjustment));
+    }
+
+    /**
+     * Determine the best match from a set of candidates using weighted voting.
+     * Weights are inversely proportional to distance.
+     */
+    static consensusVoting(matches: { personId: number; distance: number }[]): { personId: number; confidence: number; distance: number } | null {
+        if (!matches || matches.length === 0) return null;
+
+        const votes = new Map<number, { count: number; weight: number; bestDist: number }>();
+
+        for (const m of matches) {
+            const entry = votes.get(m.personId) || { count: 0, weight: 0, bestDist: Infinity };
+            // Weight formula: 1 / (1 + distance^2) -> Higher weight for close matches
+            const w = 1 / (1 + m.distance * m.distance);
+
+            votes.set(m.personId, {
+                count: entry.count + 1,
+                weight: entry.weight + w,
+                bestDist: Math.min(entry.bestDist, m.distance)
+            });
+        }
+
+        // Find winner
+        let winnerId = -1;
+        let maxWeight = -1;
+
+        for (const [pid, stats] of votes.entries()) {
+            // Boost weight for multiple occurrences
+            const totalScore = stats.weight * (1 + Math.log(stats.count));
+
+            if (totalScore > maxWeight) {
+                maxWeight = totalScore;
+                winnerId = pid;
+            }
+        }
+
+        if (winnerId !== -1) {
+            const stats = votes.get(winnerId)!;
+            // Confidence is somewhat heuristic, based on weight ratio?
+            // For now, return normalized weight or just 1.0
+            return {
+                personId: winnerId,
+                confidence: maxWeight, // Raw score for now
+                distance: stats.bestDist
+            };
+        }
+
+        return null;
+    }
 }
 

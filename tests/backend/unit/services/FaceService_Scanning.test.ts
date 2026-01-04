@@ -48,7 +48,7 @@ describe('FaceService Scanning Verification', () => {
         vi.clearAllMocks();
     });
 
-    it('should persist "review" confidence tier when distance is 0.5', async () => {
+    it('should persist "review" confidence tier when distance is 0.8', async () => {
         // Arrange
         const photoId = 123;
         const faces = [{
@@ -63,8 +63,8 @@ describe('FaceService Scanning Verification', () => {
             {
                 personId: 10,
                 personName: 'Test Person',
-                similarity: 0.66,
-                distance: 0.5,
+                similarity: 0.55,
+                distance: 0.8,
                 matchType: 'faiss'
             }
         ]);

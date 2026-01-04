@@ -429,6 +429,22 @@ async function initDB(basePath, onProgress) {
   } catch (e) {
   }
   try {
+    db.exec("ALTER TABLE faces ADD COLUMN pose_yaw REAL");
+  } catch (e) {
+  }
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN pose_pitch REAL");
+  } catch (e) {
+  }
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN pose_roll REAL");
+  } catch (e) {
+  }
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN face_quality REAL");
+  } catch (e) {
+  }
+  try {
     try {
       db.exec("ALTER TABLE faces ADD COLUMN descriptor BLOB");
     } catch (e) {
@@ -1111,6 +1127,93 @@ class FaceRepository {
       throw new Error(`FaceRepository.getUnnamedFacesForNoiseDetection failed: ${String(error)}`);
     }
   }
+  /**
+   * Get faces that need pose data backfill (Phase 5).
+   * Returns faces where pose_yaw IS NULL but have descriptors.
+   */
+  static getFacesNeedingPoseBackfill(limit = 100) {
+    const db2 = getDB();
+    try {
+      const rows = db2.prepare(`
+                SELECT 
+                    f.id,
+                    f.photo_id,
+                    f.box_json,
+                    p.file_path,
+                    p.preview_cache_path,
+                    p.metadata_json
+                FROM faces f
+                JOIN photos p ON f.photo_id = p.id
+                WHERE f.pose_yaw IS NULL 
+                  AND f.descriptor IS NOT NULL
+                  AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
+                  AND (f.blur_score IS NULL OR f.blur_score >= 10)
+                LIMIT ?
+            `).all(limit);
+      return rows.map((r) => {
+        let orientation = 1;
+        try {
+          const meta = JSON.parse(r.metadata_json || "{}");
+          orientation = meta.Orientation || meta.orientation || 1;
+        } catch {
+        }
+        return {
+          ...r,
+          orientation
+        };
+      });
+    } catch (error) {
+      throw new Error(`FaceRepository.getFacesNeedingPoseBackfill failed: ${String(error)}`);
+    }
+  }
+  /**
+   * Get the total count of faces needing pose backfill.
+   */
+  static getPoseBackfillCount() {
+    const db2 = getDB();
+    try {
+      const needsBackfill = db2.prepare(`
+                SELECT COUNT(*) as count FROM faces 
+                WHERE pose_yaw IS NULL 
+                  AND descriptor IS NOT NULL
+                  AND (is_ignored = 0 OR is_ignored IS NULL)
+                  AND (blur_score IS NULL OR blur_score >= 10)
+            `).get();
+      const total = db2.prepare(`
+                SELECT COUNT(*) as count FROM faces 
+                WHERE descriptor IS NOT NULL
+                  AND (is_ignored = 0 OR is_ignored IS NULL)
+                  AND (blur_score IS NULL OR blur_score >= 10)
+            `).get();
+      return {
+        needsBackfill: (needsBackfill == null ? void 0 : needsBackfill.count) || 0,
+        total: (total == null ? void 0 : total.count) || 0
+      };
+    } catch (error) {
+      throw new Error(`FaceRepository.getPoseBackfillCount failed: ${String(error)}`);
+    }
+  }
+  /**
+   * Update pose data for a specific face (Phase 5 backfill).
+   */
+  static updateFacePoseData(faceId, poseData) {
+    const db2 = getDB();
+    try {
+      db2.prepare(`
+                UPDATE faces 
+                SET pose_yaw = ?, pose_pitch = ?, pose_roll = ?, face_quality = ?
+                WHERE id = ?
+            `).run(
+        poseData.pose_yaw,
+        poseData.pose_pitch,
+        poseData.pose_roll,
+        poseData.face_quality,
+        faceId
+      );
+    } catch (error) {
+      throw new Error(`FaceRepository.updateFacePoseData failed: ${String(error)}`);
+    }
+  }
 }
 class PersonRepository {
   static getPeople() {
@@ -1236,7 +1339,11 @@ const DEFAULT_CONFIG = {
     outlierThreshold: 1.2,
     autoAssignThreshold: 0.4,
     reviewThreshold: 0.6,
-    enableAutoTiering: true
+    enableAutoTiering: true,
+    enableMultiSampleVoting: true,
+    maxSamplesPerPerson: 50,
+    enableQualityAdjustedThresholds: true,
+    lowQualityThresholdBoost: 0.15
   },
   ai_queue: []
 };
@@ -1441,6 +1548,262 @@ class PersonService {
     }
   }
 }
+class FaceAnalysisService {
+  /**
+   * L2-normalize a vector (unit length).
+   */
+  static normalizeVector(vec) {
+    let magnitude = 0;
+    for (let i = 0; i < vec.length; i++) {
+      magnitude += vec[i] * vec[i];
+    }
+    magnitude = Math.sqrt(magnitude);
+    if (magnitude === 0) return vec;
+    return vec.map((v) => v / magnitude);
+  }
+  /**
+   * Compute Euclidean distance between two embeddings.
+   * Both vectors are L2-normalized before comparison.
+   * For normalized vectors: distance = sqrt(2 * (1 - cosine_similarity))
+   * Range: 0 (identical) to 2 (opposite)
+   * 
+   * @param vecA First embedding vector
+   * @param vecB Second embedding vector
+   * @returns Euclidean distance between the two normalized vectors
+   */
+  static computeDistance(vecA, vecB) {
+    if (!vecA || !vecB || vecA.length !== vecB.length) {
+      return Infinity;
+    }
+    const normA = this.normalizeVector(vecA);
+    const normB = this.normalizeVector(vecB);
+    let sum = 0;
+    for (let i = 0; i < normA.length; i++) {
+      const diff = normA[i] - normB[i];
+      sum += diff * diff;
+    }
+    return Math.sqrt(sum);
+  }
+  /**
+   * Parse a descriptor from various formats (BLOB, JSON string, or array).
+   * 
+   * @param raw Raw descriptor data
+   * @returns Parsed number array or null if invalid
+   */
+  static parseDescriptor(raw) {
+    if (!raw) return null;
+    if (Array.isArray(raw)) {
+      return raw;
+    }
+    if (Buffer.isBuffer(raw)) {
+      try {
+        const floatArray = new Float32Array(
+          raw.buffer,
+          raw.byteOffset,
+          raw.byteLength / 4
+        );
+        return Array.from(floatArray);
+      } catch {
+        return null;
+      }
+    }
+    if (typeof raw === "string") {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  /**
+   * Find faces that are potential outliers (misassigned) for a given person.
+   * Uses distance-to-centroid analysis to identify faces that don't match
+   * the person's mean embedding.
+   * 
+   * @param personId The person ID to analyze
+   * @param threshold Distance threshold above which faces are flagged (default: 1.0)
+   *                  For L2-normalized embeddings: 0=identical, ~0.8=similar, ~1.2=different, 2=opposite
+   * @returns Analysis result with outlier list
+   */
+  static findOutliersForPerson(personId, threshold = 1.2) {
+    const person = PersonRepository.getPersonWithDescriptor(personId);
+    if (!person) {
+      throw new Error(`Person with ID ${personId} not found`);
+    }
+    const centroid = this.parseDescriptor(person.descriptor_mean_json);
+    if (!centroid || centroid.length === 0) {
+      return {
+        personId,
+        personName: person.name,
+        totalFaces: 0,
+        outliers: [],
+        threshold,
+        centroidValid: false
+      };
+    }
+    const faces = FaceRepository.getFacesWithDescriptorsByPerson(personId);
+    const outliers = [];
+    const allDistances = [];
+    for (const face of faces) {
+      const descriptor = this.parseDescriptor(face.descriptor);
+      if (!descriptor) continue;
+      const distance = this.computeDistance(descriptor, centroid);
+      allDistances.push(distance);
+      if (distance > threshold) {
+        let box = { x: 0, y: 0, width: 100, height: 100 };
+        try {
+          box = JSON.parse(face.box_json);
+        } catch {
+        }
+        outliers.push({
+          faceId: face.id,
+          distance,
+          blurScore: face.blur_score,
+          box,
+          photo_id: face.photo_id,
+          // Added
+          file_path: face.file_path,
+          preview_cache_path: face.preview_cache_path,
+          photo_width: face.width,
+          photo_height: face.height
+        });
+      }
+    }
+    if (allDistances.length > 0) {
+      const sorted = [...allDistances].sort((a, b) => a - b);
+      const min = sorted[0];
+      const max = sorted[sorted.length - 1];
+      const median = sorted[Math.floor(sorted.length / 2)];
+      const avg = allDistances.reduce((a, b) => a + b, 0) / allDistances.length;
+      console.log(`[FaceAnalysis] Person ${person.name}: ${faces.length} faces, distances min=${min.toFixed(3)} max=${max.toFixed(3)} avg=${avg.toFixed(3)} median=${median.toFixed(3)}, threshold=${threshold}, outliers=${outliers.length}`);
+    }
+    outliers.sort((a, b) => b.distance - a.distance);
+    return {
+      personId,
+      personName: person.name,
+      totalFaces: faces.length,
+      outliers,
+      threshold,
+      centroidValid: true
+    };
+  }
+  /**
+   * Detect background/noise faces for bulk ignore.
+   * Sends data to Python backend for DBSCAN clustering and centroid distance calculation.
+   * 
+   * @param options Threshold overrides from SmartIgnoreSettings
+   * @param pythonProvider Python AI provider for backend calls
+   */
+  static async detectBackgroundFaces(options, pythonProvider2) {
+    const unnamedFaces = FaceRepository.getUnnamedFacesForNoiseDetection();
+    if (unnamedFaces.length === 0) {
+      return {
+        candidates: [],
+        stats: { totalUnnamed: 0, singlePhotoCount: 0, twoPhotoCount: 0, noiseCount: 0 }
+      };
+    }
+    const people = PersonRepository.getPeopleWithDescriptors();
+    const centroids = people.map((p) => ({
+      personId: p.id,
+      name: p.name,
+      descriptor: p.descriptor
+    })).filter((c) => c.descriptor.length > 0);
+    const facesPayload = unnamedFaces.map((f) => ({
+      id: f.id,
+      descriptor: this.parseDescriptor(f.descriptor) || [],
+      photo_id: f.photo_id,
+      box_json: f.box_json,
+      file_path: f.file_path,
+      preview_cache_path: f.preview_cache_path,
+      width: f.width,
+      height: f.height
+    })).filter((f) => f.descriptor.length > 0);
+    console.log(`[FaceAnalysis] detectBackgroundFaces: ${facesPayload.length} faces, ${centroids.length} centroids`);
+    const result = await pythonProvider2.sendRequest("detect_background_faces", {
+      faces: facesPayload,
+      centroids,
+      minPhotoAppearances: options.minPhotoAppearances ?? 3,
+      maxClusterSize: options.maxClusterSize ?? 2,
+      centroidDistanceThreshold: options.centroidDistanceThreshold ?? 0.7
+    });
+    if (!result.success && result.error) {
+      throw new Error(result.error);
+    }
+    const candidates = (result.candidates || []).map((c) => {
+      let box = { x: 0, y: 0, width: 100, height: 100 };
+      try {
+        if (c.box_json) box = JSON.parse(c.box_json);
+      } catch {
+      }
+      return {
+        faceId: c.faceId,
+        photoCount: c.photoCount,
+        clusterSize: c.clusterSize,
+        nearestPersonDistance: c.nearestPersonDistance,
+        nearestPersonName: c.nearestPersonName,
+        box,
+        photo_id: c.photo_id,
+        file_path: c.file_path,
+        preview_cache_path: c.preview_cache_path,
+        photo_width: c.width,
+        photo_height: c.height
+      };
+    });
+    return {
+      candidates,
+      stats: result.stats || { totalUnnamed: 0, singlePhotoCount: 0, twoPhotoCount: 0, noiseCount: 0 }
+    };
+  }
+  /**
+   * Quality-adjusted threshold for challenging faces (Phase 5).
+   * Low quality faces (side profiles, occlusions) get a more relaxed threshold.
+   * 
+   * @param baseThreshold - Standard threshold (e.g., 0.6)
+   * @param faceQuality - Quality score from 0-1 (from Python backend)
+   * @returns Adjusted threshold
+   */
+  static getQualityAdjustedThreshold(baseThreshold, faceQuality) {
+    const adjustment = (0.6 - faceQuality) * 0.25;
+    return Math.max(0.3, Math.min(0.9, baseThreshold + adjustment));
+  }
+  /**
+   * Determine the best match from a set of candidates using weighted voting.
+   * Weights are inversely proportional to distance.
+   */
+  static consensusVoting(matches) {
+    if (!matches || matches.length === 0) return null;
+    const votes = /* @__PURE__ */ new Map();
+    for (const m of matches) {
+      const entry = votes.get(m.personId) || { count: 0, weight: 0, bestDist: Infinity };
+      const w = 1 / (1 + m.distance * m.distance);
+      votes.set(m.personId, {
+        count: entry.count + 1,
+        weight: entry.weight + w,
+        bestDist: Math.min(entry.bestDist, m.distance)
+      });
+    }
+    let winnerId = -1;
+    let maxWeight = -1;
+    for (const [pid, stats] of votes.entries()) {
+      const totalScore = stats.weight * (1 + Math.log(stats.count));
+      if (totalScore > maxWeight) {
+        maxWeight = totalScore;
+        winnerId = pid;
+      }
+    }
+    if (winnerId !== -1) {
+      const stats = votes.get(winnerId);
+      return {
+        personId: winnerId,
+        confidence: maxWeight,
+        // Raw score for now
+        distance: stats.bestDist
+      };
+    }
+    return null;
+  }
+}
 class FaceService {
   /**
    * Modular formula for matching a descriptor against the entire library.
@@ -1542,18 +1905,33 @@ class FaceService {
         for (let j = 0; j < pendingIndices.length; j++) {
           const originalIdx = pendingIndices[j];
           const matches = batchFaiss[j];
+          const candidates2 = [];
+          const personNames = /* @__PURE__ */ new Map();
           for (const m of matches) {
             if (faceToPerson.has(m.id)) {
               const p = faceToPerson.get(m.id);
-              results[originalIdx] = {
-                personId: p.personId,
-                personName: p.name,
-                similarity: 1 / (1 + m.distance),
-                distance: m.distance,
-                matchType: "faiss"
-              };
-              break;
+              candidates2.push({ personId: p.personId, distance: m.distance });
+              if (!personNames.has(p.personId)) personNames.set(p.personId, p.name);
             }
+          }
+          const consensus = FaceAnalysisService.consensusVoting(candidates2);
+          if (consensus) {
+            results[originalIdx] = {
+              personId: consensus.personId,
+              personName: personNames.get(consensus.personId),
+              similarity: 1 / (1 + consensus.distance),
+              distance: consensus.distance,
+              matchType: "faiss"
+            };
+          } else if (candidates2.length > 0) {
+            const best = candidates2[0];
+            results[originalIdx] = {
+              personId: best.personId,
+              personName: personNames.get(best.personId),
+              similarity: 1 / (1 + best.distance),
+              distance: best.distance,
+              matchType: "faiss"
+            };
           }
         }
       }
@@ -1696,21 +2074,24 @@ class FaceService {
         if (matchData) {
           const dist = matchData.distance;
           matchDistance = dist;
-          if (dist < HIGH_THRESHOLD) {
+          const fQuality = face.faceQuality ?? 0.5;
+          const adjHighThreshold = FaceAnalysisService.getQualityAdjustedThreshold(HIGH_THRESHOLD, fQuality);
+          const adjReviewThreshold = FaceAnalysisService.getQualityAdjustedThreshold(REVIEW_THRESHOLD, fQuality);
+          if (dist < adjHighThreshold) {
             if (!personId) {
               personId = matchData.personId;
               confidenceTier = "high";
               suggestedPersonId = matchData.personId;
               assignedCount++;
             }
-          } else if (dist < REVIEW_THRESHOLD) {
+          } else if (dist < adjReviewThreshold) {
             if (!personId) {
               confidenceTier = "review";
               suggestedPersonId = matchData.personId;
-              logger.info(`[FaceService] Face classified as REVIEW tier (dist=${matchDistance == null ? void 0 : matchDistance.toFixed(3)}). Suggested: ${matchData.personId}`);
+              logger.info(`[FaceService] Face classified as REVIEW tier (dist=${matchDistance == null ? void 0 : matchDistance.toFixed(3)} < ${adjReviewThreshold.toFixed(3)}). Suggested: ${matchData.personId}`);
             }
           } else {
-            logger.info(`[FaceService] Face classified as UNKNOWN tier (dist=${matchDistance == null ? void 0 : matchDistance.toFixed(3)})`);
+            logger.info(`[FaceService] Face classified as UNKNOWN tier (dist=${matchDistance == null ? void 0 : matchDistance.toFixed(3)} >= ${adjReviewThreshold.toFixed(3)})`);
           }
         }
         let finalId = 0;
@@ -1719,6 +2100,7 @@ class FaceService {
                         UPDATE faces 
                         SET descriptor = ?, box_json = ?, blur_score = ?, 
                             confidence_tier = ?, suggested_person_id = ?, match_distance = ?,
+                            pose_yaw = ?, pose_pitch = ?, pose_roll = ?, face_quality = ?,
                             person_id = COALESCE(person_id, ?) -- Only set if null
                         WHERE id = ?
                     `).run(
@@ -1728,6 +2110,10 @@ class FaceService {
             confidenceTier,
             suggestedPersonId,
             matchDistance,
+            face.poseYaw ?? null,
+            face.posePitch ?? null,
+            face.poseRoll ?? null,
+            face.faceQuality ?? null,
             personId,
             // Coalesce fallback
             bestMatch.id
@@ -1737,9 +2123,10 @@ class FaceService {
           const info = db2.prepare(`
                         INSERT INTO faces (
                             photo_id, person_id, descriptor, box_json, blur_score, 
-                            is_reference, confidence_tier, suggested_person_id, match_distance
+                            is_reference, confidence_tier, suggested_person_id, match_distance,
+                            pose_yaw, pose_pitch, pose_roll, face_quality
                         )
-                        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
                      `).run(
             photoId,
             personId,
@@ -1748,7 +2135,11 @@ class FaceService {
             face.blurScore,
             confidenceTier,
             suggestedPersonId,
-            matchDistance
+            matchDistance,
+            face.poseYaw ?? null,
+            face.posePitch ?? null,
+            face.poseRoll ?? null,
+            face.faceQuality ?? null
           );
           finalId = Number(info.lastInsertRowid);
         }
@@ -2520,214 +2911,6 @@ function registerAIHandlers() {
     }
   });
 }
-class FaceAnalysisService {
-  /**
-   * L2-normalize a vector (unit length).
-   */
-  static normalizeVector(vec) {
-    let magnitude = 0;
-    for (let i = 0; i < vec.length; i++) {
-      magnitude += vec[i] * vec[i];
-    }
-    magnitude = Math.sqrt(magnitude);
-    if (magnitude === 0) return vec;
-    return vec.map((v) => v / magnitude);
-  }
-  /**
-   * Compute Euclidean distance between two embeddings.
-   * Both vectors are L2-normalized before comparison.
-   * For normalized vectors: distance = sqrt(2 * (1 - cosine_similarity))
-   * Range: 0 (identical) to 2 (opposite)
-   * 
-   * @param vecA First embedding vector
-   * @param vecB Second embedding vector
-   * @returns Euclidean distance between the two normalized vectors
-   */
-  static computeDistance(vecA, vecB) {
-    if (!vecA || !vecB || vecA.length !== vecB.length) {
-      return Infinity;
-    }
-    const normA = this.normalizeVector(vecA);
-    const normB = this.normalizeVector(vecB);
-    let sum = 0;
-    for (let i = 0; i < normA.length; i++) {
-      const diff = normA[i] - normB[i];
-      sum += diff * diff;
-    }
-    return Math.sqrt(sum);
-  }
-  /**
-   * Parse a descriptor from various formats (BLOB, JSON string, or array).
-   * 
-   * @param raw Raw descriptor data
-   * @returns Parsed number array or null if invalid
-   */
-  static parseDescriptor(raw) {
-    if (!raw) return null;
-    if (Array.isArray(raw)) {
-      return raw;
-    }
-    if (Buffer.isBuffer(raw)) {
-      try {
-        const floatArray = new Float32Array(
-          raw.buffer,
-          raw.byteOffset,
-          raw.byteLength / 4
-        );
-        return Array.from(floatArray);
-      } catch {
-        return null;
-      }
-    }
-    if (typeof raw === "string") {
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
-  /**
-   * Find faces that are potential outliers (misassigned) for a given person.
-   * Uses distance-to-centroid analysis to identify faces that don't match
-   * the person's mean embedding.
-   * 
-   * @param personId The person ID to analyze
-   * @param threshold Distance threshold above which faces are flagged (default: 1.0)
-   *                  For L2-normalized embeddings: 0=identical, ~0.8=similar, ~1.2=different, 2=opposite
-   * @returns Analysis result with outlier list
-   */
-  static findOutliersForPerson(personId, threshold = 1.2) {
-    const person = PersonRepository.getPersonWithDescriptor(personId);
-    if (!person) {
-      throw new Error(`Person with ID ${personId} not found`);
-    }
-    const centroid = this.parseDescriptor(person.descriptor_mean_json);
-    if (!centroid || centroid.length === 0) {
-      return {
-        personId,
-        personName: person.name,
-        totalFaces: 0,
-        outliers: [],
-        threshold,
-        centroidValid: false
-      };
-    }
-    const faces = FaceRepository.getFacesWithDescriptorsByPerson(personId);
-    const outliers = [];
-    const allDistances = [];
-    for (const face of faces) {
-      const descriptor = this.parseDescriptor(face.descriptor);
-      if (!descriptor) continue;
-      const distance = this.computeDistance(descriptor, centroid);
-      allDistances.push(distance);
-      if (distance > threshold) {
-        let box = { x: 0, y: 0, width: 100, height: 100 };
-        try {
-          box = JSON.parse(face.box_json);
-        } catch {
-        }
-        outliers.push({
-          faceId: face.id,
-          distance,
-          blurScore: face.blur_score,
-          box,
-          photo_id: face.photo_id,
-          // Added
-          file_path: face.file_path,
-          preview_cache_path: face.preview_cache_path,
-          photo_width: face.width,
-          photo_height: face.height
-        });
-      }
-    }
-    if (allDistances.length > 0) {
-      const sorted = [...allDistances].sort((a, b) => a - b);
-      const min = sorted[0];
-      const max = sorted[sorted.length - 1];
-      const median = sorted[Math.floor(sorted.length / 2)];
-      const avg = allDistances.reduce((a, b) => a + b, 0) / allDistances.length;
-      console.log(`[FaceAnalysis] Person ${person.name}: ${faces.length} faces, distances min=${min.toFixed(3)} max=${max.toFixed(3)} avg=${avg.toFixed(3)} median=${median.toFixed(3)}, threshold=${threshold}, outliers=${outliers.length}`);
-    }
-    outliers.sort((a, b) => b.distance - a.distance);
-    return {
-      personId,
-      personName: person.name,
-      totalFaces: faces.length,
-      outliers,
-      threshold,
-      centroidValid: true
-    };
-  }
-  /**
-   * Detect background/noise faces for bulk ignore.
-   * Sends data to Python backend for DBSCAN clustering and centroid distance calculation.
-   * 
-   * @param options Threshold overrides from SmartIgnoreSettings
-   * @param pythonProvider Python AI provider for backend calls
-   */
-  static async detectBackgroundFaces(options, pythonProvider2) {
-    const unnamedFaces = FaceRepository.getUnnamedFacesForNoiseDetection();
-    if (unnamedFaces.length === 0) {
-      return {
-        candidates: [],
-        stats: { totalUnnamed: 0, singlePhotoCount: 0, twoPhotoCount: 0, noiseCount: 0 }
-      };
-    }
-    const people = PersonRepository.getPeopleWithDescriptors();
-    const centroids = people.map((p) => ({
-      personId: p.id,
-      name: p.name,
-      descriptor: p.descriptor
-    })).filter((c) => c.descriptor.length > 0);
-    const facesPayload = unnamedFaces.map((f) => ({
-      id: f.id,
-      descriptor: this.parseDescriptor(f.descriptor) || [],
-      photo_id: f.photo_id,
-      box_json: f.box_json,
-      file_path: f.file_path,
-      preview_cache_path: f.preview_cache_path,
-      width: f.width,
-      height: f.height
-    })).filter((f) => f.descriptor.length > 0);
-    console.log(`[FaceAnalysis] detectBackgroundFaces: ${facesPayload.length} faces, ${centroids.length} centroids`);
-    const result = await pythonProvider2.sendRequest("detect_background_faces", {
-      faces: facesPayload,
-      centroids,
-      minPhotoAppearances: options.minPhotoAppearances ?? 3,
-      maxClusterSize: options.maxClusterSize ?? 2,
-      centroidDistanceThreshold: options.centroidDistanceThreshold ?? 0.7
-    });
-    if (!result.success && result.error) {
-      throw new Error(result.error);
-    }
-    const candidates = (result.candidates || []).map((c) => {
-      let box = { x: 0, y: 0, width: 100, height: 100 };
-      try {
-        if (c.box_json) box = JSON.parse(c.box_json);
-      } catch {
-      }
-      return {
-        faceId: c.faceId,
-        photoCount: c.photoCount,
-        clusterSize: c.clusterSize,
-        nearestPersonDistance: c.nearestPersonDistance,
-        nearestPersonName: c.nearestPersonName,
-        box,
-        photo_id: c.photo_id,
-        file_path: c.file_path,
-        preview_cache_path: c.preview_cache_path,
-        photo_width: c.width,
-        photo_height: c.height
-      };
-    });
-    return {
-      candidates,
-      stats: result.stats || { totalUnnamed: 0, singlePhotoCount: 0, twoPhotoCount: 0, noiseCount: 0 }
-    };
-  }
-}
 function registerDBHandlers() {
   ipcMain.handle("db:getLibraryStats", async () => {
     try {
@@ -2987,6 +3170,76 @@ function registerDBHandlers() {
       return { success: true, ...result };
     } catch (error) {
       console.error("[Main] db:detectBackgroundFaces failed:", error);
+      return { success: false, error: String(error) };
+    }
+  });
+  ipcMain.handle("db:getPoseBackfillStatus", async () => {
+    try {
+      const status = FaceRepository.getPoseBackfillCount();
+      return {
+        success: true,
+        needsBackfill: status.needsBackfill,
+        total: status.total,
+        completed: status.total - status.needsBackfill,
+        percent: status.total > 0 ? Math.round((status.total - status.needsBackfill) / status.total * 100) : 100
+      };
+    } catch (error) {
+      console.error("[Main] db:getPoseBackfillStatus failed:", error);
+      return { success: false, error: String(error) };
+    }
+  });
+  ipcMain.handle("db:processPoseBackfillBatch", async (_, { batchSize = 10 }) => {
+    try {
+      const faces = FaceRepository.getFacesNeedingPoseBackfill(batchSize);
+      if (faces.length === 0) {
+        return { success: true, processed: 0, message: "No faces need backfill" };
+      }
+      let processed = 0;
+      let failed = 0;
+      for (const face of faces) {
+        try {
+          const box = JSON.parse(face.box_json);
+          const filePath = face.file_path;
+          const orientation = face.orientation;
+          const result = await pythonProvider.sendRequest("extract_face_pose", {
+            filePath,
+            box,
+            orientation,
+            faceId: face.id
+          });
+          if (result.success) {
+            FaceRepository.updateFacePoseData(face.id, {
+              pose_yaw: result.poseYaw ?? 0,
+              pose_pitch: result.posePitch ?? 0,
+              pose_roll: result.poseRoll ?? 0,
+              face_quality: result.faceQuality ?? 0.5
+            });
+            processed++;
+          } else {
+            FaceRepository.updateFacePoseData(face.id, {
+              pose_yaw: 0,
+              // Sentinel value indicating "processed but no pose"
+              pose_pitch: null,
+              pose_roll: null,
+              face_quality: null
+            });
+            failed++;
+          }
+        } catch (e) {
+          console.error(`[Main] Failed to backfill pose for face ${face.id}:`, e);
+          failed++;
+        }
+      }
+      const status = FaceRepository.getPoseBackfillCount();
+      return {
+        success: true,
+        processed,
+        failed,
+        remaining: status.needsBackfill,
+        percent: status.total > 0 ? Math.round((status.total - status.needsBackfill) / status.total * 100) : 100
+      };
+    } catch (error) {
+      console.error("[Main] db:processPoseBackfillBatch failed:", error);
       return { success: false, error: String(error) };
     }
   });

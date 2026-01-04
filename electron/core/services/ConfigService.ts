@@ -48,6 +48,11 @@ export interface SmartIgnoreSettings {
     reviewThreshold: number;
     /** Whether to enable scan-time auto-tiering. Default: true */
     enableAutoTiering: boolean;
+    // Phase 5: Challenging Face Recognition
+    enableMultiSampleVoting: boolean;
+    maxSamplesPerPerson: number;
+    enableQualityAdjustedThresholds: boolean;
+    lowQualityThresholdBoost: number;
 }
 
 export interface AppConfig {
@@ -83,7 +88,11 @@ export const DEFAULT_CONFIG: AppConfig = {
         outlierThreshold: 1.2,
         autoAssignThreshold: 0.4,
         reviewThreshold: 0.6,
-        enableAutoTiering: true
+        enableAutoTiering: true,
+        enableMultiSampleVoting: true,
+        maxSamplesPerPerson: 50,
+        enableQualityAdjustedThresholds: true,
+        lowQualityThresholdBoost: 0.15
     },
     ai_queue: []
 };

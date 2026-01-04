@@ -490,7 +490,7 @@ interface SmartIgnoreSettings {
 
 ---
 
-## Feature 4: Misassigned Face Detection
+## Feature 4: Misassigned Face Detection (✅ Implemented)
 
 ### Overview
 
@@ -686,7 +686,7 @@ interface Props {
 
 ---
 
-## Feature 5: Challenging Face Recognition
+## Feature 5: Challenging Face Recognition (✅ Implemented)
 
 ### Overview
 

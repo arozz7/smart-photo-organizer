@@ -420,4 +420,117 @@ export class FaceRepository {
             throw new Error(`FaceRepository.getUnnamedFacesForNoiseDetection failed: ${String(error)}`);
         }
     }
+
+    /**
+     * Get faces that need pose data backfill (Phase 5).
+     * Returns faces where pose_yaw IS NULL but have descriptors.
+     */
+    static getFacesNeedingPoseBackfill(limit = 100): Array<{
+        id: number;
+        photo_id: number;
+        box_json: string;
+        file_path: string;
+        preview_cache_path: string | null;
+    }> {
+        const db = getDB();
+        try {
+            const rows = db.prepare(`
+                SELECT 
+                    f.id,
+                    f.photo_id,
+                    f.box_json,
+                    p.file_path,
+                    p.preview_cache_path,
+                    p.metadata_json
+                FROM faces f
+                JOIN photos p ON f.photo_id = p.id
+                WHERE f.pose_yaw IS NULL 
+                  AND f.descriptor IS NOT NULL
+                  AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
+                  AND (f.blur_score IS NULL OR f.blur_score >= 10)
+                LIMIT ?
+            `).all(limit) as Array<{
+                id: number;
+                photo_id: number;
+                box_json: string;
+                file_path: string;
+                preview_cache_path: string | null;
+                metadata_json: string;
+            }>;
+
+            return rows.map(r => {
+                let orientation = 1;
+                try {
+                    const meta = JSON.parse(r.metadata_json || '{}');
+                    orientation = meta.Orientation || meta.orientation || 1;
+                } catch { /* ignore */ }
+                return {
+                    ...r,
+                    orientation
+                };
+            });
+        } catch (error) {
+            throw new Error(`FaceRepository.getFacesNeedingPoseBackfill failed: ${String(error)}`);
+        }
+    }
+
+    /**
+     * Get the total count of faces needing pose backfill.
+     */
+    static getPoseBackfillCount(): { needsBackfill: number; total: number } {
+        const db = getDB();
+        try {
+            const needsBackfill = db.prepare(`
+                SELECT COUNT(*) as count FROM faces 
+                WHERE pose_yaw IS NULL 
+                  AND descriptor IS NOT NULL
+                  AND (is_ignored = 0 OR is_ignored IS NULL)
+                  AND (blur_score IS NULL OR blur_score >= 10)
+            `).get() as { count: number };
+
+            const total = db.prepare(`
+                SELECT COUNT(*) as count FROM faces 
+                WHERE descriptor IS NOT NULL
+                  AND (is_ignored = 0 OR is_ignored IS NULL)
+                  AND (blur_score IS NULL OR blur_score >= 10)
+            `).get() as { count: number };
+
+            return {
+                needsBackfill: needsBackfill?.count || 0,
+                total: total?.count || 0
+            };
+        } catch (error) {
+            throw new Error(`FaceRepository.getPoseBackfillCount failed: ${String(error)}`);
+        }
+    }
+
+    /**
+     * Update pose data for a specific face (Phase 5 backfill).
+     */
+    static updateFacePoseData(
+        faceId: number,
+        poseData: {
+            pose_yaw: number | null;
+            pose_pitch: number | null;
+            pose_roll: number | null;
+            face_quality: number | null;
+        }
+    ): void {
+        const db = getDB();
+        try {
+            db.prepare(`
+                UPDATE faces 
+                SET pose_yaw = ?, pose_pitch = ?, pose_roll = ?, face_quality = ?
+                WHERE id = ?
+            `).run(
+                poseData.pose_yaw,
+                poseData.pose_pitch,
+                poseData.pose_roll,
+                poseData.face_quality,
+                faceId
+            );
+        } catch (error) {
+            throw new Error(`FaceRepository.updateFacePoseData failed: ${String(error)}`);
+        }
+    }
 }

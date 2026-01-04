@@ -70,7 +70,12 @@ def handle_command(command):
     payload = command.get('payload', {})
     req_id = payload.get('reqId')
     
-    logger.debug(f"Received command: {cmd_type}") if cmd_type == 'generate_thumbnail' else logger.info(f"Received command: {cmd_type}")
+    # Silent/Debug commands
+    debug_commands = ['generate_thumbnail', 'ping', 'get_system_status', 'batch_search_index']
+    if cmd_type in debug_commands:
+        logger.debug(f"Received command: {cmd_type}")
+    else:
+        logger.info(f"Received command: {cmd_type}")
 
     response = {}
     if req_id:
@@ -468,6 +473,33 @@ def handle_command(command):
                 f_blur = image_ops.estimate_blur(face_crop, target_size=112)
                 f_ten = image_ops.estimate_sharpness_tenengrad(face_crop, target_size=112)
                 
+                # Extract Pose Data (Phase 5: Challenging Face Recognition)
+                pose_yaw, pose_pitch, pose_roll = None, None, None
+                if hasattr(face, 'pose') and face.pose is not None:
+                    try:
+                        # InsightFace pose is [pitch, yaw, roll] in degrees
+                        pose = face.pose
+                        pose_pitch = float(pose[0]) if len(pose) > 0 else None
+                        pose_yaw = float(pose[1]) if len(pose) > 1 else None
+                        pose_roll = float(pose[2]) if len(pose) > 2 else None
+                    except (TypeError, IndexError):
+                        pass  # Pose data not available, keep as None
+                
+                # Calculate Face Quality Score (Phase 5)
+                face_quality = None
+                if f_blur is not None:
+                    blur_factor = min(f_blur / 100.0, 1.0)
+                    pose_factor = 0.5  # Default if no pose
+                    if pose_yaw is not None:
+                        # 0° = 1.0 (frontal), 90° = 0.0 (profile)
+                        pose_factor = max(0, 1.0 - (abs(pose_yaw) / 90.0))
+                    det_score = float(face.det_score) if hasattr(face, 'det_score') else 0.5
+                    face_size = bbox[2] - bbox[0]  # width
+                    size_factor = min(face_size / 200.0, 1.0)
+                    
+                    # Weighted average
+                    face_quality = (blur_factor * 0.3 + pose_factor * 0.3 + det_score * 0.2 + size_factor * 0.2)
+                
                 # Thresholds
                 vol_th = CONFIG.get('faceBlurThreshold', 20.0)
                 ten_th = 100.0
@@ -482,8 +514,13 @@ def handle_command(command):
                     "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
                     "descriptor": face.embedding.tolist() if hasattr(face, 'embedding') else [],
                     "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
-                    "blurScore": float(f_blur)
+                    "blurScore": float(f_blur),
+                    "poseYaw": pose_yaw,
+                    "posePitch": pose_pitch,
+                    "poseRoll": pose_roll,
+                    "faceQuality": face_quality
                 })
+
             
             logger.info(f"[Face] Initial scan found {len(f_results)} faces.")
                 
@@ -995,7 +1032,99 @@ def handle_command(command):
             logger.error(f"Background face detection error: {e}")
             response = {"type": "background_faces_result", "success": False, "error": str(e), "reqId": req_id}
 
+    elif cmd_type == 'extract_face_pose':
+        # Phase 5 Backfill: Extract pose data for a specific face region
+        file_path = payload.get('filePath')
+        box = payload.get('box')  # {x, y, width, height}
+        face_id = payload.get('faceId')
+        
+        logger.debug(f"Extracting pose for face {face_id} from {file_path}")
+        
+        try:
+            img = load_image_cv2(file_path)
+            if img is None:
+                response = {"type": "face_pose_result", "success": False, "error": "Image load failed", "faceId": face_id}
+            else:
+                # Apply Orientation Correction (Match analyze_image logic)
+                orientation = payload.get('orientation', 1)
+                h_img, w_img = img.shape[:2]
+                is_landscape_dims = w_img > h_img
+                expects_portrait = (orientation == 6 or orientation == 8)
+                
+                if expects_portrait and is_landscape_dims:
+                    if orientation == 6:
+                        img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+                    elif orientation == 8:
+                        img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                elif orientation == 3:
+                     img = cv2.rotate(img, cv2.ROTATE_180)
+
+                # Expand box slightly for better face detection
+                x = int(box.get('x', 0))
+                y = int(box.get('y', 0))
+                w = int(box.get('width', 100))
+                h = int(box.get('height', 100))
+                
+                # Add 100% padding (context is crucial for detection on crops)
+                pad_x = int(w * 1.0)
+                pad_y = int(h * 1.0)
+                x1 = max(0, x - pad_x)
+                y1 = max(0, y - pad_y)
+                x2 = min(img.shape[1], x + w + pad_x)
+                y2 = min(img.shape[0], y + h + pad_y)
+                
+                face_crop = img[y1:y2, x1:x2]
+                
+                if face_crop.size == 0 or face_crop.shape[0] < 10 or face_crop.shape[1] < 10:
+                    logger.warning(f"Face crop too small/empty for face {face_id}")
+                    response = {"type": "face_pose_result", "success": False, "error": "Face crop too small", "faceId": face_id}
+                else:
+                    if not faces.app: 
+                        faces.init_insightface()
+                    
+                    # Run detection on crop
+                    f_results = faces.app.get(face_crop)
+                    
+                    pose_yaw, pose_pitch, pose_roll, face_quality = None, None, None, None
+                    
+                    if len(f_results) > 0:
+                        # Take the largest detected face
+                        best_face = max(f_results, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
+                        
+                        # Extract pose
+                        if hasattr(best_face, 'pose') and best_face.pose is not None:
+                            try:
+                                pose = best_face.pose
+                                pose_pitch = float(pose[0]) if len(pose) > 0 else None
+                                pose_yaw = float(pose[1]) if len(pose) > 1 else None
+                                pose_roll = float(pose[2]) if len(pose) > 2 else None
+                            except (TypeError, IndexError):
+                                pass
+                        
+                        # Calculate quality
+                        f_blur = image_ops.estimate_blur(face_crop, target_size=112)
+                        blur_factor = min(f_blur / 100.0, 1.0) if f_blur else 0.5
+                        pose_factor = max(0, 1.0 - (abs(pose_yaw) / 90.0)) if pose_yaw is not None else 0.5
+                        det_score = float(best_face.det_score) if hasattr(best_face, 'det_score') else 0.5
+                        size_factor = min(w / 200.0, 1.0)
+                        face_quality = (blur_factor * 0.3 + pose_factor * 0.3 + det_score * 0.2 + size_factor * 0.2)
+                    
+                    response = {
+                        "type": "face_pose_result",
+                        "success": True,
+                        "faceId": face_id,
+                        "poseYaw": pose_yaw,
+                        "posePitch": pose_pitch,
+                        "poseRoll": pose_roll,
+                        "faceQuality": face_quality
+                    }
+                
+        except Exception as e:
+            logger.error(f"Pose extraction error: {e}")
+            response = {"type": "face_pose_result", "success": False, "error": str(e), "faceId": face_id}
+
     else:
+
         response = {"error": f"Unknown command: {cmd_type}", "reqId": req_id}
         
     if req_id is not None and "reqId" not in response:
@@ -1015,12 +1144,30 @@ def main_loop():
             if not line: break
             line = line.strip()
             if not line: continue
-            
-            command = json.loads(line)
-            result = handle_command(command)
-            if result:
-                print(json.dumps(result))
-                sys.stdout.flush()
+            # Parse the line as JSON
+            try:
+                command_data = json.loads(line)
+                command_type = command_data.get('command')
+                logger.debug(f"Received command: {command_type}")
+                
+                if command_type == 'ping':
+                    # Fast path for ping
+                    print(json.dumps({"status": "ok", "message": "pong"}))
+                    sys.stdout.flush()
+                    continue
+                
+                result = handle_command(command_data)
+                if result:
+                    print(json.dumps(result))
+                    sys.stdout.flush()
+            except json.JSONDecodeError:
+                logger.warning(f"Received non-JSON input: {line}")
+            except Exception as e:
+                logger.error(f"Error processing command: {e}")
+                try:
+                    print(json.dumps({"error": str(e)}))
+                    sys.stdout.flush()
+                except: pass
         except Exception as e:
             logger.error(f"Loop error: {e}")
             try:

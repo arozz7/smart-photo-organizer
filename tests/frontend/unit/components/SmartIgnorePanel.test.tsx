@@ -61,7 +61,7 @@ describe('SmartIgnorePanel', () => {
 
         // Compact button labels
         expect(screen.getByText('Filter BG')).toBeInTheDocument();
-        expect(screen.getByText('Ignore All')).toBeInTheDocument();
+        expect(screen.getByText('Ignore All Groups')).toBeInTheDocument();
     });
 
     it('triggers action callbacks', () => {
@@ -78,7 +78,7 @@ describe('SmartIgnorePanel', () => {
         fireEvent.click(screen.getByText('Filter BG'));
         expect(onFilterMock).toHaveBeenCalled();
 
-        fireEvent.click(screen.getByText('Ignore All'));
+        fireEvent.click(screen.getByText('Ignore All Groups'));
         expect(onIgnoreMock).toHaveBeenCalled();
     });
 

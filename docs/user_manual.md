@@ -43,6 +43,7 @@ The AI automatically detects faces during the scan. Your job is to give them nam
     - **Confidence Tiers & Visual Indicators:**
         - **Green Ring:** High confidence match (75%+ similarity). The AI has automatically assigned this face.
         - **Amber Ring:** Suggestions requiring review (60-75% similarity). Click "Accept" to confirm.
+        - **'?' Badge:** Weak matches or side-profile detections that require manual verification.
         - **No Ring:** Unknown faces with no close matches in your library.
 5.  **Refining Groups:**
     - **Ungroup:** If a suggested group contains mixed faces, click the **"Ungroup"** button on the row to break it apart and return the faces to the "Unmatched" pool for individual sorting.
@@ -121,7 +122,7 @@ Tools for maintaining the health and accuracy of your library:
 - **Clear AI Tags:** Removes all AI-generated tags while preserving your manual ones. Useful if you want to re-scan with a different performance profile.
 - **Cleanup Tags:** Normalizes all tags in the database (lowercase, single-word) and merges duplicates.
 - **Deduplicate Faces:** Scans for and merges potential duplicate face entries in your database.
-- **Deduplicate Faces:** Scans for and merges potential duplicate face entries in your database.
+- **Face Data Upgrade:** Detects and processes missing pose estimation data for improved recognition of side profiles.
 - **Calculate Blur Scores:** Missing scores for old scans? Use this to calculate quality scores for existing faces, enabling the "Cleanup Blurry" feature.
 - **Factory Reset:** ⚠️ **Extreme Caution.** Wipes the database and all settings to start fresh.
 
