@@ -40,6 +40,9 @@ The AI automatically detects faces during the scan. Your job is to give them nam
 3.  **Merging:** If you accidentally created two entries for the same person (e.g., "John" and "John Doe"), simply rename one to match the other. The app will ask if you want to **merge** them.
     - **Performance:** Optimized to handle selecting thousands of faces without slowing down.
     - **RAW Support:** View original "Context" photos even for RAW files (ARW, CR2, etc.).
+    - **Confidence Tiers:**
+        - **Amber Ring:** Faces with an Amber Ring are "Suggestions". The AI is 40-60% sure. Click the "Check" mark or the suggested name to confirm.
+        - **Unknown:** Faces with no ring are truly unknown.
 5.  **Refining Groups:**
     - **Ungroup:** If a suggested group contains mixed faces, click the **"Ungroup"** button on the row to break it apart and return the faces to the "Unmatched" pool for individual sorting.
     - **Filter Background Faces:** Use the **"Filter Background"** button in the header (funnel icon) to automatically detect and bulk-ignore "noise" faces (strangers/background crowds) that appear only once or twice.

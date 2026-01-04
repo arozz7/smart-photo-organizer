@@ -75,11 +75,18 @@ export default function Library() {
         });
     }
 
-    const handleRescanFiltered = async () => {
+    const [showFilterScanMenu, setShowFilterScanMenu] = useState(false)
+
+    // ... (existing code)
+
+    const handleRescanFiltered = async (forceRescan = false) => {
+        setShowFilterScanMenu(false)
         showConfirm({
-            title: 'Bulk Rescan',
-            description: 'Rescan ALL photos matching the current filter? This will refresh metadata and run AI logic.',
-            confirmLabel: 'Prepare Rescan',
+            title: forceRescan ? 'Bulk Force Rescan' : 'Bulk Rescan',
+            description: forceRescan
+                ? 'FORCE rescan ALL photos matching the current filter? This will re-read files, regenerate thumbnails, and re-run AI.'
+                : 'Rescan photos matching the current filter? This will check for missing data and run AI.',
+            confirmLabel: forceRescan ? 'Force Rescan' : 'Rescan',
             onConfirm: async () => {
                 try {
                     // @ts-ignore
@@ -89,11 +96,10 @@ export default function Library() {
                         setTimeout(() => {
                             showConfirm({
                                 title: 'Proceed with Rescan',
-                                description: `Found ${photosToRescan.length} photos. Proceed with Force Rescan?`,
+                                description: `Found ${photosToRescan.length} photos. Proceed with ${forceRescan ? 'FORCE ' : ''}Rescan?`,
                                 confirmLabel: 'Start Processing',
                                 onConfirm: async () => {
-                                    const ids = photosToRescan.map((p: any) => p.id);
-                                    await rescanFiles(ids);
+                                    await rescanFiles(photosToRescan, forceRescan);
                                 }
                             });
                         }, 200);
@@ -301,37 +307,58 @@ export default function Library() {
                             Rescan ({selectedIds.size})
                         </button>
                     )}
-
                     {!isSelectionMode && (
-                        <button
-                            onClick={handleRescanFiltered}
-                            title="Rescan all photos matching current filter"
-                            className="text-gray-400 hover:text-white transition-colors"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v3.25a1 1 0 11-2 0V13.011a7.002 7.002 0 01-11.266-1.688 1 1 0 01.273-1.266z" clipRule="evenodd" />
-                            </svg>
-                        </button>
+                        <div className="relative flex items-center">
+                            <button
+                                onClick={() => handleRescanFiltered(false)}
+                                title="Rescan matching photos"
+                                className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded-l text-sm font-medium transition-colors border-r border-gray-600 flex items-center gap-2"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v3.25a1 1 0 11-2 0V13.011a7.002 7.002 0 01-11.266-1.688 1 1 0 01.273-1.266z" clipRule="evenodd" />
+                                </svg>
+                                Rescan
+                            </button>
+                            <button
+                                onClick={() => setShowFilterScanMenu(!showFilterScanMenu)}
+                                className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-1.5 py-1 rounded-r text-sm transition-colors"
+                            >
+                                <ChevronDownIcon />
+                            </button>
+
+                            {showFilterScanMenu && (
+                                <div className="absolute top-full left-0 mt-1 w-64 bg-gray-800 border border-gray-700 rounded shadow-xl z-50 overflow-hidden ring-1 ring-black ring-opacity-5">
+                                    <button
+                                        onClick={() => handleRescanFiltered(true)}
+                                        className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors whitespace-nowrap"
+                                    >
+                                        Force Rescan
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     )}
-                </div>
+                </div >
 
                 {/* AI Status Indicator */}
-                <div className="flex items-center gap-2">
+                < div className="flex items-center gap-2" >
                     {/* AIStatus moved to StatusBar */}
 
-                    {scanErrors.length > 0 && (
-                        <button
-                            onClick={() => setShowErrors(true)}
-                            className="flex items-center gap-1.5 px-2 py-1 bg-red-900/50 hover:bg-red-900/80 border border-red-700/50 rounded transition-colors text-red-200"
-                            title={`${scanErrors.length} scanning errors`}
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                            </svg>
-                            <span className="text-xs font-medium">{scanErrors.length}</span>
-                        </button>
-                    )}
-                </div>
+                    {
+                        scanErrors.length > 0 && (
+                            <button
+                                onClick={() => setShowErrors(true)}
+                                className="flex items-center gap-1.5 px-2 py-1 bg-red-900/50 hover:bg-red-900/80 border border-red-700/50 rounded transition-colors text-red-200"
+                                title={`${scanErrors.length} scanning errors`}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                                <span className="text-xs font-medium">{scanErrors.length}</span>
+                            </button>
+                        )
+                    }
+                </div >
 
                 <div className="ml-auto flex items-center gap-2">
                     {/* Search and Scan buttons... */}
@@ -365,10 +392,10 @@ export default function Library() {
                         </button>
 
                         {showScanMenu && (
-                            <div className="absolute top-full right-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded shadow-xl z-50 overflow-hidden">
+                            <div className="absolute top-full right-0 mt-1 w-64 bg-gray-800 border border-gray-700 rounded shadow-xl z-50 overflow-hidden ring-1 ring-black ring-opacity-5">
                                 <button
                                     onClick={() => handleScan(true)}
-                                    className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors"
+                                    className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors whitespace-nowrap"
                                 >
                                     Force Rescan (Check All)
                                 </button>
@@ -383,7 +410,7 @@ export default function Library() {
                         <GearIcon className="w-5 h-5" />
                     </button>
                 </div>
-            </header>
+            </header >
 
             <SettingsModal
                 open={showSettings}
@@ -479,9 +506,11 @@ export default function Library() {
 
 
             {/* Error Modal */}
-            {showErrors && (
-                <ScanErrorsModal onClose={() => setShowErrors(false)} />
-            )}
-        </div>
+            {
+                showErrors && (
+                    <ScanErrorsModal onClose={() => setShowErrors(false)} />
+                )
+            }
+        </div >
     )
 }

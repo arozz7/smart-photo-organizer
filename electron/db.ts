@@ -5,12 +5,15 @@ import logger from './logger';
 // Deprecated functions are removed.
 // Deprecated functions are removed.
 
+const INSTANCE_ID = Math.random().toString(36).slice(7);
+logger.info(`[DB Module] Loading Module Instance: ${INSTANCE_ID}`);
+
 let db: any;
 
 export async function initDB(basePath: string, onProgress?: (status: string) => void) {
   const dbPath = path.join(basePath, 'library.db');
   if (onProgress) onProgress('Initializing Database...');
-  logger.info('Initializing Database at:', dbPath);
+  logger.info(`[DB Module ${INSTANCE_ID}] Initializing Database at:`, dbPath);
 
   // Allow UI to breathe
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -135,11 +138,25 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     // Column likely already exists
   }
 
+
   try {
     db.exec('ALTER TABLE people ADD COLUMN cover_face_id INTEGER');
   } catch (e) {
     // Column likely already exists
   }
+
+  // --- MIGRATION: Scan-Time Confidence Tiering (Feature 2) ---
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN confidence_tier TEXT DEFAULT 'unknown'");
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN suggested_person_id INTEGER');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN match_distance REAL');
+  } catch (e) { /* Column exists */ }
 
   // --- MIGRATION: Smart Face Storage (BLOBs + Pruning) ---
   try {
@@ -394,6 +411,7 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
 
 export function getDB() {
   if (!db) {
+    logger.error(`[DB Module ${INSTANCE_ID}] Database not initialized. db is ${db}`);
     throw new Error('Database not initialized');
   }
   return db;

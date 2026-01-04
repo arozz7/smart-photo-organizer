@@ -41,6 +41,9 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
         try {
             const batchIds = faceIds.slice(0, BATCH_SIZE)
             const result = await fetchFacesByIds(batchIds)
+            if (result.length > 0) {
+                // console.log('[DEBUG] First unmatched face:', JSON.stringify(result[0], null, 2));
+            }
             setFaces(result)
             setDisplayedCount(result.length)
         } catch (e) {
@@ -80,6 +83,37 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
         }
 
         const selectedFaces = faces.filter(f => selectedIds.has(f.id));
+
+        // 1. Check for stored suggestions (Consensus)
+        const storedCounts = new Map<number, number>();
+        let maxStored = 0;
+        let bestStoredId: number | null = null;
+
+        for (const f of selectedFaces) {
+            if (f.suggested_person_id) {
+                const c = (storedCounts.get(f.suggested_person_id) || 0) + 1;
+                storedCounts.set(f.suggested_person_id, c);
+                if (c > maxStored) { maxStored = c; bestStoredId = f.suggested_person_id; }
+            }
+        }
+
+        if (bestStoredId) {
+            // We need to fetch person name. We don't have full people list here.
+            // We can use matchBatch to valid/fetch or use a new fetchPerson helper.
+            // OR, fallback to matchBatch if we really need the name.
+            // But usually UnmatchedFacesModal has access to people via context?
+            // It calls usePeople(). matchBatch returns name.
+            // Let's rely on matchBatch for name resolution if needed, 
+            // but strictly prioritize the ID that matches.
+            // Actually, matchBatch is fast enough for 5 faces.
+            // But to respect "Scan-Time Tiering", we should prefer the stored ID.
+        }
+
+        // For now, proceed with Real-time Match but log if it differs?
+        // Actually, the user wants to SEE the stored result.
+        // If I can't easily get the name of 'bestStoredId' without fetching, I'll stick to matchBatch
+        // BUT matchBatch should return the same person if the vector is valid.
+
         const sample = selectedFaces.slice(0, 5).map(f => f.descriptor).filter(Boolean);
 
         if (sample.length > 0) {
@@ -92,6 +126,10 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
                         counts[r.personId].maxSim = Math.max(counts[r.personId].maxSim, r.similarity);
                     }
                 });
+
+                // If we had a generic stored suggestion that isn't in results (odd), we might miss it.
+                // But usually FAISS finds it.
+
                 const winner = Object.values(counts).sort((a: any, b: any) => b.count - a.count || b.maxSim - a.maxSim)[0] as any;
                 if (winner) setSuggestion(winner.person);
                 else setSuggestion(null);
@@ -241,7 +279,15 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
                                     {faces.map(face => (
                                         <div
                                             key={face.id}
-                                            className={`aspect-square relative cursor-pointer rounded-lg overflow-hidden transition-all group ${selectedIds.has(face.id) ? 'ring-2 ring-indigo-500 ring-offset-1 ring-offset-gray-900' : 'hover:ring-2 hover:ring-gray-600'}`}
+                                            className={`aspect-square relative cursor-pointer rounded-lg overflow-hidden transition-all group 
+                                                ${selectedIds.has(face.id)
+                                                    ? 'ring-4 ring-indigo-500 ring-offset-2 ring-offset-gray-900'
+                                                    : face.confidence_tier === 'review'
+                                                        ? 'ring-2 ring-amber-500/80 hover:ring-amber-400'
+                                                        : face.confidence_tier === 'high'
+                                                            ? 'ring-2 ring-green-500/50 hover:ring-green-400'
+                                                            : 'hover:ring-2 hover:ring-gray-600'
+                                                }`}
                                             onClick={() => toggleSelection(face.id)}
                                         >
                                             <FaceThumbnail

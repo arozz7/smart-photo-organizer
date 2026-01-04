@@ -143,6 +143,14 @@ export function registerAIHandlers() {
         }
     });
 
+    ipcMain.handle('ai:saveVectorIndex', async () => {
+        return await pythonProvider.sendRequest('save_vector_index', {}, 30000);
+    });
+
+    ipcMain.handle('ai:addFacesToVectorIndex', async (_event, { vectors, ids }) => {
+        return await pythonProvider.sendRequest('add_faces_to_vector_index', { vectors, ids }, 60000);
+    });
+
     ipcMain.handle('ai:getClusteredFaces', async (_event, options) => {
         try {
             const faces = FaceRepository.getUnassignedDescriptors();

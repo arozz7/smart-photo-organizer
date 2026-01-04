@@ -4,9 +4,10 @@ import { ExifTool } from 'exiftool-vendored';
 import logger from './logger';
 import { getDB } from './db';
 
+import { PhotoService } from './core/services/PhotoService';
+
 // Helper to get ExifTool from service
 export async function getExifTool(): Promise<ExifTool | null> {
-    const { PhotoService } = await import('./core/services/PhotoService');
     return PhotoService.getExifTool();
 }
 
@@ -14,7 +15,6 @@ const SUPPORTED_EXTS = ['.jpg', '.jpeg', '.png', '.arw', '.cr2', '.nef', '.dng',
 
 // Helper to extract preview (delegated to PhotoService)
 export async function extractPreview(filePath: string, previewDir: string, forceRescan: boolean = false): Promise<string | null> {
-    const { PhotoService } = await import('./core/services/PhotoService');
     // Enable Throw on Error to capture corruption details
     return PhotoService.extractPreview(filePath, previewDir, forceRescan, true);
 }

@@ -63,6 +63,9 @@ const TEST_SCHEMA = `
     is_ignored INTEGER DEFAULT 0,
     is_reference INTEGER DEFAULT 0,
     source TEXT DEFAULT 'auto',
+    confidence_tier TEXT DEFAULT 'unknown',
+    suggested_person_id INTEGER,
+    match_distance REAL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
     FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
@@ -163,18 +166,21 @@ export function seedFace(
         blur_score: 50,
         is_ignored: 0,
         is_reference: 0,
+        confidence_tier: 'unknown',
         ...overrides
     };
 
     const stmt = db.prepare(`
-    INSERT INTO faces (photo_id, person_id, box_json, descriptor, confidence, blur_score, is_ignored, is_reference)
-    VALUES (@photo_id, @person_id, @box_json, @descriptor, @confidence, @blur_score, @is_ignored, @is_reference)
+    INSERT INTO faces (photo_id, person_id, box_json, descriptor, confidence, blur_score, is_ignored, is_reference, confidence_tier, suggested_person_id, match_distance)
+    VALUES (@photo_id, @person_id, @box_json, @descriptor, @confidence, @blur_score, @is_ignored, @is_reference, @confidence_tier, @suggested_person_id, @match_distance)
   `);
 
     const result = stmt.run({
         ...face,
         person_id: face.person_id ?? null,
-        descriptor: face.descriptor ?? null
+        descriptor: face.descriptor ?? null,
+        suggested_person_id: face.suggested_person_id ?? null,
+        match_distance: face.match_distance ?? null
     });
 
     return result.lastInsertRowid as number;
@@ -207,4 +213,7 @@ interface TestFace {
     blur_score: number;
     is_ignored: number;
     is_reference: number;
+    confidence_tier?: string;
+    suggested_person_id?: number | null;
+    match_distance?: number | null;
 }

@@ -225,13 +225,15 @@ describe('FaceRepository', () => {
             expect(result).toBeNull();
         });
 
-        it('should return face with parsed box and descriptor', () => {
+        it('should return face with parsed box, descriptor, and confidence tier', () => {
             // Arrange
             const photoId = seedPhoto(db);
             const box = { x: 10, y: 20, width: 30, height: 40 };
             const faceId = seedFace(db, photoId, {
                 box_json: JSON.stringify(box),
-                descriptor: createTestDescriptor(1)
+                descriptor: createTestDescriptor(1),
+                confidence_tier: 'review',
+                match_distance: 0.55
             });
 
             // Act
@@ -242,6 +244,8 @@ describe('FaceRepository', () => {
             expect(result!.id).toBe(faceId);
             expect(result!.box).toEqual(box);
             expect(result!.descriptor).toHaveLength(512);
+            expect(result!.confidence_tier).toBe('review');
+            expect(result!.match_distance).toBe(0.55);
         });
     });
 

@@ -19,7 +19,10 @@ export class FaceRepository {
             original_width,
             original_height,
             descriptor: row.descriptor ? Array.from(new Float32Array(row.descriptor.buffer, row.descriptor.byteOffset, row.descriptor.byteLength / 4)) : null,
-            is_reference: !!row.is_reference
+            is_reference: !!row.is_reference,
+            confidence_tier: row.confidence_tier || 'unknown',
+            suggested_person_id: row.suggested_person_id,
+            match_distance: row.match_distance
         };
     }
 
@@ -68,7 +71,8 @@ export class FaceRepository {
         if (ids.length === 0) return [];
         const placeholders = ids.map(() => '?').join(',');
         const query = `
-            SELECT f.id, f.photo_id, f.blur_score, f.box_json, f.descriptor, p.file_path, p.preview_cache_path, p.metadata_json, p.width, p.height
+            SELECT f.id, f.photo_id, f.blur_score, f.box_json, f.descriptor, f.confidence_tier, f.suggested_person_id, f.match_distance,
+                   p.file_path, p.preview_cache_path, p.metadata_json, p.width, p.height
             FROM faces f
             JOIN photos p ON f.photo_id = p.id
             WHERE f.id IN (${placeholders})
@@ -129,7 +133,7 @@ export class FaceRepository {
         const db = getDB();
         try {
             const faces = db.prepare(`
-                SELECT f.id, f.photo_id, f.blur_score, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
+                SELECT f.id, f.photo_id, f.blur_score, f.box_json, f.confidence_tier, f.suggested_person_id, f.match_distance, p.file_path, p.preview_cache_path, p.width, p.height
                 FROM faces f
                 JOIN photos p ON f.photo_id = p.id
                 WHERE f.person_id IS NULL 

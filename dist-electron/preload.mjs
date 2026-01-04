@@ -1,1 +1,25 @@
-"use strict";const o=require("electron");o.contextBridge.exposeInMainWorld("ipcRenderer",{on(e,r){const n=(i,...t)=>r(...t);return o.ipcRenderer.on(e,n),()=>{o.ipcRenderer.removeListener(e,n)}},off(...e){const[r,...n]=e;return o.ipcRenderer.off(r,...n)},send(...e){const[r,...n]=e;return o.ipcRenderer.send(r,...n)},invoke(...e){const[r,...n]=e;return o.ipcRenderer.invoke(r,...n)}});
+"use strict";
+const electron = require("electron");
+electron.contextBridge.exposeInMainWorld("ipcRenderer", {
+  on(channel, listener) {
+    const subscription = (_event, ...args) => listener(...args);
+    electron.ipcRenderer.on(channel, subscription);
+    return () => {
+      electron.ipcRenderer.removeListener(channel, subscription);
+    };
+  },
+  off(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.off(channel, ...omit);
+  },
+  send(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.send(channel, ...omit);
+  },
+  invoke(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.invoke(channel, ...omit);
+  }
+  // You can expose other APTs you need here.
+  // ...
+});
