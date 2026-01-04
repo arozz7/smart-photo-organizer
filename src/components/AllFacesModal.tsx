@@ -4,6 +4,8 @@ import { VirtuosoGrid } from 'react-virtuoso';
 import PersonFaceItem from './PersonFaceItem';
 import { Face } from '../types';
 import { useAlert } from '../context/AlertContext';
+import { usePeople } from '../context/PeopleContext';
+import { PersonNameInput } from './PersonNameInput';
 
 interface AllFacesModalProps {
     isOpen: boolean;
@@ -189,83 +191,65 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                 isOpen={isMoveModalOpen}
                 onClose={() => setIsMoveModalOpen(false)}
                 onConfirm={handleMove}
-                count={selectedFaces.size}
+                faceIds={Array.from(selectedFaces)}
             />
         </div>
     );
 }
 
-// Internal Move Modal (Simplified version of RenameModal)
-const MoveFacesModal = ({ isOpen, onClose, onConfirm, count }: { isOpen: boolean, onClose: () => void, onConfirm: (name: string) => void, count: number }) => {
+// Internal Move Modal
+const MoveFacesModal = ({ isOpen, onClose, onConfirm, faceIds }: { isOpen: boolean, onClose: () => void, onConfirm: (name: string) => void, faceIds: number[] }) => {
     const [name, setName] = useState('');
-    const [suggestions, setSuggestions] = useState<string[]>([]);
-    const [allPeopleNames, setAllPeopleNames] = useState<string[]>([]);
+    const [descriptors, setDescriptors] = useState<number[][] | undefined>(undefined);
+    const { fetchFacesByIds } = usePeople();
 
     useEffect(() => {
-        if (isOpen) {
+        if (isOpen && faceIds.length > 0) {
             setName('');
-            fetchPeople();
-        }
-    }, [isOpen]);
+            setDescriptors(undefined);
 
-    const fetchPeople = async () => {
-        try {
-            // @ts-ignore
-            const people = await window.ipcRenderer.invoke('db:getPeople');
-            setAllPeopleNames(people.map((p: any) => p.name));
-        } catch (err) {
-            // ignore
+            // Fetch descriptors for AI suggestions (limit to 5)
+            fetchFacesByIds(faceIds.slice(0, 5)).then(faces => {
+                const descs = faces.map(f => f.descriptor).filter(d => !!d) as number[][];
+                if (descs.length > 0) {
+                    setDescriptors(descs);
+                }
+            });
         }
-    };
-
-    useEffect(() => {
-        if (name.length > 0) {
-            const filtered = allPeopleNames
-                .filter(p => p.toLowerCase().includes(name.toLowerCase()) && p !== name)
-                .slice(0, 10);
-            setSuggestions(filtered);
-        } else {
-            setSuggestions(allPeopleNames.slice(0, 10));
-        }
-    }, [name, allPeopleNames]);
+    }, [isOpen, faceIds, fetchFacesByIds]);
 
     if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-gray-800 p-6 rounded-xl shadow-2xl w-full max-w-md border border-gray-700">
-                <h3 className="text-xl font-bold text-white mb-2">Move {count} Faces</h3>
+                <h3 className="text-xl font-bold text-white mb-2">Move {faceIds.length} Faces</h3>
                 <p className="text-gray-400 mb-4 text-sm">Select the target person.</p>
                 <div className="relative mb-6">
-                    <input
-                        type="text"
-                        value={name}
-                        onChange={e => setName(e.target.value)}
-                        placeholder="Person Name"
-                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    <PersonNameInput
                         autoFocus
-                        onKeyDown={e => {
-                            if (e.key === 'Enter') onConfirm(name);
-                            if (e.key === 'Escape') onClose();
+                        value={name}
+                        onChange={setName}
+                        onCommit={() => name.trim() && onConfirm(name)}
+                        descriptors={descriptors}
+                        placeholder="Person Name"
+                        className="w-full"
+                        onSelect={(_id, selectedName) => {
+                            setName(selectedName);
+                            // Optional: auto-commit on select? 
+                            // Usually "Move" button is safer for bulk actions.
                         }}
                     />
-                    {suggestions.length > 0 && (
-                        <div className="absolute left-0 right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 max-h-40 overflow-y-auto">
-                            {suggestions.map((suggestion, idx) => (
-                                <div
-                                    key={idx}
-                                    className="px-4 py-2 hover:bg-indigo-600 cursor-pointer text-gray-200"
-                                    onClick={() => setName(suggestion)}
-                                >
-                                    {suggestion}
-                                </div>
-                            ))}
-                        </div>
-                    )}
                 </div>
                 <div className="flex justify-end gap-3">
                     <button onClick={onClose} className="px-4 py-2 rounded-lg hover:bg-gray-700 text-gray-300">Cancel</button>
-                    <button onClick={() => onConfirm(name)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">Move</button>
+                    <button
+                        onClick={() => name.trim() && onConfirm(name)}
+                        disabled={!name.trim()}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Move
+                    </button>
                 </div>
             </div>
         </div>

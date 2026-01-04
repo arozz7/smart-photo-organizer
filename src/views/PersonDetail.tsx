@@ -247,6 +247,7 @@ const PersonDetail = () => {
                 onConfirm={onMoveFaces}
                 initialValue=""
                 count={selectedFaces.size}
+                faceIds={Array.from(selectedFaces)}
             />
 
             <EditPersonNameModal

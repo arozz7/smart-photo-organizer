@@ -17,6 +17,8 @@ interface Face {
     person_name?: string
     width?: number
     height?: number
+    face_quality?: number
+    match_distance?: number
 }
 
 interface PeopleContextType {
@@ -46,6 +48,8 @@ export interface SmartIgnoreSettings {
     autoAssignThreshold: number;
     reviewThreshold: number;
     enableAutoTiering: boolean;
+    enableAiSuggestions: boolean;
+    aiSuggestionThreshold: number;
 }
 
 const PeopleContext = createContext<PeopleContextType | undefined>(undefined)

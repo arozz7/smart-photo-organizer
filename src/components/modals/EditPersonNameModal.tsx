@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { PersonNameInput } from '../PersonNameInput';
 
 interface EditPersonNameModalProps {
     isOpen: boolean;
@@ -38,16 +39,15 @@ const EditPersonNameModal = ({
 
                 <div className="mb-6">
                     <label className="block text-gray-400 text-sm mb-2">New Name</label>
-                    <input
-                        type="text"
-                        value={name}
-                        onChange={e => setName(e.target.value)}
-                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    <PersonNameInput
                         autoFocus
-                        onKeyDown={e => {
-                            if (e.key === 'Enter') onRename(name);
-                            if (e.key === 'Escape') onClose();
-                        }}
+                        value={name}
+                        onChange={setName}
+                        onCommit={() => name.trim() && onRename(name)}
+                        placeholder="New Name"
+                        className="w-full"
+                        onSelect={(_id, selectedName) => setName(selectedName)}
+                    // No descriptors for rename, just autocomplete which PersonNameInput handles by default
                     />
                     <p className="text-xs text-gray-500 mt-2">
                         Note: If this name belongs to another person, these two people will be <strong>merged</strong>. This cannot be undone.

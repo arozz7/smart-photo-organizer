@@ -4,6 +4,24 @@ import ScanWarningsModal from '../components/ScanWarningsModal';
 import { useAI } from '../context/AIContext';
 import { useAlert } from '../context/AlertContext';
 import { usePoseBackfill } from '../hooks/usePoseBackfill';
+import { usePeople } from '../context/PeopleContext';
+
+function SettingsToggle({ label, description, value, onChange }: { label: string, description: string, value: boolean, onChange: (val: boolean) => void }) {
+    return (
+        <div className="flex items-center justify-between">
+            <div>
+                <h4 className="font-medium text-white">{label}</h4>
+                <p className="text-sm text-gray-400 max-w-sm">{description}</p>
+            </div>
+            <button
+                onClick={() => onChange(!value)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${value ? 'bg-indigo-600' : 'bg-gray-700'}`}
+            >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${value ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+        </div>
+    );
+}
 
 function PreviewManager() {
     const [stats, setStats] = useState<{ count: number, size: number } | null>(null)
@@ -172,6 +190,7 @@ export default function Settings() {
     const [showWarningsModal, setShowWarningsModal] = useState(false);
     const { calculatingBlur, blurProgress, calculateBlurScores } = useAI();
     const { showAlert, showConfirm } = useAlert();
+    const { smartIgnoreSettings, updateSmartIgnoreSettings } = usePeople();
 
     const [aiProfile, setAiProfile] = useState<'balanced' | 'high'>('balanced');
     const [vlmEnabled, setVlmEnabled] = useState(false);
@@ -417,6 +436,42 @@ export default function Settings() {
                             </div>
                         </div>
                     </section>
+
+                    {/* Person Identification Settings */}
+                    <section className="space-y-4">
+                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Person Identification</h3>
+
+                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <SettingsToggle
+                                label="AI Name Suggestions"
+                                description="Suggest names for unknown faces based on visual similarity."
+                                value={smartIgnoreSettings?.enableAiSuggestions ?? true}
+                                onChange={(val) => updateSmartIgnoreSettings({ enableAiSuggestions: val })}
+                            />
+
+                            <div className="pt-4 border-t border-gray-700">
+                                <label className="block text-sm font-medium text-white mb-1">
+                                    Suggestion Strength: <span className="text-indigo-400">{(smartIgnoreSettings?.aiSuggestionThreshold ?? 0.6).toFixed(2)}</span>
+                                </label>
+                                <p className="text-xs text-gray-400 mb-3">
+                                    Higher values require stronger matches for suggestions. Lower values suggest more liberally.
+                                </p>
+                                <input
+                                    type="range"
+                                    min="0.3"
+                                    max="0.85"
+                                    step="0.01"
+                                    value={smartIgnoreSettings?.aiSuggestionThreshold ?? 0.6}
+                                    onChange={(e) => updateSmartIgnoreSettings({ aiSuggestionThreshold: parseFloat(e.target.value) })}
+                                    className="w-full accent-indigo-500"
+                                />
+                                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                                    <span>Liberal (0.3)</span>
+                                    <span>Strict (0.85)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
                 </div>
 
                 {/* Right Column */}
@@ -580,7 +635,7 @@ export default function Settings() {
             </div>
 
             {/* Scan Errors / Warnings */}
-            <section className="space-y-4">
+            <section className="space-y-4 pt-8">
                 <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Health & Logs</h3>
                 <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 flex justify-between items-center">
                     <div>
@@ -652,11 +707,6 @@ export default function Settings() {
                     </div>
                 )
             }
-
-            <ScanWarningsModal
-                isOpen={showWarningsModal}
-                onClose={() => setShowWarningsModal(false)}
-            />
         </div>
     )
 }
