@@ -359,5 +359,87 @@ export function registerDBHandlers() {
         }
     });
 
+    // --- POSE DATA BACKFILL (Phase 5) ---
+    ipcMain.handle('db:getPoseBackfillStatus', async () => {
+        try {
+            const status = FaceRepository.getPoseBackfillCount();
+            return {
+                success: true,
+                needsBackfill: status.needsBackfill,
+                total: status.total,
+                completed: status.total - status.needsBackfill,
+                percent: status.total > 0 ? Math.round(((status.total - status.needsBackfill) / status.total) * 100) : 100
+            };
+        } catch (error) {
+            console.error('[Main] db:getPoseBackfillStatus failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('db:processPoseBackfillBatch', async (_, { batchSize = 10 }) => {
+        try {
+            const faces = FaceRepository.getFacesNeedingPoseBackfill(batchSize);
+
+            if (faces.length === 0) {
+                return { success: true, processed: 0, message: 'No faces need backfill' };
+            }
+
+            let processed = 0;
+            let failed = 0;
+
+            for (const face of faces) {
+                try {
+                    const box = JSON.parse(face.box_json);
+                    const filePath = face.file_path;
+                    const orientation = face.orientation;
+
+                    // Call Python to extract pose
+                    const result = await pythonProvider.sendRequest('extract_face_pose', {
+                        filePath,
+                        box,
+                        orientation,
+                        faceId: face.id
+                    });
+
+                    if (result.success) {
+                        // Update database with pose data
+                        // Update database with pose data - default to 0 if null to mark as processed
+                        FaceRepository.updateFacePoseData(face.id, {
+                            pose_yaw: result.poseYaw ?? 0,
+                            pose_pitch: result.posePitch ?? 0,
+                            pose_roll: result.poseRoll ?? 0,
+                            face_quality: result.faceQuality ?? 0.5
+                        });
+                        processed++;
+                    } else {
+                        // Mark as processed with null values to avoid retrying failed faces
+                        FaceRepository.updateFacePoseData(face.id, {
+                            pose_yaw: 0, // Sentinel value indicating "processed but no pose"
+                            pose_pitch: null,
+                            pose_roll: null,
+                            face_quality: null
+                        });
+                        failed++;
+                    }
+                } catch (e) {
+                    console.error(`[Main] Failed to backfill pose for face ${face.id}:`, e);
+                    failed++;
+                }
+            }
+
+            const status = FaceRepository.getPoseBackfillCount();
+            return {
+                success: true,
+                processed,
+                failed,
+                remaining: status.needsBackfill,
+                percent: status.total > 0 ? Math.round(((status.total - status.needsBackfill) / status.total) * 100) : 100
+            };
+        } catch (error) {
+            console.error('[Main] db:processPoseBackfillBatch failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
 }
 

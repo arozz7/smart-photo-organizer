@@ -30,16 +30,16 @@
     - **Status:** ✅ Implemented in v0.4.5.
 - **Scan-Time Confidence Tiering (Phase 2):**
     - **Goal:** Auto-classify new faces at scan time into high-confidence, review, or unknown tiers.
-    - **Status:** Specification Complete.
+    - **Status:** ✅ Implemented in v0.4.5 (See `aiChangeLog/phase-21-confidence-tiering.md`).
 - **Smart Ignore UI Panel (Phase 3):**
     - **Goal:** Unified dashboard for managing thresholds and bulk actions.
-    - **Status:** Specification Complete (UI Drafted).
+    - **Status:** ✅ Implemented in v0.4.5 [See Changelog](aiChangeLog/phase-22-smart-ignore-panel.md)
 - **Misassigned Face Detection (Phase 4):**
     - **Goal:** Identify faces incorrectly assigned to a person using distance-to-centroid analysis.
-    - **Status:** Specification Complete.
+    - **Status:** ✅ Implemented in v0.4.5 [See Changelog](aiChangeLog\phase-19-outlier-detection.md)
 - **Challenging Face Recognition (Phase 5):**
     - **Goal:** Improve matches for side profiles, partial faces, and occlusions using pose-aware matching and multi-sample voting.
-    - **Status:** Specification Complete.
+    - **Status:** ✅ Implemented in v0.4.5 [See Changelog](aiChangeLog/phase-23-challenging-recognition.md)
 - **Unified Person Name Input (Phase 6):**
     - **Goal:** Standardize AI-powered name suggestions and autocomplete across all assignment interfaces.
     - **Status:** Specification Complete.

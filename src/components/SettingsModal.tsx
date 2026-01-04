@@ -21,6 +21,8 @@ interface AISettings {
     vlmMaxTokens: number;
     hideUnnamedFacesByDefault: boolean;
     vlmEnabled: boolean;
+    autoAssignThreshold?: number;
+    reviewThreshold?: number;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => {
@@ -174,6 +176,32 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                             onChange={(e) => setSettings(prev => ({ ...prev, hideUnnamedFacesByDefault: e.target.checked }))}
                                             className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-900"
                                         />
+                                    </div>
+
+                                    {/* Smart Tiering Section */}
+                                    <div className="pt-4 border-t border-gray-800">
+                                        <h3 className="text-lg font-semibold text-amber-400 mb-2">Face Matching Thresholds</h3>
+                                        <p className="text-xs text-gray-500 mb-4">
+                                            Controls how strict face matching is during scanning. <strong>Lower values = stricter matching</strong> (fewer but more confident matches). Changes apply to future scans.
+                                        </p>
+
+                                        <SettingSlider
+                                            label="Auto-Assign (High Confidence)"
+                                            value={settings.autoAssignThreshold || 0.70}
+                                            min={0.4} max={1.0} step={0.05}
+                                            onChange={(v) => handleChange('autoAssignThreshold', v)}
+                                            tooltip="LOWER = fewer auto-assigns but more accurate. HIGHER = more auto-assigns but may include false matches. Default 0.70 (~75% similarity)."
+                                        />
+
+                                        <div className="mt-4">
+                                            <SettingSlider
+                                                label="Review Tier Cutoff"
+                                                value={settings.reviewThreshold || 0.90}
+                                                min={0.6} max={1.2} step={0.05}
+                                                onChange={(v) => handleChange('reviewThreshold', v)}
+                                                tooltip="LOWER = fewer suggestions shown for review. HIGHER = more suggestions but includes weaker matches. Default 0.90 (~60% similarity)."
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </Tabs.Content>

@@ -368,27 +368,57 @@ ALTER TABLE faces ADD COLUMN match_distance REAL;
 
 ### Backend Changes
 
-#### [MODIFY] [main.py](file:///j:/Projects/smart-photo-organizer/src/python/main.py)
+#### [NEW] [face_classifier.py](file:///j:/Projects/smart-photo-organizer/src/python/core/face_classifier.py)
 
-Modify the `scan_faces` command response to include tier classification:
+Encapsulates the tiering logic to keep `main.py` clean.
 
 ```python
-# After face detection and embedding extraction:
+class FaceClassifier:
+    def __init__(self):
+        # Thresholds could be configurable
+        self.high_conf_threshold = 0.4
+        self.review_threshold = 0.6
+        
+    def classify_face(self, face_embedding, matches):
+        """
+        Classifies a face into 'high', 'review', or 'unknown' tier based on matches.
+        Returns: (tier, suggested_person_id, match_distance)
+        """
+        if not matches:
+            return 'unknown', None, None
+            
+        best_match = matches[0]
+        distance = best_match['distance']
+        person_id = get_person_id_from_face(best_match['id'])
+        
+        if distance < self.high_conf_threshold:
+            return 'high', person_id, distance
+        elif distance < self.review_threshold:
+            return 'review', person_id, distance
+        else:
+            return 'unknown', None, distance
+```
+
+#### [MODIFY] [main.py](file:///j:/Projects/smart-photo-organizer/src/python/main.py)
+
+Integrate the classifier:
+
+```python
+# Import
+from core.face_classifier import FaceClassifier
+
+# Initialize
+classifier = FaceClassifier()
+
+# Inside scan_faces or analyze_image:
 for face in detected_faces:
-    # Search for matches in named person index
     matches = vector_store.search_index(face.embedding, k=1, threshold=0.7)
     
-    if matches and matches[0]['distance'] < 0.4:
-        face['confidence_tier'] = 'high'
-        face['suggested_person_id'] = get_person_id_from_face(matches[0]['id'])
-    elif matches and matches[0]['distance'] < 0.6:
-        face['confidence_tier'] = 'review'
-        face['suggested_person_id'] = get_person_id_from_face(matches[0]['id'])
-    else:
-        face['confidence_tier'] = 'unknown'
-        face['suggested_person_id'] = None
+    tier, suggested_id, distance = classifier.classify_face(face.embedding, matches)
     
-    face['match_distance'] = matches[0]['distance'] if matches else None
+    face['confidence_tier'] = tier
+    face['suggested_person_id'] = suggested_id
+    face['match_distance'] = distance
 ```
 
 ### Frontend Changes
@@ -406,7 +436,7 @@ Display confidence tier badge on each face thumbnail.
 
 ---
 
-## Feature 3: Smart Ignore UI Panel
+## Feature 3: Smart Ignore UI Panel (✅ Implemented)
 
 ### Overview
 
@@ -460,7 +490,7 @@ interface SmartIgnoreSettings {
 
 ---
 
-## Feature 4: Misassigned Face Detection
+## Feature 4: Misassigned Face Detection (✅ Implemented)
 
 ### Overview
 
@@ -656,7 +686,7 @@ interface Props {
 
 ---
 
-## Feature 5: Challenging Face Recognition
+## Feature 5: Challenging Face Recognition (✅ Implemented)
 
 ### Overview
 

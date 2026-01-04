@@ -4,6 +4,7 @@ import { PersonService } from './PersonService';
 import logger from '../../logger';
 import { getDB } from '../../db';
 import { getAISettings } from '../../store';
+import { FaceAnalysisService } from './FaceAnalysisService';
 
 /**
  * Result of a face matching operation.
@@ -154,18 +155,38 @@ export class FaceService {
                     const originalIdx = pendingIndices[j];
                     const matches = batchFaiss[j];
 
+                    // Phase 5: Multi-Sample Voting
+                    const candidates: { personId: number; distance: number }[] = [];
+                    const personNames = new Map<number, string>();
+
                     for (const m of matches) {
                         if (faceToPerson.has(m.id)) {
                             const p = faceToPerson.get(m.id)!;
-                            results[originalIdx] = {
-                                personId: p.personId,
-                                personName: p.name,
-                                similarity: 1 / (1 + m.distance),
-                                distance: m.distance,
-                                matchType: 'faiss'
-                            };
-                            break;
+                            candidates.push({ personId: p.personId, distance: m.distance });
+                            if (!personNames.has(p.personId)) personNames.set(p.personId, p.name);
                         }
+                    }
+
+                    const consensus = FaceAnalysisService.consensusVoting(candidates);
+
+                    if (consensus) {
+                        results[originalIdx] = {
+                            personId: consensus.personId,
+                            personName: personNames.get(consensus.personId)!,
+                            similarity: 1 / (1 + consensus.distance),
+                            distance: consensus.distance,
+                            matchType: 'faiss'
+                        };
+                    } else if (candidates.length > 0) {
+                        // Fallback to best single match if voting fails (unlikely)
+                        const best = candidates[0];
+                        results[originalIdx] = {
+                            personId: best.personId,
+                            personName: personNames.get(best.personId)!,
+                            similarity: 1 / (1 + best.distance),
+                            distance: best.distance,
+                            matchType: 'faiss'
+                        };
                     }
                 }
             }
@@ -285,15 +306,23 @@ export class FaceService {
             .map(f => f.descriptor);
 
         // Pre-calculate matches for all faces (returns null if no match found within default threshold)
-        // We use a high threshold to capture 'Review' tier candidates
-        // Tier Thresholds: High < 0.4, Review < 0.6.  Match default is usually 0.65.
-        // We'll trust matchBatch to return matches up to ~0.65
+        // IMPORTANT: FAISS uses L2 distance on NORMALIZED vectors (range 0-2, lower = better match)
+        // Read thresholds from settings
+        const settings = getAISettings();
+        const HIGH_THRESHOLD = settings.autoAssignThreshold || 0.7;     // L2 distance for auto-assign
+        const REVIEW_THRESHOLD = settings.reviewThreshold || 0.9;       // L2 distance for review tier
+        const SEARCH_CUTOFF = Math.max(REVIEW_THRESHOLD + 0.1, 1.0);    // Search a bit beyond review tier
         let matchResults: (FaceMatch | null)[] = [];
         if (descriptorsToMatch.length > 0) {
             matchResults = await this.matchBatch(descriptorsToMatch, {
-                threshold: 0.65,
-                searchFn: async (d, k, t) => aiProvider.searchFaces(d, k, t)
+                threshold: SEARCH_CUTOFF, // L2 distance - captures all candidates within review range
+                searchFn: aiProvider ? async (d, k, t) => aiProvider.searchFaces(d, k, t) : undefined
             });
+            // DEBUG: Track tier classification statistics
+            const matchCount = matchResults.filter(m => m !== null).length;
+            const highCount = matchResults.filter(m => m && m.distance < HIGH_THRESHOLD).length;
+            const reviewCount = matchResults.filter(m => m && m.distance >= HIGH_THRESHOLD && m.distance < REVIEW_THRESHOLD).length;
+            logger.info(`[FaceService] Tier Stats: ${descriptorsToMatch.length} descriptors, ${matchCount} matched, ${highCount} high, ${reviewCount} review (thresholds: high<${HIGH_THRESHOLD}, review<${REVIEW_THRESHOLD})`);
         }
 
         let matchIdx = 0;
@@ -345,28 +374,31 @@ export class FaceService {
                     const dist = matchData.distance;
                     matchDistance = dist;
 
-                    if (dist < 0.4) {
+                    // Phase 5: Quality-Adjusted Thresholds
+                    // Dynamic threshold based on face quality (e.g. side profile gets relaxed threshold)
+                    const fQuality = face.faceQuality ?? 0.5;
+                    const adjHighThreshold = FaceAnalysisService.getQualityAdjustedThreshold(HIGH_THRESHOLD, fQuality);
+                    const adjReviewThreshold = FaceAnalysisService.getQualityAdjustedThreshold(REVIEW_THRESHOLD, fQuality);
+
+                    if (dist < adjHighThreshold) {
                         // High Confidence -> Auto Assign
-                        // Only auto-assign if not already assigned manually to someone else??
-                        // For now, if it's a new face or unassigned, assigned.
-                        // If updating existing, maybe preserve? 
-                        // Assuming scan refreshes state.
                         if (!personId) {
                             personId = matchData.personId;
                             confidenceTier = 'high';
-                            suggestedPersonId = matchData.personId; // Also set suggested
+                            suggestedPersonId = matchData.personId;
                             assignedCount++;
                         }
-                    } else if (dist < 0.6) {
+                    } else if (dist < adjReviewThreshold) {
                         // Review Tier
                         if (!personId) {
                             confidenceTier = 'review';
                             suggestedPersonId = matchData.personId;
-                            logger.info(`[FaceService] Face classified as REVIEW tier (dist=${matchDistance?.toFixed(3)}). Suggested: ${matchData.personId}`);
+                            // Log why we are in review (distance vs threshold)
+                            logger.info(`[FaceService] Face classified as REVIEW tier (dist=${matchDistance?.toFixed(3)} < ${adjReviewThreshold.toFixed(3)}). Suggested: ${matchData.personId}`);
                         }
                     } else {
                         // Unknown Tier
-                        logger.info(`[FaceService] Face classified as UNKNOWN tier (dist=${matchDistance?.toFixed(3)})`);
+                        logger.info(`[FaceService] Face classified as UNKNOWN tier (dist=${matchDistance?.toFixed(3)} >= ${adjReviewThreshold.toFixed(3)})`);
                     }
                 }
 
@@ -381,6 +413,7 @@ export class FaceService {
                         UPDATE faces 
                         SET descriptor = ?, box_json = ?, blur_score = ?, 
                             confidence_tier = ?, suggested_person_id = ?, match_distance = ?,
+                            pose_yaw = ?, pose_pitch = ?, pose_roll = ?, face_quality = ?,
                             person_id = COALESCE(person_id, ?) -- Only set if null
                         WHERE id = ?
                     `).run(
@@ -390,6 +423,10 @@ export class FaceService {
                         confidenceTier,
                         suggestedPersonId,
                         matchDistance,
+                        face.poseYaw ?? null,
+                        face.posePitch ?? null,
+                        face.poseRoll ?? null,
+                        face.faceQuality ?? null,
                         personId, // Coalesce fallback
                         bestMatch.id
                     );
@@ -399,9 +436,10 @@ export class FaceService {
                     const info = db.prepare(`
                         INSERT INTO faces (
                             photo_id, person_id, descriptor, box_json, blur_score, 
-                            is_reference, confidence_tier, suggested_person_id, match_distance
+                            is_reference, confidence_tier, suggested_person_id, match_distance,
+                            pose_yaw, pose_pitch, pose_roll, face_quality
                         )
-                        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
                      `).run(
                         photoId,
                         personId,
@@ -410,7 +448,11 @@ export class FaceService {
                         face.blurScore,
                         confidenceTier,
                         suggestedPersonId,
-                        matchDistance
+                        matchDistance,
+                        face.poseYaw ?? null,
+                        face.posePitch ?? null,
+                        face.poseRoll ?? null,
+                        face.faceQuality ?? null
                     );
                     finalId = Number(info.lastInsertRowid);
                 }

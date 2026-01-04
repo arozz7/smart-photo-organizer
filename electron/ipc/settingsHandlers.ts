@@ -143,4 +143,13 @@ export function registerSettingsHandlers() {
             return { success: false, error: e.message };
         }
     });
+
+    ipcMain.handle('settings:getSmartIgnoreSettings', () => {
+        return ConfigService.getSmartIgnoreSettings();
+    });
+
+    ipcMain.handle('settings:updateSmartIgnoreSettings', (_, settings) => {
+        ConfigService.updateSmartIgnoreSettings(settings);
+        return { success: true };
+    });
 }

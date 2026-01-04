@@ -39,10 +39,31 @@ const PersonFaceItem = memo(({ face, isSelected, toggleSelection, isCover, onSet
                 )}
 
                 {isSelected && (
-                    <div className="absolute top-2 right-2 bg-blue-500 rounded-full p-1">
+                    <div className="absolute top-2 right-2 bg-blue-500 rounded-full p-1 z-10">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" viewBox="0 0 20 20" fill="currentColor">
                             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                         </svg>
+                    </div>
+                )}
+
+                {/* Data Quality & Confidence Indicators */}
+                {!isSelected && (
+                    <div className="absolute top-2 right-2 flex flex-col gap-1 items-end z-10 pointer-events-none">
+                        {/* Low Recognition Confidence (Review Tier) */}
+                        {face.match_distance !== undefined && face.match_distance > 0.4 && (
+                            <div className="bg-orange-500/90 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm backdrop-blur-sm" title={`Weak Match (${Math.round((1 / (1 + face.match_distance)) * 100)}%)`}>
+                                ?
+                            </div>
+                        )}
+
+                        {/* Low Quality / Side Profile */}
+                        {face.face_quality !== undefined && face.face_quality < 0.5 && (
+                            <div className="bg-gray-700/80 text-white rounded p-0.5 shadow-sm backdrop-blur-sm" title="Low Quality / Side Profile">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                </svg>
+                            </div>
+                        )}
                     </div>
                 )}
 

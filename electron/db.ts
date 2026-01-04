@@ -158,6 +158,23 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     db.exec('ALTER TABLE faces ADD COLUMN match_distance REAL');
   } catch (e) { /* Column exists */ }
 
+  // --- MIGRATION: Challenging Face Recognition (Phase 5) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_yaw REAL');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_pitch REAL');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_roll REAL');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN face_quality REAL');
+  } catch (e) { /* Column exists */ }
+
   // --- MIGRATION: Smart Face Storage (BLOBs + Pruning) ---
   try {
     // 1. Add new columns

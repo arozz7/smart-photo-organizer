@@ -30,7 +30,7 @@ export default defineConfig({
             ]
         },
 
-        // Alias for imports
+        // Alias for imports (deprecated in newer Vitest, prefer resolve.alias)
         alias: {
             '@': path.resolve(__dirname, './src'),
             '@electron': path.resolve(__dirname, './electron')

@@ -35,6 +35,8 @@ const TEST_SCHEMA = `
     gps_latitude REAL,
     gps_longitude REAL,
     preview_cache_path TEXT,
+    blur_score REAL,
+    description TEXT,
     metadata_json TEXT,
     scan_status TEXT DEFAULT 'pending',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -66,6 +68,10 @@ const TEST_SCHEMA = `
     confidence_tier TEXT DEFAULT 'unknown',
     suggested_person_id INTEGER,
     match_distance REAL,
+    pose_yaw REAL,
+    pose_pitch REAL,
+    pose_roll REAL,
+    face_quality REAL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
     FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
@@ -123,11 +129,15 @@ export function seedPhoto(db: Database.Database, overrides: Partial<TestPhoto> =
     };
 
     const stmt = db.prepare(`
-    INSERT INTO photos (file_path, file_name, file_size, width, height, date_taken, metadata_json)
-    VALUES (@file_path, @file_name, @file_size, @width, @height, @date_taken, @metadata_json)
+    INSERT INTO photos (file_path, file_name, file_size, width, height, date_taken, metadata_json, blur_score, description)
+    VALUES (@file_path, @file_name, @file_size, @width, @height, @date_taken, @metadata_json, @blur_score, @description)
   `);
 
-    const result = stmt.run(photo);
+    const result = stmt.run({
+        ...photo,
+        blur_score: photo.blur_score ?? null,
+        description: photo.description ?? null
+    });
     return result.lastInsertRowid as number;
 }
 
@@ -171,8 +181,16 @@ export function seedFace(
     };
 
     const stmt = db.prepare(`
-    INSERT INTO faces (photo_id, person_id, box_json, descriptor, confidence, blur_score, is_ignored, is_reference, confidence_tier, suggested_person_id, match_distance)
-    VALUES (@photo_id, @person_id, @box_json, @descriptor, @confidence, @blur_score, @is_ignored, @is_reference, @confidence_tier, @suggested_person_id, @match_distance)
+    INSERT INTO faces (
+        photo_id, person_id, box_json, descriptor, confidence, blur_score, 
+        is_ignored, is_reference, confidence_tier, suggested_person_id, match_distance,
+        pose_yaw, pose_pitch, pose_roll, face_quality
+    )
+    VALUES (
+        @photo_id, @person_id, @box_json, @descriptor, @confidence, @blur_score, 
+        @is_ignored, @is_reference, @confidence_tier, @suggested_person_id, @match_distance,
+        @pose_yaw, @pose_pitch, @pose_roll, @face_quality
+    )
   `);
 
     const result = stmt.run({
@@ -180,7 +198,11 @@ export function seedFace(
         person_id: face.person_id ?? null,
         descriptor: face.descriptor ?? null,
         suggested_person_id: face.suggested_person_id ?? null,
-        match_distance: face.match_distance ?? null
+        match_distance: face.match_distance ?? null,
+        pose_yaw: face.pose_yaw ?? null,
+        pose_pitch: face.pose_pitch ?? null,
+        pose_roll: face.pose_roll ?? null,
+        face_quality: face.face_quality ?? null
     });
 
     return result.lastInsertRowid as number;
@@ -202,6 +224,8 @@ interface TestPhoto {
     height: number;
     date_taken: string;
     metadata_json: string | null;
+    blur_score?: number;
+    description?: string;
 }
 
 interface TestFace {
@@ -216,4 +240,8 @@ interface TestFace {
     confidence_tier?: string;
     suggested_person_id?: number | null;
     match_distance?: number | null;
+    pose_yaw?: number;
+    pose_pitch?: number;
+    pose_roll?: number;
+    face_quality?: number;
 }

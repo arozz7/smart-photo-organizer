@@ -40,9 +40,11 @@ The AI automatically detects faces during the scan. Your job is to give them nam
 3.  **Merging:** If you accidentally created two entries for the same person (e.g., "John" and "John Doe"), simply rename one to match the other. The app will ask if you want to **merge** them.
     - **Performance:** Optimized to handle selecting thousands of faces without slowing down.
     - **RAW Support:** View original "Context" photos even for RAW files (ARW, CR2, etc.).
-    - **Confidence Tiers:**
-        - **Amber Ring:** Faces with an Amber Ring are "Suggestions". The AI is 40-60% sure. Click the "Check" mark or the suggested name to confirm.
-        - **Unknown:** Faces with no ring are truly unknown.
+    - **Confidence Tiers & Visual Indicators:**
+        - **Green Ring:** High confidence match (75%+ similarity). The AI has automatically assigned this face.
+        - **Amber Ring:** Suggestions requiring review (60-75% similarity). Click "Accept" to confirm.
+        - **'?' Badge:** Weak matches or side-profile detections that require manual verification.
+        - **No Ring:** Unknown faces with no close matches in your library.
 5.  **Refining Groups:**
     - **Ungroup:** If a suggested group contains mixed faces, click the **"Ungroup"** button on the row to break it apart and return the faces to the "Unmatched" pool for individual sorting.
     - **Filter Background Faces:** Use the **"Filter Background"** button in the header (funnel icon) to automatically detect and bulk-ignore "noise" faces (strangers/background crowds) that appear only once or twice.
@@ -120,7 +122,7 @@ Tools for maintaining the health and accuracy of your library:
 - **Clear AI Tags:** Removes all AI-generated tags while preserving your manual ones. Useful if you want to re-scan with a different performance profile.
 - **Cleanup Tags:** Normalizes all tags in the database (lowercase, single-word) and merges duplicates.
 - **Deduplicate Faces:** Scans for and merges potential duplicate face entries in your database.
-- **Deduplicate Faces:** Scans for and merges potential duplicate face entries in your database.
+- **Face Data Upgrade:** Detects and processes missing pose estimation data for improved recognition of side profiles.
 - **Calculate Blur Scores:** Missing scores for old scans? Use this to calculate quality scores for existing faces, enabling the "Cleanup Blurry" feature.
 - **Factory Reset:** ⚠️ **Extreme Caution.** Wipes the database and all settings to start fresh.
 
@@ -134,6 +136,9 @@ Click **"Manage Models"** in Settings for a transparent overview of your AI engi
 Other Fine-Tuning controls:
 - **Face Detection Confidence:** Adjust how sure the AI must be to mark a face.
 - **Face Blur Threshold:** Minimum quality score for faces.
+- **Face Matching Thresholds:** (Settings → General → Face Matching Thresholds)
+    - **Auto-Assign Threshold:** Controls which faces get automatically assigned during scanning. *Lower = stricter (fewer auto-assigns but more accurate). Higher = more auto-assigns but may include false matches.* Default: 0.70.
+    - **Review Tier Cutoff:** Controls which faces are marked for review (amber ring). *Lower = fewer suggestions. Higher = more suggestions but includes weaker matches.* Default: 0.90.
 - **Tagging Creativity (Temperature):** 
     - **LOWER (0.1 - 0.3):** Factual, consistent descriptions. 
     - **HIGHER (0.7+):** Multi-sentence, descriptive, and "creative" tagging.
