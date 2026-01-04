@@ -131,7 +131,10 @@ export function registerAIHandlers() {
     // The previous implementation was complex.
     ipcMain.handle('ai:rebuildIndex', async () => {
         try {
-            const faces = FaceRepository.getAllDescriptors();
+            // CRITICAL: Only index faces that belong to named people
+            // This ensures FAISS matches return valid person IDs for auto-assign
+            const faces = FaceRepository.getNamedFaceDescriptors();
+            logger.info(`[Main] Rebuilding FAISS index with ${faces.length} named person faces`);
             // Optimization: If too many faces, write to temp file?
             // For now, try direct payload.
             return await pythonProvider.sendRequest('rebuild_index', {

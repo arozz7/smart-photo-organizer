@@ -12,6 +12,9 @@ export interface AISettings {
     useGpu: boolean;
     vlmEnabled: boolean;
     runtimeUrl?: string;
+    // L2 distance thresholds for scan-time face classification
+    autoAssignThreshold?: number;  // Default 0.7 - faces below this are auto-assigned
+    reviewThreshold?: number;      // Default 0.9 - faces below this are review tier
 }
 
 export interface WindowBounds {
@@ -39,6 +42,12 @@ export interface SmartIgnoreSettings {
     centroidDistanceThreshold: number;
     /** Distance threshold for outlier (misassigned face) detection. Default: 1.2 */
     outlierThreshold: number;
+    /** Confidence threshold for auto-assigning High Tier faces (e.g. 0.4). Default: 0.4 */
+    autoAssignThreshold: number;
+    /** Confidence threshold for Review Tier faces (e.g. 0.6). Default: 0.6 */
+    reviewThreshold: number;
+    /** Whether to enable scan-time auto-tiering. Default: true */
+    enableAutoTiering: boolean;
 }
 
 export interface AppConfig {
@@ -52,7 +61,7 @@ export interface AppConfig {
 }
 
 // Default Config
-const DEFAULT_CONFIG: AppConfig = {
+export const DEFAULT_CONFIG: AppConfig = {
     libraryPath: '',
     aiSettings: {
         faceSimilarityThreshold: 0.65,
@@ -71,7 +80,10 @@ const DEFAULT_CONFIG: AppConfig = {
         minPhotoAppearances: 3,
         maxClusterSize: 2,
         centroidDistanceThreshold: 0.7,
-        outlierThreshold: 1.2
+        outlierThreshold: 1.2,
+        autoAssignThreshold: 0.4,
+        reviewThreshold: 0.6,
+        enableAutoTiering: true
     },
     ai_queue: []
 };

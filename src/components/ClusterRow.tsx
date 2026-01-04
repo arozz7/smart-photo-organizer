@@ -209,9 +209,11 @@ const ClusterRow = memo(({
                             key={face.id}
                             onClick={() => toggleFace(face.id)}
                             className={`w-24 h-24 flex-none relative group cursor-pointer rounded-md overflow-hidden transition-all ${isSelected
-                                    ? 'ring-4 ring-indigo-500 ring-offset-2 ring-offset-gray-900 z-10'
-                                    : face.confidence_tier === 'review'
-                                        ? 'ring-2 ring-amber-500/50 hover:ring-amber-500 z-0'
+                                ? 'ring-4 ring-indigo-500 ring-offset-2 ring-offset-gray-900 z-10'
+                                : face.confidence_tier === 'high'
+                                    ? 'ring-2 ring-green-500/80 hover:ring-green-500 z-0'
+                                    : (face.confidence_tier === 'review' || suggestion)
+                                        ? 'ring-2 ring-amber-500/80 hover:ring-amber-500 z-0'
                                         : 'hover:opacity-90'
                                 }`}
                         >

@@ -291,6 +291,25 @@ export class FaceRepository {
         }));
     }
 
+    /**
+     * Get descriptors ONLY for faces assigned to named people.
+     * CRITICAL: This is what should populate the FAISS index for scan-time matching.
+     * Including unnamed faces in FAISS causes false matches.
+     */
+    static getNamedFaceDescriptors(): { id: number, descriptor: number[] }[] {
+        const db = getDB();
+        const rows = db.prepare(`
+            SELECT f.id, f.descriptor 
+            FROM faces f 
+            JOIN people p ON f.person_id = p.id 
+            WHERE f.descriptor IS NOT NULL AND f.person_id IS NOT NULL
+        `).all() as any[];
+        return rows.map(r => ({
+            id: r.id,
+            descriptor: Array.from(new Float32Array(r.descriptor.buffer, r.descriptor.byteOffset, r.descriptor.byteLength / 4))
+        }));
+    }
+
     static getUnassignedDescriptors(): { id: number, descriptor: number[] }[] {
         const db = getDB();
         const rows = db.prepare('SELECT id, descriptor FROM faces WHERE descriptor IS NOT NULL AND person_id IS NULL AND (is_ignored = 0 OR is_ignored IS NULL)').all() as any[];

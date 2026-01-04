@@ -33,17 +33,19 @@ vi.mock('../../../electron/logger', () => ({
 }));
 
 // Mock PhotoService (as used in scanner.ts via dynamic imports)
-const mockExifToolInstance = {
-    version: vi.fn().mockResolvedValue('12.00'),
-    read: vi.fn().mockResolvedValue({ ImageWidth: 100, ImageHeight: 100 })
-};
+vi.mock('../../../electron/core/services/PhotoService', () => {
+    const mockExifToolInstance = {
+        version: vi.fn().mockResolvedValue('12.00'),
+        read: vi.fn().mockResolvedValue({ ImageWidth: 100, ImageHeight: 100 })
+    };
 
-vi.mock('../../../electron/core/services/PhotoService', () => ({
-    PhotoService: {
-        getExifTool: vi.fn().mockResolvedValue(mockExifToolInstance),
-        extractPreview: vi.fn().mockResolvedValue('/mock/previews/hash.jpg')
-    }
-}));
+    return {
+        PhotoService: {
+            getExifTool: vi.fn().mockResolvedValue(mockExifToolInstance),
+            extractPreview: vi.fn().mockResolvedValue('/mock/previews/hash.jpg')
+        }
+    };
+});
 
 // Mock fs/promises
 vi.mock('node:fs', async (importOriginal) => {

@@ -12,6 +12,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:fix": "npm rebuild better-sqlite3 && vitest run",
     "test:watch": "vitest",
     "test:backend": "vitest run --include 'tests/backend/**/*.test.ts'",
     "test:frontend": "vitest run --include 'tests/frontend/**/*.test.{ts,tsx}'",

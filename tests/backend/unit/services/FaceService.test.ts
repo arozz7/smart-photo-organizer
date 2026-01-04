@@ -44,7 +44,8 @@ vi.mock('../../../../electron/logger', () => ({
     default: {
         info: vi.fn(),
         error: vi.fn(),
-        warn: vi.fn()
+        warn: vi.fn(),
+        debug: vi.fn()
     }
 }));
 
@@ -245,7 +246,8 @@ describe('FaceService', () => {
             await FaceService.processAnalysisResult(photoId, detectedFaces, 100, 100, null);
 
             // Assert
-            expect(mockDBInstance.prepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE faces SET descriptor'));
+            expect(mockDBInstance.prepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE faces'));
+            expect(mockDBInstance.prepare).toHaveBeenCalledWith(expect.stringContaining('SET descriptor'));
         });
         it('should classify as Review tier if distance is between 0.4 and 0.6', async () => {
             // Arrange
@@ -267,7 +269,7 @@ describe('FaceService', () => {
             // Mock DB to return person info for face 99
             // @ts-ignore
             vi.mocked(mockPrepare.all).mockImplementation((...args: any[]) => {
-                if (args[0] === 99) return [{ person_id: 2, name: 'Bob' }];
+                if (args[0] === 99) return [{ id: 99, person_id: 2, name: 'Bob' }];
                 return [];
             });
 
@@ -313,7 +315,7 @@ describe('FaceService', () => {
 
             // @ts-ignore
             vi.mocked(mockPrepare.all).mockImplementation((...args: any[]) => {
-                if (args[0] === 99) return [{ person_id: 3, name: 'Charlie' }];
+                if (args[0] === 99) return [{ id: 99, person_id: 3, name: 'Charlie' }];
                 return [];
             });
 

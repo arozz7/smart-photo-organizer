@@ -34,6 +34,18 @@ interface PeopleContextType {
     rebuildIndex: () => Promise<{ success: boolean; count?: number; error?: string }>
     matchFace: (descriptor: any, options?: any) => Promise<any>
     matchBatch: (descriptors: any[], options?: any) => Promise<any[]>
+    smartIgnoreSettings: SmartIgnoreSettings | null
+    updateSmartIgnoreSettings: (settings: Partial<SmartIgnoreSettings>) => Promise<void>
+}
+
+export interface SmartIgnoreSettings {
+    minPhotoAppearances: number;
+    maxClusterSize: number;
+    centroidDistanceThreshold: number;
+    outlierThreshold: number;
+    autoAssignThreshold: number;
+    reviewThreshold: number;
+    enableAutoTiering: boolean;
 }
 
 const PeopleContext = createContext<PeopleContextType | undefined>(undefined)
@@ -42,6 +54,32 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     const [people, setPeople] = useState<Person[]>([])
     const [faces, setFaces] = useState<Face[]>([])
     const [loading, setLoading] = useState(false)
+    const [smartIgnoreSettings, setSmartIgnoreSettings] = useState<SmartIgnoreSettings | null>(null)
+
+    const loadSmartIgnoreSettings = useCallback(async () => {
+        try {
+            // @ts-ignore
+            const s = await window.ipcRenderer.invoke('settings:getSmartIgnoreSettings');
+            setSmartIgnoreSettings(s);
+        } catch (e) {
+            console.error("Failed to load smart ignore settings", e);
+        }
+    }, []);
+
+    const updateSmartIgnoreSettings = useCallback(async (settings: Partial<SmartIgnoreSettings>) => {
+        try {
+            // @ts-ignore
+            await window.ipcRenderer.invoke('settings:updateSmartIgnoreSettings', settings);
+            setSmartIgnoreSettings(prev => prev ? { ...prev, ...settings } : null);
+        } catch (e) {
+            console.error("Failed to update smart ignore settings", e);
+        }
+    }, []);
+
+    // Load settings on mount
+    React.useEffect(() => {
+        loadSmartIgnoreSettings();
+    }, [loadSmartIgnoreSettings]);
 
     const loadPeople = useCallback(async () => {
         setLoading(true)
@@ -215,8 +253,9 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         loadPeople, loadFaces, loadUnnamedFaces, fetchFacesByIds, assignPerson,
         ignoreFace, ignoreFaces, autoNameFaces,
         rebuildIndex,
-        matchFace, matchBatch
-    }), [people, faces, loading, matchFace, matchBatch])
+        matchFace, matchBatch,
+        smartIgnoreSettings, updateSmartIgnoreSettings
+    }), [people, faces, loading, matchFace, matchBatch, smartIgnoreSettings, updateSmartIgnoreSettings])
 
     return (
         <PeopleContext.Provider value={value}>

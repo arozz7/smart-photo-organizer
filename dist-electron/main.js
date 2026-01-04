@@ -1025,6 +1025,24 @@ class FaceRepository {
       descriptor: Array.from(new Float32Array(r.descriptor.buffer, r.descriptor.byteOffset, r.descriptor.byteLength / 4))
     }));
   }
+  /**
+   * Get descriptors ONLY for faces assigned to named people.
+   * CRITICAL: This is what should populate the FAISS index for scan-time matching.
+   * Including unnamed faces in FAISS causes false matches.
+   */
+  static getNamedFaceDescriptors() {
+    const db2 = getDB();
+    const rows = db2.prepare(`
+            SELECT f.id, f.descriptor 
+            FROM faces f 
+            JOIN people p ON f.person_id = p.id 
+            WHERE f.descriptor IS NOT NULL AND f.person_id IS NOT NULL
+        `).all();
+    return rows.map((r) => ({
+      id: r.id,
+      descriptor: Array.from(new Float32Array(r.descriptor.buffer, r.descriptor.byteOffset, r.descriptor.byteLength / 4))
+    }));
+  }
   static getUnassignedDescriptors() {
     const db2 = getDB();
     const rows = db2.prepare("SELECT id, descriptor FROM faces WHERE descriptor IS NOT NULL AND person_id IS NULL AND (is_ignored = 0 OR is_ignored IS NULL)").all();
@@ -1215,7 +1233,10 @@ const DEFAULT_CONFIG = {
     minPhotoAppearances: 3,
     maxClusterSize: 2,
     centroidDistanceThreshold: 0.7,
-    outlierThreshold: 1.2
+    outlierThreshold: 1.2,
+    autoAssignThreshold: 0.4,
+    reviewThreshold: 0.6,
+    enableAutoTiering: true
   },
   ai_queue: []
 };
@@ -1620,12 +1641,21 @@ class FaceService {
     }
     const facesForFaiss = [];
     const descriptorsToMatch = faces.filter((f) => f.descriptor && f.descriptor.length > 0).map((f) => f.descriptor);
+    const settings = getAISettings();
+    const HIGH_THRESHOLD = settings.autoAssignThreshold || 0.7;
+    const REVIEW_THRESHOLD = settings.reviewThreshold || 0.9;
+    const SEARCH_CUTOFF = Math.max(REVIEW_THRESHOLD + 0.1, 1);
     let matchResults = [];
     if (descriptorsToMatch.length > 0) {
       matchResults = await this.matchBatch(descriptorsToMatch, {
-        threshold: 0.65,
-        searchFn: async (d, k, t) => aiProvider.searchFaces(d, k, t)
+        threshold: SEARCH_CUTOFF,
+        // L2 distance - captures all candidates within review range
+        searchFn: aiProvider ? async (d, k, t) => aiProvider.searchFaces(d, k, t) : void 0
       });
+      const matchCount = matchResults.filter((m) => m !== null).length;
+      const highCount = matchResults.filter((m) => m && m.distance < HIGH_THRESHOLD).length;
+      const reviewCount = matchResults.filter((m) => m && m.distance >= HIGH_THRESHOLD && m.distance < REVIEW_THRESHOLD).length;
+      logger.info(`[FaceService] Tier Stats: ${descriptorsToMatch.length} descriptors, ${matchCount} matched, ${highCount} high, ${reviewCount} review (thresholds: high<${HIGH_THRESHOLD}, review<${REVIEW_THRESHOLD})`);
     }
     let matchIdx = 0;
     let assignedCount = 0;
@@ -1666,14 +1696,14 @@ class FaceService {
         if (matchData) {
           const dist = matchData.distance;
           matchDistance = dist;
-          if (dist < 0.4) {
+          if (dist < HIGH_THRESHOLD) {
             if (!personId) {
               personId = matchData.personId;
               confidenceTier = "high";
               suggestedPersonId = matchData.personId;
               assignedCount++;
             }
-          } else if (dist < 0.6) {
+          } else if (dist < REVIEW_THRESHOLD) {
             if (!personId) {
               confidenceTier = "review";
               suggestedPersonId = matchData.personId;
@@ -2430,7 +2460,8 @@ function registerAIHandlers() {
   });
   ipcMain.handle("ai:rebuildIndex", async () => {
     try {
-      const faces = FaceRepository.getAllDescriptors();
+      const faces = FaceRepository.getNamedFaceDescriptors();
+      logger.info(`[Main] Rebuilding FAISS index with ${faces.length} named person faces`);
       return await pythonProvider.sendRequest("rebuild_index", {
         descriptors: faces.map((f) => f.descriptor),
         ids: faces.map((f) => f.id)
@@ -3079,6 +3110,13 @@ function registerSettingsHandlers() {
     } catch (e) {
       return { success: false, error: e.message };
     }
+  });
+  ipcMain.handle("settings:getSmartIgnoreSettings", () => {
+    return ConfigService.getSmartIgnoreSettings();
+  });
+  ipcMain.handle("settings:updateSmartIgnoreSettings", (_, settings) => {
+    ConfigService.updateSmartIgnoreSettings(settings);
+    return { success: true };
   });
 }
 async function getExifTool() {
