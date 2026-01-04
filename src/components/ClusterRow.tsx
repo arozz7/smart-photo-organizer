@@ -54,9 +54,47 @@ const ClusterRow = memo(({
     }, [faceIds, fetchFacesByIds])
 
     // Get Suggestions
+    const { people } = usePeople(); // Need people to look up names for stored suggestions
+
     useEffect(() => {
         if (!loaded || clusterFaces.length === 0) return;
 
+        // 1. Check for stored suggestions (Scan-Time Tiering)
+        // We look for a consensus or majority suggestion in the cluster
+        const suggestionCounts = new Map<number, number>();
+        let maxCount = 0;
+        let bestStoredId: number | null = null;
+
+        for (const f of clusterFaces) {
+            if (f.suggested_person_id) {
+                const count = (suggestionCounts.get(f.suggested_person_id) || 0) + 1;
+                suggestionCounts.set(f.suggested_person_id, count);
+                if (count > maxCount) {
+                    maxCount = count;
+                    bestStoredId = f.suggested_person_id;
+                }
+            }
+        }
+
+        if (bestStoredId) {
+            const person = people.find(p => p.id === bestStoredId);
+            if (person) {
+                // Determine similarity from match_distance of the faces
+                // Use the best (lowest) distance found for this person
+                const bestDist = Math.min(...clusterFaces
+                    .filter(f => f.suggested_person_id === bestStoredId && f.match_distance !== undefined)
+                    .map(f => f.match_distance || 1));
+
+                setSuggestion({
+                    personId: person.id,
+                    personName: person.name,
+                    similarity: 1 / (1 + bestDist)
+                });
+                return; // Skip expensive matchBatch if we have a stored suggestion
+            }
+        }
+
+        // 2. Fallback to Real-time Matching (for old scans or unassigned)
         const sampleDescriptors = clusterFaces
             .slice(0, 5)
             .map(f => f.descriptor)
@@ -72,13 +110,14 @@ const ClusterRow = memo(({
                         counts[r.personId].maxSim = Math.max(counts[r.personId].maxSim, r.similarity);
                     }
                 });
-                const winner = Object.values(counts).sort((a: any, b: any) => b.count - a.count || b.maxSim - a.maxSim)[0] as any;
+                const winners = Object.values(counts).sort((a: any, b: any) => b.count - a.count || b.maxSim - a.maxSim);
+                const winner = winners[0] as any;
                 if (winner && winner.maxSim > 0.6) {
                     setSuggestion(winner.person);
                 }
             });
         }
-    }, [loaded, clusterFaces, matchBatch]);
+    }, [loaded, clusterFaces, matchBatch, people]);
 
     // Memoize selection calculation to avoid recalc on every render if not needed
     // But since selectedFaceIds changes, this will run. The key is that React.memo on the COMPONENT 
@@ -169,7 +208,11 @@ const ClusterRow = memo(({
                         <div
                             key={face.id}
                             onClick={() => toggleFace(face.id)}
-                            className={`w-24 h-24 flex-none relative group cursor-pointer rounded-md overflow-hidden transition-all ${isSelected ? 'ring-4 ring-indigo-500 ring-offset-2 ring-offset-gray-900 z-10' : 'hover:opacity-90'
+                            className={`w-24 h-24 flex-none relative group cursor-pointer rounded-md overflow-hidden transition-all ${isSelected
+                                    ? 'ring-4 ring-indigo-500 ring-offset-2 ring-offset-gray-900 z-10'
+                                    : face.confidence_tier === 'review'
+                                        ? 'ring-2 ring-amber-500/50 hover:ring-amber-500 z-0'
+                                        : 'hover:opacity-90'
                                 }`}
                         >
                             <FaceThumbnail

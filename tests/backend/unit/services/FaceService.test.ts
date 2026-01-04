@@ -9,9 +9,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // 1. Create stable mocks for nested objects
 const mockPrepare = {
-    run: vi.fn(() => ({ lastInsertRowid: 1 })),
-    all: vi.fn(() => []),
-    get: vi.fn(() => ({}))
+    run: vi.fn((..._args: any[]) => ({ lastInsertRowid: 1 })),
+    all: vi.fn((..._args: any[]): any[] => []),
+    get: vi.fn((..._args: any[]) => ({}))
 };
 
 const mockDBInstance = {
@@ -246,6 +246,88 @@ describe('FaceService', () => {
 
             // Assert
             expect(mockDBInstance.prepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE faces SET descriptor'));
+        });
+        it('should classify as Review tier if distance is between 0.4 and 0.6', async () => {
+            // Arrange
+            const photoId = 11;
+            const detectedFaces = [
+                { box: { x: 0, y: 0, width: 10, height: 10 }, descriptor: [1.0], blurScore: 50 }
+            ];
+            vi.mocked(FaceRepository.getFacesByPhoto).mockReturnValue([]);
+
+            const aiProvider = {
+                addToIndex: vi.fn(),
+                // Mock search to return a match with distance 0.5 (Review Tier)
+                searchFaces: vi.fn().mockResolvedValue([
+                    [{ id: 99, distance: 0.5 }]
+                ])
+            };
+
+            // Mock DB to return person info for face 99
+            // Mock DB to return person info for face 99
+            // @ts-ignore
+            vi.mocked(mockPrepare.all).mockImplementation((...args: any[]) => {
+                if (args[0] === 99) return [{ person_id: 2, name: 'Bob' }];
+                return [];
+            });
+
+            // Act
+            await FaceService.processAnalysisResult(photoId, detectedFaces, 100, 100, aiProvider);
+
+            // Assert
+            // Verify INSERT includes confidence_tier='review' and suggested_person_id=2
+            // Arguments are positional in the SQL helper we mocked via global mockPrepare?
+            // Wait, mockPrepare is global object in test file, but mocked via vi.mock('../db').
+            // We need to inspect the call arguments to `run`.
+            const runCalls = mockPrepare.run.mock.calls;
+            const insertCall = runCalls.find((c: any) => c.length >= 7); // Insert has many params
+
+            // Param positions based on query:
+            // photo_id, person_id, descriptor, box_json, blur_score, confidence_tier, suggested_person_id, match_distance
+            // indices: 0, 1, 2, 3, 4, 5, 6, 7
+
+            expect(insertCall).toBeDefined();
+            // index 5 is confidence_tier
+            expect(insertCall![5]).toBe('review');
+            // index 6 is suggested_person_id
+            expect(insertCall![6]).toBe(2);
+            // index 7 is match_distance
+            expect(insertCall![7]).toBe(0.5);
+        });
+
+        it('should auto-assign High tier if distance < 0.4', async () => {
+            // Arrange
+            const photoId = 12;
+            const detectedFaces = [
+                { box: { x: 0, y: 0, width: 10, height: 10 }, descriptor: [1.0], blurScore: 50 }
+            ];
+            vi.mocked(FaceRepository.getFacesByPhoto).mockReturnValue([]);
+
+            const aiProvider = {
+                addToIndex: vi.fn(),
+                // Mock search to return a match with distance 0.2 (High Tier)
+                searchFaces: vi.fn().mockResolvedValue([
+                    [{ id: 99, distance: 0.2 }]
+                ])
+            };
+
+            // @ts-ignore
+            vi.mocked(mockPrepare.all).mockImplementation((...args: any[]) => {
+                if (args[0] === 99) return [{ person_id: 3, name: 'Charlie' }];
+                return [];
+            });
+
+            // Act
+            await FaceService.processAnalysisResult(photoId, detectedFaces, 100, 100, aiProvider);
+
+            // Assert
+            const runCalls = mockPrepare.run.mock.calls;
+            const insertCall = runCalls[runCalls.length - 1]; // Last call
+
+            // person_id (index 1) should be set
+            expect(insertCall![1]).toBe(3);
+            // confidence_tier (index 5) should be 'high'
+            expect(insertCall![5]).toBe('high');
         });
     });
 });

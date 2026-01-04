@@ -15,7 +15,7 @@ interface ScanContextType {
     filter: any
     setFilter: (filter: any) => void
     loadingPhotos: boolean
-    rescanFiles: (ids: number[]) => Promise<void>
+    rescanFiles: (ids: number[], forceRescan?: boolean) => Promise<void>
     // From useLibraryMetadata
     availableTags: any[]
     loadTags: () => Promise<void>
@@ -211,20 +211,19 @@ export function ScanProvider({ children }: { children: ReactNode }) {
         }
     }
 
-    const rescanFiles = async (ids: number[]) => {
+    const rescanFiles = async (ids: number[], forceRescan: boolean = false) => {
         if (ids.length === 0) return;
         setActiveScanRequests(prev => prev + 1)
         try {
             // @ts-ignore
-            const filesData = await window.ipcRenderer.invoke('db:getFilePaths', ids);
-            const pathsToScan = filesData.map((f: any) => f.file_path);
+            const pathsToScan = await window.ipcRenderer.invoke('db:getFilePaths', ids);
 
             if (pathsToScan.length > 0) {
-                console.log(`[ScanContext] Rescanning ${pathsToScan.length} specific files...`);
+                console.log(`[ScanContext] Rescanning ${pathsToScan.length} specific files (force=${forceRescan})...`);
                 // @ts-ignore
-                const scannedPhotos = await window.ipcRenderer.invoke('scan-files', pathsToScan, { forceRescan: true });
+                const scannedPhotos = await window.ipcRenderer.invoke('scan-files', pathsToScan, { forceRescan });
 
-                // Queue Logic: Queue ALL returned photos as they are forced
+                // Queue Logic: Queue ALL returned photos as they are forced/requested
                 if (scannedPhotos.length > 0) {
                     addToQueue(scannedPhotos, true);
                 }

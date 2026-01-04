@@ -12,7 +12,7 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
 
 ## Features at a Glance
 
-*   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. Learns as you name them. Uses FAISS for lightning-fast similarity search across millions of faces.
+*   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. **Smart Confidence Tiers** classify matches as High, Review (Amber Ring), or Unknown. Learns as you name them. Uses FAISS for lightning-fast similarity search across millions of faces.
     
     ![People Interactions](docs/assets/PeopleSectionInteractions.gif)
 *   **⚙️ Configurable AI & Storage:** Fine-tune face detection, blur sensitivity, and tagging creativity settings. Choose where your library data (DB, previews, indices) is stored.
