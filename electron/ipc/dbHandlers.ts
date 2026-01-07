@@ -189,8 +189,13 @@ export function registerDBHandlers() {
     });
 
     ipcMain.handle('db:generateEras', async (_, args) => {
-        const { personId, config } = args;
-        return await PersonService.generateEras(personId, config);
+        try {
+            const { personId, config } = args;
+            return await PersonService.generateEras(personId, config);
+        } catch (e) {
+            console.error('[Main] db:generateEras failed:', e);
+            return { success: false, error: String(e) };
+        }
     });
 
     ipcMain.handle('db:getEras', async (_, personId) => {

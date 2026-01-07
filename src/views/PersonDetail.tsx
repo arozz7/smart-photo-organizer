@@ -7,6 +7,7 @@ import TargetedScanModal from '../components/TargetedScanModal';
 import RenameModal from '../components/modals/RenameModal';
 import EditPersonNameModal from '../components/modals/EditPersonNameModal';
 import OutlierReviewModal from '../components/OutlierReviewModal';
+import ActionDropdown from '../components/ui/ActionDropdown';
 import { useAI } from '../context/AIContext';
 import { usePersonDetail } from '../hooks/usePersonDetail';
 
@@ -100,8 +101,9 @@ const PersonDetail = () => {
     return (
         <div className="h-full flex flex-col bg-gray-900 text-white p-6 overflow-hidden">
             {/* Header */}
-            <div className="flex justify-between items-center mb-6">
-                <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4 mb-6">
+                {/* Left: Back button + Name */}
+                <div className="flex items-center gap-4 shrink-0">
                     <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-800 rounded-full">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -119,11 +121,9 @@ const PersonDetail = () => {
                             </svg>
                         </button>
                     </h1>
-                    <span className="text-gray-400 text-sm">({faces.length} faces)</span>
-                </div>
-
-                <div className="flex gap-2">
-                    <div className="flex gap-2 mr-4 border-r border-gray-700 pr-4">
+                    <span className="text-gray-400 text-sm whitespace-nowrap">({faces.length} faces)</span>
+                    {/* Cover controls */}
+                    <div className="flex gap-2 border-l border-gray-700 pl-4">
                         {person.cover_face_id ? (
                             <button
                                 onClick={onUnpinCover}
@@ -146,10 +146,13 @@ const PersonDetail = () => {
                             </button>
                         )}
                     </div>
+                </div>
 
+                {/* Center/Right: Action buttons */}
+                <div className="flex items-center gap-2 flex-wrap">
                     <button
                         onClick={() => setIsBlurryModalOpen(true)}
-                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 shrink-0"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -159,7 +162,7 @@ const PersonDetail = () => {
 
                     <button
                         onClick={() => setIsAllFacesModalOpen(true)}
-                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 shrink-0"
                         title="Review complete list of faces"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -168,66 +171,63 @@ const PersonDetail = () => {
                         Review All
                     </button>
 
-                    <button
-                        onClick={async () => {
-                            const found = await actions.findOutliers();
-                            if (found && found.length > 0) {
-                                setIsOutlierModalOpen(true);
-                            }
-                        }}
-                        disabled={isAnalyzingOutliers}
-                        className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 border border-amber-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
-                        title="Find faces that may have been incorrectly assigned to this person"
-                    >
-                        {isAnalyzingOutliers ? (
-                            <div className="animate-spin h-4 w-4 border-2 border-amber-400 border-t-transparent rounded-full" />
-                        ) : (
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                        )}
-                        {isAnalyzingOutliers ? 'Analyzing...' : 'Find Misassigned'}
-                    </button>
-
-                    <button
-                        onClick={actions.recalculateModel}
-                        className="bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 border border-purple-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
-                        title="Force recalculate the person's facial model (centroid) based on current faces. Useful after cleaning up bad assignments."
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        Recalculate Model
-                    </button>
-
-                    <button
-                        onClick={actions.generateEras}
-                        className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
-                        title="Analyze confirmed faces to detect age clusters (Eras) and create specific models for each time period."
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Generate Eras
-                    </button>
-
-                    <button
-                        onClick={() => setIsScanModalOpen(true)}
-                        disabled={isScanning}
-                        className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
-                        title="Scan all photos with high accuracy to find more of this person"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                        {isScanning ? 'Preparing...' : `Scan Library for ${person.name}`}
-                    </button>
+                    {/* Secondary Actions Dropdown */}
+                    <ActionDropdown
+                        label="More Actions"
+                        testId="person-detail-actions"
+                        items={[
+                            {
+                                label: isAnalyzingOutliers ? 'Analyzing...' : 'Find Misassigned',
+                                icon: (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                ),
+                                onClick: async () => {
+                                    const found = await actions.findOutliers();
+                                    if (found && found.length > 0) {
+                                        setIsOutlierModalOpen(true);
+                                    }
+                                },
+                                loading: isAnalyzingOutliers,
+                            },
+                            {
+                                label: 'Recalculate Model',
+                                icon: (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                ),
+                                onClick: actions.recalculateModel,
+                            },
+                            {
+                                label: 'Generate Eras',
+                                icon: (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                ),
+                                onClick: actions.generateEras,
+                            },
+                            {
+                                label: isScanning ? 'Preparing...' : `Scan Library for ${person.name}`,
+                                icon: (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </svg>
+                                ),
+                                onClick: () => setIsScanModalOpen(true),
+                                disabled: isScanning,
+                                variant: 'primary',
+                            },
+                        ]}
+                    />
 
                     {/* Selection Controls */}
-                    <div className="flex gap-2 border-l border-gray-700 pl-4 ml-2">
+                    <div className="flex gap-2 border-l border-gray-700 pl-4 ml-2 shrink-0">
                         <button
                             onClick={selectAll}
-                            className="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-800 transition-colors"
+                            className="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-800 transition-colors whitespace-nowrap"
                             title="Select all faces"
                         >
                             Select All
@@ -235,42 +235,13 @@ const PersonDetail = () => {
                         {selectedFaces.size > 0 && (
                             <button
                                 onClick={clearSelection}
-                                className="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-800 transition-colors"
+                                className="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-800 transition-colors whitespace-nowrap"
                                 title="Clear selection"
                             >
                                 Clear ({selectedFaces.size})
                             </button>
                         )}
                     </div>
-
-                    {selectedFaces.size > 0 && (
-                        <div className="flex gap-2">
-                            <button
-                                onClick={async () => {
-                                    // @ts-ignore
-                                    await window.ipcRenderer.invoke('db:confirmFaces', Array.from(selectedFaces));
-                                    clearSelection();
-                                    refresh();
-                                }}
-                                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors"
-                                title="Mark as correctly assigned (for reference-based outlier detection)"
-                            >
-                                ✓ Confirm ({selectedFaces.size})
-                            </button>
-                            <button
-                                onClick={() => setIsRenameModalOpen(true)}
-                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
-                            >
-                                Move / Rename ({selectedFaces.size})
-                            </button>
-                            <button
-                                onClick={actions.removeFaces}
-                                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
-                            >
-                                Remove ({selectedFaces.size})
-                            </button>
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -387,6 +358,56 @@ const PersonDetail = () => {
                     ))}
                 </div>
             </div>
+
+            {/* Floating Selection Action Bar */}
+            {selectedFaces.size > 0 && (
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
+                    <div className="text-sm font-medium text-white border-r border-gray-700 pr-4">
+                        {selectedFaces.size} selected
+                    </div>
+                    <button
+                        onClick={async () => {
+                            // @ts-ignore
+                            await window.ipcRenderer.invoke('db:confirmFaces', Array.from(selectedFaces));
+                            clearSelection();
+                            refresh();
+                        }}
+                        className="text-sm font-medium text-green-400 hover:text-green-300 transition-colors flex items-center gap-2"
+                        title="Mark as correctly assigned"
+                    >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        Confirm
+                    </button>
+                    <button
+                        onClick={() => setIsRenameModalOpen(true)}
+                        className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-2"
+                    >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                        Move / Rename
+                    </button>
+                    <button
+                        onClick={actions.removeFaces}
+                        className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors flex items-center gap-2"
+                    >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Remove
+                    </button>
+                    <div className="border-l border-gray-700 pl-4">
+                        <button
+                            onClick={clearSelection}
+                            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
         </div >
     );
 };

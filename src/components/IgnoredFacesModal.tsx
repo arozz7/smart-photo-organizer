@@ -295,49 +295,6 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                         <div className="text-sm text-gray-400">
                             {selectedIds.size} selected
                         </div>
-                        {selectedIds.size > 0 && (
-                            <div className="flex flex-col gap-0.5 animate-fade-in">
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => handleRestore()}
-                                        className="bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-lg shadow-green-900/40"
-                                    >
-                                        Restore Selected
-                                    </button>
-                                    {suggestion && (
-                                        <button
-                                            onClick={async () => {
-                                                const ids = Array.from(selectedIds);
-                                                try {
-                                                    // Use the updated backend handler that restores and assigns in one go
-                                                    // @ts-ignore
-                                                    await window.ipcRenderer.invoke('db:restoreFaces', {
-                                                        faceIds: ids,
-                                                        personId: suggestion.personId
-                                                    });
-
-                                                    removeFacesFromState(ids);
-                                                    loadFaces({ unnamed: true });
-                                                } catch (err) {
-                                                    console.error("Smart restore failed:", err);
-                                                }
-                                            }}
-                                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-lg shadow-indigo-900/40 flex items-center gap-2 group"
-                                        >
-                                            <span>Restore as <strong>{suggestion.personName}</strong></span>
-                                            <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded text-indigo-200">{Math.round(suggestion.similarity * 100)}%</span>
-                                        </button>
-                                    )}
-                                </div>
-                                {!suggestion && (
-                                    <div className="text-[10px] text-gray-500 italic ml-1 mt-1">
-                                        {faces.filter(f => selectedIds.has(f.id) && f.descriptor).length === 0
-                                            ? "No face data found (needs scan)"
-                                            : `No matches found at ${Math.round(threshold * 100)}% sensitivity.`}
-                                    </div>
-                                )}
-                            </div>
-                        )}
 
                         <div className="flex-1" />
 
@@ -465,6 +422,57 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                             </>
                         )}
                     </div>
+
+                    {/* Floating Selection Action Bar */}
+                    {selectedIds.size > 0 && (
+                        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
+                            <div className="text-sm font-medium text-white border-r border-gray-700 pr-4">
+                                {selectedIds.size} selected
+                            </div>
+                            <button
+                                onClick={() => handleRestore()}
+                                className="text-sm font-medium text-green-400 hover:text-green-300 transition-colors flex items-center gap-2"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                Restore
+                            </button>
+                            {suggestion && (
+                                <button
+                                    onClick={async () => {
+                                        const ids = Array.from(selectedIds);
+                                        try {
+                                            // @ts-ignore
+                                            await window.ipcRenderer.invoke('db:restoreFaces', {
+                                                faceIds: ids,
+                                                personId: suggestion.personId
+                                            });
+                                            removeFacesFromState(ids);
+                                            loadFaces({ unnamed: true });
+                                        } catch (err) {
+                                            console.error("Smart restore failed:", err);
+                                        }
+                                    }}
+                                    className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-2"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                    </svg>
+                                    Restore as {suggestion.personName}
+                                    <span className="text-[10px] bg-indigo-900/50 px-1.5 py-0.5 rounded">{Math.round(suggestion.similarity * 100)}%</span>
+                                </button>
+                            )}
+                            <div className="border-l border-gray-700 pl-4">
+                                <button
+                                    onClick={() => setSelectedIds(new Set())}
+                                    className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </Dialog.Content>
             </Dialog.Portal>
         </Dialog.Root>

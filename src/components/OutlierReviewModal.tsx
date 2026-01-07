@@ -183,35 +183,6 @@ export default function OutlierReviewModal({
                                 </button>
                             </div>
                             <div className="flex-1" />
-                            {selectedIds.size > 0 && (
-                                <div className="flex gap-2">
-                                    {onConfirmFaces && (
-                                        <button
-                                            onClick={handleConfirmSelected}
-                                            disabled={isProcessing}
-                                            className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-green-900/20 disabled:opacity-50 flex items-center gap-2"
-                                            title="Mark as correctly assigned (won't appear as outlier again)"
-                                        >
-                                            ✓ Confirm ({selectedIds.size})
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={() => setIsRenameModalOpen(true)}
-                                        disabled={isProcessing}
-                                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-indigo-900/20 disabled:opacity-50 flex items-center gap-2"
-                                    >
-                                        Move / Rename ({selectedIds.size})
-                                    </button>
-                                    <button
-                                        onClick={handleRemoveSelected}
-                                        disabled={isProcessing}
-                                        className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-red-900/20 disabled:opacity-50 flex items-center gap-2"
-                                    >
-                                        {isProcessing && <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />}
-                                        Remove ({selectedIds.size})
-                                    </button>
-                                </div>
-                            )}
                         </div>
 
                         {/* Content */}
@@ -292,6 +263,60 @@ export default function OutlierReviewModal({
                                 </div>
                             )}
                         </div>
+
+                        {/* Floating Selection Action Bar */}
+                        {selectedIds.size > 0 && (
+                            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
+                                <div className="text-sm font-medium text-white border-r border-gray-700 pr-4">
+                                    {selectedIds.size} selected
+                                </div>
+                                {onConfirmFaces && (
+                                    <button
+                                        onClick={handleConfirmSelected}
+                                        disabled={isProcessing}
+                                        className="text-sm font-medium text-green-400 hover:text-green-300 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                        title="Mark as correctly assigned"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        Confirm
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setIsRenameModalOpen(true)}
+                                    disabled={isProcessing}
+                                    className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                    </svg>
+                                    Move / Rename
+                                </button>
+                                <button
+                                    onClick={handleRemoveSelected}
+                                    disabled={isProcessing}
+                                    className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                >
+                                    {isProcessing ? (
+                                        <div className="animate-spin h-4 w-4 border-2 border-red-400 border-t-transparent rounded-full" />
+                                    ) : (
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    )}
+                                    Remove
+                                </button>
+                                <div className="border-l border-gray-700 pl-4">
+                                    <button
+                                        onClick={deselectAll}
+                                        className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Footer Help */}
                         <div className="flex-none p-3 border-t border-gray-800 bg-gray-800/30 text-xs text-gray-500">

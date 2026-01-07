@@ -134,7 +134,7 @@ export class PersonService {
         const MIN_FACES_PER_ERA = config?.minFacesForEra ?? 50;
         const MERGE_THRESHOLD = config?.eraMergeThreshold ?? 0.75;
 
-        const faces = FaceRepository.getConfirmedFacesWithDates(personId);
+        const faces = FaceRepository.getAssignedFacesWithDates(personId);
 
         if (faces.length < MIN_FACES_PER_ERA) {
             return { success: false, error: `Not enough faces (found ${faces.length}, need ${MIN_FACES_PER_ERA})` };

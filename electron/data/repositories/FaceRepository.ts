@@ -610,7 +610,7 @@ export class FaceRepository {
         );
     }
 
-    static getConfirmedFacesWithDates(personId: number) {
+    static getAssignedFacesWithDates(personId: number) {
         const db = getDB();
         try {
             const faces = db.prepare(`
@@ -618,7 +618,6 @@ export class FaceRepository {
                 FROM faces f
                 JOIN photos p ON f.photo_id = p.id
                 WHERE f.person_id = ? 
-                AND f.is_confirmed = 1
                 AND f.descriptor IS NOT NULL
             `).all(personId);
 
@@ -629,7 +628,7 @@ export class FaceRepository {
                 metadata_json: f.metadata_json // Add metadata
             }));
         } catch (error) {
-            console.error('FaceRepository.getConfirmedFacesWithDates failed:', error);
+            console.error('FaceRepository.getAssignedFacesWithDates failed:', error);
             return [];
         }
     }
