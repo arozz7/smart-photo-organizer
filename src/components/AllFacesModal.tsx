@@ -181,35 +181,6 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                             </button>
                         )}
                         <div className="h-6 w-px bg-gray-700" />
-                        {selectedFaces.size > 0 && (
-                            <>
-                                <button
-                                    onClick={async () => {
-                                        // @ts-ignore
-                                        await window.ipcRenderer.invoke('db:confirmFaces', Array.from(selectedFaces));
-                                        setSelectedFaces(new Set());
-                                        loadAllFaces();  // Refresh to show checkmarks
-                                    }}
-                                    className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-medium transition-colors"
-                                    title="Mark as correctly assigned (for reference-based outlier detection)"
-                                >
-                                    ✓ Confirm ({selectedFaces.size})
-                                </button>
-                                <button
-                                    onClick={() => setIsMoveModalOpen(true)}
-                                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
-                                >
-                                    Move ({selectedFaces.size})
-                                </button>
-                                <button
-                                    onClick={handleUnassign}
-                                    className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-500 border border-red-500/30 rounded-lg text-sm font-medium transition-colors"
-                                >
-                                    Remove ({selectedFaces.size})
-                                </button>
-                                <div className="h-6 w-px bg-gray-700 mx-2" />
-                            </>
-                        )}
                         <button onClick={onClose} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -244,6 +215,56 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                         />
                     )}
                 </div>
+
+                {/* Floating Selection Action Bar */}
+                {selectedFaces.size > 0 && (
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
+                        <div className="text-sm font-medium text-white border-r border-gray-700 pr-4">
+                            {selectedFaces.size} selected
+                        </div>
+                        <button
+                            onClick={async () => {
+                                // @ts-ignore
+                                await window.ipcRenderer.invoke('db:confirmFaces', Array.from(selectedFaces));
+                                setSelectedFaces(new Set());
+                                loadAllFaces();
+                            }}
+                            className="text-sm font-medium text-green-400 hover:text-green-300 transition-colors flex items-center gap-2"
+                            title="Mark as correctly assigned"
+                        >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Confirm
+                        </button>
+                        <button
+                            onClick={() => setIsMoveModalOpen(true)}
+                            className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-2"
+                        >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                            Move
+                        </button>
+                        <button
+                            onClick={handleUnassign}
+                            className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors flex items-center gap-2"
+                        >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Remove
+                        </button>
+                        <div className="border-l border-gray-700 pl-4">
+                            <button
+                                onClick={() => setSelectedFaces(new Set())}
+                                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <MoveFacesModal

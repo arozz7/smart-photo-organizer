@@ -1,7 +1,16 @@
 # Changelog
 
+## v0.5.0
+*Release Date: 2026-01-07*
+
+### 🐛 Critical Fixes
+- **RAW Photo Previews:** Fixed "Preview Unavailable" errors for RAW files (ARW, NEF, etc.) by implementing on-the-fly regeneration fallback and resolving React Strict Mode race conditions.
+- **Generate Eras:** Fixed "undefined error" crashes for persons with auto-assigned faces. Now uses all assigned faces (not just confirmed ones) for clustering, enabling visual eras for a wider range of users.
+- **Backend Stability:** Added robust error handling to IPC channels to prevent silent failures.
+
+---
+
 ## v0.4.5
-*Release Date: 2026-01-04*
 ### Features
 - **Background Face Filter (New!):** A powerful tool to detect and bulk-ignore "noise" faces (strangers in background, crowds).
     - Uses DBSCAN clustering and distance analysis to identify irrelevant faces.

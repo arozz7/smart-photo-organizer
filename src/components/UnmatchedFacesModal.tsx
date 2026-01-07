@@ -204,35 +204,6 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
                         <div className="text-sm text-gray-400">
                             {selectedIds.size} selected
                         </div>
-                        {selectedIds.size > 0 && (
-                            <div className="flex items-center gap-2 animate-fade-in">
-                                <button
-                                    onClick={() => handleAction('name')}
-                                    disabled={actionLoading}
-                                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-indigo-900/20 disabled:opacity-50"
-                                >
-                                    Name Selected
-                                </button>
-                                {suggestion && (
-                                    <button
-                                        onClick={() => handleAction('autoName')}
-                                        disabled={actionLoading}
-                                        className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-green-900/20 flex items-center gap-2 disabled:opacity-50"
-                                    >
-                                        {actionLoading && <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full" />}
-                                        <span>Use Suggestion: <strong>{suggestion.personName}</strong></span>
-                                        <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">{Math.round(suggestion.similarity * 100)}%</span>
-                                    </button>
-                                )}
-                                <button
-                                    onClick={() => handleAction('ignore')}
-                                    disabled={actionLoading}
-                                    className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-red-900/20 disabled:opacity-50"
-                                >
-                                    Ignore Selected
-                                </button>
-                            </div>
-                        )}
                         <div className="flex-1" />
 
                         {/* Local Threshold Setting */}
@@ -346,6 +317,60 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
                             </>
                         )}
                     </div>
+
+                    {/* Floating Selection Action Bar */}
+                    {selectedIds.size > 0 && (
+                        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
+                            <div className="text-sm font-medium text-white border-r border-gray-700 pr-4">
+                                {selectedIds.size} selected
+                            </div>
+                            <button
+                                onClick={() => handleAction('name')}
+                                disabled={actionLoading}
+                                className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-2 disabled:opacity-50"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                </svg>
+                                Name
+                            </button>
+                            {suggestion && (
+                                <button
+                                    onClick={() => handleAction('autoName')}
+                                    disabled={actionLoading}
+                                    className="text-sm font-medium text-green-400 hover:text-green-300 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                >
+                                    {actionLoading ? (
+                                        <div className="animate-spin h-4 w-4 border-2 border-green-400 border-t-transparent rounded-full" />
+                                    ) : (
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    )}
+                                    Assign to {suggestion.personName}
+                                    <span className="text-[10px] bg-green-900/50 px-1.5 py-0.5 rounded">{Math.round(suggestion.similarity * 100)}%</span>
+                                </button>
+                            )}
+                            <button
+                                onClick={() => handleAction('ignore')}
+                                disabled={actionLoading}
+                                className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors flex items-center gap-2 disabled:opacity-50"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                </svg>
+                                Ignore
+                            </button>
+                            <div className="border-l border-gray-700 pl-4">
+                                <button
+                                    onClick={() => setSelectedIds(new Set())}
+                                    className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </Dialog.Content>
             </Dialog.Portal>
         </Dialog.Root>

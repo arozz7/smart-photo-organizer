@@ -397,7 +397,7 @@ export const usePersonDetail = (personId: string | undefined) => {
             } else {
                 addToast({
                     title: 'Generation Failed',
-                    description: `Cannot generate eras: ${result.reason}`,
+                    description: `Cannot generate eras: ${result.error || result.reason || 'Unknown error'}`,
                     type: 'warning',
                     duration: 4000
                 });

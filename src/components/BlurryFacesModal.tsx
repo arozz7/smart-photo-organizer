@@ -408,31 +408,57 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                                 </span>
                                 <span className="text-xs text-gray-500">This only removes the face detection.</span>
                             </div>
-                            <div className="flex gap-3 items-center">
-                                {selectedIds.size > 0 && (
-                                    <div className="flex gap-2 items-center bg-gray-800 p-1 pr-2 rounded mr-4">
-                                        <input
-                                            type="text"
-                                            list="people-suggestions-blurry"
-                                            placeholder="Assign to..."
-                                            value={assignName}
-                                            onChange={(e) => setAssignName(e.target.value)}
-                                            className="bg-gray-700 text-white text-sm px-2 py-1 rounded border border-gray-600 focus:border-indigo-500 outline-none w-40"
-                                        />
-                                        <datalist id="people-suggestions-blurry">
-                                            {people.map((p: any) => <option key={p.id} value={p.name} />)}
-                                        </datalist>
-                                        <button onClick={handleAssign} disabled={!assignName.trim()} className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-3 py-1.5 rounded transition-colors">
-                                            Assign
-                                        </button>
-                                    </div>
-                                )}
-                                <button onClick={() => onOpenChange(false)} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors text-white">Close</button>
-                                <button disabled={selectedIds.size === 0} onClick={handleDelete} className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded text-sm font-medium transition-colors text-white flex items-center gap-2 shadow-lg shadow-red-900/20">
-                                    <TrashIcon /> Discard Faces
-                                </button>
-                            </div>
+                            <button onClick={() => onOpenChange(false)} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors text-white">Close</button>
                         </div>
+
+                        {/* Floating Selection Action Bar */}
+                        {selectedIds.size > 0 && (
+                            <div className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
+                                <div className="text-sm font-medium text-white border-r border-gray-700 pr-4">
+                                    {selectedIds.size} selected
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="text"
+                                        list="people-suggestions-blurry-fab"
+                                        placeholder="Assign to..."
+                                        value={assignName}
+                                        onChange={(e) => setAssignName(e.target.value)}
+                                        className="bg-gray-800 text-white text-sm px-3 py-1.5 rounded-full border border-gray-600 focus:border-indigo-500 outline-none w-32"
+                                    />
+                                    <datalist id="people-suggestions-blurry-fab">
+                                        {people.map((p: any) => <option key={p.id} value={p.name} />)}
+                                    </datalist>
+                                    <button
+                                        onClick={handleAssign}
+                                        disabled={!assignName.trim()}
+                                        className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 disabled:opacity-50"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                        </svg>
+                                        Assign
+                                    </button>
+                                </div>
+                                <button
+                                    onClick={handleDelete}
+                                    className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors flex items-center gap-2"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                    Discard
+                                </button>
+                                <div className="border-l border-gray-700 pl-4">
+                                    <button
+                                        onClick={() => setSelectedIds(new Set())}
+                                        className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         <Dialog.Close asChild>
                             <button className="absolute top-4 right-4 text-gray-400 hover:text-white"><Cross2Icon /></button>

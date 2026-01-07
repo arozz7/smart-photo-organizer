@@ -17,7 +17,7 @@ export class ImageService {
     async processRequest(request: Request): Promise<Response> {
         let decodedPath = '';
         try {
-            // DEBUG: Log every request (Commented out in original)
+            // DEBUG: Log every request (enable for troubleshooting)
             // logger.info(`[Protocol] Incoming: ${request.url}`);
 
             const urlObj = new URL(request.url);
@@ -200,6 +200,82 @@ export class ImageService {
         const ext = path.extname(filePath).toLowerCase();
         const isRaw = ['.nef', '.arw', '.cr2', '.dng', '.orf', '.rw2'].includes(ext);
 
+        // Check if this is a request for a preview file (not a RAW file)
+        const isPreviewPath = filePath.includes('previews') && ext === '.jpg';
+
+        if (isPreviewPath) {
+            // Preview file requested directly
+            try {
+                await fs.access(filePath);
+                const prevBuffer = await fs.readFile(filePath);
+                return new Response(prevBuffer as any, { headers: { 'Content-Type': 'image/jpeg' } });
+            } catch (e) {
+                // Preview file missing - look up original file and regenerate
+                logger.warn(`[Protocol] Preview file missing, attempting regeneration: ${filePath}`);
+
+                // Extract hash from preview filename to find original
+                const match = filePath.match(/previews[\\/]([a-f0-9]+)\.jpg/i);
+                if (match && match[1]) {
+                    try {
+                        const srcPath = await this.repo.getFilePathFromPreview(match[1]);
+                        if (srcPath) {
+                            logger.info(`[Protocol] Regenerating preview for: ${srcPath}`);
+
+                            // Check if source is web-friendly - just serve it directly
+                            const srcExt = path.extname(srcPath).toLowerCase();
+                            const isWebFriendly = ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(srcExt);
+
+                            if (isWebFriendly) {
+                                // Serve original file directly - no preview needed
+                                logger.info(`[Protocol] Source is web-friendly, serving directly: ${srcPath}`);
+                                try {
+                                    await fs.access(srcPath);
+                                    return await net.fetch(pathToFileURL(srcPath).toString());
+                                } catch (srcErr) {
+                                    logger.warn(`[Protocol] Source file also missing: ${srcPath}`);
+                                    throw srcErr;
+                                }
+                            }
+
+                            // Source is RAW - use Python to generate thumbnail
+                            if (this.fallbackGenerator) {
+                                try {
+                                    const { orientation } = await this.repo.getImageMetadata(srcPath);
+                                    logger.info(`[Protocol] Calling Python fallback for RAW: ${srcPath}`);
+                                    const fbBuf = await this.fallbackGenerator(srcPath, 1280, undefined, orientation);
+                                    if (fbBuf) {
+                                        logger.info(`[Protocol] Python regeneration successful, returning ${fbBuf.length} bytes`);
+                                        const response = new Response(fbBuf as any, {
+                                            status: 200,
+                                            headers: {
+                                                'Content-Type': 'image/jpeg',
+                                                'Content-Length': fbBuf.length.toString(),
+                                                'Cache-Control': 'no-cache',
+                                                'X-Generated-By': 'Python-Regenerated'
+                                            }
+                                        });
+                                        logger.info(`[Protocol] Returning regenerated response for: ${filePath}`);
+                                        return response;
+                                    } else {
+                                        logger.warn(`[Protocol] Python fallback returned null for: ${srcPath}`);
+                                    }
+                                } catch (pyErr) {
+                                    logger.error(`[Protocol] Python fallback error for ${srcPath}:`, pyErr);
+                                }
+                            } else {
+                                logger.warn(`[Protocol] No fallbackGenerator available for RAW regeneration`);
+                            }
+                        } else {
+                            logger.warn(`[Protocol] Could not find source path for preview hash: ${match[1]}`);
+                        }
+                    } catch (regenErr) {
+                        logger.warn(`[Protocol] Preview regeneration failed: ${regenErr}`);
+                    }
+                }
+                throw e;
+            }
+        }
+
         if (isRaw) {
             // RAW Handling
             try {
@@ -215,10 +291,40 @@ export class ImageService {
                     }
                 }
 
-                // 2. On-the-fly Convert
+                // 2. On-the-fly Convert (Sharp may not support all RAW formats)
                 // logger.info(`[Protocol] Converting RAW on-the-fly: ${filePath}`);
-                const buffer = await this.processor.convertRaw(filePath);
-                return new Response(buffer as any, { headers: { 'Content-Type': 'image/jpeg' } });
+                try {
+                    const buffer = await this.processor.convertRaw(filePath);
+                    // logger.info(`[Protocol] Sharp conversion successful: ${buffer.length} bytes`);
+                    return new Response(buffer as any, { headers: { 'Content-Type': 'image/jpeg' } });
+                } catch (convErr) {
+                    // Fallback to Python if Sharp/Libvips fails (e.g. unsupported RAW)
+                    // logger.warn(`[Protocol] ConvertRaw failed, trying Python fallback: ${convErr}`);
+                    if (this.fallbackGenerator) {
+                        try {
+                            // logger.info(`[Protocol] Calling Python fallback for: ${filePath}`);
+                            const { orientation } = await this.repo.getImageMetadata(filePath);
+                            // logger.info(`[Protocol] Got orientation: ${orientation}, calling fallbackGenerator...`);
+                            const fbBuf = await this.fallbackGenerator(filePath, 1280, undefined, orientation);
+                            if (fbBuf) {
+                                // logger.info(`[Protocol] Python fallback success: ${fbBuf.length} bytes`);
+                                return new Response(fbBuf as any, {
+                                    headers: {
+                                        'Content-Type': 'image/jpeg',
+                                        'X-Generated-By': 'Python-Fallback-Direct'
+                                    }
+                                });
+                            } else {
+                                logger.warn(`[Protocol] Python fallback returned null`);
+                            }
+                        } catch (pyErr) {
+                            logger.warn(`[Protocol] Python Fallback (Direct) failed: ${pyErr}`);
+                        }
+                    } else {
+                        logger.warn(`[Protocol] No fallbackGenerator available!`);
+                    }
+                    throw convErr;
+                }
 
             } catch (rawErr) {
                 logger.error(`[Protocol] Failed to serve RAW file ${filePath}:`, rawErr);

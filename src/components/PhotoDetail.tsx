@@ -23,6 +23,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
 
     const [metadata, setMetadata] = useState<any>(null)
     const [imagePath, setImagePath] = useState<string>('')
+    const [imageRetryCount, setImageRetryCount] = useState(0)
     const [visualRotation, setVisualRotation] = useState(0)
     const [tags, setTags] = useState<string[]>([])
     const [faces, setFaces] = useState<any[]>([])
@@ -64,18 +65,13 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                 setMetadata(null)
             }
 
-            // Determine image path (prefer preview for speed, or original if supported)
-            // For detail view, we likely want the original if it's displayable by Chrome (jpg/png),
-            // but for RAWs we must use the preview.
-            // Let's use the local-resource protocol.
-            const ext = photo.file_path.split('.').pop()?.toLowerCase()
-            const isWebFriendly = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext || '')
-
-            // If it's a raw file, we MUST use the preview_cache_path
-            const pathToLoad = isWebFriendly ? photo.file_path : (photo.preview_cache_path || photo.file_path)
-            console.log(`[UI] Loading image from: ${pathToLoad} (isWebFriendly: ${isWebFriendly}, hasPreview: ${!!photo.preview_cache_path})`);
-
-            setImagePath(`local-resource://${encodeURIComponent(pathToLoad)}`)
+            // Determine image path
+            // Always use the original file_path - the backend ImageService will handle:
+            // - Web-friendly files: serve directly
+            // - RAW files: use cached preview or generate on-the-fly
+            // This avoids issues with stale/missing preview_cache_path entries
+            console.log(`[UI] Loading image from file_path: ${photo.file_path}`)
+            setImagePath(`local-resource://${encodeURIComponent(photo.file_path)}`)
 
             // Fetch tags
             fetchTags()
@@ -341,7 +337,39 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                     alt={photo.file_path.split(/[\\/]/).pop()}
                                     className="w-full h-full object-contain shadow-2xl"
                                     onLoad={handleImgLoad}
+                                    onError={(e) => {
+                                        console.warn(`[PhotoDetail] Image failed to load (attempt ${imageRetryCount + 1}): ${imagePath}`);
+                                        // Retry up to 2 times with cache-bust to handle race conditions with Python fallback
+                                        if (imageRetryCount < 2) {
+                                            console.log(`[PhotoDetail] Retrying image load...`);
+                                            setImageRetryCount(prev => prev + 1);
+                                            // Add cache-bust timestamp to force new request
+                                            const baseUrl = `local-resource://${encodeURIComponent(photo.file_path)}`;
+                                            setImagePath(`${baseUrl}?retry=${Date.now()}`);
+                                            return;
+                                        }
+                                        console.error(`[PhotoDetail] All retry attempts failed for:`, {
+                                            id: photo.id,
+                                            file_path: photo.file_path,
+                                            preview_cache_path: photo.preview_cache_path
+                                        });
+                                        // Show fallback message after all retries exhausted
+                                        const target = e.currentTarget;
+                                        target.style.display = 'none';
+                                        const fallback = target.parentElement?.querySelector('.image-error-fallback');
+                                        if (fallback) {
+                                            (fallback as HTMLElement).style.display = 'flex';
+                                        }
+                                    }}
                                 />
+                                <div className="image-error-fallback hidden text-gray-400 flex-col items-center gap-2 absolute inset-0 justify-center bg-gray-900">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    <span>Failed to load preview</span>
+                                    <span className="text-xs text-gray-500">{photo.file_path.split(/[\\/]/).pop()}</span>
+                                    <span className="text-xs text-gray-600">Try re-scanning the library to regenerate previews</span>
+                                </div>
                                 {imgRect && (
                                     <div
                                         className="absolute top-0 left-0 w-full h-full pointer-events-none"

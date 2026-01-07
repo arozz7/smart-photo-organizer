@@ -29,7 +29,7 @@ vi.mock('../../../../electron/data/repositories/PersonRepository', () => ({
 
 vi.mock('../../../../electron/data/repositories/FaceRepository', () => ({
     FaceRepository: {
-        getConfirmedFacesWithDates: vi.fn(),
+        getAssignedFacesWithDates: vi.fn(),
         updateFaceEra: vi.fn()
     }
 }));
@@ -71,7 +71,7 @@ describe('PersonService - Era Generation', () => {
 
         it('should fail gracefully if not enough faces', async () => {
             // Arrange
-            vi.mocked(FaceRepository.getConfirmedFacesWithDates).mockReturnValue([
+            vi.mocked(FaceRepository.getAssignedFacesWithDates).mockReturnValue([
                 createFace(1, [0.1]),
                 createFace(2, [0.2])
             ]);
@@ -89,7 +89,7 @@ describe('PersonService - Era Generation', () => {
 
         it('should succeed with custom config allowing fewer faces', async () => {
             // Arrange
-            vi.mocked(FaceRepository.getConfirmedFacesWithDates).mockReturnValue([
+            vi.mocked(FaceRepository.getAssignedFacesWithDates).mockReturnValue([
                 createFace(1, [0.1]),
                 createFace(2, [0.1])
             ]);
@@ -116,7 +116,7 @@ describe('PersonService - Era Generation', () => {
                 ...Array(10).fill(0).map((_, i) => createFace(i + 10, [10, 10]))
             ];
 
-            vi.mocked(FaceRepository.getConfirmedFacesWithDates).mockReturnValue(faces);
+            vi.mocked(FaceRepository.getAssignedFacesWithDates).mockReturnValue(faces);
 
             const config = { minFacesForEra: 10, eraMergeThreshold: 0.5 }; // Strict merge
 
@@ -138,7 +138,7 @@ describe('PersonService - Era Generation', () => {
                 ...Array(10).fill(0).map((_, i) => createFace(i + 10, [0.3, 0.3]))
             ];
 
-            vi.mocked(FaceRepository.getConfirmedFacesWithDates).mockReturnValue(faces);
+            vi.mocked(FaceRepository.getAssignedFacesWithDates).mockReturnValue(faces);
 
             // Merge threshold 0.75 > 0.42, so they should merge
             const config = { minFacesForEra: 10, eraMergeThreshold: 0.75 };
@@ -157,7 +157,7 @@ describe('PersonService - Era Generation', () => {
                 createFace(1, [0, 0], new Date('2020-07-01').getTime()),
                 createFace(2, [0, 0], new Date('2022-07-01').getTime())
             ];
-            vi.mocked(FaceRepository.getConfirmedFacesWithDates).mockReturnValue(faces);
+            vi.mocked(FaceRepository.getAssignedFacesWithDates).mockReturnValue(faces);
             const config = { minFacesForEra: 2, eraMergeThreshold: 1.0 };
 
             // Act
