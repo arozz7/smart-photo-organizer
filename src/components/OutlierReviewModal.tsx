@@ -19,6 +19,7 @@ interface OutlierReviewModalProps {
     outliers: OutlierResult[];
     onRemoveFaces: (faceIds: number[]) => Promise<void>;
     onMoveFaces: (faceIds: number[], targetName: string) => Promise<void>;
+    onConfirmFaces?: (faceIds: number[]) => Promise<void>;  // NEW: Mark as correctly assigned
     onRefresh: () => void;
 }
 
@@ -29,6 +30,7 @@ export default function OutlierReviewModal({
     outliers: initialOutliers,
     onRemoveFaces,
     onMoveFaces,
+    onConfirmFaces,
     onRefresh
 }: OutlierReviewModalProps) {
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -94,6 +96,24 @@ export default function OutlierReviewModal({
             onRefresh();
         } catch (err) {
             console.error('Failed to move faces:', err);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleConfirmSelected = async () => {
+        if (selectedIds.size === 0 || !onConfirmFaces) return;
+
+        setIsProcessing(true);
+        try {
+            await onConfirmFaces(Array.from(selectedIds));
+            // Filter out confirmed faces from local outlier list
+            // (they are now marked as correct, no longer outliers)
+            setLocalOutliers(prev => prev.filter(o => !selectedIds.has(o.faceId)));
+            setSelectedIds(new Set());
+            onRefresh();
+        } catch (err) {
+            console.error('Failed to confirm faces:', err);
         } finally {
             setIsProcessing(false);
         }
@@ -165,6 +185,16 @@ export default function OutlierReviewModal({
                             <div className="flex-1" />
                             {selectedIds.size > 0 && (
                                 <div className="flex gap-2">
+                                    {onConfirmFaces && (
+                                        <button
+                                            onClick={handleConfirmSelected}
+                                            disabled={isProcessing}
+                                            className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-green-900/20 disabled:opacity-50 flex items-center gap-2"
+                                            title="Mark as correctly assigned (won't appear as outlier again)"
+                                        >
+                                            ✓ Confirm ({selectedIds.size})
+                                        </button>
+                                    )}
                                     <button
                                         onClick={() => setIsRenameModalOpen(true)}
                                         disabled={isProcessing}

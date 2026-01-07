@@ -194,6 +194,7 @@ export default function Settings() {
 
     const [aiProfile, setAiProfile] = useState<'balanced' | 'high'>('balanced');
     const [vlmEnabled, setVlmEnabled] = useState(false);
+    const [eraConfig, setEraConfig] = useState<{ minFaces: number, mergeThreshold: number }>({ minFaces: 50, mergeThreshold: 0.75 });
 
     useEffect(() => {
         // @ts-ignore
@@ -207,6 +208,10 @@ export default function Settings() {
             if (settings) {
                 if (settings.aiProfile) setAiProfile(settings.aiProfile);
                 if (settings.vlmEnabled !== undefined) setVlmEnabled(settings.vlmEnabled);
+                setEraConfig({
+                    minFaces: settings.minFacesForEra ?? 50,
+                    mergeThreshold: settings.eraMergeThreshold ?? 0.75
+                });
             }
         });
     }, [])
@@ -468,6 +473,65 @@ export default function Settings() {
                                 <div className="flex justify-between text-xs text-gray-500 mt-1">
                                     <span>Liberal (0.3)</span>
                                     <span>Strict (0.85)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Era Generation Settings */}
+                    <section className="space-y-4">
+                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Era Generation</h3>
+
+                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-6">
+                            <div>
+                                <h4 className="font-medium text-white mb-1">Merge Similarity Threshold</h4>
+                                <p className="text-sm text-gray-400 mb-3">
+                                    How similar two eras must be to merge. (0.6 = Strict, 1.3+ = Force Merge).
+                                </p>
+                                <div className="flex items-center gap-4">
+                                    <input
+                                        type="range"
+                                        min="0.5"
+                                        max="2.0"
+                                        step="0.05"
+                                        value={eraConfig.mergeThreshold}
+                                        onChange={async (e) => {
+                                            const val = parseFloat(e.target.value);
+                                            setEraConfig(prev => ({ ...prev, mergeThreshold: val }));
+                                            // @ts-ignore
+                                            const current = await window.ipcRenderer.invoke('ai:getSettings');
+                                            // @ts-ignore
+                                            await window.ipcRenderer.invoke('ai:saveSettings', { ...current, eraMergeThreshold: val });
+                                        }}
+                                        className="w-full accent-indigo-500"
+                                    />
+                                    <span className="text-sm font-mono text-indigo-400 w-12 text-right">{eraConfig.mergeThreshold.toFixed(2)}</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 className="font-medium text-white mb-1">Minimum Faces per Era</h4>
+                                <p className="text-sm text-gray-400 mb-3">
+                                    Minimum number of confirmed faces required to justify creating a separate Era.
+                                </p>
+                                <div className="flex items-center gap-4">
+                                    <input
+                                        type="range"
+                                        min="10"
+                                        max="500"
+                                        step="10"
+                                        value={eraConfig.minFaces}
+                                        onChange={async (e) => {
+                                            const val = parseInt(e.target.value);
+                                            setEraConfig(prev => ({ ...prev, minFaces: val }));
+                                            // @ts-ignore
+                                            const current = await window.ipcRenderer.invoke('ai:getSettings');
+                                            // @ts-ignore
+                                            await window.ipcRenderer.invoke('ai:saveSettings', { ...current, minFacesForEra: val });
+                                        }}
+                                        className="w-full accent-indigo-500"
+                                    />
+                                    <span className="text-sm font-mono text-indigo-400 w-12 text-right">{eraConfig.minFaces}</span>
                                 </div>
                             </div>
                         </div>

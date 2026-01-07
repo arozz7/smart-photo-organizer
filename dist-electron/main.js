@@ -2,9 +2,9 @@ var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 import { app, net, protocol, ipcMain, dialog, shell, BrowserWindow, screen } from "electron";
-import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import path__default from "node:path";
+import * as fs from "node:fs/promises";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import * as fs$1 from "node:fs";
 import fs__default, { promises } from "node:fs";
@@ -14,6 +14,12 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { createHash } from "node:crypto";
 import { ExifTool } from "exiftool-vendored";
+if (process.env["VITE_DEV_SERVER_URL"]) {
+  const appData = app.getPath("appData");
+  const devUserData = path__default.join(appData, "smart-photo-organizer-dev");
+  app.setPath("userData", devUserData);
+  console.log(`[Setup] Dev Mode detected. Redirecting userData to: ${devUserData}`);
+}
 const logDir = path__default.join(app.getPath("userData"), "logs");
 if (!fs__default.existsSync(logDir)) {
   fs__default.mkdirSync(logDir, { recursive: true });
@@ -444,6 +450,51 @@ async function initDB(basePath, onProgress) {
     db.exec("ALTER TABLE faces ADD COLUMN face_quality REAL");
   } catch (e) {
   }
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN is_confirmed BOOLEAN DEFAULT 0");
+  } catch (e) {
+  }
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN era_id INTEGER");
+  } catch (e) {
+  }
+  try {
+    db.exec("ALTER TABLE people ADD COLUMN centroid_snapshot_json TEXT");
+  } catch (e) {
+  }
+  try {
+    db.exec("ALTER TABLE people ADD COLUMN last_drift_check INTEGER");
+  } catch (e) {
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS person_eras (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      era_name TEXT,
+      start_year INTEGER,
+      end_year INTEGER,
+      centroid_json TEXT,
+      face_count INTEGER DEFAULT 0,
+      is_auto_generated BOOLEAN DEFAULT 1,
+      created_at INTEGER,
+      descriptor_mean_json TEXT,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_person_eras_person_id ON person_eras(person_id);
+
+    -- Phase D: Centroid Drift Detection
+    CREATE TABLE IF NOT EXISTS person_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      descriptor_json TEXT,
+      face_count INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reason TEXT,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_person_history_person_id ON person_history(person_id);
+  `);
   try {
     try {
       db.exec("ALTER TABLE faces ADD COLUMN descriptor BLOB");
@@ -1027,11 +1078,21 @@ class FaceRepository {
     const placeholders = faceIds.map(() => "?").join(",");
     db2.prepare(`DELETE FROM faces WHERE id IN (${placeholders})`).run(...faceIds);
   }
-  static updateFacePerson(faceIds, personId) {
+  static updateFacePerson(faceIds, personId, setConfirmed = null) {
     if (!faceIds || faceIds.length === 0) return;
     const db2 = getDB();
     const placeholders = faceIds.map(() => "?").join(",");
-    db2.prepare(`UPDATE faces SET person_id = ? WHERE id IN (${placeholders})`).run(personId, ...faceIds);
+    let query = `UPDATE faces SET person_id = ?`;
+    const params = [personId];
+    if (setConfirmed !== null) {
+      query += `, is_confirmed = ?`;
+      params.push(setConfirmed ? 1 : 0);
+    } else if (personId === null) {
+      query += `, is_confirmed = 0`;
+    }
+    query += ` WHERE id IN (${placeholders})`;
+    params.push(...faceIds);
+    db2.prepare(query).run(...params);
   }
   static getAllDescriptors() {
     const db2 = getDB();
@@ -1214,6 +1275,78 @@ class FaceRepository {
       throw new Error(`FaceRepository.updateFacePoseData failed: ${String(error)}`);
     }
   }
+  // ============== FACE CONFIRMATION (Centroid Stability Feature) ==============
+  /**
+   * Mark faces as confirmed (user-verified as correctly assigned).
+   * Confirmed faces are excluded from outlier detection.
+   */
+  static setConfirmed(faceIds, confirmed) {
+    if (!faceIds || faceIds.length === 0) return;
+    const db2 = getDB();
+    const placeholders = faceIds.map(() => "?").join(",");
+    db2.prepare(`UPDATE faces SET is_confirmed = ? WHERE id IN (${placeholders})`).run(
+      confirmed ? 1 : 0,
+      ...faceIds
+    );
+  }
+  /**
+   * Get all confirmed faces for a person.
+   */
+  static getConfirmedFaces(personId) {
+    const db2 = getDB();
+    try {
+      return db2.prepare(`
+                SELECT f.id, f.descriptor, f.box_json, f.photo_id, p.file_path
+                FROM faces f
+                JOIN photos p ON f.photo_id = p.id
+                WHERE f.person_id = ?
+                  AND f.is_confirmed = 1
+                  AND f.descriptor IS NOT NULL
+                  AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
+            `).all(personId);
+    } catch (error) {
+      throw new Error(`FaceRepository.getConfirmedFaces failed: ${String(error)}`);
+    }
+  }
+  /**
+   * Unassign faces from a person (remove person_id without ignoring).
+   * Used for removing misassigned faces.
+   */
+  static unassignFaces(faceIds) {
+    if (!faceIds || faceIds.length === 0) return;
+    const db2 = getDB();
+    const placeholders = faceIds.map(() => "?").join(",");
+    db2.prepare(`UPDATE faces SET person_id = NULL, is_confirmed = 0 WHERE id IN (${placeholders})`).run(
+      ...faceIds
+    );
+  }
+  static getConfirmedFacesWithDates(personId) {
+    const db2 = getDB();
+    try {
+      const faces = db2.prepare(`
+                SELECT f.id, f.descriptor, p.created_at, p.metadata_json 
+                FROM faces f
+                JOIN photos p ON f.photo_id = p.id
+                WHERE f.person_id = ? 
+                AND f.is_confirmed = 1
+                AND f.descriptor IS NOT NULL
+            `).all(personId);
+      return faces.map((f) => ({
+        id: f.id,
+        descriptor: Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)),
+        created_at: f.created_at,
+        metadata_json: f.metadata_json
+        // Add metadata
+      }));
+    } catch (error) {
+      console.error("FaceRepository.getConfirmedFacesWithDates failed:", error);
+      return [];
+    }
+  }
+  static updateFaceEra(faceId, eraId) {
+    const db2 = getDB();
+    db2.prepare("UPDATE faces SET era_id = ? WHERE id = ?").run(eraId, faceId);
+  }
 }
 class PersonRepository {
   static getPeople() {
@@ -1229,12 +1362,12 @@ class PersonRepository {
                         blur_score,
                         ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY blur_score DESC) as rn
                     FROM faces 
-                    WHERE person_id IS NOT NULL
+                    WHERE person_id IS NOT NULL AND is_ignored = 0
                 ),
                 PersonCounts AS (
                     SELECT person_id, COUNT(*) as face_count 
                     FROM faces 
-                    WHERE person_id IS NOT NULL 
+                    WHERE person_id IS NOT NULL AND is_ignored = 0
                     GROUP BY person_id
                 )
                 SELECT 
@@ -1259,13 +1392,24 @@ class PersonRepository {
     }
   }
   static getPeopleWithDescriptors() {
+    var _a;
     const db2 = getDB();
     try {
-      const rows = db2.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
-      return rows.map((r) => ({
+      const people = db2.prepare("SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL").all();
+      const eras = db2.prepare("SELECT * FROM person_eras").all();
+      const erasMap = /* @__PURE__ */ new Map();
+      for (const era of eras) {
+        if (!erasMap.has(era.person_id)) erasMap.set(era.person_id, []);
+        (_a = erasMap.get(era.person_id)) == null ? void 0 : _a.push({
+          centroid: JSON.parse(era.centroid_json),
+          name: era.era_name
+        });
+      }
+      return people.map((r) => ({
         id: r.id,
         name: r.name,
-        descriptor: JSON.parse(r.descriptor_mean_json)
+        descriptor: JSON.parse(r.descriptor_mean_json),
+        eras: erasMap.get(r.id) || []
       }));
     } catch (error) {
       throw new Error(`PersonRepository.getPeopleWithDescriptors failed: ${String(error)}`);
@@ -1314,6 +1458,35 @@ class PersonRepository {
     } catch (error) {
       throw new Error(`PersonRepository.getPersonWithDescriptor failed: ${String(error)}`);
     }
+  }
+  static getPerson(personId) {
+    return this.getPersonById(personId);
+  }
+  static addHistorySnapshot(personId, descriptorJson, faceCount, reason) {
+    const db2 = getDB();
+    db2.prepare("INSERT INTO person_history (person_id, descriptor_json, face_count, reason) VALUES (?, ?, ?, ?)").run(personId, descriptorJson, faceCount, reason);
+  }
+  // --- Era Methods ---
+  static addEra(era) {
+    const db2 = getDB();
+    const info = db2.prepare(`
+            INSERT INTO person_eras (person_id, era_name, start_year, end_year, centroid_json, face_count, is_auto_generated, created_at)
+            VALUES (@person_id, @era_name, @start_year, @end_year, @centroid_json, @face_count, @is_auto_generated, strftime('%s','now'))
+        `).run({ ...era, is_auto_generated: era.is_auto_generated ? 1 : 0 });
+    return info.lastInsertRowid;
+  }
+  static clearEras(personId) {
+    const db2 = getDB();
+    db2.prepare("DELETE FROM person_eras WHERE person_id = ?").run(personId);
+  }
+  static getEras(personId) {
+    const db2 = getDB();
+    return db2.prepare("SELECT * FROM person_eras WHERE person_id = ? ORDER BY start_year ASC").all(personId);
+  }
+  static deleteEra(eraId) {
+    const db2 = getDB();
+    db2.prepare("UPDATE faces SET era_id = NULL WHERE era_id = ?").run(eraId);
+    db2.prepare("DELETE FROM person_eras WHERE id = ?").run(eraId);
   }
 }
 const DEFAULT_CONFIG = {
@@ -1448,13 +1621,198 @@ class PersonService {
       PersonRepository.updateDescriptorMean(personId, null);
       return;
     }
-    const vectors = validFaces.map((f) => f.descriptor);
+    let vectors = validFaces.map((f) => f.descriptor);
+    const calcMean = (vecs) => {
+      const dim = vecs[0].length;
+      const mean2 = new Array(dim).fill(0);
+      for (const vec of vecs) {
+        for (let i = 0; i < dim; i++) mean2[i] += vec[i];
+      }
+      let mag = 0;
+      for (let i = 0; i < dim; i++) {
+        mean2[i] /= vecs.length;
+        mag += mean2[i] ** 2;
+      }
+      mag = Math.sqrt(mag);
+      if (mag > 0) {
+        for (let i = 0; i < dim; i++) mean2[i] /= mag;
+      }
+      return mean2;
+    };
+    const l2Dist = (v1, v2) => {
+      let sum = 0;
+      for (let i = 0; i < v1.length; i++) sum += (v1[i] - v2[i]) ** 2;
+      return Math.sqrt(sum);
+    };
+    let mean = calcMean(vectors);
+    if (vectors.length > 5) {
+      const dists = vectors.map((v) => l2Dist(v, mean));
+      const sumDist = dists.reduce((a, b) => a + b, 0);
+      const avgDist = sumDist / dists.length;
+      const variance = dists.reduce((a, b) => a + (b - avgDist) ** 2, 0) / dists.length;
+      const stdDev = Math.sqrt(variance);
+      const dynamicLimit = avgDist + 1.5 * stdDev;
+      const hardLimit = 0.65;
+      const limit = Math.min(dynamicLimit, hardLimit);
+      const cleanVectors = vectors.filter((_, i) => dists[i] <= limit);
+      if (cleanVectors.length > 0 && cleanVectors.length < vectors.length) {
+        console.log(`[PersonService] Outlier Rejection for Persona ${personId}: Removed ${vectors.length - cleanVectors.length} faces (Limit: ${limit.toFixed(3)})`);
+        vectors = cleanVectors;
+        mean = calcMean(vectors);
+      }
+    }
+    const DRIFT_THRESHOLD = 0.2;
+    let driftDetected = false;
+    let diff = 0;
+    const oldPerson = PersonRepository.getPerson(personId);
+    if (oldPerson && oldPerson.descriptor_mean_json) {
+      try {
+        const oldMean = JSON.parse(oldPerson.descriptor_mean_json);
+        if (Array.isArray(oldMean) && oldMean.length === mean.length) {
+          diff = l2Dist(oldMean, mean);
+          console.log(`[DriftCheck] Person ${personId} centroid shift: ${diff.toFixed(6)} (Threshold: ${DRIFT_THRESHOLD})`);
+          if (diff > DRIFT_THRESHOLD) {
+            console.warn(`[DriftAlert] Person ${personId} centroid drifted by ${diff.toFixed(3)} (Threshold: ${DRIFT_THRESHOLD})`);
+            driftDetected = true;
+          }
+        }
+      } catch (e) {
+      }
+    }
+    console.timeEnd(`recalculatePersonMean-${personId}`);
+    PersonRepository.updateDescriptorMean(personId, JSON.stringify(mean));
+    try {
+      PersonRepository.addHistorySnapshot(personId, JSON.stringify(mean), vectors.length, driftDetected ? "drift_detected" : "recalc");
+    } catch (e) {
+      console.warn("Failed to save person history:", e);
+    }
+    return { success: true, drift: driftDetected, driftDistance: diff };
+  }
+  static async generateEras(personId, config) {
+    const MIN_FACES_PER_ERA = (config == null ? void 0 : config.minFacesForEra) ?? 50;
+    const MERGE_THRESHOLD = (config == null ? void 0 : config.eraMergeThreshold) ?? 0.75;
+    const faces = FaceRepository.getConfirmedFacesWithDates(personId);
+    const parseDate = (f) => {
+      try {
+        if (f.metadata_json) {
+          const meta = JSON.parse(f.metadata_json);
+          const dateStr = meta.DateTimeOriginal || meta.CreateDate || meta.DateCreated || meta.DateTimeDigitized;
+          if (dateStr && typeof dateStr === "string") {
+            const isoLike = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
+            const ts = Date.parse(isoLike);
+            if (!isNaN(ts)) return ts;
+          }
+          if (meta.created_at) {
+            const ts = Date.parse(meta.created_at);
+            if (!isNaN(ts)) return ts;
+          }
+        }
+        if (f.created_at) {
+          const ts = new Date(f.created_at).getTime();
+          if (!isNaN(ts)) return ts;
+        }
+      } catch (e) {
+      }
+      return null;
+    };
+    const facesWithMeta = faces.map((f) => ({ ...f, timestamp: parseDate(f) }));
+    let k = 1;
+    if (faces.length >= MIN_FACES_PER_ERA) k = 2;
+    if (faces.length >= MIN_FACES_PER_ERA * 5) k = 3;
+    let centroids = [];
+    for (let i = 0; i < k; i++) {
+      const idx = Math.floor(Math.random() * facesWithMeta.length);
+      centroids.push(facesWithMeta[idx].descriptor);
+    }
+    let clusters = Array.from({ length: k }, () => []);
+    let changed = true;
+    let iter = 0;
+    while (changed && iter < 10) {
+      changed = false;
+      iter++;
+      clusters = Array.from({ length: k }, () => []);
+      for (const face of facesWithMeta) {
+        let minDist = Infinity;
+        let clusterIdx = 0;
+        for (let i = 0; i < k; i++) {
+          const dist = FaceService.calculateL2Distance(face.descriptor, centroids[i]);
+          if (dist < minDist) {
+            minDist = dist;
+            clusterIdx = i;
+          }
+        }
+        clusters[clusterIdx].push(face);
+      }
+      for (let i = 0; i < k; i++) {
+        if (clusters[i].length === 0) continue;
+        const newCentroid = this.calculateCentroid(clusters[i].map((f) => f.descriptor));
+        const shift = FaceService.calculateL2Distance(centroids[i], newCentroid);
+        if (shift > 0.01) changed = true;
+        centroids[i] = newCentroid;
+      }
+    }
+    let merged = true;
+    while (merged) {
+      merged = false;
+      const currentCentroids = clusters.map(
+        (c) => c.length > 0 ? this.calculateCentroid(c.map((f) => f.descriptor)) : []
+      );
+      for (let i = 0; i < clusters.length; i++) {
+        if (clusters[i].length === 0) continue;
+        for (let j = i + 1; j < clusters.length; j++) {
+          if (clusters[j].length === 0) continue;
+          const dist = FaceService.calculateL2Distance(currentCentroids[i], currentCentroids[j]);
+          console.log(`[box] Cluster ${i} vs ${j}: distance ${dist.toFixed(4)} (Threshold: ${MERGE_THRESHOLD})`);
+          if (dist < MERGE_THRESHOLD) {
+            clusters[i] = [...clusters[i], ...clusters[j]];
+            clusters[j] = [];
+            merged = true;
+            break;
+          }
+        }
+        if (merged) break;
+      }
+    }
+    const validClusters = clusters.filter((c) => c.length >= MIN_FACES_PER_ERA);
+    PersonRepository.clearEras(personId);
+    let eraCount = 0;
+    for (const cluster of validClusters) {
+      const mean = this.calculateCentroid(cluster.map((f) => f.descriptor));
+      const datedFaces = cluster.filter((f) => f.timestamp !== null).sort((a, b) => a.timestamp - b.timestamp);
+      let label = `Visual Era ${eraCount + 1}`;
+      let startYear = null;
+      let endYear = null;
+      if (datedFaces.length > 0) {
+        const start = new Date(datedFaces[0].timestamp).getFullYear();
+        const end = new Date(datedFaces[datedFaces.length - 1].timestamp).getFullYear();
+        if (start === end) label = `${start}`;
+        else label = `${start}-${end}`;
+        startYear = start;
+        endYear = end;
+      }
+      const eraId = PersonRepository.addEra({
+        person_id: personId,
+        era_name: label,
+        start_year: startYear,
+        end_year: endYear,
+        centroid_json: JSON.stringify(mean),
+        face_count: cluster.length,
+        is_auto_generated: true
+      });
+      for (const f of cluster) {
+        FaceRepository.updateFaceEra(f.id, eraId);
+      }
+      eraCount++;
+    }
+    console.log(`[PersonService] Generated ${eraCount} visual eras for person ${personId} (K=${k})`);
+    return { success: true, count: eraCount };
+  }
+  // Helper extracted from recalculatePersonMean
+  static calculateCentroid(vectors) {
     const dim = vectors[0].length;
     const mean = new Array(dim).fill(0);
     for (const vec of vectors) {
-      for (let i = 0; i < dim; i++) {
-        mean[i] += vec[i];
-      }
+      for (let i = 0; i < dim; i++) mean[i] += vec[i];
     }
     let mag = 0;
     for (let i = 0; i < dim; i++) {
@@ -1463,19 +1821,16 @@ class PersonService {
     }
     mag = Math.sqrt(mag);
     if (mag > 0) {
-      for (let i = 0; i < dim; i++) {
-        mean[i] /= mag;
-      }
+      for (let i = 0; i < dim; i++) mean[i] /= mag;
     }
-    console.timeEnd(`recalculatePersonMean-${personId}`);
-    PersonRepository.updateDescriptorMean(personId, JSON.stringify(mean));
+    return mean;
   }
   static async mergePeople(fromId, toId) {
     if (fromId === toId) return;
     const faces = FaceRepository.getAllFaces(1e4, 0, { personId: fromId }, false);
     const faceIds = faces.map((f) => f.id);
     if (faceIds.length > 0) {
-      FaceRepository.updateFacePerson(faceIds, toId);
+      FaceRepository.updateFacePerson(faceIds, toId, true);
     }
     PersonRepository.deletePerson(fromId);
     await this.recalculatePersonMean(toId);
@@ -1495,7 +1850,7 @@ class PersonService {
     if (!person) {
       person = PersonRepository.createPerson(normalizedName);
     }
-    FaceRepository.updateFacePerson([faceId], person.id);
+    FaceRepository.updateFacePerson([faceId], person.id, true);
     this.recalculatePersonMean(person.id);
     return { success: true, person };
   }
@@ -1618,39 +1973,137 @@ class FaceAnalysisService {
   }
   /**
    * Find faces that are potential outliers (misassigned) for a given person.
-   * Uses distance-to-centroid analysis to identify faces that don't match
-   * the person's mean embedding.
+   * 
+   * DETECTION STRATEGY (Priority Order):
+   * 1. REFERENCE-BASED (best): If user has confirmed faces, compute their mean
+   *    as ground truth and flag faces that are too far from it.
+   * 2. IQR FALLBACK: If no confirmed faces, use pairwise clustering IQR method.
+   *    Note: IQR fails when contamination >50% (wrong faces become majority).
    * 
    * @param personId The person ID to analyze
-   * @param threshold Distance threshold above which faces are flagged (default: 1.0)
-   *                  For L2-normalized embeddings: 0=identical, ~0.8=similar, ~1.2=different, 2=opposite
+   * @param threshold Distance threshold for reference-based (default 0.85)
    * @returns Analysis result with outlier list
    */
-  static findOutliersForPerson(personId, threshold = 1.2) {
+  static findOutliersForPerson(personId, threshold = 0.85) {
     const person = PersonRepository.getPersonWithDescriptor(personId);
     if (!person) {
       throw new Error(`Person with ID ${personId} not found`);
     }
-    const centroid = this.parseDescriptor(person.descriptor_mean_json);
-    if (!centroid || centroid.length === 0) {
+    const faces = FaceRepository.getFacesWithDescriptorsByPerson(personId);
+    const confirmedFaces = FaceRepository.getConfirmedFaces(personId);
+    const confirmedFaceIds = new Set(confirmedFaces.map((f) => f.id));
+    if (faces.length < 2) {
       return {
         personId,
         personName: person.name,
-        totalFaces: 0,
+        totalFaces: faces.length,
         outliers: [],
         threshold,
-        centroidValid: false
+        centroidValid: true
       };
     }
-    const faces = FaceRepository.getFacesWithDescriptorsByPerson(personId);
+    const facesWithParsed = faces.map((f) => ({
+      ...f,
+      parsedDescriptor: this.parseDescriptor(f.descriptor)
+    })).filter((f) => f.parsedDescriptor !== null);
+    if (confirmedFaces.length >= 1) {
+      console.log(`[FaceAnalysis] Person ${person.name}: Using REFERENCE-BASED detection with ${confirmedFaces.length} confirmed faces`);
+      const confirmedDescriptors = confirmedFaces.map((f) => this.parseDescriptor(f.descriptor)).filter((d) => d !== null);
+      if (confirmedDescriptors.length === 0) {
+        console.log(`[FaceAnalysis] No valid descriptors in confirmed faces, falling back to IQR`);
+        return this.findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, threshold);
+      }
+      const refCentroid = new Array(confirmedDescriptors[0].length).fill(0);
+      for (const desc of confirmedDescriptors) {
+        for (let i = 0; i < desc.length; i++) {
+          refCentroid[i] += desc[i] / confirmedDescriptors.length;
+        }
+      }
+      const normalizedRef = this.normalizeVector(refCentroid);
+      let maxConfirmedDist = 0;
+      for (const desc of confirmedDescriptors) {
+        const dist = this.computeDistance(desc, normalizedRef);
+        if (dist > maxConfirmedDist) maxConfirmedDist = dist;
+      }
+      const calculatedThreshold = maxConfirmedDist + 0.25;
+      const adaptiveThreshold = Math.min(1, Math.max(0.65, calculatedThreshold));
+      console.log(`[FaceAnalysis] Confirmed faces max dist=${maxConfirmedDist.toFixed(3)}, calculated=${calculatedThreshold.toFixed(3)}, used=${adaptiveThreshold.toFixed(3)}`);
+      const outliers = [];
+      for (const face of facesWithParsed) {
+        if (confirmedFaceIds.has(face.id)) continue;
+        const distance = this.computeDistance(face.parsedDescriptor, normalizedRef);
+        if (distance > adaptiveThreshold) {
+          let box = { x: 0, y: 0, width: 100, height: 100 };
+          try {
+            box = JSON.parse(face.box_json);
+          } catch {
+          }
+          outliers.push({
+            faceId: face.id,
+            distance,
+            blurScore: face.blur_score,
+            box,
+            photo_id: face.photo_id,
+            file_path: face.file_path,
+            preview_cache_path: face.preview_cache_path,
+            photo_width: face.width,
+            photo_height: face.height
+          });
+        }
+      }
+      console.log(`[FaceAnalysis] Person ${person.name}: Found ${outliers.length} outliers (REFERENCE method)`);
+      outliers.sort((a, b) => b.distance - a.distance);
+      return {
+        personId,
+        personName: person.name,
+        totalFaces: faces.length,
+        outliers,
+        threshold: adaptiveThreshold,
+        centroidValid: true
+      };
+    }
+    console.log(`[FaceAnalysis] Person ${person.name}: No confirmed faces, using IQR method (may fail if >50% contaminated)`);
+    return this.findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, threshold);
+  }
+  /**
+   * IQR-based outlier detection (fallback when no confirmed faces).
+   * WARNING: This method fails when contamination exceeds ~50%.
+   */
+  static findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, _threshold) {
+    var _a, _b;
+    const avgDistances = [];
+    for (let i = 0; i < facesWithParsed.length; i++) {
+      let totalDist = 0;
+      let count = 0;
+      for (let j = 0; j < facesWithParsed.length; j++) {
+        if (i !== j) {
+          const dist = this.computeDistance(
+            facesWithParsed[i].parsedDescriptor,
+            facesWithParsed[j].parsedDescriptor
+          );
+          totalDist += dist;
+          count++;
+        }
+      }
+      avgDistances.push({
+        faceId: facesWithParsed[i].id,
+        avgDist: count > 0 ? totalDist / count : 0,
+        idx: i
+      });
+    }
+    const sortedDists = [...avgDistances].sort((a, b) => a.avgDist - b.avgDist);
+    const q1Idx = Math.floor(sortedDists.length * 0.25);
+    const q3Idx = Math.floor(sortedDists.length * 0.75);
+    const q1 = ((_a = sortedDists[q1Idx]) == null ? void 0 : _a.avgDist) ?? 0;
+    const q3 = ((_b = sortedDists[q3Idx]) == null ? void 0 : _b.avgDist) ?? 0;
+    const iqr = q3 - q1;
+    const outlierThreshold = q3 + iqr * 1;
+    console.log(`[FaceAnalysis] IQR: Q1=${q1.toFixed(3)}, Q3=${q3.toFixed(3)}, IQR=${iqr.toFixed(3)}, threshold=${outlierThreshold.toFixed(3)}`);
     const outliers = [];
-    const allDistances = [];
-    for (const face of faces) {
-      const descriptor = this.parseDescriptor(face.descriptor);
-      if (!descriptor) continue;
-      const distance = this.computeDistance(descriptor, centroid);
-      allDistances.push(distance);
-      if (distance > threshold) {
+    for (const { faceId, avgDist, idx } of avgDistances) {
+      if (confirmedFaceIds.has(faceId)) continue;
+      if (avgDist > outlierThreshold) {
+        const face = facesWithParsed[idx];
         let box = { x: 0, y: 0, width: 100, height: 100 };
         try {
           box = JSON.parse(face.box_json);
@@ -1658,11 +2111,10 @@ class FaceAnalysisService {
         }
         outliers.push({
           faceId: face.id,
-          distance,
+          distance: avgDist,
           blurScore: face.blur_score,
           box,
           photo_id: face.photo_id,
-          // Added
           file_path: face.file_path,
           preview_cache_path: face.preview_cache_path,
           photo_width: face.width,
@@ -1670,21 +2122,14 @@ class FaceAnalysisService {
         });
       }
     }
-    if (allDistances.length > 0) {
-      const sorted = [...allDistances].sort((a, b) => a - b);
-      const min = sorted[0];
-      const max = sorted[sorted.length - 1];
-      const median = sorted[Math.floor(sorted.length / 2)];
-      const avg = allDistances.reduce((a, b) => a + b, 0) / allDistances.length;
-      console.log(`[FaceAnalysis] Person ${person.name}: ${faces.length} faces, distances min=${min.toFixed(3)} max=${max.toFixed(3)} avg=${avg.toFixed(3)} median=${median.toFixed(3)}, threshold=${threshold}, outliers=${outliers.length}`);
-    }
+    console.log(`[FaceAnalysis] Found ${outliers.length} outliers (IQR method)`);
     outliers.sort((a, b) => b.distance - a.distance);
     return {
       personId,
       personName: person.name,
-      totalFaces: faces.length,
+      totalFaces: facesWithParsed.length,
       outliers,
-      threshold,
+      threshold: outlierThreshold,
       centroidValid: true
     };
   }
@@ -1887,8 +2332,7 @@ class FaceService {
     const pendingIndices = results.map((r, i) => r === null ? i : -1).filter((i) => i !== -1);
     if (pendingIndices.length > 0 && options.searchFn) {
       const pendingDescriptors = pendingIndices.map((i) => parsedDescriptors[i]);
-      const distThreshold = 1 / Math.max(0.01, threshold) - 1;
-      const batchFaiss = await options.searchFn(pendingDescriptors, options.topK ?? 5, distThreshold);
+      const batchFaiss = await options.searchFn(pendingDescriptors, options.topK ?? 5, threshold);
       const allMatchedFaceIds = /* @__PURE__ */ new Set();
       batchFaiss.forEach((mList) => mList.forEach((m) => allMatchedFaceIds.add(m.id)));
       if (allMatchedFaceIds.size > 0) {
@@ -1947,61 +2391,144 @@ class FaceService {
     let bestMatch = null;
     let minDist = Infinity;
     for (const person of candidates) {
-      const centroid = person.descriptor || person.mean;
-      if (!centroid || centroid.length !== normalized.length) continue;
-      let sumSq = 0;
-      for (let i = 0; i < normalized.length; i++) {
-        const diff = normalized[i] - centroid[i];
-        sumSq += diff * diff;
+      const globalCentroid = person.descriptor || person.mean;
+      if (globalCentroid && globalCentroid.length === normalized.length) {
+        const dist = this.calculateL2Distance(normalized, globalCentroid);
+        if (dist < minDist) {
+          minDist = dist;
+          bestMatch = person;
+        }
       }
-      const dist = Math.sqrt(sumSq);
-      if (dist < minDist) {
-        minDist = dist;
-        bestMatch = person;
+      if (person.eras && person.eras.length > 0) {
+        for (const era of person.eras) {
+          if (era.centroid && era.centroid.length === normalized.length) {
+            const dist = this.calculateL2Distance(normalized, era.centroid);
+            if (dist < minDist) {
+              minDist = dist;
+              bestMatch = person;
+            }
+          }
+        }
       }
     }
     const similarity = 1 / (1 + minDist);
-    if (bestMatch && similarity >= threshold) {
+    if (bestMatch && minDist <= threshold) {
       return { personId: bestMatch.id, personName: bestMatch.name, distance: minDist, similarity };
     }
     return null;
   }
-  static async autoAssignFaces(faceIds, thresholdOverride, searchFn) {
+  // Public helper for other services
+  static calculateL2Distance(v1, v2) {
+    let sumSq = 0;
+    for (let i = 0; i < v1.length; i++) {
+      const diff = v1[i] - v2[i];
+      sumSq += diff * diff;
+    }
+    return Math.sqrt(sumSq);
+  }
+  /**
+   * Auto-assign unassigned faces to named people.
+   * 
+   * CRITICAL FIXES (v0.5.1):
+   * - Freeze centroids at start (no mid-batch recalculation)
+   * - Filter by confidence tier (only 'high' by default)
+   * - Cap assignments per person (prevent cascade absorption)
+   * - Return queued/capped faces for user review
+   */
+  static async autoAssignFaces(faceIds, thresholdOverride, searchFn, options) {
+    const opts = { ...this.AUTO_ASSIGN_DEFAULTS, ...options };
+    const settings = getAISettings();
+    const HIGH_THRESHOLD = thresholdOverride ?? settings.autoAssignThreshold ?? 0.7;
+    const REVIEW_THRESHOLD = settings.reviewThreshold || 0.9;
     try {
-      let totalAssigned = 0;
-      const allAssigned = [];
-      let pass = 1;
-      const MAX_PASSES = 5;
-      while (pass <= MAX_PASSES) {
-        const candidates = FaceRepository.getFacesForClustering();
-        let faces = faceIds && faceIds.length > 0 ? candidates.filter((f) => faceIds.includes(f.id)) : candidates;
-        if (faces.length === 0) break;
-        logger.info(`[AutoAssign] Pass ${pass}: Matching ${faces.length} faces...`);
-        const matchResults = await this.matchBatch(
-          faces.map((f) => f.descriptor),
-          { threshold: thresholdOverride, searchFn }
-        );
-        let passAssignedCount = 0;
-        const peopleToRecalc = /* @__PURE__ */ new Set();
-        for (let i = 0; i < faces.length; i++) {
-          const match = matchResults[i];
-          if (match) {
-            FaceRepository.updateFacePerson([faces[i].id], match.personId);
-            passAssignedCount++;
-            allAssigned.push({ faceId: faces[i].id, personId: match.personId, similarity: match.similarity });
-            peopleToRecalc.add(match.personId);
-          }
+      const frozenCentroids = PersonRepository.getPeopleWithDescriptors();
+      logger.info(`[AutoAssign] Frozen ${frozenCentroids.length} person centroids for batch operation.`);
+      const candidates = FaceRepository.getFacesForClustering();
+      const faces = faceIds && faceIds.length > 0 ? candidates.filter((f) => faceIds.includes(f.id)) : candidates;
+      if (faces.length === 0) {
+        return { success: true, count: 0, assigned: [], queuedForReview: [], capped: [] };
+      }
+      logger.info(`[AutoAssign] Processing ${faces.length} faces against ${frozenCentroids.length} people...`);
+      const matchResults = await this.matchBatch(
+        faces.map((f) => f.descriptor),
+        {
+          threshold: REVIEW_THRESHOLD,
+          // Capture all candidates up to review tier
+          candidatePeople: frozenCentroids,
+          searchFn: opts.useFaissFallback ? searchFn : void 0
         }
-        if (passAssignedCount === 0) break;
-        totalAssigned += passAssignedCount;
-        logger.info(`[AutoAssign] Pass ${pass}: Successfully identified ${passAssignedCount} faces.`);
-        for (const pid of peopleToRecalc) {
+      );
+      const assigned = [];
+      const queuedForReview = [];
+      const capped = [];
+      const assignmentCounts = /* @__PURE__ */ new Map();
+      const affectedPeople = /* @__PURE__ */ new Set();
+      for (let i = 0; i < faces.length; i++) {
+        const match = matchResults[i];
+        if (!match) continue;
+        const face = faces[i];
+        const dist = match.distance;
+        let tier = "unknown";
+        if (dist < HIGH_THRESHOLD) {
+          tier = "high";
+        } else if (dist < REVIEW_THRESHOLD) {
+          tier = "review";
+        }
+        if (!opts.tierFilter.includes(tier)) {
+          if (tier === "review") {
+            queuedForReview.push({
+              faceId: face.id,
+              personId: match.personId,
+              distance: dist,
+              personName: match.personName
+            });
+          }
+          continue;
+        }
+        const currentCount = assignmentCounts.get(match.personId) ?? 0;
+        if (currentCount >= opts.maxAssignmentsPerPerson) {
+          capped.push({
+            faceId: face.id,
+            personId: match.personId,
+            reason: `Exceeded ${opts.maxAssignmentsPerPerson} assignments for ${match.personName}`
+          });
+          continue;
+        }
+        assigned.push({
+          faceId: face.id,
+          personId: match.personId,
+          similarity: match.similarity,
+          tier
+        });
+        assignmentCounts.set(match.personId, currentCount + 1);
+        affectedPeople.add(match.personId);
+      }
+      if (assigned.length > 0) {
+        const groupedByPerson = /* @__PURE__ */ new Map();
+        for (const a of assigned) {
+          const existing = groupedByPerson.get(a.personId) || [];
+          existing.push(a.faceId);
+          groupedByPerson.set(a.personId, existing);
+        }
+        for (const [personId, faceIdList] of groupedByPerson) {
+          FaceRepository.updateFacePerson(faceIdList, personId);
+        }
+      }
+      if (!opts.deferRecalculation && affectedPeople.size > 0) {
+        logger.info(`[AutoAssign] Recalculating means for ${affectedPeople.size} affected people...`);
+        for (const pid of affectedPeople) {
           await PersonService.recalculatePersonMean(pid);
         }
-        pass++;
       }
-      if (totalAssigned > 0) logger.info(`[AutoAssign] Final: Identified ${totalAssigned} faces.`);
-      return { success: true, count: totalAssigned, assigned: allAssigned };
+      logger.info(`[AutoAssign] Complete: ${assigned.length} assigned, ${queuedForReview.length} queued for review, ${capped.length} capped`);
+      return {
+        success: true,
+        count: assigned.length,
+        assigned,
+        queuedForReview,
+        capped,
+        affectedPeople: Array.from(affectedPeople)
+      };
     } catch (e) {
       logger.error("Auto-Assign failed:", e);
       return { success: false, error: String(e) };
@@ -2155,6 +2682,19 @@ class FaceService {
     if (assignedCount > 0) logger.info(`[FaceService] Auto-assigned ${assignedCount} faces via scan-time logic.`);
   }
 }
+/**
+ * Options for auto-assign operation.
+ */
+__publicField(FaceService, "AUTO_ASSIGN_DEFAULTS", {
+  maxAssignmentsPerPerson: 50,
+  // Cap to prevent single person absorbing wrong faces
+  tierFilter: ["high"],
+  // Only assign high-confidence by default
+  deferRecalculation: false,
+  // Recalc at end by default
+  useFaissFallback: false
+  // Disable FAISS for bulk to prevent voting issues
+});
 class PhotoRepository {
   static getPhotos(page = 1, limit = 50, sort = "date_desc", filter = {}, offset) {
     const db2 = getDB();
@@ -3023,8 +3563,8 @@ function registerDBHandlers() {
     const searchFn = async (descriptors, k, th) => {
       return pythonProvider.searchFaces(descriptors, k, th);
     };
-    const settings = ConfigService.getAISettings();
-    const threshold = settings.faceSimilarityThreshold || 0.65;
+    const aiSettings = ConfigService.getAISettings();
+    const threshold = aiSettings.autoAssignThreshold || 0.7;
     return FaceService.autoAssignFaces(args.faceIds, threshold, searchFn);
   });
   ipcMain.handle("db:updateFaces", async (_, _args) => {
@@ -3034,8 +3574,22 @@ function registerDBHandlers() {
     FaceRepository.deleteFaces(faceIds);
     return { success: true };
   });
+  ipcMain.handle("db:recalculatePersonModel", async (_, personId) => {
+    return await PersonService.recalculatePersonMean(personId);
+  });
   ipcMain.handle("db:unassignFaces", async (_, faceIds) => {
     await PersonService.unassignFaces(faceIds);
+    return { success: true };
+  });
+  ipcMain.handle("db:generateEras", async (_, args) => {
+    const { personId, config } = args;
+    return await PersonService.generateEras(personId, config);
+  });
+  ipcMain.handle("db:getEras", async (_, personId) => {
+    return PersonRepository.getEras(personId);
+  });
+  ipcMain.handle("db:deleteEra", async (_, eraId) => {
+    PersonRepository.deleteEra(eraId);
     return { success: true };
   });
   ipcMain.handle("db:getPeople", async () => PersonRepository.getPeople());
@@ -3173,6 +3727,24 @@ function registerDBHandlers() {
       return { success: false, error: String(error) };
     }
   });
+  ipcMain.handle("db:confirmFaces", async (_, faceIds) => {
+    try {
+      FaceRepository.setConfirmed(faceIds, true);
+      return { success: true, confirmed: faceIds.length };
+    } catch (error) {
+      console.error("[Main] db:confirmFaces failed:", error);
+      return { success: false, error: String(error) };
+    }
+  });
+  ipcMain.handle("db:unconfirmFaces", async (_, faceIds) => {
+    try {
+      FaceRepository.setConfirmed(faceIds, false);
+      return { success: true, unconfirmed: faceIds.length };
+    } catch (error) {
+      console.error("[Main] db:unconfirmFaces failed:", error);
+      return { success: false, error: String(error) };
+    }
+  });
   ipcMain.handle("db:getPoseBackfillStatus", async () => {
     try {
       const status = FaceRepository.getPoseBackfillCount();
@@ -3200,7 +3772,7 @@ function registerDBHandlers() {
         try {
           const box = JSON.parse(face.box_json);
           const filePath = face.file_path;
-          const orientation = face.orientation;
+          const orientation = face.orientation || 1;
           const result = await pythonProvider.sendRequest("extract_face_pose", {
             filePath,
             box,

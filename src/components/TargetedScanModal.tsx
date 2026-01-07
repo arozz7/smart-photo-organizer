@@ -25,6 +25,19 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
     const [loadingCount, setLoadingCount] = useState(false);
     const [matchedFaceIds, setMatchedFaceIds] = useState<number[]>([]);
     const [matchedAssociations, setMatchedAssociations] = useState<{ personId: number, faceId: number }[]>([]);
+    const [autoAssignThreshold, setAutoAssignThreshold] = useState(0.65);  // Default, loaded from settings
+
+    // Load settings on open
+    useEffect(() => {
+        if (isOpen) {
+            // @ts-ignore - Fetch AI settings for threshold
+            window.ipcRenderer.invoke('ai:getSettings').then((settings: any) => {
+                if (settings?.autoAssignThreshold) {
+                    setAutoAssignThreshold(settings.autoAssignThreshold);
+                }
+            }).catch(() => { });
+        }
+    }, [isOpen]);
 
     // Initial configuration on open
     useEffect(() => {
@@ -39,7 +52,7 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
         if (isOpen) {
             updateCount();
         }
-    }, [isOpen, mode, scope, selectedFolder, onlyWithFaces]);
+    }, [isOpen, mode, scope, selectedFolder, onlyWithFaces, autoAssignThreshold]);
 
     const updateCount = async () => {
         setLoadingCount(true);
@@ -55,13 +68,18 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
                         return;
                     }
 
+                    // Use threshold from settings
                     const searchResult = await window.ipcRenderer.invoke('ai:command', {
                         type: 'search_index',
-                        payload: { descriptor, k: 1000, threshold: 0.8 }
+                        payload: { descriptor, k: 1000, threshold: autoAssignThreshold }
                     });
 
                     if (searchResult?.matches?.length > 0) {
-                        const ids = searchResult.matches.map((m: any) => m.id);
+                        // Filter by distance: only accept high-confidence matches
+                        const validMatches = searchResult.matches.filter((m: any) =>
+                            (m.distance !== undefined && m.distance < autoAssignThreshold)
+                        );
+                        const ids = validMatches.map((m: any) => m.id);
 
                         // @ts-ignore
                         const metadata = await window.ipcRenderer.invoke('db:getFaceMetadata', ids);
@@ -101,15 +119,18 @@ const TargetedScanModal: React.FC<TargetedScanModalProps> = ({ isOpen, onClose, 
                         // @ts-ignore
                         const searchResult = await window.ipcRenderer.invoke('ai:command', {
                             type: 'search_index',
-                            payload: { descriptor: p.descriptor, k: 500, threshold: 0.8 }
+                            payload: { descriptor: p.descriptor, k: 500, threshold: autoAssignThreshold }
                         });
 
 
                         if (searchResult?.matches) {
                             for (const match of searchResult.matches) {
-                                // Calculate similarity score from distance (1 / (1 + distance))
                                 // FAISS returns distance (L2), lower is better.
                                 const distance = match.distance !== undefined ? match.distance : 100;
+
+                                // STRICT: Only accept matches below threshold from settings
+                                if (distance >= autoAssignThreshold) continue;
+
                                 const score = 1 / (1 + distance);
 
                                 const existing = bestMatches.get(match.id);

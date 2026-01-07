@@ -274,11 +274,26 @@ export class FaceRepository {
         db.prepare(`DELETE FROM faces WHERE id IN (${placeholders})`).run(...faceIds);
     }
 
-    static updateFacePerson(faceIds: number[], personId: number) {
+    static updateFacePerson(faceIds: number[], personId: number | null, setConfirmed: boolean | null = null) {
         if (!faceIds || faceIds.length === 0) return;
         const db = getDB();
         const placeholders = faceIds.map(() => '?').join(',');
-        db.prepare(`UPDATE faces SET person_id = ? WHERE id IN (${placeholders})`).run(personId, ...faceIds);
+
+        let query = `UPDATE faces SET person_id = ?`;
+        const params: any[] = [personId];
+
+        if (setConfirmed !== null) {
+            query += `, is_confirmed = ?`;
+            params.push(setConfirmed ? 1 : 0);
+        } else if (personId === null) {
+            // Implicitly unconfirm if removing person
+            query += `, is_confirmed = 0`;
+        }
+
+        query += ` WHERE id IN (${placeholders})`;
+        params.push(...faceIds);
+
+        db.prepare(query).run(...params);
     }
 
     static getAllDescriptors(): { id: number, descriptor: number[] }[] {
@@ -532,5 +547,94 @@ export class FaceRepository {
         } catch (error) {
             throw new Error(`FaceRepository.updateFacePoseData failed: ${String(error)}`);
         }
+    }
+
+    // ============== FACE CONFIRMATION (Centroid Stability Feature) ==============
+
+    /**
+     * Mark faces as confirmed (user-verified as correctly assigned).
+     * Confirmed faces are excluded from outlier detection.
+     */
+    static setConfirmed(faceIds: number[], confirmed: boolean): void {
+        if (!faceIds || faceIds.length === 0) return;
+        const db = getDB();
+        const placeholders = faceIds.map(() => '?').join(',');
+        db.prepare(`UPDATE faces SET is_confirmed = ? WHERE id IN (${placeholders})`).run(
+            confirmed ? 1 : 0,
+            ...faceIds
+        );
+    }
+
+    /**
+     * Get all confirmed faces for a person.
+     */
+    static getConfirmedFaces(personId: number): Array<{
+        id: number;
+        descriptor: Buffer | null;
+        box_json: string;
+        photo_id: number;
+        file_path: string;
+    }> {
+        const db = getDB();
+        try {
+            return db.prepare(`
+                SELECT f.id, f.descriptor, f.box_json, f.photo_id, p.file_path
+                FROM faces f
+                JOIN photos p ON f.photo_id = p.id
+                WHERE f.person_id = ?
+                  AND f.is_confirmed = 1
+                  AND f.descriptor IS NOT NULL
+                  AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
+            `).all(personId) as Array<{
+                id: number;
+                descriptor: Buffer | null;
+                box_json: string;
+                photo_id: number;
+                file_path: string;
+            }>;
+        } catch (error) {
+            throw new Error(`FaceRepository.getConfirmedFaces failed: ${String(error)}`);
+        }
+    }
+
+    /**
+     * Unassign faces from a person (remove person_id without ignoring).
+     * Used for removing misassigned faces.
+     */
+    static unassignFaces(faceIds: number[]): void {
+        if (!faceIds || faceIds.length === 0) return;
+        const db = getDB();
+        const placeholders = faceIds.map(() => '?').join(',');
+        db.prepare(`UPDATE faces SET person_id = NULL, is_confirmed = 0 WHERE id IN (${placeholders})`).run(
+            ...faceIds
+        );
+    }
+
+    static getConfirmedFacesWithDates(personId: number) {
+        const db = getDB();
+        try {
+            const faces = db.prepare(`
+                SELECT f.id, f.descriptor, p.created_at, p.metadata_json 
+                FROM faces f
+                JOIN photos p ON f.photo_id = p.id
+                WHERE f.person_id = ? 
+                AND f.is_confirmed = 1
+                AND f.descriptor IS NOT NULL
+            `).all(personId);
+
+            return faces.map((f: any) => ({
+                id: f.id,
+                descriptor: Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)),
+                created_at: f.created_at,
+                metadata_json: f.metadata_json // Add metadata
+            }));
+        } catch (error) {
+            console.error('FaceRepository.getConfirmedFacesWithDates failed:', error);
+            return [];
+        }
+    }
+    static updateFaceEra(faceId: number, eraId: number) {
+        const db = getDB();
+        db.prepare('UPDATE faces SET era_id = ? WHERE id = ?').run(eraId, faceId);
     }
 }

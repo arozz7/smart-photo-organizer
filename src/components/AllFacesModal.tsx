@@ -22,6 +22,10 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
     const { showAlert, showConfirm } = useAlert();
     const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
 
+    // Era Filtering
+    const [eras, setEras] = useState<any[]>([]);
+    const [selectedEra, setSelectedEra] = useState<number | 'all'>('all'); // 'all' or eraId
+
     useEffect(() => {
         if (isOpen && personId) {
             loadAllFaces();
@@ -42,6 +46,11 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                 includeDescriptors: false
             });
             setFaces(allFaces);
+
+            // Load Eras
+            // @ts-ignore
+            const loadedEras = await window.ipcRenderer.invoke('db:getEras', personId);
+            setEras(loadedEras);
         } catch (err) {
             console.error(err);
             showAlert({ title: 'Error', description: 'Failed to load faces', variant: 'danger' });
@@ -49,6 +58,11 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
             setLoading(false);
         }
     };
+
+    const filteredFaces = useMemo(() => {
+        if (selectedEra === 'all') return faces;
+        return faces.filter(f => f.era_id === selectedEra);
+    }, [faces, selectedEra]);
 
     const toggleSelection = useCallback((faceId: number) => {
         setSelectedFaces(prev => {
@@ -131,11 +145,56 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                 <div className="px-6 py-4 border-b border-gray-800 bg-gray-900 flex justify-between items-center shrink-0">
                     <div className="flex items-center gap-4">
                         <h2 className="text-xl font-bold text-white">Review All Faces: <span className="text-indigo-400">{personName}</span></h2>
-                        <span className="text-gray-500 text-sm">({faces.length} faces)</span>
+
+                        {eras.length > 0 && (
+                            <select
+                                value={selectedEra}
+                                onChange={(e) => setSelectedEra(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+                                className="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:outline-none focus:border-blue-500"
+                            >
+                                <option value="all">Show All Eras ({faces.length})</option>
+                                {eras.map((era: any) => (
+                                    <option key={era.id} value={era.id}>
+                                        {era.era_name} ({era.face_count})
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                        <span className="text-gray-500 text-sm">({filteredFaces.length} showing)</span>
                     </div>
                     <div className="flex items-center gap-3">
+                        {/* Selection Controls */}
+                        <button
+                            onClick={() => setSelectedFaces(new Set(faces.map(f => f.id)))}
+                            className="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-800 transition-colors"
+                            title="Select all faces"
+                        >
+                            Select All
+                        </button>
+                        {selectedFaces.size > 0 && (
+                            <button
+                                onClick={() => setSelectedFaces(new Set())}
+                                className="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-800 transition-colors"
+                                title="Clear selection"
+                            >
+                                Clear ({selectedFaces.size})
+                            </button>
+                        )}
+                        <div className="h-6 w-px bg-gray-700" />
                         {selectedFaces.size > 0 && (
                             <>
+                                <button
+                                    onClick={async () => {
+                                        // @ts-ignore
+                                        await window.ipcRenderer.invoke('db:confirmFaces', Array.from(selectedFaces));
+                                        setSelectedFaces(new Set());
+                                        loadAllFaces();  // Refresh to show checkmarks
+                                    }}
+                                    className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-medium transition-colors"
+                                    title="Mark as correctly assigned (for reference-based outlier detection)"
+                                >
+                                    ✓ Confirm ({selectedFaces.size})
+                                </button>
                                 <button
                                     onClick={() => setIsMoveModalOpen(true)}
                                     className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
@@ -168,10 +227,10 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                     ) : (
                         <VirtuosoGrid
                             style={{ height: '100%' }}
-                            totalCount={faces.length}
+                            totalCount={filteredFaces.length}
                             components={gridComponents}
                             itemContent={(index) => {
-                                const face = faces[index];
+                                const face = filteredFaces[index];
                                 return (
                                     <div className="h-full">
                                         <PersonFaceItem

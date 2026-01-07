@@ -149,62 +149,188 @@ export class FaceAnalysisService {
 
     /**
      * Find faces that are potential outliers (misassigned) for a given person.
-     * Uses distance-to-centroid analysis to identify faces that don't match
-     * the person's mean embedding.
+     * 
+     * DETECTION STRATEGY (Priority Order):
+     * 1. REFERENCE-BASED (best): If user has confirmed faces, compute their mean
+     *    as ground truth and flag faces that are too far from it.
+     * 2. IQR FALLBACK: If no confirmed faces, use pairwise clustering IQR method.
+     *    Note: IQR fails when contamination >50% (wrong faces become majority).
      * 
      * @param personId The person ID to analyze
-     * @param threshold Distance threshold above which faces are flagged (default: 1.0)
-     *                  For L2-normalized embeddings: 0=identical, ~0.8=similar, ~1.2=different, 2=opposite
+     * @param threshold Distance threshold for reference-based (default 0.85)
      * @returns Analysis result with outlier list
      */
-    static findOutliersForPerson(personId: number, threshold = 1.2): OutlierAnalysis {
-        // 1. Get person with centroid
+    static findOutliersForPerson(personId: number, threshold = 0.85): OutlierAnalysis {
         const person = PersonRepository.getPersonWithDescriptor(personId);
 
         if (!person) {
             throw new Error(`Person with ID ${personId} not found`);
         }
 
-        const centroid = this.parseDescriptor(person.descriptor_mean_json);
+        const faces = FaceRepository.getFacesWithDescriptorsByPerson(personId);
+        const confirmedFaces = FaceRepository.getConfirmedFaces(personId);
+        const confirmedFaceIds = new Set(confirmedFaces.map(f => f.id));
 
-        if (!centroid || centroid.length === 0) {
+        if (faces.length < 2) {
             return {
                 personId,
                 personName: person.name,
-                totalFaces: 0,
+                totalFaces: faces.length,
                 outliers: [],
                 threshold,
-                centroidValid: false
+                centroidValid: true
             };
         }
 
-        // 2. Get all faces with descriptors for this person
-        const faces = FaceRepository.getFacesWithDescriptorsByPerson(personId);
+        // Parse all face descriptors
+        const facesWithParsed = faces.map(f => ({
+            ...f,
+            parsedDescriptor: this.parseDescriptor(f.descriptor)
+        })).filter(f => f.parsedDescriptor !== null);
 
-        // 3. Calculate distance for each face
+        // STRATEGY 1: REFERENCE-BASED (using confirmed faces as ground truth)
+        if (confirmedFaces.length >= 1) {
+            console.log(`[FaceAnalysis] Person ${person.name}: Using REFERENCE-BASED detection with ${confirmedFaces.length} confirmed faces`);
+
+            // Compute mean of confirmed faces as reference
+            const confirmedDescriptors = confirmedFaces
+                .map(f => this.parseDescriptor(f.descriptor))
+                .filter(d => d !== null) as number[][];
+
+            if (confirmedDescriptors.length === 0) {
+                console.log(`[FaceAnalysis] No valid descriptors in confirmed faces, falling back to IQR`);
+                return this.findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, threshold);
+            }
+
+            // Compute reference centroid from confirmed faces only
+            const refCentroid = new Array(confirmedDescriptors[0].length).fill(0);
+            for (const desc of confirmedDescriptors) {
+                for (let i = 0; i < desc.length; i++) {
+                    refCentroid[i] += desc[i] / confirmedDescriptors.length;
+                }
+            }
+            const normalizedRef = this.normalizeVector(refCentroid);
+
+            // Find max distance among confirmed faces (to set adaptive threshold)
+            let maxConfirmedDist = 0;
+            for (const desc of confirmedDescriptors) {
+                const dist = this.computeDistance(desc, normalizedRef);
+                if (dist > maxConfirmedDist) maxConfirmedDist = dist;
+            }
+
+            // Adaptive threshold: max confirmed distance + margin
+            // But CAP it at hard limit (e.g. 1.0) to prevent polluted confirmations from breaking detection.
+            // A distance > 1.0 in Facenet/Dlib usually means completely different people.
+            const calculatedThreshold = maxConfirmedDist + 0.25;
+            const adaptiveThreshold = Math.min(1.0, Math.max(0.65, calculatedThreshold));
+
+            console.log(`[FaceAnalysis] Confirmed faces max dist=${maxConfirmedDist.toFixed(3)}, calculated=${calculatedThreshold.toFixed(3)}, used=${adaptiveThreshold.toFixed(3)}`);
+
+            // Flag faces far from reference
+            const outliers: OutlierResult[] = [];
+            for (const face of facesWithParsed) {
+                if (confirmedFaceIds.has(face.id)) continue; // Skip confirmed
+
+                const distance = this.computeDistance(face.parsedDescriptor!, normalizedRef);
+
+                if (distance > adaptiveThreshold) {
+                    let box = { x: 0, y: 0, width: 100, height: 100 };
+                    try { box = JSON.parse(face.box_json); } catch { }
+
+                    outliers.push({
+                        faceId: face.id,
+                        distance,
+                        blurScore: face.blur_score,
+                        box,
+                        photo_id: face.photo_id,
+                        file_path: face.file_path,
+                        preview_cache_path: face.preview_cache_path,
+                        photo_width: face.width,
+                        photo_height: face.height
+                    });
+                }
+            }
+
+            console.log(`[FaceAnalysis] Person ${person.name}: Found ${outliers.length} outliers (REFERENCE method)`);
+            outliers.sort((a, b) => b.distance - a.distance);
+
+            return {
+                personId,
+                personName: person.name,
+                totalFaces: faces.length,
+                outliers,
+                threshold: adaptiveThreshold,
+                centroidValid: true
+            };
+        }
+
+        // STRATEGY 2: IQR FALLBACK (no confirmed faces)
+        console.log(`[FaceAnalysis] Person ${person.name}: No confirmed faces, using IQR method (may fail if >50% contaminated)`);
+        return this.findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, threshold);
+    }
+
+    /**
+     * IQR-based outlier detection (fallback when no confirmed faces).
+     * WARNING: This method fails when contamination exceeds ~50%.
+     */
+    private static findOutliersIQR(
+        personId: number,
+        person: { name: string },
+        facesWithParsed: Array<any>,
+        confirmedFaceIds: Set<number>,
+        _threshold: number  // Kept for API parity, IQR uses dynamic threshold
+    ): OutlierAnalysis {
+        // Compute pairwise distances: avg distance of each face to all others
+        const avgDistances: { faceId: number; avgDist: number; idx: number }[] = [];
+
+        for (let i = 0; i < facesWithParsed.length; i++) {
+            let totalDist = 0;
+            let count = 0;
+
+            for (let j = 0; j < facesWithParsed.length; j++) {
+                if (i !== j) {
+                    const dist = this.computeDistance(
+                        facesWithParsed[i].parsedDescriptor!,
+                        facesWithParsed[j].parsedDescriptor!
+                    );
+                    totalDist += dist;
+                    count++;
+                }
+            }
+
+            avgDistances.push({
+                faceId: facesWithParsed[i].id,
+                avgDist: count > 0 ? totalDist / count : 0,
+                idx: i
+            });
+        }
+
+        // IQR calculation
+        const sortedDists = [...avgDistances].sort((a, b) => a.avgDist - b.avgDist);
+        const q1Idx = Math.floor(sortedDists.length * 0.25);
+        const q3Idx = Math.floor(sortedDists.length * 0.75);
+        const q1 = sortedDists[q1Idx]?.avgDist ?? 0;
+        const q3 = sortedDists[q3Idx]?.avgDist ?? 0;
+        const iqr = q3 - q1;
+        const outlierThreshold = q3 + (iqr * 1.0);
+
+        console.log(`[FaceAnalysis] IQR: Q1=${q1.toFixed(3)}, Q3=${q3.toFixed(3)}, IQR=${iqr.toFixed(3)}, threshold=${outlierThreshold.toFixed(3)}`);
+
         const outliers: OutlierResult[] = [];
-        const allDistances: number[] = [];
+        for (const { faceId, avgDist, idx } of avgDistances) {
+            if (confirmedFaceIds.has(faceId)) continue;
 
-        for (const face of faces) {
-            const descriptor = this.parseDescriptor(face.descriptor);
-            if (!descriptor) continue;
-
-            const distance = this.computeDistance(descriptor, centroid);
-            allDistances.push(distance);
-
-            if (distance > threshold) {
-                // Parse box JSON
+            if (avgDist > outlierThreshold) {
+                const face = facesWithParsed[idx];
                 let box = { x: 0, y: 0, width: 100, height: 100 };
-                try {
-                    box = JSON.parse(face.box_json);
-                } catch { /* use default */ }
+                try { box = JSON.parse(face.box_json); } catch { }
 
                 outliers.push({
                     faceId: face.id,
-                    distance,
+                    distance: avgDist,
                     blurScore: face.blur_score,
                     box,
-                    photo_id: face.photo_id, // Added
+                    photo_id: face.photo_id,
                     file_path: face.file_path,
                     preview_cache_path: face.preview_cache_path,
                     photo_width: face.width,
@@ -213,25 +339,15 @@ export class FaceAnalysisService {
             }
         }
 
-        // Debug logging for distance distribution
-        if (allDistances.length > 0) {
-            const sorted = [...allDistances].sort((a, b) => a - b);
-            const min = sorted[0];
-            const max = sorted[sorted.length - 1];
-            const median = sorted[Math.floor(sorted.length / 2)];
-            const avg = allDistances.reduce((a, b) => a + b, 0) / allDistances.length;
-            console.log(`[FaceAnalysis] Person ${person.name}: ${faces.length} faces, distances min=${min.toFixed(3)} max=${max.toFixed(3)} avg=${avg.toFixed(3)} median=${median.toFixed(3)}, threshold=${threshold}, outliers=${outliers.length}`);
-        }
-
-        // 4. Sort by distance (worst first)
+        console.log(`[FaceAnalysis] Found ${outliers.length} outliers (IQR method)`);
         outliers.sort((a, b) => b.distance - a.distance);
 
         return {
             personId,
             personName: person.name,
-            totalFaces: faces.length,
+            totalFaces: facesWithParsed.length,
             outliers,
-            threshold,
+            threshold: outlierThreshold,
             centroidValid: true
         };
     }

@@ -30,8 +30,17 @@ const PersonFaceItem = memo(({ face, isSelected, toggleSelection, isCover, onSet
                     className="w-full h-full pointer-events-none"
                 />
 
+                {/* Confirmed Badge (Green Checkmark) */}
+                {face.is_confirmed && !isSelected && (
+                    <div className="absolute top-2 left-2 bg-green-500/90 rounded-full p-1 shadow-lg z-10" title="Confirmed as correct">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                    </div>
+                )}
+
                 {isCover && (
-                    <div className="absolute top-2 left-2 bg-yellow-500/90 rounded-full p-1 shadow-lg z-10" title="Current Cover">
+                    <div className={`absolute ${face.is_confirmed ? 'top-8' : 'top-2'} left-2 bg-yellow-500/90 rounded-full p-1 shadow-lg z-10`} title="Current Cover">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-black" viewBox="0 0 20 20" fill="currentColor">
                             <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
@@ -50,7 +59,7 @@ const PersonFaceItem = memo(({ face, isSelected, toggleSelection, isCover, onSet
                 {!isSelected && (
                     <div className="absolute top-2 right-2 flex flex-col gap-1 items-end z-10 pointer-events-none">
                         {/* Low Recognition Confidence (Review Tier) */}
-                        {face.match_distance !== undefined && face.match_distance > 0.4 && (
+                        {face.match_distance !== undefined && face.match_distance > 0.4 && !face.is_confirmed && (
                             <div className="bg-orange-500/90 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm backdrop-blur-sm" title={`Weak Match (${Math.round((1 / (1 + face.match_distance)) * 100)}%)`}>
                                 ?
                             </div>

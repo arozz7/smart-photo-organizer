@@ -31,6 +31,18 @@ describe('PersonRepository', () => {
         db = createTestDatabase();
         // Add descriptor_mean_json column that wasn't in original mock schema
         db.exec('ALTER TABLE people ADD COLUMN descriptor_mean_json TEXT');
+        db.exec(`CREATE TABLE IF NOT EXISTS person_eras (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            person_id INTEGER NOT NULL,
+            era_name TEXT NOT NULL,
+            start_year INTEGER,
+            end_year INTEGER,
+            centroid_json TEXT,
+            face_count INTEGER DEFAULT 0,
+            is_auto_generated INTEGER DEFAULT 0,
+            created_at INTEGER
+        )`);
+        db.exec('ALTER TABLE faces ADD COLUMN era_id INTEGER');
         // Make getDB return our test database
         vi.mocked(getDB).mockReturnValue(db);
     });
@@ -339,6 +351,80 @@ describe('PersonRepository', () => {
 
             // Assert
             expect(result).toEqual([]);
+        });
+    });
+    // ==========================================
+    // Era CRUD Methods
+    // ==========================================
+    describe('Era CRUD', () => {
+        beforeEach(() => {
+            // Ensure schema for eras
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS person_eras (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    person_id INTEGER,
+                    era_name TEXT,
+                    start_year INTEGER,
+                    end_year INTEGER,
+                    centroid_json TEXT,
+                    face_count INTEGER,
+                    is_auto_generated INTEGER,
+                    created_at TIMESTAMP
+                );
+            `);
+        });
+
+        it('should add and retrieve eras', () => {
+            // Arrange
+            const personId = seedPerson(db, 'Test');
+            const era = {
+                person_id: personId,
+                era_name: 'Era 1',
+                start_year: 2020,
+                end_year: 2022,
+                centroid_json: '[]',
+                face_count: 5,
+                is_auto_generated: true
+            };
+
+            // Act
+            const id = PersonRepository.addEra(era);
+            const eras: any[] = PersonRepository.getEras(personId);
+
+            // Assert
+            expect(id).toBeGreaterThan(0);
+            expect(eras).toHaveLength(1);
+            expect(eras[0].era_name).toBe('Era 1');
+            expect(eras[0].is_auto_generated).toBe(1);
+        });
+
+        it('should delete era and nullify face associations', () => {
+            // Arrange
+            const personId = seedPerson(db, 'Test');
+            const eraId = PersonRepository.addEra({
+                person_id: personId,
+                era_name: 'To Delete',
+                start_year: 2020,
+                end_year: 2022,
+                centroid_json: '[]',
+                face_count: 5,
+                is_auto_generated: true
+            });
+
+            // Assign a face to this era
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId);
+            db.prepare('UPDATE faces SET era_id = ? WHERE id = ?').run(eraId, faceId);
+
+            // Act
+            PersonRepository.deleteEra(eraId);
+
+            // Assert
+            const era = db.prepare('SELECT * FROM person_eras WHERE id = ?').get(eraId);
+            expect(era).toBeUndefined();
+
+            const face: any = db.prepare('SELECT era_id FROM faces WHERE id = ?').get(faceId);
+            expect(face.era_id).toBeNull(); // Regression test for unlinking
         });
     });
 });

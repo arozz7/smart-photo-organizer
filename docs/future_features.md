@@ -2,13 +2,42 @@
 
 ## 🚀 Priority Roadmap
 
-
 ### 1. Advanced Library Filtering
 - **Goal:** Combine multiple filter types with conditional logic (AND/OR).
 - **New Filters:** Blur Score, Date (Year/Month), Compound Logic.
-- **Goal:** Combine multiple filter types with conditional logic (AND/OR).
-- **New Filters:** Blur Score, Date (Year/Month), Compound Logic.
 
+### 2. Home Page Dashboard
+- **Goal:** Replace Library as default startup page with an engaging, widget-based home experience.
+- **Core Features:**
+    - **Widget Grid System:** 12-column snap-to-grid layout with drag-and-drop. Supports 1x1, 2x1, 2x2 widget sizes.
+    - **On This Day Memories:** Surface photos from same date in previous years (±3 day tolerance).
+    - **Auto-Generated Collages:** Daily collage with "Save as PNG/JPG" export and "Regenerate" button.
+    - **People Spotlight:** Carousel of named people with photo counts.
+    - **Library Stats:** Pie chart of processed/pending/corrupt files.
+    - **Notification Badge:** Purple dot on Home nav when new memories are available.
+- **Scan-Time Entertainment:**
+    - **Live Discovery Feed:** Show completed scan thumbnails with fade-in animation.
+    - **Random Flashback:** Cycle through existing memories every ~10 seconds.
+    - **Live Stats:** Faces found, people matched, new locations counters.
+    - **Fun Facts:** Library insights ("You took 342 photos in March 2023!").
+- **Widget Customization Modal:**
+    - Toggle widgets ON/OFF, select sizes (1x1, 2x1, 2x2).
+    - Layout presets: Minimal, Balanced, Power User.
+    - Persistent layout saved to user preferences.
+- **Performance:**
+    - 60fps animations with "Reduce Motion" setting for lower-end hardware.
+    - Offline-capable: Stats & memories work without AI backend.
+- **Wireframes:** See [Home Page Wireframes](file:///C:/Users/arozz/.gemini/antigravity/brain/e4c43ef8-5d37-4b2a-b227-6fbddeaf706b/home-page-wireframes.md)
+
+### 3. Centroid Stability & Face Confirmation
+- **Goal:** Improve face assignment accuracy for people whose photos span many years (children, long-term family archives).
+- **Core Features:**
+    - **Face Confirmation:** Mark potentially misassigned faces as "correct" to exclude from future outlier detection.
+    - **Era-Aware Clustering:** Support multiple centroids per person based on photo date ranges (e.g., "Baby", "Teen", "Adult").
+    - **Centroid Drift Detection:** Alert users after scanning when a person's face signature shifts significantly.
+    - **Auto-Identify Fixes:** Freeze centroids during bulk operations, tier-based assignment, per-person caps to prevent cascade misassignment.
+- **Migration Path:** "Auto-Generate Eras" button analyzes existing photo dates and creates 5-year bands automatically.
+- **Implementation Plan:** See [Centroid Stability Plan](file:///C:/Users/arozz/.gemini/antigravity/brain/4b6766a5-9655-4ded-bc15-d934680dedc9/implementation_plan.md)
 
 ---
 
@@ -19,41 +48,6 @@
 - **Face Restoration Config:** Expose GFPGAN blending weight, Restoration Strength slider.
 - **Custom AI Models:** Load user-provided `.pth` models from a `models/` directory.
 - **Batch Enhancement:** Background queue for upscaling multiple photos.
-
-### Smart Face Management
-*Goal: Drastically reduce user effort and improve accuracy when managing faces (filtering noise, identifying misassignments, and matching profiles).*
-
-**Details:** See [Smart Ignore Implementation Plan](file:///j:/Projects/smart-photo-organizer/docs/smart-ignore-implementation-plan.md) for full technical specs.
-
-- **Background Face Filter (Phase 1):**
-    - **Goal:** Auto-identify and bulk-ignore "noise" faces (background strangers, one-time appearances).
-    - **Status:** ✅ Implemented in v0.4.5.
-- **Scan-Time Confidence Tiering (Phase 2):**
-    - **Goal:** Auto-classify new faces at scan time into high-confidence, review, or unknown tiers.
-    - **Status:** ✅ Implemented in v0.4.5 (See `aiChangeLog/phase-21-confidence-tiering.md`).
-- **Smart Ignore UI Panel (Phase 3):**
-    - **Goal:** Unified dashboard for managing thresholds and bulk actions.
-    - **Status:** ✅ Implemented in v0.4.5 [See Changelog](aiChangeLog/phase-22-smart-ignore-panel.md)
-- **Misassigned Face Detection (Phase 4):**
-    - **Goal:** Identify faces incorrectly assigned to a person using distance-to-centroid analysis.
-    - **Status:** ✅ Implemented in v0.4.5 [See Changelog](aiChangeLog\phase-19-outlier-detection.md)
-- **Challenging Face Recognition (Phase 5):**
-    - **Goal:** Improve matches for side profiles, partial faces, and occlusions using pose-aware matching and multi-sample voting.
-    - **Status:** ✅ Implemented in v0.4.5 [See Changelog](aiChangeLog/phase-23-challenging-recognition.md)
-- **Unified Person Name Input (Phase 6):**
-    - **Goal:** Standardize AI-powered name suggestions and autocomplete across all assignment interfaces.
-    - **Goal:** Standardize AI-powered name suggestions and autocomplete across all assignment interfaces.
-    - **Status:** ✅ Implemented in v0.4.5 [See Changelog](aiChangeLog/phase-24-unified-input.md)
-
-- **Burst Photo Face Tracking (Future Consideration):**
-    - **Goal:** Optimize face processing for burst/sports photography by tracking faces across consecutive frames.
-    - **Approach:** Integrate a face tracker (ByteTrack or DCF-based) between detection and recognition stages.
-    - **Benefit:** Only run embedding extraction for newly detected face IDs, not every frame.
-    - **Considerations:**
-        - Implementation complexity: High (requires frame-by-frame tracking logic).
-        - Performance cost: Tracker adds overhead per-frame, but saves on redundant embeddings.
-        - Use case: Primarily benefits burst sports photography, high-FPS captures.
-    - **Status:** Deferred pending performance analysis of typical library composition.
 
 ### Organization & Metadata
 - **Blurry Photo List Export:**
@@ -86,15 +80,67 @@
 
 ### Platform & Connectivity
 - **Cross-Platform:** Mac & Linux support (Docker/Python venv).
-- **External Agent API:** Local REST server for folder watching and automation (`/scan`, `/tag`).
+- **External Agent API:**
+    - **Goal:** Enable external agents to programmatically trigger scans and manage the library.
+    - **Core Architecture:**
+        - **Standalone Backend:** The Python backend (with REST API) can run independently from the Electron frontend.
+        - **Auto-Start:** If the frontend launches and no backend is detected, it starts the backend automatically.
+        - **Shared State:** Both frontend and external agents communicate with the same backend instance.
+    - **Scheduled Scanning:**
+        - Agents monitor folders for changes but do NOT trigger immediate scans.
+        - Changes are queued as "pending scan" markers.
+        - A **configurable schedule** (e.g., "Only scan between 2 AM - 6 AM") processes the queue.
+        - **Manual Override:** "Process Now" button in UI for immediate processing.
+    - **API Endpoints:**
+        - `POST /api/v1/queue-scan`: Add a file/folder to the pending scan queue.
+        - `POST /api/v1/tag`: Apply tags to a photo by ID.
+        - `GET /api/v1/status`: Check backend status (idle/scanning/queue depth).
+        - `POST /api/v1/trigger-schedule`: Force immediate processing of the scan queue.
+    - **Configuration UI (Settings Tab):**
+        - **Backend Status:** Show if running standalone or Electron-managed.
+        - **API Port:** Configure the listening port (default: 3001).
+        - **API Key:** Generate/regenerate an optional API key for authentication.
+        - **Schedule Editor:** Define scan windows (e.g., "Mon-Fri 2:00 AM - 6:00 AM").
+        - **Pending Queue:** View queued items, manually trigger or clear the queue.
 - **Containerized Backend:** Run Python backend in Docker for remote access.
 
 ---
+
+## ⏸️ Future / On Hold
+
+### Burst Photo Face Tracking
+- **Goal:** Optimize face processing for burst/sports photography by tracking faces across consecutive frames.
+- **Approach:** Integrate a face tracker (ByteTrack or DCF-based) between detection and recognition stages.
+- **Benefit:** Only run embedding extraction for newly detected face IDs, not every frame.
+- **Considerations:**
+    - Implementation complexity: High (requires frame-by-frame tracking logic).
+    - Performance cost: Tracker adds overhead per-frame, but saves on redundant embeddings.
+    - Use case: Primarily benefits burst sports photography, high-FPS captures.
+- **Status:** Deferred pending performance analysis of typical library composition.
+- **Implementation Plan:** See [Burst Photo Face Tracking Plan](file:///j:/Projects/smart-photo-organizer/docs/burst-photo-face-tracking-plan.md)
+
 ---
 
 # ✅ Implemented Features
 
-## v0.4.5 (In Development)
+## v0.5.0 (In Development)
+
+### Smart Face Management
+*Details: See [Smart Ignore Implementation Plan](file:///j:/Projects/smart-photo-organizer/docs/smart-ignore-implementation-plan.md) for full technical specs.*
+
+- **Background Face Filter (Phase 1):** Auto-identify and bulk-ignore "noise" faces (background strangers, one-time appearances). [See Changelog](aiChangeLog/phase-20-background-filter.md)
+- **Scan-Time Confidence Tiering (Phase 2):** Auto-classify new faces at scan time into high-confidence, review, or unknown tiers. [See Changelog](aiChangeLog/phase-21-confidence-tiering.md)
+- **Smart Ignore UI Panel (Phase 3):** Unified dashboard for managing thresholds and bulk actions. [See Changelog](aiChangeLog/phase-22-smart-ignore-panel.md)
+- **Misassigned Face Detection (Phase 4):** Identify faces incorrectly assigned to a person using distance-to-centroid analysis. [See Changelog](aiChangeLog/phase-19-outlier-detection.md)
+- **Challenging Face Recognition (Phase 5):** Improve matches for side profiles, partial faces, and occlusions using pose-aware matching and multi-sample voting. [See Changelog](aiChangeLog/phase-23-challenging-recognition.md)
+- **Unified Person Name Input (Phase 6):** Standardize AI-powered name suggestions and autocomplete across all assignment interfaces. [See Changelog](aiChangeLog/phase-24-unified-input.md)
+
+### Era & Stability Features (v0.5.0)
+- **Era Generation (Phase E):** Visual clustering of faces into time-based eras for improved multi-age recognition. [See Changelog](aiChangeLog/phase-25-eras-and-settings.md)
+- **Configurable Settings (Phase F):** UI controls for Era generation parameters (K-Means, Merge thresholds).
+- **Test Backfill (Phase G):** Comprehensive unit tests added for FaceService, PersonService, and Repositories.
+
+### Other Features
 - **Person Thumbnail Management:**
     - **Custom Covers:** Manually "Pin" any face as the person's cover photo.
     - **Shuffle:** Instantly pick a random high-quality face as the cover.

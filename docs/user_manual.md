@@ -57,6 +57,15 @@ The AI automatically detects faces during the scan. Your job is to give them nam
 7.  **Quality Control:**
     - **Misassigned Faces:** On any Person's detail page, click the **"Find Misassigned Faces"** button (warning icon) to scan their library. The AI will flag faces that look significantly different from the person's average face (outliers), allowing you to quickly spot and remove incorrect assignments.
 
+## ⏳ 3.1 Era Generation (Advanced)
+Some people change significantly over time (e.g., from child to adult). A single facial model might struggle to match both "Baby Nick" and "Adult Nick" accurately.
+
+1.  **Generate Eras:** On a Person's detail page, click the **"Generate Eras"** button (Clock icon).
+2.  **Visual Clustering:** The AI will analyze all confirmed faces and group them into "Eras" based on visual similarity.
+3.  **Result:** You will see a list of eras (e.g., "Era 1: 2010-2015", "Era 2: 2020-2024").
+4.  **Benefits:** Future scans will match against **all** era centroids, significantly improving recognition for people with large age gaps in your library.
+5.  **Configuration:** You can fine-tune how eras are created in **Settings > Era Generation** (Min Faces, Merge Threshold).
+
 ---
 
 ## 🪄 4. AI Enhance Lab: Upgrading Your Memories
@@ -139,6 +148,9 @@ Other Fine-Tuning controls:
 - **Face Matching Thresholds:** (Settings → General → Face Matching Thresholds)
     - **Auto-Assign Threshold:** Controls which faces get automatically assigned during scanning. *Lower = stricter (fewer auto-assigns but more accurate). Higher = more auto-assigns but may include false matches.* Default: 0.70.
     - **Review Tier Cutoff:** Controls which faces are marked for review (amber ring). *Lower = fewer suggestions. Higher = more suggestions but includes weaker matches.* Default: 0.90.
+- **Era Generation Settings:**
+    - **Min Faces for Era:** Minimum number of confirmed faces required to form a distinct era. Default: 50.
+    - **Merge Threshold:** Controls interpretation of "difference". Increase to force merging of similar-looking eras. Default: 0.75.
 - **Tagging Creativity (Temperature):** 
     - **LOWER (0.1 - 0.3):** Factual, consistent descriptions. 
     - **HIGHER (0.7+):** Multi-sentence, descriptive, and "creative" tagging.

@@ -64,6 +64,30 @@ export const usePersonDetail = (personId: string | undefined) => {
         loadData();
     }, [personId]);
 
+    // Eras logic
+    const [eras, setEras] = useState<any[]>([]);
+
+    const loadEras = useCallback(async () => {
+        if (!personId) return;
+        try {
+            // @ts-ignore
+            const loadedEras = await window.ipcRenderer.invoke('db:getEras', parseInt(personId));
+            setEras(loadedEras);
+        } catch (e) {
+            console.error('Failed to load eras', e);
+        }
+    }, [personId]);
+
+    useEffect(() => {
+        if (person) {
+            loadEras();
+        }
+    }, [person, loadEras]);
+
+    // ... (rest of the file until return) ...
+
+
+
     const loadData = async () => {
         if (!personId) return;
         setLoading(true);
@@ -100,6 +124,10 @@ export const usePersonDetail = (personId: string | undefined) => {
     const clearSelection = useCallback(() => {
         setSelectedFaces(new Set());
     }, []);
+
+    const selectAll = useCallback(() => {
+        setSelectedFaces(new Set(faces.map(f => f.id)));
+    }, [faces]);
 
     const handleReassign = async (name: string): Promise<boolean> => {
         if (!name) return false;
@@ -291,9 +319,7 @@ export const usePersonDetail = (personId: string | undefined) => {
         }
     }, [personId, outlierThreshold, person, showAlert]);
 
-    const clearOutliers = useCallback(() => {
-        setOutliers([]);
-    }, []);
+
 
     const resolveOutliers = useCallback((resolvedFaceIds: number[]) => {
         setOutliers(prev => prev.filter(o => !resolvedFaceIds.includes(o.faceId)));
@@ -306,6 +332,112 @@ export const usePersonDetail = (personId: string | undefined) => {
         });
     }, [loadData, addToast]);
 
+    const recalculateModel = async () => {
+        if (!person) return;
+        try {
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('db:recalculatePersonModel', person.id);
+
+            if (result.drift) {
+                addToast({
+                    title: 'Drift Detected',
+                    description: `The facial model changed significantly (dist: ${result.driftDistance.toFixed(3)}). Please verify matches.`,
+                    type: 'warning',
+                    duration: 6000
+                });
+            } else {
+                addToast({
+                    title: 'Model Updated',
+                    description: `Recalculated facial model for ${person.name}.`,
+                    type: 'success',
+                    duration: 3000
+                });
+            }
+        } catch (e) {
+            console.error(e);
+            showAlert({
+                title: 'Error',
+                description: 'Failed to recalculate model',
+                variant: 'danger'
+            });
+        }
+    }
+
+    const generateEras = async () => {
+        if (!person) return;
+        try {
+            // @ts-ignore
+            const settings = await window.ipcRenderer.invoke('ai:getSettings');
+            const eraConfig = {
+                minFacesForEra: settings?.minFacesForEra ?? 50,
+                eraMergeThreshold: settings?.eraMergeThreshold ?? 0.75
+            };
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('db:generateEras', {
+                personId: person.id,
+                config: eraConfig
+            });
+            if (result.success) {
+                loadEras(); // Reload eras
+                if (result.count === 0) {
+                    addToast({
+                        title: 'No Eras Generated',
+                        description: 'Faces are too close visually or not enough data.',
+                        type: 'info',
+                        duration: 3000
+                    });
+                } else {
+                    addToast({
+                        title: 'Eras Generated',
+                        description: `Successfully created ${result.count} visual eras for ${person.name}.`,
+                        type: 'success',
+                        duration: 3000
+                    });
+                }
+            } else {
+                addToast({
+                    title: 'Generation Failed',
+                    description: `Cannot generate eras: ${result.reason}`,
+                    type: 'warning',
+                    duration: 4000
+                });
+            }
+        } catch (e) {
+            console.error(e);
+            showAlert({
+                title: 'Error',
+                description: 'Failed to generate eras',
+                variant: 'danger'
+            });
+        }
+    }
+
+    const deleteEra = async (eraId: number) => {
+        try {
+            // @ts-ignore
+            await window.ipcRenderer.invoke('db:deleteEra', eraId);
+            addToast({ title: 'Era Deleted', description: 'Manually removed era.', type: 'info' });
+            loadEras();
+        } catch (e) {
+            console.error(e);
+            showAlert({ title: 'Error', description: 'Failed to delete era', variant: 'danger' });
+        }
+    };
+
+    const handleSetCover = async (faceId: number | null) => {
+        if (!person) return false;
+        try {
+            // @ts-ignore
+            await window.ipcRenderer.invoke('db:setPersonCover', { personId: person.id, faceId });
+            await loadData();
+            return true;
+        } catch (e) {
+            console.error('Failed to set cover', e);
+            showAlert({ title: 'Error', description: 'Failed to set cover photo', variant: 'danger' });
+            return false;
+        }
+    };
+
     return {
         person,
         faces,
@@ -313,37 +445,36 @@ export const usePersonDetail = (personId: string | undefined) => {
         selectedFaces,
         isScanning,
         toggleSelection,
+        selectAll,
+        deselectAll: clearSelection,
         clearSelection,
         refresh: loadData,
 
-        // Outlier detection (Phase 1)
+        // Outlier detection exports
         outliers,
         isAnalyzingOutliers,
         outlierThreshold,
         setOutlierThreshold,
 
+        // Eras
+        eras,
+
         actions: {
-            renamePerson: handleRenamePerson,
             moveFaces: handleReassign,
             // @ts-ignore
             removeFaces: handleUnassign,
+            setCover: handleSetCover,
+            renamePerson: handleRenamePerson,
             startTargetedScan: handleTargetedScan,
+            loadMore: async () => { }, // Placeholder if loadMore is not implemented
+            ignoreFaces: async () => { }, // Placeholder
+            confirmFaces: async () => { }, // Placeholder
             findOutliers,
-            clearOutliers,
+            clearOutliers: () => setOutliers([]),
             resolveOutliers,
-            setCover: async (faceId: number | null) => {
-                if (!person) return false;
-                try {
-                    // @ts-ignore
-                    await window.ipcRenderer.invoke('db:setPersonCover', { personId: person.id, faceId });
-                    await loadData();
-                    return true;
-                } catch (e) {
-                    console.error('Failed to set cover', e);
-                    showAlert({ title: 'Error', description: 'Failed to set cover photo', variant: 'danger' });
-                    return false;
-                }
-            }
+            recalculateModel,
+            generateEras,
+            deleteEra
         }
     };
 };

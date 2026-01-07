@@ -31,8 +31,12 @@ const PersonDetail = () => {
         selectedFaces,
         isScanning,
         toggleSelection,
+        clearSelection,
+        selectAll,
         refresh,
         actions,
+        // Eras
+        eras,
         // Outlier detection (Phase 1)
         outliers,
         isAnalyzingOutliers
@@ -186,6 +190,28 @@ const PersonDetail = () => {
                     </button>
 
                     <button
+                        onClick={actions.recalculateModel}
+                        className="bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 border border-purple-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
+                        title="Force recalculate the person's facial model (centroid) based on current faces. Useful after cleaning up bad assignments."
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Recalculate Model
+                    </button>
+
+                    <button
+                        onClick={actions.generateEras}
+                        className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
+                        title="Analyze confirmed faces to detect age clusters (Eras) and create specific models for each time period."
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Generate Eras
+                    </button>
+
+                    <button
                         onClick={() => setIsScanModalOpen(true)}
                         disabled={isScanning}
                         className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
@@ -197,8 +223,40 @@ const PersonDetail = () => {
                         {isScanning ? 'Preparing...' : `Scan Library for ${person.name}`}
                     </button>
 
+                    {/* Selection Controls */}
+                    <div className="flex gap-2 border-l border-gray-700 pl-4 ml-2">
+                        <button
+                            onClick={selectAll}
+                            className="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-800 transition-colors"
+                            title="Select all faces"
+                        >
+                            Select All
+                        </button>
+                        {selectedFaces.size > 0 && (
+                            <button
+                                onClick={clearSelection}
+                                className="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-800 transition-colors"
+                                title="Clear selection"
+                            >
+                                Clear ({selectedFaces.size})
+                            </button>
+                        )}
+                    </div>
+
                     {selectedFaces.size > 0 && (
                         <div className="flex gap-2">
+                            <button
+                                onClick={async () => {
+                                    // @ts-ignore
+                                    await window.ipcRenderer.invoke('db:confirmFaces', Array.from(selectedFaces));
+                                    clearSelection();
+                                    refresh();
+                                }}
+                                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors"
+                                title="Mark as correctly assigned (for reference-based outlier detection)"
+                            >
+                                ✓ Confirm ({selectedFaces.size})
+                            </button>
                             <button
                                 onClick={() => setIsRenameModalOpen(true)}
                                 className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
@@ -272,8 +330,47 @@ const PersonDetail = () => {
                     await window.ipcRenderer.invoke('db:moveFacesToPerson', faceIds, targetName);
                     actions.resolveOutliers(faceIds);
                 }}
+                onConfirmFaces={async (faceIds) => {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:confirmFaces', faceIds);
+                    // Confirmed faces are removed from outliers list (handled in modal)
+                }}
                 onRefresh={refresh}
             />
+
+            {/* Eras List (if any) */}
+            {eras && eras.length > 0 && (
+                <div className="mb-6 bg-gray-800/50 p-4 rounded-xl border border-gray-700">
+                    <h3 className="text-sm uppercase tracking-wider text-gray-400 font-bold mb-3 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Generated Eras
+                    </h3>
+                    <div className="flex flex-wrap gap-3">
+                        {eras.map((era: any) => (
+                            <div key={era.id} className="bg-gray-900 border border-gray-600 rounded-lg p-3 flex items-center gap-4 min-w-[200px]">
+                                <div>
+                                    <div className="font-bold text-white">{era.era_name}</div>
+                                    <div className="text-xs text-gray-400">
+                                        {era.face_count} faces
+                                        {era.start_year && ` • ${era.start_year}-${era.end_year}`}
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => actions.deleteEra(era.id)}
+                                    className="ml-auto text-gray-500 hover:text-red-400 p-1 rounded hover:bg-gray-800 transition-colors"
+                                    title="Delete Era"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Faces Grid */}
             <div className="flex-1 overflow-y-auto pr-2">

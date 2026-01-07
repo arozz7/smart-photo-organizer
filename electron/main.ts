@@ -1,4 +1,5 @@
-﻿import { app, BrowserWindow } from 'electron'
+﻿import './setup-env'; // Must be first
+import { app, BrowserWindow } from 'electron'
 import { registerImageProtocol } from './services/imageProtocol';
 import { pythonProvider } from './infrastructure/PythonAIProvider';
 import { registerAIHandlers } from './ipc/aiHandlers';
@@ -14,8 +15,9 @@ import * as fs from 'node:fs/promises';
 import logger from './logger';
 import { WindowManager } from './windows/windowManager';
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+// ES Module __dirname equivalent
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const LIBRARY_PATH = getLibraryPath();
 logger.info(`[Main] Library Path: ${LIBRARY_PATH}`);

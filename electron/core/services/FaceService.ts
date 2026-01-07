@@ -131,8 +131,8 @@ export class FaceService {
         const pendingIndices = results.map((r, i) => r === null ? i : -1).filter(i => i !== -1);
         if (pendingIndices.length > 0 && options.searchFn) {
             const pendingDescriptors = pendingIndices.map(i => parsedDescriptors[i]);
-            const distThreshold = (1 / Math.max(0.01, threshold)) - 1;
-            const batchFaiss = await options.searchFn(pendingDescriptors, options.topK ?? 5, distThreshold);
+            // threshold is already L2 distance, pass directly to FAISS
+            const batchFaiss = await options.searchFn(pendingDescriptors, options.topK ?? 5, threshold);
 
             // Fetch Person IDs for all matched faces in one go
             const allMatchedFaceIds = new Set<number>();
@@ -195,7 +195,7 @@ export class FaceService {
         return results;
     }
 
-    private static matchAgainstCentroids(descriptor: number[], candidates: { id: number, name: string, mean: number[] }[], threshold: number) {
+    private static matchAgainstCentroids(descriptor: number[], candidates: { id: number, name: string, mean: number[], eras?: any[] }[], threshold: number) {
         if (!descriptor || candidates.length === 0) return null;
 
         let mag = 0;
@@ -206,79 +206,202 @@ export class FaceService {
         let bestMatch = null;
         let minDist = Infinity;
 
-        for (const person of candidates) {
-            // Check for descriptor (PersonRepository.getPeopleWithDescriptors returns { descriptor: ... })
-            // or mean (legacy)
-            const centroid = (person as any).descriptor || (person as any).mean;
 
-            if (!centroid || centroid.length !== normalized.length) continue;
-            let sumSq = 0;
-            for (let i = 0; i < normalized.length; i++) {
-                const diff = normalized[i] - centroid[i];
-                sumSq += diff * diff;
+
+        for (const person of candidates) {
+            // Check global centroid
+            const globalCentroid = (person as any).descriptor || (person as any).mean;
+
+            if (globalCentroid && globalCentroid.length === normalized.length) {
+                const dist = this.calculateL2Distance(normalized, globalCentroid);
+                if (dist < minDist) {
+                    minDist = dist;
+                    bestMatch = person;
+                }
             }
-            const dist = Math.sqrt(sumSq);
-            if (dist < minDist) {
-                minDist = dist;
-                bestMatch = person;
+
+            // Check Eras (Phase E)
+            if (person.eras && person.eras.length > 0) {
+                for (const era of person.eras) {
+                    if (era.centroid && era.centroid.length === normalized.length) {
+                        const dist = this.calculateL2Distance(normalized, era.centroid);
+                        if (dist < minDist) {
+                            minDist = dist; // If era matches better, use it
+                            bestMatch = person; // Still matches the same person
+                        }
+                    }
+                }
             }
         }
 
         const similarity = 1 / (1 + minDist);
-        if (bestMatch && similarity >= threshold) {
+        // Compare distance against threshold (lower distance = better match)
+        if (bestMatch && minDist <= threshold) {
             return { personId: bestMatch.id, personName: bestMatch.name, distance: minDist, similarity };
         }
         return null;
     }
 
-    static async autoAssignFaces(faceIds: number[], thresholdOverride?: number, searchFn?: SearchFn) {
+    // Public helper for other services
+    static calculateL2Distance(v1: number[], v2: number[]): number {
+        let sumSq = 0;
+        for (let i = 0; i < v1.length; i++) {
+            const diff = v1[i] - v2[i];
+            sumSq += diff * diff;
+        }
+        return Math.sqrt(sumSq);
+    }
+
+    /**
+     * Options for auto-assign operation.
+     */
+    static readonly AUTO_ASSIGN_DEFAULTS = {
+        maxAssignmentsPerPerson: 50,   // Cap to prevent single person absorbing wrong faces
+        tierFilter: ['high'] as string[], // Only assign high-confidence by default
+        deferRecalculation: false,      // Recalc at end by default
+        useFaissFallback: false         // Disable FAISS for bulk to prevent voting issues
+    };
+
+    /**
+     * Auto-assign unassigned faces to named people.
+     * 
+     * CRITICAL FIXES (v0.5.1):
+     * - Freeze centroids at start (no mid-batch recalculation)
+     * - Filter by confidence tier (only 'high' by default)
+     * - Cap assignments per person (prevent cascade absorption)
+     * - Return queued/capped faces for user review
+     */
+    static async autoAssignFaces(
+        faceIds: number[],
+        thresholdOverride?: number,
+        searchFn?: SearchFn,
+        options?: Partial<typeof FaceService.AUTO_ASSIGN_DEFAULTS>
+    ) {
+        const opts = { ...this.AUTO_ASSIGN_DEFAULTS, ...options };
+        const settings = getAISettings();
+
+        // Thresholds for tier classification (L2 distance - lower is better)
+        const HIGH_THRESHOLD = thresholdOverride ?? settings.autoAssignThreshold ?? 0.7;
+        const REVIEW_THRESHOLD = settings.reviewThreshold || 0.9;
+
         try {
-            let totalAssigned = 0;
-            const allAssigned: any[] = [];
-            let pass = 1;
-            const MAX_PASSES = 5;
+            // 1. FREEZE CENTROIDS at start - prevents cascade drift
+            const frozenCentroids = PersonRepository.getPeopleWithDescriptors();
+            logger.info(`[AutoAssign] Frozen ${frozenCentroids.length} person centroids for batch operation.`);
 
-            while (pass <= MAX_PASSES) {
-                const candidates = FaceRepository.getFacesForClustering();
-                let faces = faceIds && faceIds.length > 0
-                    ? candidates.filter((f: any) => faceIds.includes(f.id))
-                    : candidates;
+            // 2. Get faces to process
+            const candidates = FaceRepository.getFacesForClustering();
+            const faces = faceIds && faceIds.length > 0
+                ? candidates.filter((f: any) => faceIds.includes(f.id))
+                : candidates;
 
-                if (faces.length === 0) break;
-
-                logger.info(`[AutoAssign] Pass ${pass}: Matching ${faces.length} faces...`);
-
-                const matchResults = await this.matchBatch(
-                    faces.map((f: any) => f.descriptor),
-                    { threshold: thresholdOverride, searchFn }
-                );
-
-                let passAssignedCount = 0;
-                const peopleToRecalc = new Set<number>();
-
-                for (let i = 0; i < faces.length; i++) {
-                    const match = matchResults[i];
-                    if (match) {
-                        FaceRepository.updateFacePerson([faces[i].id], match.personId);
-                        passAssignedCount++;
-                        allAssigned.push({ faceId: faces[i].id, personId: match.personId, similarity: match.similarity });
-                        peopleToRecalc.add(match.personId);
-                    }
-                }
-
-                if (passAssignedCount === 0) break;
-
-                totalAssigned += passAssignedCount;
-                logger.info(`[AutoAssign] Pass ${pass}: Successfully identified ${passAssignedCount} faces.`);
-
-                for (const pid of peopleToRecalc) {
-                    await PersonService.recalculatePersonMean(pid);
-                }
-                pass++;
+            if (faces.length === 0) {
+                return { success: true, count: 0, assigned: [], queuedForReview: [], capped: [] };
             }
 
-            if (totalAssigned > 0) logger.info(`[AutoAssign] Final: Identified ${totalAssigned} faces.`);
-            return { success: true, count: totalAssigned, assigned: allAssigned };
+            logger.info(`[AutoAssign] Processing ${faces.length} faces against ${frozenCentroids.length} people...`);
+
+            // 3. Match ALL faces in single pass against FROZEN centroids
+            const matchResults = await this.matchBatch(
+                faces.map((f: any) => f.descriptor),
+                {
+                    threshold: REVIEW_THRESHOLD, // Capture all candidates up to review tier
+                    candidatePeople: frozenCentroids,
+                    searchFn: opts.useFaissFallback ? searchFn : undefined
+                }
+            );
+
+            // 4. Process matches with filtering
+            const assigned: { faceId: number; personId: number; similarity: number; tier: string }[] = [];
+            const queuedForReview: { faceId: number; personId: number; distance: number; personName: string }[] = [];
+            const capped: { faceId: number; personId: number; reason: string }[] = [];
+            const assignmentCounts = new Map<number, number>();
+            const affectedPeople = new Set<number>();
+
+            for (let i = 0; i < faces.length; i++) {
+                const match = matchResults[i];
+                if (!match) continue;
+
+                const face = faces[i];
+                const dist = match.distance;
+
+                // Determine tier
+                let tier = 'unknown';
+                if (dist < HIGH_THRESHOLD) {
+                    tier = 'high';
+                } else if (dist < REVIEW_THRESHOLD) {
+                    tier = 'review';
+                }
+
+                // Check tier filter
+                if (!opts.tierFilter.includes(tier)) {
+                    if (tier === 'review') {
+                        queuedForReview.push({
+                            faceId: face.id,
+                            personId: match.personId,
+                            distance: dist,
+                            personName: match.personName
+                        });
+                    }
+                    continue;
+                }
+
+                // Check per-person cap
+                const currentCount = assignmentCounts.get(match.personId) ?? 0;
+                if (currentCount >= opts.maxAssignmentsPerPerson) {
+                    capped.push({
+                        faceId: face.id,
+                        personId: match.personId,
+                        reason: `Exceeded ${opts.maxAssignmentsPerPerson} assignments for ${match.personName}`
+                    });
+                    continue;
+                }
+
+                // Assign!
+                assigned.push({
+                    faceId: face.id,
+                    personId: match.personId,
+                    similarity: match.similarity,
+                    tier
+                });
+                assignmentCounts.set(match.personId, currentCount + 1);
+                affectedPeople.add(match.personId);
+            }
+
+            // 5. Batch commit assignments
+            if (assigned.length > 0) {
+                // Group by person for efficient batch update
+                const groupedByPerson = new Map<number, number[]>();
+                for (const a of assigned) {
+                    const existing = groupedByPerson.get(a.personId) || [];
+                    existing.push(a.faceId);
+                    groupedByPerson.set(a.personId, existing);
+                }
+
+                for (const [personId, faceIdList] of groupedByPerson) {
+                    FaceRepository.updateFacePerson(faceIdList, personId);
+                }
+            }
+
+            // 6. Recalculate means ONCE at end (not per-pass)
+            if (!opts.deferRecalculation && affectedPeople.size > 0) {
+                logger.info(`[AutoAssign] Recalculating means for ${affectedPeople.size} affected people...`);
+                for (const pid of affectedPeople) {
+                    await PersonService.recalculatePersonMean(pid);
+                }
+            }
+
+            // 7. Log results
+            logger.info(`[AutoAssign] Complete: ${assigned.length} assigned, ${queuedForReview.length} queued for review, ${capped.length} capped`);
+
+            return {
+                success: true,
+                count: assigned.length,
+                assigned,
+                queuedForReview,
+                capped,
+                affectedPeople: Array.from(affectedPeople)
+            };
 
         } catch (e) {
             logger.error("Auto-Assign failed:", e);

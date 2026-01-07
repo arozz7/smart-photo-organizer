@@ -161,9 +161,10 @@ export function registerDBHandlers() {
         const searchFn = async (descriptors: number[][], k?: number, th?: number) => {
             return pythonProvider.searchFaces(descriptors, k, th);
         };
+        // Read from aiSettings (where SettingsModal saves the values)
         // @ts-ignore
-        const settings = ConfigService.getAISettings();
-        const threshold = settings.faceSimilarityThreshold || 0.65;
+        const aiSettings = ConfigService.getAISettings();
+        const threshold = aiSettings.autoAssignThreshold || 0.7; // Default 0.7 if not set
         // @ts-ignore
         return FaceService.autoAssignFaces(args.faceIds, threshold, searchFn);
     });
@@ -178,8 +179,26 @@ export function registerDBHandlers() {
         return { success: true };
     });
 
+    ipcMain.handle('db:recalculatePersonModel', async (_, personId) => {
+        return await PersonService.recalculatePersonMean(personId);
+    });
+
     ipcMain.handle('db:unassignFaces', async (_, faceIds) => {
         await PersonService.unassignFaces(faceIds);
+        return { success: true };
+    });
+
+    ipcMain.handle('db:generateEras', async (_, args) => {
+        const { personId, config } = args;
+        return await PersonService.generateEras(personId, config);
+    });
+
+    ipcMain.handle('db:getEras', async (_, personId) => {
+        return PersonRepository.getEras(personId);
+    });
+
+    ipcMain.handle('db:deleteEra', async (_, eraId) => {
+        PersonRepository.deleteEra(eraId);
         return { success: true };
     });
 
@@ -355,6 +374,27 @@ export function registerDBHandlers() {
             return { success: true, ...result };
         } catch (error) {
             console.error('[Main] db:detectBackgroundFaces failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    // --- FACE CONFIRMATION (Centroid Stability Feature) ---
+    ipcMain.handle('db:confirmFaces', async (_, faceIds: number[]) => {
+        try {
+            FaceRepository.setConfirmed(faceIds, true);
+            return { success: true, confirmed: faceIds.length };
+        } catch (error) {
+            console.error('[Main] db:confirmFaces failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('db:unconfirmFaces', async (_, faceIds: number[]) => {
+        try {
+            FaceRepository.setConfirmed(faceIds, false);
+            return { success: true, unconfirmed: faceIds.length };
+        } catch (error) {
+            console.error('[Main] db:unconfirmFaces failed:', error);
             return { success: false, error: String(error) };
         }
     });

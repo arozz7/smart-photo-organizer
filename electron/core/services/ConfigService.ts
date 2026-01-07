@@ -15,6 +15,9 @@ export interface AISettings {
     // L2 distance thresholds for scan-time face classification
     autoAssignThreshold?: number;  // Default 0.7 - faces below this are auto-assigned
     reviewThreshold?: number;      // Default 0.9 - faces below this are review tier
+    // Era Generation
+    minFacesForEra?: number;       // Default 50
+    eraMergeThreshold?: number;    // Default 0.75
 }
 
 export interface WindowBounds {

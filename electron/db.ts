@@ -175,6 +175,54 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     db.exec('ALTER TABLE faces ADD COLUMN face_quality REAL');
   } catch (e) { /* Column exists */ }
 
+  // --- MIGRATION: Centroid Stability & Face Confirmation ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN is_confirmed BOOLEAN DEFAULT 0');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN era_id INTEGER');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN centroid_snapshot_json TEXT');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN last_drift_check INTEGER');
+  } catch (e) { /* Column exists */ }
+
+  // Create person_eras table for era-aware clustering
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS person_eras (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      era_name TEXT,
+      start_year INTEGER,
+      end_year INTEGER,
+      centroid_json TEXT,
+      face_count INTEGER DEFAULT 0,
+      is_auto_generated BOOLEAN DEFAULT 1,
+      created_at INTEGER,
+      descriptor_mean_json TEXT,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_person_eras_person_id ON person_eras(person_id);
+
+    -- Phase D: Centroid Drift Detection
+    CREATE TABLE IF NOT EXISTS person_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      descriptor_json TEXT,
+      face_count INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reason TEXT,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_person_history_person_id ON person_history(person_id);
+  `);
+
   // --- MIGRATION: Smart Face Storage (BLOBs + Pruning) ---
   try {
     // 1. Add new columns

@@ -13,6 +13,7 @@ export interface Face {
     confidence_tier?: 'high' | 'review' | 'unknown';
     suggested_person_id?: number | null;
     match_distance?: number | null;
+    era_id?: number | null;
 }
 
 export interface Person {
