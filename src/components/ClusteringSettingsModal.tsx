@@ -73,8 +73,8 @@ const ClusteringSettingsModal: React.FC<ClusteringSettingsModalProps> = ({ open,
                                 <Slider.Thumb className="block w-4 h-4 bg-white rounded-full shadow hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" />
                             </Slider.Root>
                             <div className="flex justify-between text-[10px] text-gray-500 uppercase tracking-wider font-semibold">
-                                <span>Loose (Fewer Groups)</span>
-                                <span>Strict (More Groups)</span>
+                                <span>Loose (More Groups)</span>
+                                <span>Strict (Fewer Groups)</span>
                             </div>
                         </div>
 

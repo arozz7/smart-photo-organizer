@@ -221,6 +221,20 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
       FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_person_history_person_id ON person_history(person_id);
+
+    -- Person Alerts: Store drift detection and other person-related alerts
+    CREATE TABLE IF NOT EXISTS person_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      alert_type TEXT NOT NULL,
+      message TEXT,
+      drift_distance REAL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      dismissed_at DATETIME,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_person_alerts_person_id ON person_alerts(person_id);
+    CREATE INDEX IF NOT EXISTS idx_person_alerts_dismissed ON person_alerts(dismissed_at);
   `);
 
   // --- MIGRATION: Smart Face Storage (BLOBs + Pruning) ---

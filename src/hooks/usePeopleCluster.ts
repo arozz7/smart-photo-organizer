@@ -130,7 +130,7 @@ export function usePeopleCluster() {
         });
     }
 
-    const handleNameGroup = useCallback(async (ids: number[], name: string) => {
+    const handleNameGroup = useCallback(async (ids: number[], name: string, confirm?: boolean) => {
         // Optimistic: Remove from clusters immediately
         const idsSet = new Set(ids)
         setClusters(prev => prev.map(c => ({
@@ -144,15 +144,16 @@ export function usePeopleCluster() {
             return next
         })
 
-        // API Call
-        await autoNameFaces(ids, name)
+        // API Call - pass confirm flag if accepting a suggestion
+        await autoNameFaces(ids, name, confirm)
         addToast({ type: 'success', description: `Named ${ids.length} faces.` })
     }, [autoNameFaces, addToast])
 
     const handleConfirmName = useCallback(async (selectedIds: number[], name: string) => {
         if (!name || selectedIds.length === 0) return
         setNamingGroup(null)
-        await handleNameGroup(selectedIds, name)
+        // Manual naming is always confirmed
+        await handleNameGroup(selectedIds, name, true)
     }, [handleNameGroup])
 
     const handleOpenNaming = useCallback(async (ids: number[]) => {

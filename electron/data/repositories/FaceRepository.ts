@@ -343,6 +343,7 @@ export class FaceRepository {
         id: number;
         descriptor: Buffer | null;
         blur_score: number | null;
+        is_confirmed: number; // 0 or 1
         box_json: string;
         photo_id: number;
         file_path: string;
@@ -357,6 +358,7 @@ export class FaceRepository {
                     f.id, 
                     f.descriptor, 
                     f.blur_score,
+                    f.is_confirmed,
                     f.box_json,
                     f.photo_id,
                     p.file_path,
@@ -372,6 +374,7 @@ export class FaceRepository {
                 id: number;
                 descriptor: Buffer | null;
                 blur_score: number | null;
+                is_confirmed: number;
                 box_json: string;
                 photo_id: number;
                 file_path: string;

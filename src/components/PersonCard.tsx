@@ -3,6 +3,8 @@ import FaceThumbnail from './FaceThumbnail'
 
 export default function PersonCard({ person, onClick }: { person: any, onClick: () => void }) {
     const box = person.cover_box ? JSON.parse(person.cover_box) : null;
+    const hasUnconfirmed = person.unconfirmed_count > 0;
+    const hasAlerts = person.alert_count > 0;
 
     return (
         <div
@@ -22,6 +24,26 @@ export default function PersonCard({ person, onClick }: { person: any, onClick: 
                 ) : (
                     <div className="w-full h-full flex items-center justify-center text-4xl">
                         👤
+                    </div>
+                )}
+
+                {/* Drift Alert indicator (top-left, red) */}
+                {hasAlerts && (
+                    <div
+                        className="absolute top-2 left-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow-lg"
+                        title={`${person.alert_count} alert${person.alert_count !== 1 ? 's' : ''} - click to review`}
+                    >
+                        ⚠
+                    </div>
+                )}
+
+                {/* New faces indicator badge (top-right, amber) */}
+                {hasUnconfirmed && (
+                    <div
+                        className="absolute top-2 right-2 bg-amber-500 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold animate-pulse shadow-lg"
+                        title={`${person.unconfirmed_count} unconfirmed face${person.unconfirmed_count !== 1 ? 's' : ''}`}
+                    >
+                        {person.unconfirmed_count > 99 ? '99+' : person.unconfirmed_count}
                     </div>
                 )}
 

@@ -4,6 +4,7 @@ import { VirtuosoGrid } from 'react-virtuoso';
 import PersonFaceItem from './PersonFaceItem';
 import { Face } from '../types';
 import { useAlert } from '../context/AlertContext';
+import { useToast } from '../context/ToastContext';
 import { usePeople } from '../context/PeopleContext';
 import { PersonNameInput } from './PersonNameInput';
 
@@ -20,11 +21,14 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
     const [loading, setLoading] = useState(false);
     const [selectedFaces, setSelectedFaces] = useState<Set<number>>(new Set());
     const { showAlert, showConfirm } = useAlert();
+    const { addToast } = useToast();
     const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
 
     // Era Filtering
     const [eras, setEras] = useState<any[]>([]);
     const [selectedEra, setSelectedEra] = useState<number | 'all'>('all'); // 'all' or eraId
+    // Unconfirmed Filter
+    const [showUnconfirmedOnly, setShowUnconfirmedOnly] = useState(false);
 
     useEffect(() => {
         if (isOpen && personId) {
@@ -60,9 +64,15 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
     };
 
     const filteredFaces = useMemo(() => {
-        if (selectedEra === 'all') return faces;
-        return faces.filter(f => f.era_id === selectedEra);
-    }, [faces, selectedEra]);
+        let result = faces;
+        if (selectedEra !== 'all') {
+            result = result.filter(f => f.era_id === selectedEra);
+        }
+        if (showUnconfirmedOnly) {
+            result = result.filter(f => !f.is_confirmed);
+        }
+        return result;
+    }, [faces, selectedEra, showUnconfirmedOnly]);
 
     const toggleSelection = useCallback((faceId: number) => {
         setSelectedFaces(prev => {
@@ -88,6 +98,7 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                 try {
                     // @ts-ignore
                     await window.ipcRenderer.invoke('db:unassignFaces', Array.from(selectedFaces));
+                    addToast({ type: 'success', description: `Removed ${selectedFaces.size} faces.` });
                     setSelectedFaces(new Set());
                     loadAllFaces(); // Refresh local list
                     onUpdate(); // Signal parent to refresh (though parent might not show all these faces)
@@ -105,7 +116,8 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
             // @ts-ignore
             const result = await window.ipcRenderer.invoke('db:reassignFaces', {
                 faceIds: Array.from(selectedFaces),
-                personName: targetName
+                personName: targetName,
+                confirm: true // Mark as confirmed when manually moving
             });
 
             if (result.success) {
@@ -113,7 +125,7 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                 setIsMoveModalOpen(false);
                 loadAllFaces();
                 onUpdate();
-                showAlert({ title: 'Success', description: `Moved ${selectedFaces.size} faces to ${targetName}.` });
+                addToast({ type: 'success', description: `Moved ${selectedFaces.size} faces to ${targetName}.` });
             } else {
                 showAlert({ title: 'Move Failed', description: result.error, variant: 'danger' });
             }
@@ -160,14 +172,24 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                                 ))}
                             </select>
                         )}
+                        {/* Unconfirmed filter toggle */}
+                        <button
+                            onClick={() => setShowUnconfirmedOnly(!showUnconfirmedOnly)}
+                            className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${showUnconfirmedOnly
+                                ? 'text-amber-300 bg-amber-900/30 border-amber-500/50 hover:bg-amber-900/50'
+                                : 'text-gray-400 bg-gray-700/50 border-gray-600 hover:bg-gray-700'
+                                }`}
+                        >
+                            {showUnconfirmedOnly ? '✓ Unconfirmed Only' : 'Show Unconfirmed Only'}
+                        </button>
                         <span className="text-gray-500 text-sm">({filteredFaces.length} showing)</span>
                     </div>
                     <div className="flex items-center gap-3">
                         {/* Selection Controls */}
                         <button
-                            onClick={() => setSelectedFaces(new Set(faces.map(f => f.id)))}
+                            onClick={() => setSelectedFaces(new Set(filteredFaces.map(f => f.id)))}
                             className="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-800 transition-colors"
-                            title="Select all faces"
+                            title="Select all visible faces"
                         >
                             Select All
                         </button>
@@ -228,6 +250,7 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                                 await window.ipcRenderer.invoke('db:confirmFaces', Array.from(selectedFaces));
                                 setSelectedFaces(new Set());
                                 loadAllFaces();
+                                onUpdate(); // Refresh parent to update unconfirmed_count
                             }}
                             className="text-sm font-medium text-green-400 hover:text-green-300 transition-colors flex items-center gap-2"
                             title="Mark as correctly assigned"

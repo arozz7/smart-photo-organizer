@@ -199,4 +199,45 @@ describe('FaceAnalysisService.detectBackgroundFaces', () => {
         await expect(FaceAnalysisService.detectBackgroundFaces({}, mockPython))
             .rejects.toThrow('DBSCAN clustering failed');
     });
+    it('should include Era centroids in the payload sent to Python', async () => {
+        // Arrange
+        const faceDescriptor = new Float32Array([1, 0, 0, 0]);
+        const faceBuffer = Buffer.from(faceDescriptor.buffer);
+
+        vi.mocked(FaceRepository.getUnnamedFacesForNoiseDetection).mockReturnValue([
+            createMockUnnamedFace(100, faceBuffer)
+        ]);
+
+        // Mock a person with Eras
+        vi.mocked(PersonRepository.getPeopleWithDescriptors).mockReturnValue([
+            {
+                id: 1,
+                name: 'John',
+                descriptor: [1, 0, 0, 0],
+                eras: [
+                    { name: 'Young John', centroid: [0.9, 0.1, 0, 0] },
+                    { name: 'Old John', centroid: [0.8, 0.2, 0, 0] }
+                ]
+            }
+        ]);
+
+        const mockPython = createMockPythonProvider({ success: true, candidates: [], stats: {} });
+
+        // Act
+        await FaceAnalysisService.detectBackgroundFaces({}, mockPython);
+
+        // Assert
+        expect(mockPython.sendRequest).toHaveBeenCalledWith('detect_background_faces', expect.objectContaining({
+            // Should contain 3 centroids: 1 main + 2 eras
+            centroids: expect.arrayContaining([
+                expect.objectContaining({ personId: 1, name: 'John', descriptor: [1, 0, 0, 0] }),
+                expect.objectContaining({ personId: 1, name: 'Young John', descriptor: [0.9, 0.1, 0, 0] }),
+                expect.objectContaining({ personId: 1, name: 'Old John', descriptor: [0.8, 0.2, 0, 0] })
+            ])
+        }));
+
+        // precise length check
+        const callArgs = mockPython.sendRequest.mock.calls[0][1];
+        expect(callArgs.centroids).toHaveLength(3);
+    });
 });

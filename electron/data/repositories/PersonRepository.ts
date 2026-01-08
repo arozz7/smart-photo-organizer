@@ -21,10 +21,26 @@ export class PersonRepository {
                     FROM faces 
                     WHERE person_id IS NOT NULL AND is_ignored = 0
                     GROUP BY person_id
+                ),
+                UnconfirmedCounts AS (
+                    SELECT person_id, COUNT(*) as unconfirmed_count 
+                    FROM faces 
+                    WHERE person_id IS NOT NULL 
+                      AND is_ignored = 0 
+                      AND (is_confirmed = 0 OR is_confirmed IS NULL)
+                    GROUP BY person_id
+                ),
+                AlertCounts AS (
+                    SELECT person_id, COUNT(*) as alert_count 
+                    FROM person_alerts 
+                    WHERE dismissed_at IS NULL
+                    GROUP BY person_id
                 )
                 SELECT 
                     p.*, 
                     COALESCE(pc.face_count, 0) as face_count,
+                    COALESCE(uc.unconfirmed_count, 0) as unconfirmed_count,
+                    COALESCE(ac.alert_count, 0) as alert_count,
                     COALESCE(fixed_photo.preview_cache_path, fixed_photo.file_path, ph.preview_cache_path, ph.file_path) as cover_path,
                     COALESCE(fixed_face.box_json, bf.box_json) as cover_box,
                     COALESCE(fixed_photo.width, ph.width) as cover_width,
@@ -32,6 +48,8 @@ export class PersonRepository {
                     p.cover_face_id
                 FROM people p
                 LEFT JOIN PersonCounts pc ON p.id = pc.person_id
+                LEFT JOIN UnconfirmedCounts uc ON p.id = uc.person_id
+                LEFT JOIN AlertCounts ac ON p.id = ac.person_id
                 LEFT JOIN BestFaces bf ON p.id = bf.person_id AND bf.rn = 1
                 LEFT JOIN photos ph ON bf.photo_id = ph.id
                 LEFT JOIN faces fixed_face ON p.cover_face_id = fixed_face.id
@@ -167,5 +185,78 @@ export class PersonRepository {
         const db = getDB();
         db.prepare('UPDATE faces SET era_id = NULL WHERE era_id = ?').run(eraId);
         db.prepare('DELETE FROM person_eras WHERE id = ?').run(eraId);
+    }
+
+    // --- Alert Methods (for Drift Detection) ---
+
+    /**
+     * Add an alert for a person (e.g., drift detected).
+     */
+    static addAlert(personId: number, alertType: string, message: string, driftDistance?: number) {
+        const db = getDB();
+        db.prepare(`
+            INSERT INTO person_alerts (person_id, alert_type, message, drift_distance)
+            VALUES (?, ?, ?, ?)
+        `).run(personId, alertType, message, driftDistance ?? null);
+    }
+
+    /**
+     * Get active (non-dismissed) alerts for a person.
+     */
+    static getActiveAlerts(personId: number): Array<{
+        id: number;
+        person_id: number;
+        alert_type: string;
+        message: string;
+        drift_distance: number | null;
+        created_at: string;
+    }> {
+        const db = getDB();
+        return db.prepare(`
+            SELECT id, person_id, alert_type, message, drift_distance, created_at
+            FROM person_alerts
+            WHERE person_id = ? AND dismissed_at IS NULL
+            ORDER BY created_at DESC
+        `).all(personId) as Array<{
+            id: number;
+            person_id: number;
+            alert_type: string;
+            message: string;
+            drift_distance: number | null;
+            created_at: string;
+        }>;
+    }
+
+    /**
+     * Get all people with active alerts (for badge display).
+     */
+    static getPeopleWithActiveAlerts(): Array<{ person_id: number; alert_count: number }> {
+        const db = getDB();
+        return db.prepare(`
+            SELECT person_id, COUNT(*) as alert_count
+            FROM person_alerts
+            WHERE dismissed_at IS NULL
+            GROUP BY person_id
+        `).all() as Array<{ person_id: number; alert_count: number }>;
+    }
+
+    /**
+     * Dismiss an alert.
+     */
+    static dismissAlert(alertId: number) {
+        const db = getDB();
+        db.prepare(`
+            UPDATE person_alerts SET dismissed_at = CURRENT_TIMESTAMP WHERE id = ?
+        `).run(alertId);
+    }
+
+    /**
+     * Dismiss all alerts for a person.
+     */
+    static dismissAllAlerts(personId: number) {
+        const db = getDB();
+        db.prepare(`
+            UPDATE person_alerts SET dismissed_at = CURRENT_TIMESTAMP WHERE person_id = ? AND dismissed_at IS NULL
+        `).run(personId);
     }
 }

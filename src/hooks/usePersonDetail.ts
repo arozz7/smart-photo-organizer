@@ -36,6 +36,7 @@ export interface OutlierResult {
     preview_cache_path: string | null;
     photo_width: number;
     photo_height: number;
+    is_confirmed?: boolean; // For filtering unconfirmed faces
 }
 
 // ... hook logic ...
