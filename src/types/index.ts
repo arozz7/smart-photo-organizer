@@ -10,6 +10,7 @@ export interface Face {
     width?: number;
     height?: number;
     is_ignored?: boolean;
+    is_confirmed?: boolean;
     confidence_tier?: 'high' | 'review' | 'unknown';
     suggested_person_id?: number | null;
     match_distance?: number | null;

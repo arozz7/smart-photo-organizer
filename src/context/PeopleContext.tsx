@@ -32,7 +32,7 @@ interface PeopleContextType {
     assignPerson: (faceId: number, name: string) => Promise<any>
     ignoreFace: (faceId: number) => Promise<void>
     ignoreFaces: (faceIds: number[]) => Promise<void>
-    autoNameFaces: (faceIds: number[], name: string) => Promise<void>
+    autoNameFaces: (faceIds: number[], name: string, confirm?: boolean) => Promise<void>
     rebuildIndex: () => Promise<{ success: boolean; count?: number; error?: string }>
     matchFace: (descriptor: any, options?: any) => Promise<any>
     matchBatch: (descriptors: any[], options?: any) => Promise<any[]>
@@ -164,11 +164,12 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         }
     }, [])
 
-    const autoNameFaces = useCallback(async (faceIds: number[], name: string) => {
+    const autoNameFaces = useCallback(async (faceIds: number[], name: string, confirm?: boolean) => {
         try {
             // Use batch handler for efficiency
+            // Pass confirm flag to set is_confirmed when accepting suggestions
             // @ts-ignore
-            await window.ipcRenderer.invoke('db:reassignFaces', { faceIds, personName: name })
+            await window.ipcRenderer.invoke('db:reassignFaces', { faceIds, personName: name, confirm })
 
             await loadPeople()
             setFaces(prev => prev.filter(f => !faceIds.includes(f.id)))

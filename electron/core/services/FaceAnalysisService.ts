@@ -15,9 +15,10 @@ export interface OutlierResult {
     faceId: number;
     distance: number;
     blurScore: number | null;
+    is_confirmed: boolean; // For filtering unconfirmed faces in Review All modal
     // Face display data (so modal doesn't need to look up faces separately)
     box: { x: number; y: number; width: number; height: number };
-    photo_id: number; // Added
+    photo_id: number;
     file_path: string;
     preview_cache_path: string | null;
     photo_width: number;
@@ -241,6 +242,7 @@ export class FaceAnalysisService {
                         faceId: face.id,
                         distance,
                         blurScore: face.blur_score,
+                        is_confirmed: face.is_confirmed === 1,
                         box,
                         photo_id: face.photo_id,
                         file_path: face.file_path,
@@ -329,6 +331,7 @@ export class FaceAnalysisService {
                     faceId: face.id,
                     distance: avgDist,
                     blurScore: face.blur_score,
+                    is_confirmed: face.is_confirmed === 1,
                     box,
                     photo_id: face.photo_id,
                     file_path: face.file_path,

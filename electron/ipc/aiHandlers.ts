@@ -157,11 +157,21 @@ export function registerAIHandlers() {
     ipcMain.handle('ai:getClusteredFaces', async (_event, options) => {
         try {
             const faces = FaceRepository.getUnassignedDescriptors();
-            // Pass to Python
+
+            // Map frontend 'threshold' (similarity) to Python 'eps' (distance)
+            // DBSCAN uses distance: eps = 1 - threshold (e.g., 0.65 similarity = 0.35 distance)
+            let eps = 0.45; // Default distance threshold
+            if (options?.threshold !== undefined) {
+                eps = 1 - options.threshold;
+            }
+
             const payload = {
                 faces: faces, // [{id, descriptor}, ...]
-                ...options
+                eps: eps,
+                min_samples: options?.min_samples || 2
             };
+
+            logger.info(`[Main] Clustering ${faces.length} faces with eps=${eps.toFixed(3)} (threshold=${options?.threshold || 'default'})`);
             return await pythonProvider.sendRequest('cluster_faces', payload, 300000);
         } catch (e) {
             logger.error(`[Main] ai:getClusteredFaces failed: ${e}`);

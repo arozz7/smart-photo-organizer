@@ -102,6 +102,15 @@ export class PersonService {
                     if (diff > DRIFT_THRESHOLD) {
                         console.warn(`[DriftAlert] Person ${personId} centroid drifted by ${diff.toFixed(3)} (Threshold: ${DRIFT_THRESHOLD})`);
                         driftDetected = true;
+
+                        // Persist the drift alert for UI display
+                        const personName = oldPerson.name || `Person ${personId}`;
+                        PersonRepository.addAlert(
+                            personId,
+                            'drift_detected',
+                            `Centroid drift detected for ${personName}: face signature shifted by ${(diff * 100).toFixed(1)}%. This may indicate misassigned faces.`,
+                            diff
+                        );
                     }
                 }
             } catch (e) { /* Invalid JSON, ignore */ }

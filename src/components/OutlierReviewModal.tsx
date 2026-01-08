@@ -39,6 +39,8 @@ export default function OutlierReviewModal({
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     // Local copy of outliers so we can filter out removed faces without closing
     const [localOutliers, setLocalOutliers] = useState<OutlierResult[]>(initialOutliers);
+    // Filter to show only unconfirmed faces
+    const [showUnconfirmedOnly, setShowUnconfirmedOnly] = useState(false);
 
     // Sync local outliers when prop changes (e.g., re-opening modal)
     useEffect(() => {
@@ -56,8 +58,13 @@ export default function OutlierReviewModal({
         setSelectedIds(newSet);
     };
 
+    // Apply filter to outliers
+    const displayedOutliers = showUnconfirmedOnly
+        ? localOutliers.filter(o => !o.is_confirmed)
+        : localOutliers;
+
     const selectAll = () => {
-        setSelectedIds(new Set(localOutliers.map(o => o.faceId)));
+        setSelectedIds(new Set(displayedOutliers.map(o => o.faceId)));
     };
 
     const deselectAll = () => {
@@ -172,14 +179,25 @@ export default function OutlierReviewModal({
                         {/* Toolbar */}
                         <div className="flex-none p-3 bg-gray-800/30 border-b border-gray-800 flex items-center gap-4">
                             <div className="text-sm text-gray-400">
-                                {localOutliers.length} potential outlier{localOutliers.length !== 1 ? 's' : ''} found
+                                {displayedOutliers.length} potential outlier{displayedOutliers.length !== 1 ? 's' : ''} found
+                                {showUnconfirmedOnly && ` (filtering ${localOutliers.length - displayedOutliers.length} confirmed)`}
                             </div>
                             <div className="flex items-center gap-2">
+                                {/* Unconfirmed filter toggle */}
                                 <button
-                                    onClick={selectedIds.size === localOutliers.length ? deselectAll : selectAll}
+                                    onClick={() => setShowUnconfirmedOnly(!showUnconfirmedOnly)}
+                                    className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${showUnconfirmedOnly
+                                        ? 'text-amber-300 bg-amber-900/30 border-amber-500/50 hover:bg-amber-900/50'
+                                        : 'text-gray-400 bg-gray-800/50 border-gray-700 hover:bg-gray-800'
+                                        }`}
+                                >
+                                    {showUnconfirmedOnly ? '✓ Unconfirmed Only' : 'Show Unconfirmed Only'}
+                                </button>
+                                <button
+                                    onClick={selectedIds.size === displayedOutliers.length ? deselectAll : selectAll}
                                     className="px-3 py-1.5 text-sm font-medium text-indigo-300 bg-indigo-900/20 hover:bg-indigo-900/40 border border-indigo-500/30 rounded-lg transition-colors"
                                 >
-                                    {selectedIds.size === localOutliers.length ? 'Deselect All' : 'Select All'}
+                                    {selectedIds.size === displayedOutliers.length ? 'Deselect All' : 'Select All'}
                                 </button>
                             </div>
                             <div className="flex-1" />
@@ -187,14 +205,14 @@ export default function OutlierReviewModal({
 
                         {/* Content */}
                         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                            {localOutliers.length === 0 ? (
+                            {displayedOutliers.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center h-full text-gray-500">
                                     <span className="text-4xl mb-4">✓</span>
-                                    <p>No potential misassignments found</p>
+                                    <p>{showUnconfirmedOnly ? 'All faces are confirmed' : 'No potential misassignments found'}</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                    {localOutliers.map(outlier => {
+                                    {displayedOutliers.map(outlier => {
                                         const distanceInfo = getDistanceLabel(outlier.distance);
                                         const isSelected = selectedIds.has(outlier.faceId);
 

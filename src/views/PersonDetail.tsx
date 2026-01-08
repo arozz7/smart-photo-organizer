@@ -24,6 +24,15 @@ const PersonDetail = () => {
     const [isScanModalOpen, setIsScanModalOpen] = useState(false);
     const [isOutlierModalOpen, setIsOutlierModalOpen] = useState(false);
 
+    // Alert State (for drift detection)
+    const [alerts, setAlerts] = useState<Array<{
+        id: number;
+        alert_type: string;
+        message: string;
+        drift_distance: number | null;
+        created_at: string;
+    }>>([]);
+
     // Business Logic from Hook
     const {
         person,
@@ -48,6 +57,42 @@ const PersonDetail = () => {
         setThrottled(true);
         return () => setThrottled(false);
     }, [setThrottled]);
+
+    // Fetch alerts for this person
+    useEffect(() => {
+        const loadAlerts = async () => {
+            if (!personId) return;
+            try {
+                // @ts-ignore
+                const personAlerts = await window.ipcRenderer.invoke('person:getAlerts', parseInt(personId));
+                setAlerts(personAlerts || []);
+            } catch (err) {
+                console.error('Failed to load alerts:', err);
+            }
+        };
+        loadAlerts();
+    }, [personId]);
+
+    const dismissAlert = async (alertId: number) => {
+        try {
+            // @ts-ignore
+            await window.ipcRenderer.invoke('person:dismissAlert', alertId);
+            setAlerts(prev => prev.filter(a => a.id !== alertId));
+        } catch (err) {
+            console.error('Failed to dismiss alert:', err);
+        }
+    };
+
+    const dismissAllAlerts = async () => {
+        if (!personId) return;
+        try {
+            // @ts-ignore
+            await window.ipcRenderer.invoke('person:dismissAllAlerts', parseInt(personId));
+            setAlerts([]);
+        } catch (err) {
+            console.error('Failed to dismiss alerts:', err);
+        }
+    };
 
     // Handlers
     const onRenamePerson = async (newName: string) => {
@@ -100,6 +145,45 @@ const PersonDetail = () => {
 
     return (
         <div className="h-full flex flex-col bg-gray-900 text-white p-6 overflow-hidden">
+            {/* Alert Banner */}
+            {alerts.length > 0 && (
+                <div className="mb-4 bg-red-900/40 border border-red-500/50 rounded-xl p-4">
+                    <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                            <div className="text-red-400 text-lg">⚠</div>
+                            <h3 className="font-bold text-red-300">Drift Alerts ({alerts.length})</h3>
+                        </div>
+                        <button
+                            onClick={dismissAllAlerts}
+                            className="text-xs text-red-300/60 hover:text-red-200 px-2 py-1 rounded hover:bg-red-800/30 transition-colors"
+                        >
+                            Dismiss All
+                        </button>
+                    </div>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {alerts.map(alert => (
+                            <div key={alert.id} className="flex items-start justify-between bg-red-950/50 rounded-lg p-3">
+                                <p className="text-sm text-red-200/80 flex-1">
+                                    {alert.message}
+                                </p>
+                                <button
+                                    onClick={() => dismissAlert(alert.id)}
+                                    className="ml-2 p-1 text-red-300/60 hover:text-red-200 hover:bg-red-800/30 rounded transition-colors shrink-0"
+                                    title="Dismiss"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                    <p className="text-xs text-red-300/60 mt-3">
+                        Consider using "Find Misassigned" to review faces. If all faces match, you can safely dismiss these alerts.
+                    </p>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex flex-wrap items-center gap-4 mb-6">
                 {/* Left: Back button + Name */}

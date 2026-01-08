@@ -148,6 +148,7 @@
 - **Era Generation (Phase E):** Visual clustering of faces into time-based eras for improved multi-age recognition. [See Changelog](aiChangeLog/phase-25-eras-and-settings.md)
 - **Configurable Settings (Phase F):** UI controls for Era generation parameters (K-Means, Merge thresholds).
 - **Test Backfill (Phase G):** Comprehensive unit tests added for FaceService, PersonService, and Repositories.
+- **Fixes & QoL (Phase 26):** Fixed RAW Previews, Era Generation bugs, Clustering Thresholds, and improved UX feedback (Toasts). [See Changelog](aiChangeLog/phase-26-fix-raw-and-eras.md)
 
 ### Other Features
 - **Person Thumbnail Management:**

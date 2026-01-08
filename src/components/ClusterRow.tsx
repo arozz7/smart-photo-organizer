@@ -11,7 +11,7 @@ interface ClusterRowProps {
     toggleFace: (id: number) => void
     toggleGroup: (ids: number[]) => void
     fetchFacesByIds: (ids: number[]) => Promise<Face[]>
-    onNameGroup: (ids: number[], name: string) => Promise<void>
+    onNameGroup: (ids: number[], name: string, confirm?: boolean) => Promise<void>
     onIgnoreGroup: (ids: number[]) => void
     onUngroup: (index: number) => void
     onOpenNaming: (ids: number[]) => void
@@ -166,7 +166,7 @@ const ClusterRow = memo(({
                                 {suggestion.personName}
                             </span>
                             <button
-                                onClick={() => onNameGroup(faceIds, suggestion.personName)}
+                                onClick={() => onNameGroup(faceIds, suggestion.personName, true)}
                                 className="ml-1 bg-green-600 hover:bg-green-500 text-white rounded px-1.5 py-0.5 text-[10px] uppercase font-bold transition-colors"
                             >
                                 Accept

@@ -280,12 +280,13 @@ export function registerDBHandlers() {
     // db:reassignFaces (Bulk Assign)
     // db:reassignFaces (Bulk Assign via ID lookup internally?) 
     // Kept for backward compat if needed, but db:moveFacesToPerson is better
-    ipcMain.handle('db:reassignFaces', async (_, { faceIds, personName }) => {
+    ipcMain.handle('db:reassignFaces', async (_, { faceIds, personName, confirm }) => {
         const normalizedName = personName.trim();
         let person = PersonRepository.getPersonByName(normalizedName);
         if (!person) person = PersonRepository.createPerson(normalizedName);
 
-        FaceRepository.updateFacePerson(faceIds, person.id);
+        // Pass confirm flag to set is_confirmed when accepting suggestions
+        FaceRepository.updateFacePerson(faceIds, person.id, confirm ?? null);
         await PersonService.recalculatePersonMean(person.id);
         return { success: true, person };
     });
@@ -490,6 +491,26 @@ export function registerDBHandlers() {
             console.error('[Main] db:processPoseBackfillBatch failed:', error);
             return { success: false, error: String(error) };
         }
+    });
+
+    // --- PERSON ALERTS (Drift Detection) ---
+
+    ipcMain.handle('person:getAlerts', async (_, personId: number) => {
+        return PersonRepository.getActiveAlerts(personId);
+    });
+
+    ipcMain.handle('person:getPeopleWithAlerts', async () => {
+        return PersonRepository.getPeopleWithActiveAlerts();
+    });
+
+    ipcMain.handle('person:dismissAlert', async (_, alertId: number) => {
+        PersonRepository.dismissAlert(alertId);
+        return { success: true };
+    });
+
+    ipcMain.handle('person:dismissAllAlerts', async (_, personId: number) => {
+        PersonRepository.dismissAllAlerts(personId);
+        return { success: true };
     });
 
 }

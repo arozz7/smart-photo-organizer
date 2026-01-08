@@ -430,6 +430,20 @@ export default function People() {
                     </div>
                 </div>
             )}
+
+            {/* Auto-Identify Progress Modal Overlay */}
+            {isAutoAssigning && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm">
+                    <div className="bg-gray-800/95 p-8 rounded-2xl text-center shadow-2xl border border-gray-700 max-w-sm mx-4">
+                        <div className="animate-spin h-12 w-12 border-4 border-indigo-500 border-t-transparent rounded-full mx-auto mb-5" />
+                        <p className="text-white font-semibold text-lg mb-2">Auto-Identifying Faces...</p>
+                        <p className="text-gray-400 text-sm">
+                            Matching unnamed faces against all known people.
+                            <br />This may take a moment.
+                        </p>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
