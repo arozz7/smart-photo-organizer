@@ -6,6 +6,7 @@ import { usePeople } from '../context/PeopleContext'
 
 interface ClusterRowProps {
     faceIds: number[]
+    initialSuggestion?: { personId: number, personName: string, similarity: number }
     index: number
     selectedFaceIds: Set<number>
     toggleFace: (id: number) => void
@@ -19,6 +20,7 @@ interface ClusterRowProps {
 
 const ClusterRow = memo(({
     faceIds,
+    initialSuggestion,
     index,
     selectedFaceIds,
     toggleFace,
@@ -28,7 +30,7 @@ const ClusterRow = memo(({
     onIgnoreGroup,
     onUngroup,
     onOpenNaming
-}: ClusterRowProps) => { // Removed 'export' from here, added it to the end or declared it as export const
+}: ClusterRowProps) => {
     const [clusterFaces, setClusterFaces] = useState<Face[]>([])
     const [loaded, setLoaded] = useState(false)
     const [suggestion, setSuggestion] = useState<any>(null)
@@ -38,8 +40,7 @@ const ClusterRow = memo(({
     useEffect(() => {
         let mounted = true;
 
-        // Reset state when faceIds changes to prevent data from previous row appearing
-        // especially when Virtuoso reuses the component.
+        // Reset state when faceIds changes
         setLoaded(false)
         setClusterFaces([])
         setSuggestion(null)
@@ -54,10 +55,16 @@ const ClusterRow = memo(({
     }, [faceIds, fetchFacesByIds])
 
     // Get Suggestions
-    const { people } = usePeople(); // Need people to look up names for stored suggestions
+    const { people } = usePeople();
 
     useEffect(() => {
         if (!loaded || clusterFaces.length === 0) return;
+
+        // 0. Use Backend Suggestion if available (Fastest)
+        if (initialSuggestion) {
+            setSuggestion(initialSuggestion);
+            return;
+        }
 
         // 1. Check for stored suggestions (Scan-Time Tiering)
         // We look for a consensus or majority suggestion in the cluster

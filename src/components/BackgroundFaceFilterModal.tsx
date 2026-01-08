@@ -27,6 +27,18 @@ interface BackgroundFaceFilterModalProps {
 
 const BATCH_SIZE = 150 // Load manageable chunks
 
+interface FilterState {
+    singlePhotoOnly: boolean;
+    maxClusterSize: number | null;  // null = no filter
+    minDistance: number | null;     // null = no filter
+}
+
+const DEFAULT_FILTERS: FilterState = {
+    singlePhotoOnly: false,
+    maxClusterSize: null,
+    minDistance: null
+};
+
 export default function BackgroundFaceFilterModal({ isOpen, onClose }: BackgroundFaceFilterModalProps) {
     const { loadFaces, loadPeople } = usePeople()
     const { viewPhoto, viewingPhoto } = useScan()
@@ -45,8 +57,22 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false)
     const [isNaming, setIsNaming] = useState(false)
 
-    // Displayed candidates slice
-    const displayedCandidates = allCandidates.slice(0, displayedCount)
+    // Filter state
+    const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
+    const [showFilters, setShowFilters] = useState(false)
+
+    // Apply filters client-side for performance
+    const filteredCandidates = React.useMemo(() => {
+        return allCandidates.filter(c => {
+            if (filters.singlePhotoOnly && c.photoCount !== 1) return false;
+            if (filters.maxClusterSize !== null && c.clusterSize > filters.maxClusterSize) return false;
+            if (filters.minDistance !== null && c.nearestPersonDistance < filters.minDistance) return false;
+            return true;
+        });
+    }, [allCandidates, filters]);
+
+    // Displayed candidates slice (from filtered, not raw)
+    const displayedCandidates = filteredCandidates.slice(0, displayedCount)
 
     // Load candidates when modal opens
     useEffect(() => {
@@ -57,6 +83,8 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
             setAllCandidates([])
             setDisplayedCount(0)
             setSelectedIds(new Set())
+            setFilters(DEFAULT_FILTERS)
+            setShowFilters(false)
         }
     }, [isOpen])
 
@@ -89,15 +117,15 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
     }, [])
 
     const loadMore = useCallback(() => {
-        if (displayedCount >= allCandidates.length) return
+        if (displayedCount >= filteredCandidates.length) return
         setLoadingMore(true)
 
         // Simulate async to not block UI
         setTimeout(() => {
-            const nextBatch = Math.min(displayedCount + BATCH_SIZE, allCandidates.length)
+            const nextBatch = Math.min(displayedCount + BATCH_SIZE, filteredCandidates.length)
 
             // Auto-select the new batch as well
-            const newIds = allCandidates.slice(displayedCount, nextBatch).map(c => c.faceId)
+            const newIds = filteredCandidates.slice(displayedCount, nextBatch).map(c => c.faceId)
             setSelectedIds(prev => {
                 const next = new Set(prev)
                 newIds.forEach(id => next.add(id))
@@ -107,7 +135,7 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
             setDisplayedCount(nextBatch)
             setLoadingMore(false)
         }, 50)
-    }, [displayedCount, allCandidates])
+    }, [displayedCount, filteredCandidates])
 
     const toggleSelection = (faceId: number) => {
         const next = new Set(selectedIds)
@@ -271,11 +299,108 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
                                     <span className="font-mono text-red-400 font-bold">{stats.noiseCount}</span>
                                 </div>
                                 <div className="flex-1" />
+
+                                {/* Filter Toggle */}
+                                <button
+                                    onClick={() => setShowFilters(!showFilters)}
+                                    className={`text-xs px-2 py-1 rounded transition-colors flex items-center gap-1 ${showFilters || filters.singlePhotoOnly || filters.maxClusterSize !== null || filters.minDistance !== null
+                                        ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50'
+                                        : 'bg-gray-700 text-gray-400 hover:text-white'
+                                        }`}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                                    </svg>
+                                    Filters
+                                </button>
+
                                 <span className="text-gray-500 text-xs">
-                                    Showing {displayedCount} of {allCandidates.length}
+                                    {filteredCandidates.length !== allCandidates.length ? (
+                                        <>Showing {displayedCount} of {filteredCandidates.length} filtered ({allCandidates.length} total)</>
+                                    ) : (
+                                        <>Showing {displayedCount} of {allCandidates.length}</>
+                                    )}
                                 </span>
                             </div>
                         </div>
+
+                        {/* Filter Panel */}
+                        {showFilters && (
+                            <div className="flex-none p-3 bg-amber-900/10 border-b border-amber-500/30 flex items-center gap-6 text-sm animate-fade-in">
+                                {/* Single Photo Only */}
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="checkbox"
+                                        checked={filters.singlePhotoOnly}
+                                        onChange={(e) => {
+                                            setFilters(prev => ({ ...prev, singlePhotoOnly: e.target.checked }))
+                                            setDisplayedCount(BATCH_SIZE)
+                                            setSelectedIds(new Set())
+                                        }}
+                                        className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500 focus:ring-amber-500/50"
+                                    />
+                                    <span className="text-gray-300 group-hover:text-white transition-colors">Single Photo Only</span>
+                                </label>
+
+                                {/* Max Cluster Size */}
+                                <div className="flex items-center gap-2">
+                                    <span className="text-gray-400">Max Cluster:</span>
+                                    <select
+                                        value={filters.maxClusterSize ?? ''}
+                                        onChange={(e) => {
+                                            const val = e.target.value ? parseInt(e.target.value) : null
+                                            setFilters(prev => ({ ...prev, maxClusterSize: val }))
+                                            setDisplayedCount(BATCH_SIZE)
+                                            setSelectedIds(new Set())
+                                        }}
+                                        className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+                                    >
+                                        <option value="">Any</option>
+                                        <option value="1">1 (Singletons)</option>
+                                        <option value="2">≤ 2</option>
+                                        <option value="3">≤ 3</option>
+                                        <option value="5">≤ 5</option>
+                                    </select>
+                                </div>
+
+                                {/* Min Distance */}
+                                <div className="flex items-center gap-2">
+                                    <span className="text-gray-400">Min Distance:</span>
+                                    <select
+                                        value={filters.minDistance ?? ''}
+                                        onChange={(e) => {
+                                            const val = e.target.value ? parseFloat(e.target.value) : null
+                                            setFilters(prev => ({ ...prev, minDistance: val }))
+                                            setDisplayedCount(BATCH_SIZE)
+                                            setSelectedIds(new Set())
+                                        }}
+                                        className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+                                    >
+                                        <option value="">Any</option>
+                                        <option value="0.8">≥ 0.8</option>
+                                        <option value="1.0">≥ 1.0</option>
+                                        <option value="1.2">≥ 1.2</option>
+                                        <option value="1.4">≥ 1.4</option>
+                                    </select>
+                                </div>
+
+                                <div className="flex-1" />
+
+                                {/* Clear Filters */}
+                                {(filters.singlePhotoOnly || filters.maxClusterSize !== null || filters.minDistance !== null) && (
+                                    <button
+                                        onClick={() => {
+                                            setFilters(DEFAULT_FILTERS)
+                                            setDisplayedCount(BATCH_SIZE)
+                                            setSelectedIds(new Set())
+                                        }}
+                                        className="text-xs text-gray-500 hover:text-amber-300 transition-colors"
+                                    >
+                                        Clear Filters
+                                    </button>
+                                )}
+                            </div>
+                        )}
 
                         {/* Toolbar */}
                         <div className="flex-none p-3 bg-gray-800/20 border-b border-gray-800 flex items-center gap-4">
@@ -365,7 +490,7 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
                                     </div>
 
                                     {/* Load More Button */}
-                                    {displayedCount < allCandidates.length && (
+                                    {displayedCount < filteredCandidates.length && (
                                         <div className="py-8 flex justify-center">
                                             <button
                                                 onClick={loadMore}
@@ -378,7 +503,7 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
                                                         Loading...
                                                     </>
                                                 ) : (
-                                                    `Load More (${allCandidates.length - displayedCount} remaining)`
+                                                    `Load More (${filteredCandidates.length - displayedCount} remaining)`
                                                 )}
                                             </button>
                                         </div>

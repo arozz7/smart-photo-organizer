@@ -989,6 +989,30 @@ def handle_command(command):
              logger.exception("FATAL in get_system_status")
              response = {"type": "system_status_result", "error": str(e), "reqId": req_id}
 
+    elif cmd_type == 'get_index_status':
+        # Diagnostic: Get detailed FAISS index status
+        try:
+            index_status = {
+                'loaded': (vector_store.index is not None),
+                'total_vectors': vector_store.index.ntotal if vector_store.index else 0,
+                'dimension': vector_store.index.d if vector_store.index else 0,
+            }
+            
+            # Get ID mapping breakdown
+            if hasattr(vector_store, 'id_map') and vector_store.id_map:
+                index_status['id_map_size'] = len(vector_store.id_map)
+                # Sample of IDs in index
+                sample_ids = list(vector_store.id_map.values())[:20]
+                index_status['sample_face_ids'] = sample_ids
+            else:
+                index_status['id_map_size'] = 0
+                index_status['sample_face_ids'] = []
+            
+            response = {"type": "index_status_result", "status": index_status, "reqId": req_id}
+        except Exception as e:
+            logger.error(f"Get index status error: {e}")
+            response = {"type": "index_status_result", "error": str(e), "reqId": req_id}
+
     elif cmd_type == 'cluster_faces':
         faces_data = payload.get('faces', [])
         if 'dataPath' in payload:
@@ -1006,17 +1030,32 @@ def handle_command(command):
             ids = [f['id'] for f in faces_data]
             eps = float(payload.get('eps', 0.55))
             min_samples = int(payload.get('min_samples', 2))
+            debug = bool(payload.get('debug', False))
             
-            cluster_list = faces.cluster_faces_dbscan(descriptors, ids, eps, min_samples)
+            result = faces.cluster_faces_dbscan(descriptors, ids, eps, min_samples, debug=debug)
             
-            # Identify singles (hacky but works: all IDs not in flattened cluster list)
+            # Handle both debug (dict) and normal (list) return types
+            if isinstance(result, dict):
+                cluster_list = result.get('clusters', [])
+                debug_info = result.get('debug_info')
+            else:
+                cluster_list = result
+                debug_info = None
+            
+            # Identify singles (all IDs not in flattened cluster list)
             clustered_ids = set([i for c in cluster_list for i in c])
             singles = [i for i in ids if i not in clustered_ids]
             
             # Sort by size
             cluster_list.sort(key=len, reverse=True)
             
-            response = {"type": "cluster_result", "clusters": cluster_list, "singles": singles, "reqId": req_id}
+            response = {
+                "type": "cluster_result", 
+                "clusters": cluster_list, 
+                "singles": singles, 
+                "debug_info": debug_info,
+                "reqId": req_id
+            }
         except Exception as e:
             logger.error(f"Clustering error: {e}")
             response = {"type": "cluster_result", "error": str(e), "reqId": req_id}

@@ -169,12 +169,12 @@ export class PythonAIProvider implements IAIProvider {
         return this.sendRequest('analyze_image', { filePath, ...options });
     }
 
-    async clusterFaces(faces: { id: number; descriptor: number[]; }[], eps?: number, minSamples?: number): Promise<any> {
-        return this.sendRequest('cluster_faces', { faces, eps, minSamples });
+    async clusterFaces(faces: { id: number; descriptor: number[]; }[], eps?: number, minSamples?: number, timeoutMs = 300000): Promise<any> {
+        return this.sendRequest('cluster_faces', { faces, eps, minSamples }, timeoutMs);
     }
 
-    async searchFaces(descriptors: number[][], k?: number, threshold?: number): Promise<{ id: number; distance: number; }[][]> {
-        const res = await this.sendRequest('batch_search_index', { descriptors, k, threshold });
+    async searchFaces(descriptors: number[][], k?: number, threshold?: number, timeoutMs = 60000): Promise<{ id: number; distance: number; }[][]> {
+        const res = await this.sendRequest('batch_search_index', { descriptors, k, threshold }, timeoutMs);
         if (res.error) throw new Error(res.error);
         return res.results;
     }

@@ -27,7 +27,7 @@ interface PeopleContextType {
     loading: boolean
     loadPeople: () => Promise<void>
     loadFaces: (filter?: any) => Promise<void>
-    loadUnnamedFaces: (options?: { threshold?: number, min_samples?: number }) => Promise<{ clusters: number[][], singles: number[] }>
+    loadUnnamedFaces: (options?: { threshold?: number, min_samples?: number, excludeBackground?: boolean, groupBySuggestion?: boolean }) => Promise<{ clusters: number[][], singles: number[], clusterSuggestions?: Map<number, number> }>
     fetchFacesByIds: (ids: number[]) => Promise<Face[]>
     assignPerson: (faceId: number, name: string) => Promise<any>
     ignoreFace: (faceId: number) => Promise<void>
@@ -111,7 +111,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         }
     }, [])
 
-    const loadUnnamedFaces = useCallback(async (options?: { threshold?: number, min_samples?: number }) => {
+    const loadUnnamedFaces = useCallback(async (options?: { threshold?: number, min_samples?: number, excludeBackground?: boolean, groupBySuggestion?: boolean }) => {
         try {
             // New Architecture: fetch CLUSTERS (IDs only)
             // @ts-ignore
@@ -126,11 +126,21 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
 
     const fetchFacesByIds = useCallback(async (ids: number[]) => {
         try {
-            // @ts-ignore
-            const result = await window.ipcRenderer.invoke('db:getFacesByIds', ids);
-            if (Array.isArray(result)) return result;
-            if (result && result.success && Array.isArray(result.faces)) return result.faces;
-            return [];
+            // Batching to prevent SQLite variable limit (999)
+            const BATCH_SIZE = 900;
+            const results: Face[] = [];
+
+            for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+                const batch = ids.slice(i, i + BATCH_SIZE);
+                // @ts-ignore
+                const batchResult = await window.ipcRenderer.invoke('db:getFacesByIds', batch);
+                if (Array.isArray(batchResult)) {
+                    results.push(...batchResult);
+                } else if (batchResult && batchResult.success && Array.isArray(batchResult.faces)) {
+                    results.push(...batchResult.faces);
+                }
+            }
+            return results;
         } catch (e) {
             console.error("Failed to fetch faces by IDs", e);
             return [];

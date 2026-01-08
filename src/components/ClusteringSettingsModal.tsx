@@ -7,11 +7,13 @@ import { Cross2Icon, UpdateIcon } from '@radix-ui/react-icons';
 interface ClusteringSettingsModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onRecluster: (options: { threshold: number, min_samples: number }) => void;
+    onRecluster: (options: { threshold: number, min_samples: number, excludeBackground?: boolean, groupBySuggestion?: boolean }) => void;
 }
 
 const ClusteringSettingsModal: React.FC<ClusteringSettingsModalProps> = ({ open, onOpenChange, onRecluster }) => {
     const [threshold, setThreshold] = useState(0.65);
+    const [excludeBackground, setExcludeBackground] = useState(false);
+    const [groupBySuggestion, setGroupBySuggestion] = useState(false);
     const [loading, setLoading] = useState(false);
     const [rebuildStatus, setRebuildStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
@@ -29,16 +31,21 @@ const ClusteringSettingsModal: React.FC<ClusteringSettingsModalProps> = ({ open,
                     }
                 });
             }
+            // Load advanced settings
+            setExcludeBackground(localStorage.getItem('excludeBackground') === 'true');
+            setGroupBySuggestion(localStorage.getItem('groupBySuggestion') === 'true');
         }
     }, [open]);
 
     const handleApply = async () => {
         setLoading(true);
-        // Persist preference
+        // Persist preferences
         localStorage.setItem('regroupThreshold', threshold.toString());
+        localStorage.setItem('excludeBackground', excludeBackground.toString());
+        localStorage.setItem('groupBySuggestion', groupBySuggestion.toString());
 
-        // Call parent recluster logic
-        await onRecluster({ threshold, min_samples: 2 });
+        // Call parent recluster logic with new options
+        await onRecluster({ threshold, min_samples: 2, excludeBackground, groupBySuggestion });
         setLoading(false);
         onOpenChange(false);
     };
@@ -76,6 +83,39 @@ const ClusteringSettingsModal: React.FC<ClusteringSettingsModalProps> = ({ open,
                                 <span>Loose (More Groups)</span>
                                 <span>Strict (Fewer Groups)</span>
                             </div>
+                        </div>
+
+                        {/* Advanced Options */}
+                        <div className="pt-4 border-t border-gray-800 space-y-3">
+                            <h4 className="text-sm font-medium text-gray-300 mb-2">Advanced Options</h4>
+
+                            {/* Exclude Background Noise */}
+                            <label className="flex items-center gap-3 cursor-pointer group">
+                                <input
+                                    type="checkbox"
+                                    checked={excludeBackground}
+                                    onChange={(e) => setExcludeBackground(e.target.checked)}
+                                    className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-indigo-500 focus:ring-indigo-500/50"
+                                />
+                                <div>
+                                    <span className="text-sm text-gray-300 group-hover:text-white transition-colors">Exclude Background Noise</span>
+                                    <p className="text-[10px] text-gray-500">Skip faces that appear infrequently and don't match anyone</p>
+                                </div>
+                            </label>
+
+                            {/* Group by AI Suggestion */}
+                            <label className="flex items-center gap-3 cursor-pointer group">
+                                <input
+                                    type="checkbox"
+                                    checked={groupBySuggestion}
+                                    onChange={(e) => setGroupBySuggestion(e.target.checked)}
+                                    className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-indigo-500 focus:ring-indigo-500/50"
+                                />
+                                <div>
+                                    <span className="text-sm text-gray-300 group-hover:text-white transition-colors">Group by AI Suggestion</span>
+                                    <p className="text-[10px] text-gray-500">Merge clusters that suggest the same named person</p>
+                                </div>
+                            </label>
                         </div>
 
                         <div className="bg-indigo-900/20 border border-indigo-500/20 rounded p-4 text-xs text-indigo-200">

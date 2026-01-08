@@ -149,6 +149,7 @@
 - **Configurable Settings (Phase F):** UI controls for Era generation parameters (K-Means, Merge thresholds).
 - **Test Backfill (Phase G):** Comprehensive unit tests added for FaceService, PersonService, and Repositories.
 - **Fixes & QoL (Phase 26):** Fixed RAW Previews, Era Generation bugs, Clustering Thresholds, and improved UX feedback (Toasts). [See Changelog](aiChangeLog/phase-26-fix-raw-and-eras.md)
+- **Clustering & Performance (Phase 27):** Fixed clustering logic (Metric Mismatch), optimized background detection speed (20x), and added Face Debug tools. [See Changelog](aiChangeLog/phase-27-clustering-optimization.md)
 
 ### Other Features
 - **Person Thumbnail Management:**
