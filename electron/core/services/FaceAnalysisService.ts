@@ -378,12 +378,33 @@ export class FaceAnalysisService {
         }
 
         // 2. Fetch named person centroids
-        const people = PersonRepository.getPeopleWithDescriptors() as Array<{ id: number; name: string; descriptor: number[] }>;
-        const centroids = people.map((p: { id: number; name: string; descriptor: number[] }) => ({
-            personId: p.id,
-            name: p.name,
-            descriptor: p.descriptor
-        })).filter((c: { personId: number; name: string; descriptor: number[] }) => c.descriptor.length > 0);
+        const people = PersonRepository.getPeopleWithDescriptors() as Array<{ id: number; name: string; descriptor: number[]; eras?: { name: string; centroid: number[] }[] }>;
+
+        const centroids: { personId: number; name: string; descriptor: number[] }[] = [];
+
+        for (const p of people) {
+            // Main centroid
+            if (p.descriptor && p.descriptor.length > 0) {
+                centroids.push({
+                    personId: p.id,
+                    name: p.name,
+                    descriptor: p.descriptor
+                });
+            }
+
+            // Era centroids (flattened)
+            if (p.eras && p.eras.length > 0) {
+                for (const era of p.eras) {
+                    if (era.centroid && era.centroid.length > 0) {
+                        centroids.push({
+                            personId: p.id,
+                            name: era.name, // Use Era name for debugging/logging, but ID links it to person
+                            descriptor: era.centroid
+                        });
+                    }
+                }
+            }
+        }
 
         // 3. Transform faces for Python backend
         const facesPayload = unnamedFaces.map(f => ({
@@ -399,14 +420,46 @@ export class FaceAnalysisService {
 
         console.log(`[FaceAnalysis] detectBackgroundFaces: ${facesPayload.length} faces, ${centroids.length} centroids`);
 
-        // 4. Call Python backend
-        const result = await pythonProvider.sendRequest('detect_background_faces', {
-            faces: facesPayload,
-            centroids,
-            minPhotoAppearances: options.minPhotoAppearances ?? 3,
-            maxClusterSize: options.maxClusterSize ?? 2,
-            centroidDistanceThreshold: options.centroidDistanceThreshold ?? 0.7
-        });
+        // 4. Call Python backend (with file-based transfer for large payloads)
+        const LARGE_PAYLOAD_THRESHOLD = 5000;
+        let result: any;
+
+        if (facesPayload.length > LARGE_PAYLOAD_THRESHOLD) {
+            // File-based transfer to avoid IPC timeout
+            const fs = await import('fs/promises');
+            const os = await import('os');
+            const path = await import('path');
+
+            const tempDir = os.tmpdir();
+            const dataPath = path.join(tempDir, `spo_detect_bg_${Date.now()}.json`);
+
+            console.log(`[FaceAnalysis] Large payload (${facesPayload.length} faces), using file-based transfer: ${dataPath}`);
+
+            try {
+                await fs.writeFile(dataPath, JSON.stringify({ faces: facesPayload, centroids }), 'utf-8');
+
+                result = await pythonProvider.sendRequest('detect_background_faces', {
+                    dataPath,
+                    minPhotoAppearances: options.minPhotoAppearances ?? 3,
+                    maxClusterSize: options.maxClusterSize ?? 2,
+                    centroidDistanceThreshold: options.centroidDistanceThreshold ?? 0.7
+                });
+            } finally {
+                // Cleanup temp file
+                try {
+                    await fs.unlink(dataPath);
+                } catch { /* ignore cleanup errors */ }
+            }
+        } else {
+            // Direct IPC for small payloads
+            result = await pythonProvider.sendRequest('detect_background_faces', {
+                faces: facesPayload,
+                centroids,
+                minPhotoAppearances: options.minPhotoAppearances ?? 3,
+                maxClusterSize: options.maxClusterSize ?? 2,
+                centroidDistanceThreshold: options.centroidDistanceThreshold ?? 0.7
+            });
+        }
 
         if (!result.success && result.error) {
             throw new Error(result.error);

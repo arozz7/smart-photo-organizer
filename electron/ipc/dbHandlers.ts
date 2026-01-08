@@ -375,7 +375,13 @@ export function registerDBHandlers() {
                 maxClusterSize: options?.maxClusterSize ?? settings.maxClusterSize,
                 centroidDistanceThreshold: options?.centroidDistanceThreshold ?? settings.centroidDistanceThreshold
             };
-            const result = await FaceAnalysisService.detectBackgroundFaces(merged, pythonProvider);
+
+            // Wrap provider with 5-minute timeout for heavy DBSCAN processing
+            const timeoutProvider = {
+                sendRequest: (cmd: string, payload: any) => pythonProvider.sendRequest(cmd, payload, 300000) // 5 min
+            };
+
+            const result = await FaceAnalysisService.detectBackgroundFaces(merged, timeoutProvider);
             return { success: true, ...result };
         } catch (error) {
             console.error('[Main] db:detectBackgroundFaces failed:', error);
