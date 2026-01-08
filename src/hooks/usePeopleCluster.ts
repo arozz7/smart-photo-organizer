@@ -12,7 +12,7 @@ export function usePeopleCluster() {
     const { addToast } = useToast()
 
     // Clustering State
-    const [clusters, setClusters] = useState<{ faces: number[] }[]>([])
+    const [clusters, setClusters] = useState<{ faces: number[], suggestion?: any }[]>([])
     const [singles, setSingles] = useState<number[]>([])
     const [totalFaces, setTotalFaces] = useState(0)
     const [isClustering, setIsClustering] = useState(false)
@@ -24,7 +24,7 @@ export function usePeopleCluster() {
     // Group Naming Modal State
     const [namingGroup, setNamingGroup] = useState<{ faces: Face[], name: string } | null>(null)
 
-    const loadClusteredFaces = useCallback(async (options?: { threshold?: number, min_samples?: number }) => {
+    const loadClusteredFaces = useCallback(async (options?: { threshold?: number, min_samples?: number, excludeBackground?: boolean, groupBySuggestion?: boolean }) => {
         setIsClustering(true)
         try {
             // Contextual Merge: 
@@ -38,19 +38,48 @@ export function usePeopleCluster() {
                 if (saved) finalThreshold = parseFloat(saved);
             }
 
+            // Load saved advanced settings if not passed
+            let excludeBackground = options?.excludeBackground;
+            if (excludeBackground === undefined) {
+                excludeBackground = localStorage.getItem('excludeBackground') === 'true';
+            }
+            let groupBySuggestion = options?.groupBySuggestion;
+            if (groupBySuggestion === undefined) {
+                groupBySuggestion = localStorage.getItem('groupBySuggestion') === 'true';
+            }
+
             const finalOptions = {
                 ...options,
-                threshold: finalThreshold
+                threshold: finalThreshold,
+                excludeBackground,
+                groupBySuggestion
             };
 
             const res = await loadUnnamedFaces(finalOptions)
             if (res) {
-                // Sort clusters by size (descending)
-                const sortedClusters = res.clusters.sort((a: any, b: any) => b.length - a.length).map((ids: number[]) => ({ faces: ids }));
-                setClusters(sortedClusters)
+                const rawClusters = res.clusters;
+                let normalizedClusters: { faces: number[], suggestion?: any }[] = [];
+
+                if (rawClusters.length > 0) {
+                    // Check if clusters are simple arrays (old/legacy) or objects (new backend grouping)
+                    const isSimpleArray = Array.isArray(rawClusters[0]);
+
+                    if (isSimpleArray) {
+                        // Standard DBSCAN result (number[][])
+                        normalizedClusters = rawClusters.map((ids: number[]) => ({ faces: ids, suggestion: null }));
+                        // Sort by size descending
+                        normalizedClusters.sort((a, b) => b.faces.length - a.faces.length);
+                    } else {
+                        // Backend grouped result ({ faces: number[], suggestion: any }[])
+                        // Already sorted by backend (Suggested first, then size)
+                        normalizedClusters = rawClusters as any;
+                    }
+                }
+
+                setClusters(normalizedClusters)
                 setSingles(res.singles)
 
-                const clusterCount = res.clusters.reduce((acc: number, c: any) => acc + c.length, 0);
+                const clusterCount = normalizedClusters.reduce((acc, c) => acc + c.faces.length, 0);
                 setTotalFaces(clusterCount + res.singles.length);
             }
         } catch (e) {
@@ -58,7 +87,7 @@ export function usePeopleCluster() {
         } finally {
             setIsClustering(false)
         }
-    }, [loadUnnamedFaces])
+    }, [loadUnnamedFaces, fetchFacesByIds])
 
     const toggleFace = useCallback((id: number) => {
         const newSet = new Set(selectedFaceIds)
@@ -80,6 +109,18 @@ export function usePeopleCluster() {
     }, [selectedFaceIds])
 
     const clearSelection = useCallback(() => setSelectedFaceIds(new Set()), [])
+
+    const selectAllGroups = useCallback((select: boolean = true) => {
+        if (!select) {
+            clearSelection();
+            return;
+        }
+        const newSet = new Set<number>();
+        clusters.forEach(c => {
+            c.faces.forEach(id => newSet.add(id));
+        });
+        setSelectedFaceIds(newSet);
+    }, [clusters, clearSelection]);
 
     const handleAutoAssign = async () => {
         if (totalFaces === 0) return;
@@ -257,6 +298,7 @@ export function usePeopleCluster() {
         loadClusteredFaces,
         toggleFace,
         toggleGroup,
+        selectAllGroups,
         clearSelection,
         handleAutoAssign,
         handleNameGroup,

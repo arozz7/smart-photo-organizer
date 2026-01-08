@@ -156,7 +156,25 @@ export function registerAIHandlers() {
 
     ipcMain.handle('ai:getClusteredFaces', async (_event, options) => {
         try {
-            const faces = FaceRepository.getUnassignedDescriptors();
+            let faces = FaceRepository.getUnassignedDescriptors();
+
+            // Exclude Background Noise if enabled
+            if (options?.excludeBackground) {
+                try {
+                    // Import FaceAnalysisService for background detection
+                    const { FaceAnalysisService } = await import('../core/services/FaceAnalysisService');
+                    const result = await FaceAnalysisService.detectBackgroundFaces({}, pythonProvider);
+                    if (result.candidates && result.candidates.length > 0) {
+                        const noiseIds = new Set(result.candidates.map((c: any) => c.faceId));
+                        const beforeCount = faces.length;
+                        faces = faces.filter((f: any) => !noiseIds.has(f.id));
+                        logger.info(`[Main] excludeBackground: Filtered ${beforeCount - faces.length} noise faces, ${faces.length} remaining`);
+                    }
+                } catch (e) {
+                    logger.error(`[Main] excludeBackground filter failed: ${e}`);
+                    // Continue with all faces if filter fails
+                }
+            }
 
             // Map frontend 'threshold' (similarity) to Python 'eps' (distance)
             // DBSCAN uses distance: eps = 1 - threshold (e.g., 0.65 similarity = 0.35 distance)
@@ -172,7 +190,116 @@ export function registerAIHandlers() {
             };
 
             logger.info(`[Main] Clustering ${faces.length} faces with eps=${eps.toFixed(3)} (threshold=${options?.threshold || 'default'})`);
-            return await pythonProvider.sendRequest('cluster_faces', payload, 300000);
+            const clusteringResult = await pythonProvider.sendRequest('cluster_faces', payload, 300000);
+
+            // Options: Group by AI Suggestion (Backend)
+            // If enabled, we calculate centroids of clusters, match them against known people,
+            // and merge clusters that suggest the same person.
+            if (options?.groupBySuggestion && clusteringResult.clusters && clusteringResult.clusters.length > 0) {
+                try {
+                    const { FaceService } = await import('../core/services/FaceService');
+
+                    // 1. Prepare fast descriptor lookup
+                    const faceMap = new Map<number, number[]>();
+                    faces.forEach((f: any) => {
+                        if (f.descriptor) faceMap.set(f.id, f.descriptor);
+                    });
+
+                    // 2. Calculate centroids for all clusters
+                    const clusterCentroids: number[][] = [];
+                    const validClusterIndices: number[] = [];
+
+                    clusteringResult.clusters.forEach((clusterIds: number[], idx: number) => {
+                        // Take sample of faces (up to 10) to calculate centroid
+                        const sampleIds = clusterIds.slice(0, 10);
+                        const descriptors = sampleIds.map(id => faceMap.get(id)).filter(d => d);
+                        if (descriptors.length > 0) {
+                            // Average descriptor
+                            const dims = descriptors[0].length;
+                            const centroid = new Array(dims).fill(0);
+                            descriptors.forEach(d => {
+                                for (let i = 0; i < dims; i++) centroid[i] += d[i];
+                            });
+                            for (let i = 0; i < dims; i++) centroid[i] /= descriptors.length;
+
+                            clusterCentroids.push(centroid);
+                            validClusterIndices.push(idx);
+                        }
+                    });
+
+                    // 3. Match centroids against Vector DB
+                    if (clusterCentroids.length > 0) {
+                        const searchFn = async (d: number[][], k?: number, t?: number) => pythonProvider.searchFaces(d, k, t);
+                        const matches = await FaceService.matchBatch(clusterCentroids, { threshold: 0.6, searchFn });
+
+                        // 4. Group clusters by match result
+                        const suggestionGroups = new Map<number, { indices: number[], suggestion: any }>();
+                        const unassignedIndices = new Set(clusteringResult.clusters.map((_: any, i: number) => i));
+
+                        matches.forEach((match, i) => {
+                            const originalIdx = validClusterIndices[i];
+                            if (match && match.personId) {
+                                if (!suggestionGroups.has(match.personId)) {
+                                    suggestionGroups.set(match.personId, {
+                                        indices: [], suggestion: {
+                                            personId: match.personId,
+                                            personName: match.personName || 'Unknown',
+                                            similarity: match.similarity
+                                        }
+                                    });
+                                }
+                                suggestionGroups.get(match.personId)!.indices.push(originalIdx);
+                                unassignedIndices.delete(originalIdx);
+                            }
+                        });
+
+                        // 5. Construct Result: Merged Suggested Clusters + original Unassigned Clusters
+                        const mergedClusters: any[] = [];
+
+                        // Add Suggested Groups (Merged)
+                        suggestionGroups.forEach((group) => {
+                            const allFaces: number[] = [];
+                            group.indices.forEach(idx => {
+                                allFaces.push(...clusteringResult.clusters[idx]);
+                            });
+                            mergedClusters.push({
+                                faces: allFaces,
+                                suggestion: group.suggestion
+                            });
+                        });
+
+                        // Add Unassigned Groups (As-is)
+                        unassignedIndices.forEach(idx => {
+                            mergedClusters.push({ // Return object to match new structure
+                                faces: clusteringResult.clusters[idx],
+                                suggestion: null
+                            });
+                        });
+
+                        // Sort: Suggested first (by size), then Unassigned (by size)
+                        mergedClusters.sort((a, b) => {
+                            if (a.suggestion && !b.suggestion) return -1;
+                            if (!a.suggestion && b.suggestion) return 1;
+                            return b.faces.length - a.faces.length;
+                        });
+
+                        // Return modified structure
+                        return {
+                            clusters: mergedClusters, // Now Objects, not just number[][]
+                            singles: clusteringResult.singles
+                        };
+                    }
+                } catch (err) {
+                    logger.error(`[Main] groupBySuggestion failed: ${err}`);
+                    // Fallthrough to return original result
+                }
+            }
+
+            // Normalizing return type if not grouped (or if failed)
+            // Frontend now expects object structure if we want to be consistent?
+            // Or we handle both? safely handle both.
+            // But if we return original number[][], usePeopleCluster handles it.
+            return clusteringResult;
         } catch (e) {
             logger.error(`[Main] ai:getClusteredFaces failed: ${e}`);
             return { clusters: [], singles: [] };
@@ -190,7 +317,7 @@ export function registerAIHandlers() {
     });
 
     ipcMain.handle('ai:matchBatch', async (_event, { descriptors, options }) => {
-        const searchFn = async (d: number[][], k?: number, t?: number) => pythonProvider.searchFaces(d, k, t);
+        const searchFn = async (d: number[][], k?: number, t?: number) => pythonProvider.searchFaces(d, k, t, 120000);
         return await FaceService.matchBatch(descriptors, { ...options, searchFn });
     });
 
@@ -202,7 +329,7 @@ export function registerAIHandlers() {
 
             if (descriptors.length === 0) return { success: true, matches: [] };
 
-            const searchFn = async (d: number[][], k?: number, t?: number) => pythonProvider.searchFaces(d, k, t);
+            const searchFn = async (d: number[][], k?: number, t?: number) => pythonProvider.searchFaces(d, k, t, 120000);
             const matches = await FaceService.matchBatch(descriptors, { threshold, searchFn });
 
             const results = matches.map((m, i) => m ? {
@@ -214,6 +341,90 @@ export function registerAIHandlers() {
         } catch (e) {
             logger.error(`[IPC] face:findPotentialMatches failed: ${e}`);
             return { success: false, error: String(e) };
+        }
+    });
+
+    // ===== DIAGNOSTIC HANDLERS =====
+
+    // Get FAISS Index Status
+    ipcMain.handle('ai:getIndexStatus', async () => {
+        return await pythonProvider.sendRequest('get_index_status', {}, 60000);
+    });
+
+    // Compare specific faces (cosine similarity)
+    ipcMain.handle('ai:compareFaces', async (_event, { faceIds }) => {
+        try {
+            const faces = FaceRepository.getFacesByIds(faceIds);
+            const descriptors = faces.filter((f: any) => f.descriptor).map((f: any) => ({
+                id: f.id,
+                descriptor: f.descriptor
+            }));
+
+            if (descriptors.length < 2) {
+                return { success: false, error: 'Need at least 2 faces with descriptors' };
+            }
+
+            // Compute pairwise cosine similarities
+            const similarities: any[] = [];
+            for (let i = 0; i < descriptors.length; i++) {
+                for (let j = i + 1; j < descriptors.length; j++) {
+                    const a = descriptors[i].descriptor;
+                    const b = descriptors[j].descriptor;
+
+                    // Cosine similarity: dot(a,b) / (|a| * |b|)
+                    let dot = 0, normA = 0, normB = 0;
+                    for (let k = 0; k < a.length; k++) {
+                        dot += a[k] * b[k];
+                        normA += a[k] * a[k];
+                        normB += b[k] * b[k];
+                    }
+                    const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
+                    const distance = 1 - similarity; // Euclidean-like distance for normalized vectors
+
+                    similarities.push({
+                        face1: descriptors[i].id,
+                        face2: descriptors[j].id,
+                        similarity: Math.round(similarity * 10000) / 10000,
+                        distance: Math.round(distance * 10000) / 10000
+                    });
+                }
+            }
+
+            // Sort by similarity descending
+            similarities.sort((a, b) => b.similarity - a.similarity);
+
+            return { success: true, comparisons: similarities };
+        } catch (e) {
+            logger.error(`[IPC] ai:compareFaces failed: ${e}`);
+            return { success: false, error: String(e) };
+        }
+    });
+
+    // Debug clustering - run clustering with detailed distance info
+    ipcMain.handle('ai:debugCluster', async (_event, options) => {
+        try {
+            let faces = FaceRepository.getUnassignedDescriptors();
+
+            // Map threshold to eps
+            let eps = 0.45;
+            if (options?.threshold !== undefined) {
+                eps = 1 - options.threshold;
+            }
+
+            const payload = {
+                faces: faces,
+                eps: eps,
+                min_samples: options?.min_samples || 2,
+                debug: true  // Enable debug mode
+            };
+
+            logger.info(`[Main] Debug clustering ${faces.length} faces with eps=${eps.toFixed(3)}`);
+            const result = await pythonProvider.sendRequest('cluster_faces', payload, 300000);
+
+            return result;
+        } catch (e) {
+            logger.error(`[Main] ai:debugCluster failed: ${e}`);
+            return { error: String(e) };
         }
     });
 }

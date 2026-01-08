@@ -47,15 +47,19 @@ The AI automatically detects faces during the scan. Your job is to give them nam
         - **No Ring:** Unknown faces with no close matches in your library.
 5.  **Refining Groups:**
     - **Ungroup:** If a suggested group contains mixed faces, click the **"Ungroup"** button on the row to break it apart and return the faces to the "Unmatched" pool for individual sorting.
-    - **Filter Background Faces:** Use the **"Filter Background"** button in the header (funnel icon) to automatically detect and bulk-ignore "noise" faces (strangers/background crowds) that appear only once or twice.
-    - **Ignore All Groups:** Use the **"Ignore All Groups"** button in the header if you want to quickly clear all current suggestions (e.g., if they are all non-faces or irrelevant background people).
+    - **Group by AI Suggestion:** Switch to this mode to have the AI automatically group faces by who it thinks they are (based on your existing named people). These suggestions appear at the top.
+    - **Filter Background Faces:** A powerful tool to bulk-ignore "noise".
+        - **Single Photo Only:** Strictly targets faces that appear in only one photo.
+        - **Max Cluster Size:** Filter out small clusters (e.g., size ≤ 2).
+    - **Ignore All Groups:** Use the **"Ignore All Groups"** button to dismiss all currently visible suggestions.
+    - **Debug Tools:** (Bottom Right) Use the **"Debug"** button to inspect why faces are grouping (or not) and check if selected faces match anyone in your database.
 6.  **Ignored Faces:** Managing ignored faces is easy. Open the Ignored Faces modal to review hidden faces. 
     - **Group Similar**: Automatically cluster the "ignored" pile to quickly find accidental ignores.
     - **Sensitivity Slider**: Use the slider to increase matching sensitivity if you don't see suggestions for blurry or lower-quality photos.
     - **AI Readiness**: Look for small **green dots** on the thumbnails; these indicate that the face has high-quality AI fingerprint data ready for matching.
     - **Restore as [Name]**: One-click action to restore and correctly name faces simultaneously.
 7.  **Quality Control:**
-    - **Misassigned Faces:** On any Person's detail page, click the **"Find Misassigned Faces"** button (warning icon) to scan their library. The AI will flag faces that look significantly different from the person's average face (outliers), allowing you to quickly spot and remove incorrect assignments.
+    - **Misassigned Faces:** On any Person's detail page, click the **"Find Misassigned Faces"** button to scan for outliers.
 
 ## ⏳ 3.1 Era Generation (Advanced)
 Some people change significantly over time (e.g., from child to adult). A single facial model might struggle to match both "Baby Nick" and "Adult Nick" accurately.

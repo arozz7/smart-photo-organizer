@@ -118,15 +118,17 @@ def calculate_mean_embedding(descriptors):
         
     return mean_vec.tolist()
 
-def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2):
+def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2, debug=False):
     """
     Clusters faces using DBSCAN.
     descriptors: List of embedding vectors.
     ids: List of corresponding face/photo IDs to return in clusters.
+    debug: If True, return additional diagnostic info about distances.
     Returns: List of clusters, where each cluster is a list of ids.
+             If debug=True, returns dict with 'clusters' and 'debug_info'.
     """
     if not descriptors:
-        return []
+        return {'clusters': [], 'debug_info': None} if debug else []
 
     X = np.array(descriptors)
     
@@ -137,12 +139,22 @@ def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2):
 
     try:
         from sklearn.cluster import DBSCAN
+        from sklearn.metrics import pairwise_distances
     except ImportError:
         logger.warning("sklearn not found. Clustering disabled.")
-        return [] 
+        return {'clusters': [], 'debug_info': None} if debug else []
+
+    # Original debug block position - removed to fix UnboundLocalError
 
     # DBSCAN with parameters tuned for ArcFace (Normalized Euclidean)
-    clustering = DBSCAN(eps=eps, min_samples=min_samples, metric='euclidean').fit(X)
+    # The input 'eps' is treated as a Cosine Distance threshold (range 0-2, typically 0.4-0.6)
+    # But we run DBSCAN with metric='euclidean' on normalized vectors.
+    # Conversion: distance_euclidean = sqrt(2 * distance_cosine)
+    # So: eps_euclidean = sqrt(2 * eps_cosine)
+    import math
+    eps_euclidean = math.sqrt(2 * eps)
+    
+    clustering = DBSCAN(eps=eps_euclidean, min_samples=min_samples, metric='euclidean').fit(X)
     
     labels = clustering.labels_
     
@@ -151,8 +163,65 @@ def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2):
         if label == -1: continue # Noise
         if label not in clusters: clusters[label] = []
         clusters[label].append(ids[idx])
+    
+    result_clusters = list(clusters.values())
+    
+    if debug:
+        # Build face_to_cluster map (always fast)
+        face_to_cluster = {}
+        for idx, label in enumerate(labels):
+            if label != -1:
+                face_to_cluster[ids[idx]] = int(label)
+            else:
+                face_to_cluster[ids[idx]] = -1  # Noise
+
+        # Compute distance stats (conditional on size)
+        n_faces = len(X)
+        if n_faces > 5000:
+            logger.info(f"Large dataset ({n_faces} faces). Using subsampling for debug stats.")
+            indices = np.random.choice(n_faces, 5000, replace=False)
+            X_sub = X[indices]
+            dist_matrix = pairwise_distances(X_sub, metric='euclidean')
+            rows, cols = np.triu_indices(5000, k=1)
+            distances = dist_matrix[rows, cols]
+            
+            scale_factor = (n_faces * (n_faces - 1)) / (5000 * 4999)
+            within_eps = int((distances <= eps).sum() * scale_factor)
+            outside_eps = int((distances > eps).sum() * scale_factor)
+            stats_note = "(Estimated)"
+        else:
+            dist_matrix = pairwise_distances(X, metric='euclidean')
+            rows, cols = np.triu_indices(n_faces, k=1)
+            distances = dist_matrix[rows, cols]
+            within_eps = int((distances <= eps).sum())
+            outside_eps = int((distances > eps).sum())
+            stats_note = ""
+
+        min_dist = float(np.min(distances)) if len(distances) > 0 else 0
+        max_dist = float(np.max(distances)) if len(distances) > 0 else 0
+        mean_dist = float(np.mean(distances)) if len(distances) > 0 else 0
+
+        debug_info = {
+            'total_faces': n_faces,
+            'distance_stats': {
+                'min': f"{min_dist:.4f}",
+                'mean': f"{mean_dist:.4f} {stats_note}",
+                'max': f"{max_dist:.4f}"
+            },
+            'pairs_within_eps': f"{within_eps} {stats_note}",
+            'pairs_outside_eps': f"{outside_eps} {stats_note}",
+            'eps_threshold': eps,
+            'cluster_sizes': [len(c) for c in result_clusters],
+            'cluster_count': len(result_clusters),
+            'noise_count': len(ids) - sum(len(c) for c in result_clusters),
+            'face_clusters': face_to_cluster
+        }
         
-    return list(clusters.values())
+        logger.info(f"[DBSCAN Debug] eps={eps}, faces={len(ids)}, clusters={len(result_clusters)}")
+        
+        return {'clusters': result_clusters, 'debug_info': debug_info}
+        
+    return result_clusters
 
 
 def detect_background_faces(faces_data, centroids, min_photo_appearances=3, max_cluster_size=2, distance_threshold=0.7, eps=0.55, min_samples=2):
@@ -190,41 +259,60 @@ def detect_background_faces(faces_data, centroids, min_photo_appearances=3, max_
     
     try:
         from sklearn.cluster import DBSCAN
-        clustering = DBSCAN(eps=eps, min_samples=min_samples, metric='euclidean').fit(X_normalized)
+        # Convert eps (pseudo-cosine) to Euclidean
+        import math
+        eps_euclidean = math.sqrt(2 * eps)
+        clustering = DBSCAN(eps=eps_euclidean, min_samples=min_samples, metric='euclidean').fit(X_normalized)
         labels = clustering.labels_
     except ImportError:
         logger.warning("sklearn not found. Using individual face analysis only.")
         labels = [-1] * len(ids)
     
     # Build cluster membership: face_id -> cluster_size
-    cluster_sizes = {}
+    # Optimized to O(N) from O(N*C)
+    from collections import Counter
+    valid_labels = [l for l in labels if l != -1]
+    label_counts = Counter(valid_labels)
+    
     cluster_membership = {}
-    for label in set(labels):
-        if label == -1:
-            continue
-        members = [ids[i] for i, l in enumerate(labels) if l == label]
-        size = len(members)
-        for member_id in members:
-            cluster_membership[member_id] = label
-            cluster_sizes[member_id] = size
+    cluster_sizes = {}
+    
+    for i, label in enumerate(labels):
+        if label == -1: continue
+        face_id = ids[i]
+        cluster_membership[face_id] = label
+        cluster_sizes[face_id] = label_counts[label]
     
     # Singletons get cluster size of 1
-    for i, face_id in enumerate(ids):
+    for face_id in ids:
         if face_id not in cluster_sizes:
             cluster_sizes[face_id] = 1
     
-    # 2. Count photo appearances per face (using photo_id)
+    # 2. Count photo appearances per cluster
+    # For each cluster, count how many unique photos contain faces from that cluster
+    # Faces in a cluster share the cluster's photo count
     photo_counts = {}
-    photo_to_faces = {}
+    
+    # First, build cluster -> photo_ids mapping
+    cluster_photos = {}  # label -> set of photo_ids
     for i, face_id in enumerate(ids):
         photo_id = photo_ids[i]
-        if photo_id not in photo_to_faces:
-            photo_to_faces[photo_id] = []
-        photo_to_faces[photo_id].append(face_id)
+        label = cluster_membership.get(face_id, -1)
+        if label != -1:
+            if label not in cluster_photos:
+                cluster_photos[label] = set()
+            cluster_photos[label].add(photo_id)
     
-    # For now, photo_count = 1 for each (simplified - would need cluster tracking for true count)
-    for face_id in ids:
-        photo_counts[face_id] = 1
+    # Now assign photo_count to each face based on cluster membership
+    for i, face_id in enumerate(ids):
+        label = cluster_membership.get(face_id, -1)
+        if label != -1:
+            # Count of unique photos this cluster appears in
+            photo_counts[face_id] = len(cluster_photos[label])
+        else:
+            # Singleton faces appear in exactly 1 photo
+            photo_counts[face_id] = 1
+
     
     # 3. Calculate distance to nearest named person centroid
     nearest_distances = {}

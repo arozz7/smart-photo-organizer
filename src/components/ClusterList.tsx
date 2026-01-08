@@ -4,7 +4,7 @@ import ClusterRow from './ClusterRow'
 import { Face } from '../types'
 
 interface ClusterListProps {
-    clusters: { faces: number[] }[]
+    clusters: { faces: number[], suggestion?: any }[]
     selectedFaceIds: Set<number>
     toggleFace: (id: number) => void
     toggleGroup: (ids: number[]) => void
@@ -27,6 +27,7 @@ const ClusterList = memo(({
             <div className="border-b border-gray-800 pb-4 pr-2">
                 <ClusterRow
                     faceIds={cluster.faces}
+                    initialSuggestion={cluster.suggestion}
                     index={index}
                     selectedFaceIds={selectedFaceIds}
                     toggleFace={toggleFace}

@@ -14,6 +14,7 @@ import { useAI } from '../context/AIContext'
 import { useAlert } from '../context/AlertContext'
 import { usePeopleCluster } from '../hooks/usePeopleCluster'
 import SmartIgnorePanel from '../components/SmartIgnorePanel'
+import FaceDebugModal from '../components/FaceDebugModal'
 
 export default function People() {
     const navigate = useNavigate()
@@ -25,7 +26,7 @@ export default function People() {
     const {
         clusters, singles, totalFaces, isClustering, isAutoAssigning,
         selectedFaceIds, namingGroup, setNamingGroup,
-        loadClusteredFaces, toggleFace, toggleGroup, clearSelection,
+        loadClusteredFaces, toggleFace, toggleGroup, clearSelection, selectAllGroups,
         handleAutoAssign, handleNameGroup, handleConfirmName, handleOpenNaming, handleIgnoreGroup,
         handleUngroup, handleIgnoreAllGroups
     } = usePeopleCluster()
@@ -39,6 +40,10 @@ export default function People() {
     const [isScanning, setIsScanning] = useState(false)
     const [isScanModalOpen, setIsScanModalOpen] = useState(false)
     const [showGroupingModal, setShowGroupingModal] = useState(false)
+    const [showDebugModal, setShowDebugModal] = useState(false)
+
+    // Check if dev mode (show debug features)
+    const isDev = import.meta.env.DEV
 
     // Load initial batch when tab changes
     useEffect(() => {
@@ -216,6 +221,18 @@ export default function People() {
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => selectAllGroups(selectedFaceIds.size === 0)}
+                                    className={`px-3 py-1.5 text-sm border rounded-lg transition-colors flex items-center gap-2 ${selectedFaceIds.size > 0
+                                        ? 'bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border-indigo-500/30'
+                                        : 'bg-gray-800/50 hover:bg-gray-700 text-gray-300 border-gray-700'
+                                        }`}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                    </svg>
+                                    {selectedFaceIds.size > 0 ? 'Deselect All' : 'Select All Groups'}
+                                </button>
                                 <button
                                     onClick={() => setShowGroupingModal(true)}
                                     className="px-3 py-1.5 text-sm bg-gray-800/50 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-lg transition-colors flex items-center gap-2"
@@ -396,6 +413,13 @@ export default function People() {
                 }}
             />
 
+            {/* Face Debug Modal (Dev Only) */}
+            <FaceDebugModal
+                isOpen={showDebugModal}
+                onClose={() => setShowDebugModal(false)}
+                faceIds={Array.from(selectedFaceIds)}
+            />
+
             {/* Selection Floating Action Bar */}
             {selectedFaceIds.size > 0 && (
                 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
@@ -420,6 +444,18 @@ export default function People() {
                         </svg>
                         Ignore
                     </button>
+                    {/* Debug Button - Dev Only */}
+                    {isDev && (
+                        <button
+                            onClick={() => setShowDebugModal(true)}
+                            className="text-sm font-medium text-yellow-400 hover:text-yellow-300 transition-colors flex items-center gap-2"
+                        >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                            </svg>
+                            Debug
+                        </button>
+                    )}
                     <div className="border-l border-gray-700 pl-4">
                         <button
                             onClick={clearSelection}
