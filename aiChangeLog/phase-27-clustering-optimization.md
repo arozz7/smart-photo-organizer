@@ -35,9 +35,18 @@
 ### 5. Group by AI Suggestion
 - **Backend Logic**: Moved grouping logic from Frontend to Backend (`aiHandlers.ts`).
 - **Real-time Matching**: Centroids of clusters are matched against the Vector DB in real-time.
+- **Improved UX (No-Merge)**: Preserves original DBSCAN clusters but tags them with AI suggestions. Each cluster remains independent, allowing bulk acceptance of coherent groups without incorrect merging of split clusters.
 - **Sorting**: Suggested groups are prioritized at the top of the list.
+
+### 6. FAISS Index Optimization & Sync
+- **Clean Index**: Modified `ai:rebuildIndex` to only index named faces (Reduced index size from ~76k to ~18k in dev env), preventing false matches against unnamed background faces.
+- **Stale Tracking**: Implemented `faissStaleCount` to track when the index becomes out of sync (e.g. faces removed from named persons).
+- **UI Alerts**: Added an amber alert banner on the "Identified People" page when the index needs rebuilding.
+- **Auto-Reset**: Stale count automatically resets to 0 after a successful index rebuild.
 
 ## 🧪 Verification
 - **Test Case**: Verified 4-face cluster split issue is resolved.
 - **Performance**: Verified UI responsiveness with 10k+ faces.
 - **Stability**: Verified no "UnboundLocalError" in Python backend.
+- **UX**: Confirmed "Group by Suggestion" correctly tags clusters without splitting them into single faces.
+- **Sync**: Verified stale count increments on face removal and resets on rebuild.

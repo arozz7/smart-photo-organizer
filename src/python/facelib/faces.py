@@ -118,6 +118,58 @@ def calculate_mean_embedding(descriptors):
         
     return mean_vec.tolist()
 
+def split_oversized_cluster(cluster_ids, X_normalized, id_to_idx, max_size=25):
+    """
+    Split a large cluster into smaller sub-clusters using hierarchical clustering.
+    ALWAYS splits clusters larger than max_size - no cohesion exception.
+    
+    Args:
+        cluster_ids: List of face IDs in the cluster
+        X_normalized: Full normalized embedding matrix (all faces)
+        id_to_idx: Dict mapping face ID to index in X_normalized
+        max_size: Maximum allowed cluster size
+        
+    Returns:
+        List of sub-cluster ID lists, each with size ≤ max_size
+    """
+    if len(cluster_ids) <= max_size:
+        return [cluster_ids]
+    
+    try:
+        from scipy.cluster.hierarchy import linkage, fcluster
+    except ImportError:
+        logger.warning("scipy not found. Skipping cluster splitting.")
+        return [cluster_ids]
+    
+    # Extract embeddings for this cluster
+    indices = [id_to_idx[fid] for fid in cluster_ids]
+    X_sub = X_normalized[indices]
+    
+    # Ward's method for balanced clusters
+    Z = linkage(X_sub, method='ward')
+    
+    # Split into 2 initially
+    labels = fcluster(Z, t=2, criterion='maxclust')
+    
+    # Group IDs by sub-cluster label
+    sub_clusters = {}
+    for i, label in enumerate(labels):
+        if label not in sub_clusters:
+            sub_clusters[label] = []
+        sub_clusters[label].append(cluster_ids[i])
+    
+    # RECURSIVELY split any sub-clusters that are still too large
+    final_clusters = []
+    for sub_ids in sub_clusters.values():
+        if len(sub_ids) > max_size:
+            deeper_split = split_oversized_cluster(sub_ids, X_normalized, id_to_idx, max_size)
+            final_clusters.extend(deeper_split)
+        else:
+            final_clusters.append(sub_ids)
+    
+    return final_clusters
+
+
 def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2, debug=False):
     """
     Clusters faces using DBSCAN.

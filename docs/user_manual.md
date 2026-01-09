@@ -47,7 +47,9 @@ The AI automatically detects faces during the scan. Your job is to give them nam
         - **No Ring:** Unknown faces with no close matches in your library.
 5.  **Refining Groups:**
     - **Ungroup:** If a suggested group contains mixed faces, click the **"Ungroup"** button on the row to break it apart and return the faces to the "Unmatched" pool for individual sorting.
-    - **Group by AI Suggestion:** Switch to this mode to have the AI automatically group faces by who it thinks they are (based on your existing named people). These suggestions appear at the top.
+    - **Group by AI Suggestion:** Switch to this mode to have the AI automatically group faces by who it thinks they are.
+        - **Smart Grouping:** The AI preserves coherent clusters (e.g., 50 faces from the same event) and tags the entire group with a suggestion (e.g., "Suggested: Mom").
+        - **Bulk Action:** Clicking "Accept" on a group assigns **all** faces in that cluster at once.
     - **Filter Background Faces:** A powerful tool to bulk-ignore "noise".
         - **Single Photo Only:** Strictly targets faces that appear in only one photo.
         - **Max Cluster Size:** Filter out small clusters (e.g., size ≤ 2).
@@ -60,6 +62,10 @@ The AI automatically detects faces during the scan. Your job is to give them nam
     - **Restore as [Name]**: One-click action to restore and correctly name faces simultaneously.
 7.  **Quality Control:**
     - **Misassigned Faces:** On any Person's detail page, click the **"Find Misassigned Faces"** button to scan for outliers.
+
+8.  **Face Index Maintenance:**
+    - **Stale Index Alert:** If you see an amber "Face Index Needs Update" banner on the "Identified People" tab, it means faces have been removed or reassigned, and the search index is out of date.
+    - **Rebuild Index:** Click the **"Rebuild Index"** button on the banner to refresh the AI search index. This is quick (usually < 10 seconds) and ensures accurate duplicate detection.
 
 ## ⏳ 3.1 Era Generation (Advanced)
 Some people change significantly over time (e.g., from child to adult). A single facial model might struggle to match both "Baby Nick" and "Adult Nick" accurately.

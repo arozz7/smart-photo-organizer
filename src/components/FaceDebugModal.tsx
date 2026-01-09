@@ -411,17 +411,22 @@ const FaceDebugModal: React.FC<FaceDebugModalProps> = ({ isOpen, onClose, faceId
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {suggestions.map((s, i) => (
-                                            <tr key={i} className="border-t border-gray-800">
-                                                <td className="px-3 py-2 text-white">{s.person_name}</td>
-                                                <td className="px-3 py-2 text-green-400">{(s.similarity * 100).toFixed(1)}%</td>
-                                                <td className="px-3 py-2 font-mono text-gray-300">
-                                                    <span className={s.distance <= eps ? 'text-green-400' : 'text-red-400'}>
-                                                        {s.distance.toFixed(4)}
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        ))}
+                                        {suggestions.map((s, i) => {
+                                            if (!s) return null;
+                                            return (
+                                                <tr key={i} className="border-t border-gray-800">
+                                                    <td className="px-3 py-2 text-white">{s.person_name || 'Unknown'}</td>
+                                                    <td className="px-3 py-2 text-green-400">
+                                                        {typeof s.similarity === 'number' ? (s.similarity * 100).toFixed(1) : '0.0'}%
+                                                    </td>
+                                                    <td className="px-3 py-2 font-mono text-gray-300">
+                                                        <span className={((typeof s.distance === 'number') && s.distance <= eps) ? 'text-green-400' : 'text-red-400'}>
+                                                            {typeof s.distance === 'number' ? s.distance.toFixed(4) : 'N/A'}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>

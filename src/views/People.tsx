@@ -41,9 +41,46 @@ export default function People() {
     const [isScanModalOpen, setIsScanModalOpen] = useState(false)
     const [showGroupingModal, setShowGroupingModal] = useState(false)
     const [showDebugModal, setShowDebugModal] = useState(false)
+    const [faissStaleCount, setFaissStaleCount] = useState(0)
+    const [isRebuildingIndex, setIsRebuildingIndex] = useState(false)
 
     // Check if dev mode (show debug features)
     const isDev = import.meta.env.DEV
+
+    // Load FAISS stale count on mount for "Identified" tab
+    useEffect(() => {
+        if (activeTab === 'identified') {
+            // @ts-ignore
+            window.ipcRenderer.invoke('ai:getFaissStaleCount').then((count: number) => {
+                setFaissStaleCount(count);
+            });
+        }
+    }, [activeTab]);
+
+    // Handle FAISS rebuild from alert
+    const handleFaissRebuild = async () => {
+        setIsRebuildingIndex(true);
+        try {
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('ai:rebuildIndex');
+            if (result && result.success !== false) {
+                setFaissStaleCount(0);
+                showAlert({
+                    title: 'Face Index Rebuilt',
+                    description: 'The face recognition index has been updated.'
+                });
+            } else {
+                showAlert({
+                    title: 'Rebuild Failed',
+                    description: result?.error || 'An error occurred while rebuilding the index.'
+                });
+            }
+        } catch (err) {
+            console.error('FAISS rebuild failed:', err);
+        } finally {
+            setIsRebuildingIndex(false);
+        }
+    };
 
     // Load initial batch when tab changes
     useEffect(() => {
@@ -176,6 +213,35 @@ export default function People() {
             >
                 {activeTab === 'identified' && (
                     <div className="p-6">
+                        {/* FAISS Rebuild Alert Banner */}
+                        {faissStaleCount > 0 && (
+                            <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    <div>
+                                        <p className="text-amber-300 font-medium text-sm">Face Index Needs Update</p>
+                                        <p className="text-amber-400/70 text-xs">{faissStaleCount} faces have been removed or reassigned since the last rebuild.</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={handleFaissRebuild}
+                                    disabled={isRebuildingIndex}
+                                    className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                                >
+                                    {isRebuildingIndex ? (
+                                        <div className="animate-spin h-4 w-4 border-2 border-amber-400 border-t-transparent rounded-full" />
+                                    ) : (
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                    )}
+                                    {isRebuildingIndex ? 'Rebuilding...' : 'Rebuild Index'}
+                                </button>
+                            </div>
+                        )}
+
                         {loading && people.length === 0 ? (
                             <div className="flex items-center justify-center h-full p-20">
                                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />

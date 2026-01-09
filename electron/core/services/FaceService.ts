@@ -109,7 +109,7 @@ export class FaceService {
 
         // 1. Centroid Pass
         const candidates = options.candidatePeople ?? PersonRepository.getPeopleWithDescriptors();
-        logger.debug(`[FaceService] matchBatch: Checking ${parsedDescriptors.length} faces against ${candidates.length} candidates.`);
+        logger.info(`[FaceService] matchBatch: Checking ${parsedDescriptors.length} centroids against ${candidates.length} person candidates (threshold=${threshold}).`);
 
         for (let i = 0; i < parsedDescriptors.length; i++) {
             const match = this.matchAgainstCentroids(parsedDescriptors[i], candidates, threshold);
@@ -129,6 +129,7 @@ export class FaceService {
 
         // 2. FAISS Pass for remainders
         const pendingIndices = results.map((r, i) => r === null ? i : -1).filter(i => i !== -1);
+        logger.info(`[FaceService] FAISS fallback: ${pendingIndices.length} of ${parsedDescriptors.length} need FAISS lookup`);
         if (pendingIndices.length > 0 && options.searchFn) {
             const pendingDescriptors = pendingIndices.map(i => parsedDescriptors[i]);
             // threshold is already L2 distance, pass directly to FAISS
@@ -137,6 +138,7 @@ export class FaceService {
             // Fetch Person IDs for all matched faces in one go
             const allMatchedFaceIds = new Set<number>();
             batchFaiss.forEach(mList => mList.forEach(m => allMatchedFaceIds.add(m.id)));
+            logger.info(`[FaceService] FAISS returned ${allMatchedFaceIds.size} unique face matches`);
 
             if (allMatchedFaceIds.size > 0) {
                 const db = getDB();
@@ -147,6 +149,8 @@ export class FaceService {
                     JOIN people p ON f.person_id = p.id 
                     WHERE f.id IN (${placeholders}) AND f.person_id IS NOT NULL
                 `).all(...Array.from(allMatchedFaceIds)) as { id: number, person_id: number, name: string }[];
+
+                logger.info(`[FaceService] Of ${allMatchedFaceIds.size} FAISS matches, ${rows.length} belong to named persons`);
 
                 const faceToPerson = new Map<number, { personId: number, name: string }>();
                 rows.forEach(r => faceToPerson.set(r.id, { personId: r.person_id, name: r.name }));
@@ -590,7 +594,9 @@ export class FaceService {
                     // We should recalc means if we auto-assigned.
                 }
 
-                if (finalId > 0 && face.descriptor && face.descriptor.length > 0) {
+                // CRITICAL: Only add faces with personId to FAISS
+                // This keeps FAISS index clean for suggestion matching
+                if (finalId > 0 && personId && face.descriptor && face.descriptor.length > 0) {
                     facesForFaiss.push({ id: finalId, descriptor: face.descriptor });
                 }
             }

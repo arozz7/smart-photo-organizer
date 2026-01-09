@@ -175,7 +175,19 @@ export function registerDBHandlers() {
     });
 
     ipcMain.handle('db:deleteFaces', async (_, faceIds) => {
+        // Check how many faces have person_id (are in FAISS index)
+        const db = getDB();
+        const placeholders = faceIds.map(() => '?').join(',');
+        const namedFaces = db.prepare(`SELECT COUNT(*) as count FROM faces WHERE id IN (${placeholders}) AND person_id IS NOT NULL`).get(...faceIds) as { count: number };
+
         FaceRepository.deleteFaces(faceIds);
+
+        // Increment FAISS stale count for faces that were in the index
+        if (namedFaces.count > 0) {
+            const { incrementFaissStaleCount } = await import('../store');
+            incrementFaissStaleCount(namedFaces.count);
+        }
+
         return { success: true };
     });
 
@@ -184,7 +196,19 @@ export function registerDBHandlers() {
     });
 
     ipcMain.handle('db:unassignFaces', async (_, faceIds) => {
+        // Check how many faces have person_id (are in FAISS index)
+        const db = getDB();
+        const placeholders = faceIds.map(() => '?').join(',');
+        const namedFaces = db.prepare(`SELECT COUNT(*) as count FROM faces WHERE id IN (${placeholders}) AND person_id IS NOT NULL`).get(...faceIds) as { count: number };
+
         await PersonService.unassignFaces(faceIds);
+
+        // Increment FAISS stale count for faces that were in the index
+        if (namedFaces.count > 0) {
+            const { incrementFaissStaleCount } = await import('../store');
+            incrementFaissStaleCount(namedFaces.count);
+        }
+
         return { success: true };
     });
 

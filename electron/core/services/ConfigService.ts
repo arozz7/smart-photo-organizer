@@ -66,6 +66,7 @@ export interface AppConfig {
     queue: QueueConfig;
     smartIgnore: SmartIgnoreSettings;
     ai_queue: any[]; // Queue items
+    faissStaleCount?: number; // Tracks faces removed that need FAISS rebuild
 }
 
 // Default Config
