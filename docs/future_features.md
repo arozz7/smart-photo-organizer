@@ -66,6 +66,16 @@
     - Maintain separate matching pools (Humans only match Humans).
 - **Plan:** See [Pet Classification Plan](file:///j:/Projects/smart-photo-organizer/docs/pet-classification-plan.md)
 
+### 7. Background Auto Face Bucketing
+- **Goal:** Background process that organizes unassigned faces into stable buckets for easier user review.
+- **Core Features:**
+    - **Suggestion Buckets:** Faces matching named people (below auto-assign threshold).
+    - **Discovery Buckets:** Faces clustering with each other (new unknown groups).
+    - **Scan-Aware Scheduling:** Yields to active scans, runs when paused or idle.
+    - **Smart Triggers:** Only runs when `bucketing_dirty=1` (new faces, assignments, eras).
+- **Prerequisites:** Requires #3 (Eras), #5 (Sessions), #6 (Pets) to be completed first.
+- **Plan:** See [Background Bucketing Plan](file:///j:/Projects/smart-photo-organizer/docs/background-bucketing-plan.md)
+
 ---
 
 ## 🔮 Feature Backlog
