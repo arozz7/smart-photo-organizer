@@ -3,67 +3,22 @@
  * 
  * Unified service for face analysis operations:
  * - Distance computation between face embeddings
- * - Outlier detection for misassigned faces
- * - Background face filtering (Phase 2)
  * - Multi-sample voting for challenging faces (Phase 5)
+ * 
+ * Note: Outlier detection and noise detection have been extracted to:
+ * - FaceOutlierService.ts (findOutliersForPerson, IQR detection)
+ * - FaceNoiseService.ts (detectBackgroundFaces)
  */
 
-import { FaceRepository } from '../../data/repositories/FaceRepository';
-import { PersonRepository } from '../../data/repositories/PersonRepository';
+// Import services for use in deprecated proxy methods
+import { FaceOutlierService } from './FaceOutlierService';
+import { FaceNoiseService } from './FaceNoiseService';
 
-export interface OutlierResult {
-    faceId: number;
-    distance: number;
-    blurScore: number | null;
-    is_confirmed: boolean; // For filtering unconfirmed faces in Review All modal
-    // Face display data (so modal doesn't need to look up faces separately)
-    box: { x: number; y: number; width: number; height: number };
-    photo_id: number;
-    file_path: string;
-    preview_cache_path: string | null;
-    photo_width: number;
-    photo_height: number;
-}
-
-export interface OutlierAnalysis {
-    personId: number;
-    personName: string;
-    totalFaces: number;
-    outliers: OutlierResult[];
-    threshold: number;
-    centroidValid: boolean;
-}
-
-/**
- * Candidate face identified as likely background noise.
- */
-export interface NoiseCandidate {
-    faceId: number;
-    photoCount: number;
-    clusterSize: number;
-    nearestPersonDistance: number;
-    nearestPersonName: string | null;
-    // Display data
-    box: { x: number; y: number; width: number; height: number };
-    photo_id: number;
-    file_path: string;
-    preview_cache_path: string | null;
-    photo_width: number;
-    photo_height: number;
-}
-
-/**
- * Result of background face detection analysis.
- */
-export interface NoiseAnalysis {
-    candidates: NoiseCandidate[];
-    stats: {
-        totalUnnamed: number;
-        singlePhotoCount: number;
-        twoPhotoCount: number;
-        noiseCount: number;
-    };
-}
+// Re-export from extracted services for backward compatibility
+export type { OutlierResult, OutlierAnalysis } from './FaceOutlierService';
+export { FaceOutlierService } from './FaceOutlierService';
+export type { NoiseCandidate, NoiseAnalysis } from './FaceNoiseService';
+export { FaceNoiseService } from './FaceNoiseService';
 
 export class FaceAnalysisService {
     /**
@@ -149,354 +104,6 @@ export class FaceAnalysisService {
     }
 
     /**
-     * Find faces that are potential outliers (misassigned) for a given person.
-     * 
-     * DETECTION STRATEGY (Priority Order):
-     * 1. REFERENCE-BASED (best): If user has confirmed faces, compute their mean
-     *    as ground truth and flag faces that are too far from it.
-     * 2. IQR FALLBACK: If no confirmed faces, use pairwise clustering IQR method.
-     *    Note: IQR fails when contamination >50% (wrong faces become majority).
-     * 
-     * @param personId The person ID to analyze
-     * @param threshold Distance threshold for reference-based (default 0.85)
-     * @returns Analysis result with outlier list
-     */
-    static findOutliersForPerson(personId: number, threshold = 0.85): OutlierAnalysis {
-        const person = PersonRepository.getPersonWithDescriptor(personId);
-
-        if (!person) {
-            throw new Error(`Person with ID ${personId} not found`);
-        }
-
-        const faces = FaceRepository.getFacesWithDescriptorsByPerson(personId);
-        const confirmedFaces = FaceRepository.getConfirmedFaces(personId);
-        const confirmedFaceIds = new Set(confirmedFaces.map(f => f.id));
-
-        if (faces.length < 2) {
-            return {
-                personId,
-                personName: person.name,
-                totalFaces: faces.length,
-                outliers: [],
-                threshold,
-                centroidValid: true
-            };
-        }
-
-        // Parse all face descriptors
-        const facesWithParsed = faces.map(f => ({
-            ...f,
-            parsedDescriptor: this.parseDescriptor(f.descriptor)
-        })).filter(f => f.parsedDescriptor !== null);
-
-        // STRATEGY 1: REFERENCE-BASED (using confirmed faces as ground truth)
-        if (confirmedFaces.length >= 1) {
-            console.log(`[FaceAnalysis] Person ${person.name}: Using REFERENCE-BASED detection with ${confirmedFaces.length} confirmed faces`);
-
-            // Compute mean of confirmed faces as reference
-            const confirmedDescriptors = confirmedFaces
-                .map(f => this.parseDescriptor(f.descriptor))
-                .filter(d => d !== null) as number[][];
-
-            if (confirmedDescriptors.length === 0) {
-                console.log(`[FaceAnalysis] No valid descriptors in confirmed faces, falling back to IQR`);
-                return this.findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, threshold);
-            }
-
-            // Compute reference centroid from confirmed faces only
-            const refCentroid = new Array(confirmedDescriptors[0].length).fill(0);
-            for (const desc of confirmedDescriptors) {
-                for (let i = 0; i < desc.length; i++) {
-                    refCentroid[i] += desc[i] / confirmedDescriptors.length;
-                }
-            }
-            const normalizedRef = this.normalizeVector(refCentroid);
-
-            // Find max distance among confirmed faces (to set adaptive threshold)
-            let maxConfirmedDist = 0;
-            for (const desc of confirmedDescriptors) {
-                const dist = this.computeDistance(desc, normalizedRef);
-                if (dist > maxConfirmedDist) maxConfirmedDist = dist;
-            }
-
-            // Adaptive threshold: max confirmed distance + margin
-            // But CAP it at hard limit (e.g. 1.0) to prevent polluted confirmations from breaking detection.
-            // A distance > 1.0 in Facenet/Dlib usually means completely different people.
-            const calculatedThreshold = maxConfirmedDist + 0.25;
-            const adaptiveThreshold = Math.min(1.0, Math.max(0.65, calculatedThreshold));
-
-            console.log(`[FaceAnalysis] Confirmed faces max dist=${maxConfirmedDist.toFixed(3)}, calculated=${calculatedThreshold.toFixed(3)}, used=${adaptiveThreshold.toFixed(3)}`);
-
-            // Flag faces far from reference
-            const outliers: OutlierResult[] = [];
-            for (const face of facesWithParsed) {
-                if (confirmedFaceIds.has(face.id)) continue; // Skip confirmed
-
-                const distance = this.computeDistance(face.parsedDescriptor!, normalizedRef);
-
-                if (distance > adaptiveThreshold) {
-                    let box = { x: 0, y: 0, width: 100, height: 100 };
-                    try { box = JSON.parse(face.box_json); } catch { }
-
-                    outliers.push({
-                        faceId: face.id,
-                        distance,
-                        blurScore: face.blur_score,
-                        is_confirmed: face.is_confirmed === 1,
-                        box,
-                        photo_id: face.photo_id,
-                        file_path: face.file_path,
-                        preview_cache_path: face.preview_cache_path,
-                        photo_width: face.width,
-                        photo_height: face.height
-                    });
-                }
-            }
-
-            console.log(`[FaceAnalysis] Person ${person.name}: Found ${outliers.length} outliers (REFERENCE method)`);
-            outliers.sort((a, b) => b.distance - a.distance);
-
-            return {
-                personId,
-                personName: person.name,
-                totalFaces: faces.length,
-                outliers,
-                threshold: adaptiveThreshold,
-                centroidValid: true
-            };
-        }
-
-        // STRATEGY 2: IQR FALLBACK (no confirmed faces)
-        console.log(`[FaceAnalysis] Person ${person.name}: No confirmed faces, using IQR method (may fail if >50% contaminated)`);
-        return this.findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, threshold);
-    }
-
-    /**
-     * IQR-based outlier detection (fallback when no confirmed faces).
-     * WARNING: This method fails when contamination exceeds ~50%.
-     */
-    private static findOutliersIQR(
-        personId: number,
-        person: { name: string },
-        facesWithParsed: Array<any>,
-        confirmedFaceIds: Set<number>,
-        _threshold: number  // Kept for API parity, IQR uses dynamic threshold
-    ): OutlierAnalysis {
-        // Compute pairwise distances: avg distance of each face to all others
-        const avgDistances: { faceId: number; avgDist: number; idx: number }[] = [];
-
-        for (let i = 0; i < facesWithParsed.length; i++) {
-            let totalDist = 0;
-            let count = 0;
-
-            for (let j = 0; j < facesWithParsed.length; j++) {
-                if (i !== j) {
-                    const dist = this.computeDistance(
-                        facesWithParsed[i].parsedDescriptor!,
-                        facesWithParsed[j].parsedDescriptor!
-                    );
-                    totalDist += dist;
-                    count++;
-                }
-            }
-
-            avgDistances.push({
-                faceId: facesWithParsed[i].id,
-                avgDist: count > 0 ? totalDist / count : 0,
-                idx: i
-            });
-        }
-
-        // IQR calculation
-        const sortedDists = [...avgDistances].sort((a, b) => a.avgDist - b.avgDist);
-        const q1Idx = Math.floor(sortedDists.length * 0.25);
-        const q3Idx = Math.floor(sortedDists.length * 0.75);
-        const q1 = sortedDists[q1Idx]?.avgDist ?? 0;
-        const q3 = sortedDists[q3Idx]?.avgDist ?? 0;
-        const iqr = q3 - q1;
-        const outlierThreshold = q3 + (iqr * 1.0);
-
-        console.log(`[FaceAnalysis] IQR: Q1=${q1.toFixed(3)}, Q3=${q3.toFixed(3)}, IQR=${iqr.toFixed(3)}, threshold=${outlierThreshold.toFixed(3)}`);
-
-        const outliers: OutlierResult[] = [];
-        for (const { faceId, avgDist, idx } of avgDistances) {
-            if (confirmedFaceIds.has(faceId)) continue;
-
-            if (avgDist > outlierThreshold) {
-                const face = facesWithParsed[idx];
-                let box = { x: 0, y: 0, width: 100, height: 100 };
-                try { box = JSON.parse(face.box_json); } catch { }
-
-                outliers.push({
-                    faceId: face.id,
-                    distance: avgDist,
-                    blurScore: face.blur_score,
-                    is_confirmed: face.is_confirmed === 1,
-                    box,
-                    photo_id: face.photo_id,
-                    file_path: face.file_path,
-                    preview_cache_path: face.preview_cache_path,
-                    photo_width: face.width,
-                    photo_height: face.height
-                });
-            }
-        }
-
-        console.log(`[FaceAnalysis] Found ${outliers.length} outliers (IQR method)`);
-        outliers.sort((a, b) => b.distance - a.distance);
-
-        return {
-            personId,
-            personName: person.name,
-            totalFaces: facesWithParsed.length,
-            outliers,
-            threshold: outlierThreshold,
-            centroidValid: true
-        };
-    }
-
-    /**
-     * Detect background/noise faces for bulk ignore.
-     * Sends data to Python backend for DBSCAN clustering and centroid distance calculation.
-     * 
-     * @param options Threshold overrides from SmartIgnoreSettings
-     * @param pythonProvider Python AI provider for backend calls
-     */
-    static async detectBackgroundFaces(
-        options: {
-            minPhotoAppearances?: number;
-            maxClusterSize?: number;
-            centroidDistanceThreshold?: number;
-        },
-        pythonProvider: { sendRequest: (cmd: string, payload: any) => Promise<any> }
-    ): Promise<NoiseAnalysis> {
-        // 1. Fetch unnamed faces with descriptors
-        const unnamedFaces = FaceRepository.getUnnamedFacesForNoiseDetection();
-
-        if (unnamedFaces.length === 0) {
-            return {
-                candidates: [],
-                stats: { totalUnnamed: 0, singlePhotoCount: 0, twoPhotoCount: 0, noiseCount: 0 }
-            };
-        }
-
-        // 2. Fetch named person centroids
-        const people = PersonRepository.getPeopleWithDescriptors() as Array<{ id: number; name: string; descriptor: number[]; eras?: { name: string; centroid: number[] }[] }>;
-
-        const centroids: { personId: number; name: string; descriptor: number[] }[] = [];
-
-        for (const p of people) {
-            // Main centroid
-            if (p.descriptor && p.descriptor.length > 0) {
-                centroids.push({
-                    personId: p.id,
-                    name: p.name,
-                    descriptor: p.descriptor
-                });
-            }
-
-            // Era centroids (flattened)
-            if (p.eras && p.eras.length > 0) {
-                for (const era of p.eras) {
-                    if (era.centroid && era.centroid.length > 0) {
-                        centroids.push({
-                            personId: p.id,
-                            name: era.name, // Use Era name for debugging/logging, but ID links it to person
-                            descriptor: era.centroid
-                        });
-                    }
-                }
-            }
-        }
-
-        // 3. Transform faces for Python backend
-        const facesPayload = unnamedFaces.map(f => ({
-            id: f.id,
-            descriptor: this.parseDescriptor(f.descriptor) || [],
-            photo_id: f.photo_id,
-            box_json: f.box_json,
-            file_path: f.file_path,
-            preview_cache_path: f.preview_cache_path,
-            width: f.width,
-            height: f.height
-        })).filter(f => f.descriptor.length > 0);
-
-        console.log(`[FaceAnalysis] detectBackgroundFaces: ${facesPayload.length} faces, ${centroids.length} centroids`);
-
-        // 4. Call Python backend (with file-based transfer for large payloads)
-        const LARGE_PAYLOAD_THRESHOLD = 5000;
-        let result: any;
-
-        if (facesPayload.length > LARGE_PAYLOAD_THRESHOLD) {
-            // File-based transfer to avoid IPC timeout
-            const fs = await import('fs/promises');
-            const os = await import('os');
-            const path = await import('path');
-
-            const tempDir = os.tmpdir();
-            const dataPath = path.join(tempDir, `spo_detect_bg_${Date.now()}.json`);
-
-            console.log(`[FaceAnalysis] Large payload (${facesPayload.length} faces), using file-based transfer: ${dataPath}`);
-
-            try {
-                await fs.writeFile(dataPath, JSON.stringify({ faces: facesPayload, centroids }), 'utf-8');
-
-                result = await pythonProvider.sendRequest('detect_background_faces', {
-                    dataPath,
-                    minPhotoAppearances: options.minPhotoAppearances ?? 3,
-                    maxClusterSize: options.maxClusterSize ?? 2,
-                    centroidDistanceThreshold: options.centroidDistanceThreshold ?? 0.7
-                });
-            } finally {
-                // Cleanup temp file
-                try {
-                    await fs.unlink(dataPath);
-                } catch { /* ignore cleanup errors */ }
-            }
-        } else {
-            // Direct IPC for small payloads
-            result = await pythonProvider.sendRequest('detect_background_faces', {
-                faces: facesPayload,
-                centroids,
-                minPhotoAppearances: options.minPhotoAppearances ?? 3,
-                maxClusterSize: options.maxClusterSize ?? 2,
-                centroidDistanceThreshold: options.centroidDistanceThreshold ?? 0.7
-            });
-        }
-
-        if (!result.success && result.error) {
-            throw new Error(result.error);
-        }
-
-        // 5. Transform results for frontend
-        const candidates: NoiseCandidate[] = (result.candidates || []).map((c: any) => {
-            let box = { x: 0, y: 0, width: 100, height: 100 };
-            try {
-                if (c.box_json) box = JSON.parse(c.box_json);
-            } catch { /* use default */ }
-
-            return {
-                faceId: c.faceId,
-                photoCount: c.photoCount,
-                clusterSize: c.clusterSize,
-                nearestPersonDistance: c.nearestPersonDistance,
-                nearestPersonName: c.nearestPersonName,
-                box,
-                photo_id: c.photo_id,
-                file_path: c.file_path,
-                preview_cache_path: c.preview_cache_path,
-                photo_width: c.width,
-                photo_height: c.height
-            };
-        });
-
-        return {
-            candidates,
-            stats: result.stats || { totalUnnamed: 0, singlePhotoCount: 0, twoPhotoCount: 0, noiseCount: 0 }
-        };
-    }
-
-    /**
      * Quality-adjusted threshold for challenging faces (Phase 5).
      * Low quality faces (side profiles, occlusions) get a more relaxed threshold.
      * 
@@ -558,6 +165,34 @@ export class FaceAnalysisService {
         }
 
         return null;
+    }
+
+    // =========================================================================
+    // DEPRECATED METHODS - Use FaceOutlierService and FaceNoiseService directly
+    // Kept here for backward compatibility with existing callers.
+    // =========================================================================
+
+    /**
+     * @deprecated Use FaceOutlierService.findOutliersForPerson instead
+     */
+    static findOutliersForPerson(personId: number, threshold = 0.85) {
+        // Import at top level via re-export, use directly
+        return FaceOutlierService.findOutliersForPerson(personId, threshold);
+    }
+
+    /**
+     * @deprecated Use FaceNoiseService.detectBackgroundFaces instead
+     */
+    static async detectBackgroundFaces(
+        options: {
+            minPhotoAppearances?: number;
+            maxClusterSize?: number;
+            centroidDistanceThreshold?: number;
+        },
+        pythonProvider: { sendRequest: (cmd: string, payload: any) => Promise<any> }
+    ) {
+        // Import at top level via re-export, use directly
+        return FaceNoiseService.detectBackgroundFaces(options, pythonProvider);
     }
 }
 

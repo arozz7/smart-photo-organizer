@@ -1,5 +1,5 @@
 /**
- * FaceAnalysisService.detectBackgroundFaces Unit Tests
+ * FaceNoiseService.detectBackgroundFaces Unit Tests
  * 
  * Tests the background face detection functionality:
  * - Empty face handling
@@ -29,8 +29,23 @@ vi.mock('../../../../electron/data/repositories/FaceRepository', () => ({
     }
 }));
 
+// Mock FaceAnalysisService for parseDescriptor
+vi.mock('../../../../electron/core/services/FaceAnalysisService', () => ({
+    FaceAnalysisService: {
+        parseDescriptor: (raw: unknown) => {
+            if (!raw) return null;
+            if (Array.isArray(raw)) return raw;
+            if (Buffer.isBuffer(raw)) {
+                const floatArray = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4);
+                return Array.from(floatArray);
+            }
+            return null;
+        }
+    }
+}));
+
 // 2. Now import the service and repositories
-import { FaceAnalysisService } from '../../../../electron/core/services/FaceAnalysisService';
+import { FaceNoiseService } from '../../../../electron/core/services/FaceNoiseService';
 import { PersonRepository } from '../../../../electron/data/repositories/PersonRepository';
 import { FaceRepository } from '../../../../electron/data/repositories/FaceRepository';
 
@@ -66,7 +81,7 @@ describe('FaceAnalysisService.detectBackgroundFaces', () => {
         const mockPython = createMockPythonProvider({ success: true, candidates: [], stats: {} });
 
         // Act
-        const result = await FaceAnalysisService.detectBackgroundFaces({}, mockPython);
+        const result = await FaceNoiseService.detectBackgroundFaces({}, mockPython);
 
         // Assert
         expect(result.candidates).toHaveLength(0);
@@ -96,7 +111,7 @@ describe('FaceAnalysisService.detectBackgroundFaces', () => {
         });
 
         // Act
-        await FaceAnalysisService.detectBackgroundFaces({}, mockPython);
+        await FaceNoiseService.detectBackgroundFaces({}, mockPython);
 
         // Assert
         expect(mockPython.sendRequest).toHaveBeenCalledWith('detect_background_faces', expect.objectContaining({
@@ -121,7 +136,7 @@ describe('FaceAnalysisService.detectBackgroundFaces', () => {
         const mockPython = createMockPythonProvider({ success: true, candidates: [], stats: {} });
 
         // Act
-        await FaceAnalysisService.detectBackgroundFaces({
+        await FaceNoiseService.detectBackgroundFaces({
             minPhotoAppearances: 5,
             maxClusterSize: 3,
             centroidDistanceThreshold: 0.5
@@ -164,7 +179,7 @@ describe('FaceAnalysisService.detectBackgroundFaces', () => {
         });
 
         // Act
-        const result = await FaceAnalysisService.detectBackgroundFaces({}, mockPython);
+        const result = await FaceNoiseService.detectBackgroundFaces({}, mockPython);
 
         // Assert
         expect(result.candidates).toHaveLength(1);
@@ -196,7 +211,7 @@ describe('FaceAnalysisService.detectBackgroundFaces', () => {
         });
 
         // Act & Assert
-        await expect(FaceAnalysisService.detectBackgroundFaces({}, mockPython))
+        await expect(FaceNoiseService.detectBackgroundFaces({}, mockPython))
             .rejects.toThrow('DBSCAN clustering failed');
     });
     it('should include Era centroids in the payload sent to Python', async () => {
@@ -224,7 +239,7 @@ describe('FaceAnalysisService.detectBackgroundFaces', () => {
         const mockPython = createMockPythonProvider({ success: true, candidates: [], stats: {} });
 
         // Act
-        await FaceAnalysisService.detectBackgroundFaces({}, mockPython);
+        await FaceNoiseService.detectBackgroundFaces({}, mockPython);
 
         // Assert
         expect(mockPython.sendRequest).toHaveBeenCalledWith('detect_background_faces', expect.objectContaining({

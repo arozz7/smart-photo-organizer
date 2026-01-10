@@ -44,21 +44,16 @@
 - **Migration Path:** "Auto-Generate Eras" button analyzes existing photo dates and creates 5-year bands automatically.
 - **Implementation Plan:** See [Centroid Stability Plan](file:///C:/Users/arozz/.gemini/antigravity/brain/4b6766a5-9655-4ded-bc15-d934680dedc9/implementation_plan.md)
 
-### 4. Code Refactoring - FaceAnalysisService
-- **Goal:** Refactor `FaceAnalysisService.ts` to improve maintainability as it approaches file size limits.
-- **Current Status:** ~560 lines (soft limit 400, hard limit 600).
-- **Proposed Structure:**
-    - Extract `OutlierDetection` logic to `FaceOutlierService.ts`.
-    - Extract `NoiseDetection` logic to `FaceNoiseService.ts`.
-    - Create `ipcUtils.ts` for file-based IPC transfer helpers.
-- **Trigger:** Refactor when next feature addition would exceed 600 lines.
-
-### 5. Photo Session Grouping
+### 4. Photo Session Grouping
 - **Goal:** Group unnamed faces by folder or time-window (e.g. "Photos from Dec 2024") to provide better context during review.
 - **Approach:** Add folder/date metadata to the clustering payload.
+- **Schema Changes:**
+    - `faces.session_folder TEXT` — Parent folder path at time of scan.
+    - `faces.session_date TEXT` — Photo date (from EXIF or file timestamp).
+- **Downstream Dependency:** Required by [Background Auto Face Bucketing](#7-background-auto-face-bucketing).
 - **Status:** Backlog.
 
-### 6. Pet vs Human Classification
+### 5. Pet vs Human Classification
 - **Goal:** Prevent pet faces from being incorrectly assigned to human persons.
 - **Approach:**
     - Use landmark confidence scores as a first-pass classifier.
@@ -66,14 +61,14 @@
     - Maintain separate matching pools (Humans only match Humans).
 - **Plan:** See [Pet Classification Plan](file:///j:/Projects/smart-photo-organizer/docs/pet-classification-plan.md)
 
-### 7. Background Auto Face Bucketing
+### 6. Background Auto Face Bucketing
 - **Goal:** Background process that organizes unassigned faces into stable buckets for easier user review.
 - **Core Features:**
     - **Suggestion Buckets:** Faces matching named people (below auto-assign threshold).
     - **Discovery Buckets:** Faces clustering with each other (new unknown groups).
     - **Scan-Aware Scheduling:** Yields to active scans, runs when paused or idle.
     - **Smart Triggers:** Only runs when `bucketing_dirty=1` (new faces, assignments, eras).
-- **Prerequisites:** Requires #3 (Eras), #5 (Sessions), #6 (Pets) to be completed first.
+- **Prerequisites:** Requires #3 (Eras), #4 (Sessions), #5 (Pets) to be completed first.
 - **Plan:** See [Background Bucketing Plan](file:///j:/Projects/smart-photo-organizer/docs/background-bucketing-plan.md)
 
 ---
@@ -160,7 +155,7 @@
 
 # ✅ Implemented Features
 
-## v0.5.0 (In Development)
+## v0.5.5 (In Development)
 
 ### Smart Face Management
 *Details: See [Smart Ignore Implementation Plan](file:///j:/Projects/smart-photo-organizer/docs/smart-ignore-implementation-plan.md) for full technical specs.*
@@ -180,6 +175,8 @@
 - **Clustering & Performance (Phase 27):** Fixed clustering logic (Metric Mismatch), optimized background detection speed (20x), added Face Debug tools, and optimized FAISS Index (sync tracking & alerts). [See Changelog](aiChangeLog/phase-27-clustering-optimization.md)
 - **High-Density Review UX (Phase 28):** Implemented progressive loading, keyboard navigation (`A`/`X`/`N`), cluster size filters, and "Ungroupable" search to handle 10k+ face libraries. [See Walkthrough](file:///C:/Users/arozz/.gemini/antigravity/brain/34a6fc69-1e09-40eb-974f-d34f6ae8103b/walkthrough.md)
 
+### Code Maintenance (v0.5.5)
+- **FaceAnalysisService Refactoring (Phase 29):** Split `FaceAnalysisService.ts` (564→196 lines) into `FaceOutlierService.ts` (~230 lines) and `FaceNoiseService.ts` (~175 lines) for improved maintainability. [See Changelog](aiChangeLog/phase-29-refactoring.md)
 
 ### Other Features
 - **Person Thumbnail Management:**
