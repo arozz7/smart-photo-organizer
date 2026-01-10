@@ -212,6 +212,8 @@ export function registerAIHandlers() {
         try {
             let faces = FaceRepository.getUnassignedDescriptors();
 
+            const totalUnassigned = faces.length;
+
             // Exclude Background Noise if enabled
             if (options?.excludeBackground) {
                 try {
@@ -372,7 +374,8 @@ export function registerAIHandlers() {
 
                         return {
                             clusters: taggedClusters,
-                            singles: clusteringResult.singles
+                            singles: clusteringResult.singles,
+                            totalUnassigned
                         };
                     }
                 } catch (err) {
@@ -385,7 +388,10 @@ export function registerAIHandlers() {
             // Frontend now expects object structure if we want to be consistent?
             // Or we handle both? safely handle both.
             // But if we return original number[][], usePeopleCluster handles it.
-            return clusteringResult;
+            return {
+                ...clusteringResult,
+                totalUnassigned
+            };
         } catch (e) {
             logger.error(`[Main] ai:getClusteredFaces failed: ${e}`);
             return { clusters: [], singles: [] };

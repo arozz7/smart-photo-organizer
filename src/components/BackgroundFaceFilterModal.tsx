@@ -31,12 +31,14 @@ interface FilterState {
     singlePhotoOnly: boolean;
     maxClusterSize: number | null;  // null = no filter
     minDistance: number | null;     // null = no filter
+    targetPerson: string | null;    // null = no filter
 }
 
 const DEFAULT_FILTERS: FilterState = {
     singlePhotoOnly: false,
     maxClusterSize: null,
-    minDistance: null
+    minDistance: null,
+    targetPerson: null
 };
 
 export default function BackgroundFaceFilterModal({ isOpen, onClose }: BackgroundFaceFilterModalProps) {
@@ -61,12 +63,25 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
     const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
     const [showFilters, setShowFilters] = useState(false)
 
+    // Helper to check if any filter is active
+    const isFilterActive = filters.singlePhotoOnly || filters.maxClusterSize !== null || filters.minDistance !== null || filters.targetPerson !== null;
+
+    // Compute unique people for filter dropdown
+    const availablePeople = React.useMemo(() => {
+        const people = new Set<string>();
+        allCandidates.forEach(c => {
+            if (c.nearestPersonName) people.add(c.nearestPersonName);
+        });
+        return Array.from(people).sort();
+    }, [allCandidates]);
+
     // Apply filters client-side for performance
     const filteredCandidates = React.useMemo(() => {
         return allCandidates.filter(c => {
             if (filters.singlePhotoOnly && c.photoCount !== 1) return false;
             if (filters.maxClusterSize !== null && c.clusterSize > filters.maxClusterSize) return false;
             if (filters.minDistance !== null && c.nearestPersonDistance < filters.minDistance) return false;
+            if (filters.targetPerson !== null && c.nearestPersonName !== filters.targetPerson) return false;
             return true;
         });
     }, [allCandidates, filters]);
@@ -104,8 +119,10 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
                 const initialBatch = Math.min(BATCH_SIZE, candidates.length)
                 setDisplayedCount(initialBatch)
 
-                // Auto-select initial batch
-                setSelectedIds(new Set(candidates.slice(0, initialBatch).map((c: NoiseCandidate) => c.faceId)))
+                // Auto-select initial batch only if NO filters are active
+                if (!isFilterActive) {
+                    setSelectedIds(new Set(candidates.slice(0, initialBatch).map((c: NoiseCandidate) => c.faceId)))
+                }
             } else {
                 console.error('detectBackgroundFaces failed:', result.error)
             }
@@ -124,13 +141,15 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
         setTimeout(() => {
             const nextBatch = Math.min(displayedCount + BATCH_SIZE, filteredCandidates.length)
 
-            // Auto-select the new batch as well
-            const newIds = filteredCandidates.slice(displayedCount, nextBatch).map(c => c.faceId)
-            setSelectedIds(prev => {
-                const next = new Set(prev)
-                newIds.forEach(id => next.add(id))
-                return next
-            })
+            // Auto-select the new batch only if NO filters are active
+            if (!isFilterActive) {
+                const newIds = filteredCandidates.slice(displayedCount, nextBatch).map(c => c.faceId)
+                setSelectedIds(prev => {
+                    const next = new Set(prev)
+                    newIds.forEach(id => next.add(id))
+                    return next
+                })
+            }
 
             setDisplayedCount(nextBatch)
             setLoadingMore(false)
@@ -163,8 +182,8 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
                 const nextBatchSize = Math.min(remaining.length, Math.max(displayedCount, BATCH_SIZE))
                 setDisplayedCount(nextBatchSize)
 
-                // Auto-select the next batch if there are any
-                if (nextBatchSize > 0) {
+                // Auto-select the next batch if there are any AND no filters are active
+                if (nextBatchSize > 0 && !isFilterActive) {
                     setSelectedIds(new Set(remaining.slice(0, nextBatchSize).map(c => c.faceId)))
                 } else {
                     setSelectedIds(new Set())
@@ -212,8 +231,8 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
                     const nextBatchSize = Math.min(remaining.length, Math.max(displayedCount, BATCH_SIZE))
                     setDisplayedCount(nextBatchSize)
 
-                    // Auto-select next batch
-                    if (nextBatchSize > 0) {
+                    // Auto-select next batch only if no filters active
+                    if (nextBatchSize > 0 && !isFilterActive) {
                         setSelectedIds(new Set(remaining.slice(0, nextBatchSize).map(c => c.faceId)))
                     } else {
                         setSelectedIds(new Set())
@@ -303,7 +322,7 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
                                 {/* Filter Toggle */}
                                 <button
                                     onClick={() => setShowFilters(!showFilters)}
-                                    className={`text-xs px-2 py-1 rounded transition-colors flex items-center gap-1 ${showFilters || filters.singlePhotoOnly || filters.maxClusterSize !== null || filters.minDistance !== null
+                                    className={`text-xs px-2 py-1 rounded transition-colors flex items-center gap-1 ${showFilters || filters.singlePhotoOnly || filters.maxClusterSize !== null || filters.minDistance !== null || filters.targetPerson !== null
                                         ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50'
                                         : 'bg-gray-700 text-gray-400 hover:text-white'
                                         }`}
@@ -384,10 +403,32 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
                                     </select>
                                 </div>
 
+                                {/* Person Filter */}
+                                {availablePeople.length > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-400">Person:</span>
+                                        <select
+                                            value={filters.targetPerson ?? ''}
+                                            onChange={(e) => {
+                                                const val = e.target.value || null
+                                                setFilters(prev => ({ ...prev, targetPerson: val }))
+                                                setDisplayedCount(BATCH_SIZE)
+                                                setSelectedIds(new Set())
+                                            }}
+                                            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:ring-1 focus:ring-amber-500/50 max-w-[120px]"
+                                        >
+                                            <option value="">Any</option>
+                                            {availablePeople.map(p => (
+                                                <option key={p} value={p}>{p}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+
                                 <div className="flex-1" />
 
                                 {/* Clear Filters */}
-                                {(filters.singlePhotoOnly || filters.maxClusterSize !== null || filters.minDistance !== null) && (
+                                {(filters.singlePhotoOnly || filters.maxClusterSize !== null || filters.minDistance !== null || filters.targetPerson !== null) && (
                                     <button
                                         onClick={() => {
                                             setFilters(DEFAULT_FILTERS)
@@ -427,6 +468,20 @@ export default function BackgroundFaceFilterModal({ isOpen, onClose }: Backgroun
                             <div className="flex-1" />
                             {selectedIds.size > 0 && (
                                 <div className="flex gap-2">
+                                    {/* Quick Assign Button (Only when filtering by person) */}
+                                    {filters.targetPerson && (
+                                        <button
+                                            onClick={() => handleNameSelected(filters.targetPerson!)}
+                                            disabled={isNaming}
+                                            className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-green-900/20 disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                            Confirm to {filters.targetPerson} ({selectedIds.size})
+                                        </button>
+                                    )}
+
                                     <button
                                         onClick={() => setIsRenameModalOpen(true)}
                                         disabled={isNaming}

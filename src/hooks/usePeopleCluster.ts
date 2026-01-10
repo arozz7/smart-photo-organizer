@@ -16,6 +16,7 @@ export function usePeopleCluster() {
     const [singles, setSingles] = useState<number[]>([])
     const [ungroupableFaces, setUngroupableFaces] = useState<number[]>([])
     const [totalFaces, setTotalFaces] = useState(0)
+    const [totalUnassigned, setTotalUnassigned] = useState(0)
     const [isClustering, setIsClustering] = useState(false)
     const [isAutoAssigning, setIsAutoAssigning] = useState(false);
 
@@ -86,6 +87,7 @@ export function usePeopleCluster() {
 
                 const clusterCount = normalizedClusters.reduce((acc, c) => acc + c.faces.length, 0);
                 setTotalFaces(clusterCount + res.singles.length);
+                setTotalUnassigned(res.totalUnassigned || (clusterCount + res.singles.length));
             }
         } catch (e) {
             console.error("Failed to load clusters", e)
@@ -205,19 +207,20 @@ export function usePeopleCluster() {
         // API Call - pass confirm flag if accepting a suggestion
         await autoNameFaces(ids, name, confirm)
         addToast({ type: 'success', description: `Named ${ids.length} faces.` })
-    }, [autoNameFaces, addToast])
+
+        // Remove from ungroupable list if present
+        setUngroupableFaces(prev => {
+            if (prev.length === 0) return prev;
+            const idsSet = new Set(ids);
+            return prev.filter(id => !idsSet.has(id));
+        });
+    }, [autoNameFaces, addToast, setUngroupableFaces])
 
     const handleConfirmName = useCallback(async (selectedIds: number[], name: string) => {
         if (!name || selectedIds.length === 0) return
         setNamingGroup(null)
         // Manual naming is always confirmed
         await handleNameGroup(selectedIds, name, true)
-
-        // Remove from ungroupable list if present
-        setUngroupableFaces(prev => {
-            if (prev.length === 0) return prev;
-            return prev.filter(id => !selectedIds.includes(id));
-        });
     }, [handleNameGroup])
 
     const handleOpenNaming = useCallback(async (ids: number[]) => {
@@ -337,6 +340,7 @@ export function usePeopleCluster() {
         singles,
         ungroupableFaces, // Faces too far from any named person
         totalFaces,
+        totalUnassigned,
         isClustering,
         isAutoAssigning,
         selectedFaceIds,

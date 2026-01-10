@@ -2,21 +2,13 @@ import { getDB } from '../../db';
 
 export class PersonRepository {
     static getPeople() {
+        // Ensure covers are populated (lazy migration/maintenance)
+        this.updateAllCoverFaces();
+
         const db = getDB();
         try {
             const stmt = db.prepare(`
-                WITH BestFaces AS (
-                    SELECT 
-                        person_id,
-                        id as face_id,
-                        photo_id,
-                        box_json,
-                        blur_score,
-                        ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY blur_score DESC) as rn
-                    FROM faces 
-                    WHERE person_id IS NOT NULL AND is_ignored = 0
-                ),
-                PersonCounts AS (
+                WITH PersonCounts AS (
                     SELECT person_id, COUNT(*) as face_count 
                     FROM faces 
                     WHERE person_id IS NOT NULL AND is_ignored = 0
@@ -41,17 +33,15 @@ export class PersonRepository {
                     COALESCE(pc.face_count, 0) as face_count,
                     COALESCE(uc.unconfirmed_count, 0) as unconfirmed_count,
                     COALESCE(ac.alert_count, 0) as alert_count,
-                    COALESCE(fixed_photo.preview_cache_path, fixed_photo.file_path, ph.preview_cache_path, ph.file_path) as cover_path,
-                    COALESCE(fixed_face.box_json, bf.box_json) as cover_box,
-                    COALESCE(fixed_photo.width, ph.width) as cover_width,
-                    COALESCE(fixed_photo.height, ph.height) as cover_height,
+                    COALESCE(fixed_photo.preview_cache_path, fixed_photo.file_path) as cover_path,
+                    fixed_face.box_json as cover_box,
+                    fixed_photo.width as cover_width,
+                    fixed_photo.height as cover_height,
                     p.cover_face_id
                 FROM people p
                 LEFT JOIN PersonCounts pc ON p.id = pc.person_id
                 LEFT JOIN UnconfirmedCounts uc ON p.id = uc.person_id
                 LEFT JOIN AlertCounts ac ON p.id = ac.person_id
-                LEFT JOIN BestFaces bf ON p.id = bf.person_id AND bf.rn = 1
-                LEFT JOIN photos ph ON bf.photo_id = ph.id
                 LEFT JOIN faces fixed_face ON p.cover_face_id = fixed_face.id
                 LEFT JOIN photos fixed_photo ON fixed_face.photo_id = fixed_photo.id
                 ORDER BY face_count DESC
@@ -124,6 +114,64 @@ export class PersonRepository {
     static setPersonCover(personId: number, faceId: number | null) {
         const db = getDB();
         db.prepare('UPDATE people SET cover_face_id = ? WHERE id = ?').run(faceId, personId);
+    }
+
+    /**
+     * Updates the cover face for a specific person.
+     * Logic:
+     * 1. If currently set cover is invalid (deleted or not belonging to person), pick new best.
+     * 2. If currently null, pick new best.
+     * 3. 'Best' is defined as highest blur_score (clearest face).
+     */
+    static refreshPersonCover(personId: number) {
+        const db = getDB();
+
+        // Check current cover validity
+        const person = db.prepare('SELECT cover_face_id FROM people WHERE id = ?').get(personId) as { cover_face_id: number | null };
+        if (!person) return;
+
+        let needsUpdate = false;
+
+        if (person.cover_face_id) {
+            const result = db.prepare('SELECT id FROM faces WHERE id = ? AND person_id = ?').get(person.cover_face_id, personId);
+            if (!result) needsUpdate = true; // Cover is invalid (doesn't exist or moved to another person)
+        } else {
+            needsUpdate = true; // No cover set
+        }
+
+        if (needsUpdate) {
+            // Find best face
+            const bestFace = db.prepare(`
+                SELECT id FROM faces 
+                WHERE person_id = ? AND is_ignored = 0
+                ORDER BY blur_score DESC 
+                LIMIT 1
+            `).get(personId) as { id: number } | undefined;
+
+            const newCoverId = bestFace ? bestFace.id : null;
+            db.prepare('UPDATE people SET cover_face_id = ? WHERE id = ?').run(newCoverId, personId);
+        }
+    }
+
+    /**
+     * Batch update to ensure all people have a cover face if one is available.
+     * Only updates NULL entries, preserving existing choices.
+     */
+    static updateAllCoverFaces() {
+        const db = getDB();
+        // efficient update: join faces on person_id, order by blur_score
+        // SQLite doesn't support complex UPDATE-FROM joins easily in all versions, 
+        // but we can use a correlated subquery.
+        db.prepare(`
+            UPDATE people 
+            SET cover_face_id = (
+                SELECT id FROM faces 
+                WHERE faces.person_id = people.id AND faces.is_ignored = 0
+                ORDER BY blur_score DESC
+                LIMIT 1
+            )
+            WHERE cover_face_id IS NULL
+        `).run();
     }
 
     /**

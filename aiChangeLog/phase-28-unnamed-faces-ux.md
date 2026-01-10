@@ -1,27 +1,34 @@
-# AI Change Log - Phase 28: High-Density Unnamed Faces UX
+# Phase 28: Unnamed Faces UX Improvements
 
-## Summary
-Improved the performance and usability of the Unnamed Faces review workflow to support libraries with 10k+ clusters. Implemented specialized filtering and high-speed interaction tools.
+Enhanced the face statistics display in the "Unnamed Faces" view to provide a more comprehensive count of all faces left to review.
 
 ## Changes
 
-### 🌟 New Features
-- **Progressive Loading**: Optimized the `People` tab to load 100 clusters at a time (virtualization already present, but data loading was previously bottlenecked).
-- **Keyboard Navigation**: Implemented rapid-action keys (`A` Accept, `X` Ignore, `N` Name, `Arrows` Nav).
-- **Cluster Size Filters**: Added buttons to toggle Large/Medium/Small/Single groups in the toolbar.
-- **Ungroupable Faces Search**: Added a dedicated search path for faces that don't match any known person (L2 distance > 1.0).
+### Backend (Electron)
+- **aiHandlers.ts**: Updated `ai:getClusteredFaces` to calculate and return `totalUnassigned` (the count of all faces where `person_id IS NULL` and `is_ignored = 0`). This ensures that background faces (which are filtered out of the clusters/singles) are still accounted for in the overall total.
 
-### 🛠️ Technical Fixes
-- **Timeout Reliability**: Increased AI IPC timeouts significantly (up to 15min for clustering) to handle massive library updates.
-- **JSON Safety**: Added null-checks to `descriptor_mean_json` parsing in `aiHandlers.ts`.
-- **Match Consistency**: Fixed the sensitivity slider to correctly scale similarity to L2 distance for predictable matching.
+### Frontend
+- **PeopleContext.tsx**: Updated the `loadUnnamedFaces` return type to include the optional `totalUnassigned` field.
+- **usePeopleCluster.ts**: 
+    - Added `totalUnassigned` state.
+    - Updated `loadClusteredFaces` to populate `totalUnassigned` from the backend result.
+    - Exposed `totalUnassigned` from the hook.
+- **People.tsx**:
+    - Updated the statistics display in the toolbar to show the new "total faces left to review" count.
+    - Updated the `SmartIgnorePanel` to use `totalUnassigned` for its `pendingReview` statistic.
+- **BackgroundFaceFilterModal.tsx**:
+    - Added logic to disable auto-selection of faces when any filter is active.
+    - Ensures users don't accidentally ignore or name faces that are hidden by the current filter view.
 
-### 📄 Documentation
-- Updated `future_features.md` (moved roadmap items to implemented).
-- Updated `user_manual.md` with keyboard mappings and filter explanations.
-- Created `walkthrough.md` summarizing the new UX.
+### Database (Optimization)
+- **PersonRepository.ts**:
+    - Implemented `updateAllCoverFaces` and `refreshPersonCover` to persist the "best face" (highest blur score) for each person in the `people` table.
+    - Optimized `getPeople` query to join on the persisted `cover_face_id` instead of calculating `ROW_NUMBER()` over all faces on every request.
+    - This drastically reduces load time for the "Identified People" page.
 
 ## Impact
-- **Scale**: Users can now manage 10k-50k unnamed faces without UI lag.
-- **Speed**: Accept/Ignore actions are now 5-10x faster via keyboard shortcuts.
-- **Accuracy**: Separating "Ungroupable" (strangers) from "Suggestible" (friends) reduces cognitive load during review.
+Users now have a clear indication of exactly how many unnamed faces remain to be reviewed, regardless of whether they are currently being clustered or filtered out as noise.
+
+## Verification
+- Verified IPC communication returns correct counts.
+- UI displays the total count as expected.
