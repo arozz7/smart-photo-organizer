@@ -11,8 +11,8 @@ export function registerAIHandlers() {
     // Generic Proxy 
     ipcMain.handle('ai:command', async (_event, command) => {
         const { type, payload } = command;
-        let timeout = 30000;
-        if (type === 'cluster_faces' || type === 'analyze_image') timeout = 300000;
+        let timeout = 120000;
+        if (type === 'cluster_faces' || type === 'analyze_image') timeout = 900000;
         return await pythonProvider.sendRequest(type, payload, timeout);
     });
 
@@ -74,11 +74,11 @@ export function registerAIHandlers() {
                 url = `https://github.com/arozz7/smart-photo-organizer/releases/download/v${app.getVersion()}/ai-runtime-win-x64.zip`;
             }
         }
-        return await pythonProvider.sendRequest('download_model', { modelName, url }, 1800000);
+        return await pythonProvider.sendRequest('download_model', { modelName, url }, 3600000);
     });
 
     ipcMain.handle('ai:enhanceImage', async (_event, options) => {
-        return await pythonProvider.sendRequest('enhance_image', options, 300000); // 5 min timeout
+        return await pythonProvider.sendRequest('enhance_image', options, 900000); // 15 min timeout
     });
 
     ipcMain.handle('ai:getSystemStatus', async () => {
@@ -129,6 +129,45 @@ export function registerAIHandlers() {
     // I will skip detailed reimplementation of Clustering in this single step to avoid error.
     // I'll mark as TODO or basic wrap.
     // The previous implementation was complex.
+
+    // Find Ungroupable Faces - identifies faces too far from any named person
+    ipcMain.handle('ai:findUngroupableFaces', async (_event, options) => {
+        try {
+            const { distanceThreshold = 1.0 } = options || {};
+
+            // Get unassigned faces with descriptors
+            const faces = FaceRepository.getUnassignedDescriptors();
+            if (faces.length === 0) {
+                return { success: true, ungroupable_ids: [], groupable_ids: [], stats: { total: 0 } };
+            }
+
+            // Get named person centroids (filter out those without descriptors)
+            const { PersonRepository } = await import('../data/repositories/PersonRepository');
+            const people = PersonRepository.getPeopleWithDescriptors();
+            const centroids = people
+                .filter((p: any) => p.descriptor_mean_json) // Skip people without descriptor
+                .map((p: any) => ({
+                    descriptor: JSON.parse(p.descriptor_mean_json),
+                    name: p.name,
+                    personId: p.id
+                }));
+
+            logger.info(`[Main] Finding ungroupable faces: ${faces.length} faces, ${centroids.length} centroids, threshold=${distanceThreshold}`);
+
+            // Call Python
+            const result = await pythonProvider.sendRequest('find_ungroupable_faces', {
+                faces: faces.map((f: any) => ({ id: f.id, descriptor: f.descriptor })),
+                centroids,
+                distanceThreshold
+            }, 600000); // 10 min timeout
+
+            return result;
+        } catch (e) {
+            logger.error(`[Main] ai:findUngroupableFaces failed: ${e}`);
+            return { success: false, error: String(e) };
+        }
+    });
+
     ipcMain.handle('ai:rebuildIndex', async () => {
         try {
             // CRITICAL: Only index faces that belong to named people
@@ -162,11 +201,11 @@ export function registerAIHandlers() {
     });
 
     ipcMain.handle('ai:saveVectorIndex', async () => {
-        return await pythonProvider.sendRequest('save_vector_index', {}, 30000);
+        return await pythonProvider.sendRequest('save_vector_index', {}, 120000);
     });
 
     ipcMain.handle('ai:addFacesToVectorIndex', async (_event, { vectors, ids }) => {
-        return await pythonProvider.sendRequest('add_faces_to_vector_index', { vectors, ids }, 60000);
+        return await pythonProvider.sendRequest('add_faces_to_vector_index', { vectors, ids }, 180000);
     });
 
     ipcMain.handle('ai:getClusteredFaces', async (_event, options) => {
@@ -205,7 +244,7 @@ export function registerAIHandlers() {
             };
 
             logger.info(`[Main] Clustering ${faces.length} faces with eps=${eps.toFixed(3)}, groupBySuggestion=${options?.groupBySuggestion || false}`);
-            const clusteringResult = await pythonProvider.sendRequest('cluster_faces', payload, 300000);
+            const clusteringResult = await pythonProvider.sendRequest('cluster_faces', payload, 900000);
 
             // Options: Group by AI Suggestion (Backend)
             // If enabled, we calculate centroids of clusters, match them against known people,
@@ -364,7 +403,7 @@ export function registerAIHandlers() {
     });
 
     ipcMain.handle('ai:matchBatch', async (_event, { descriptors, options }) => {
-        const searchFn = async (d: number[][], k?: number, t?: number) => pythonProvider.searchFaces(d, k, t, 120000);
+        const searchFn = async (d: number[][], k?: number, t?: number) => pythonProvider.searchFaces(d, k, t, 300000);
         return await FaceService.matchBatch(descriptors, { ...options, searchFn });
     });
 
@@ -376,7 +415,7 @@ export function registerAIHandlers() {
 
             if (descriptors.length === 0) return { success: true, matches: [] };
 
-            const searchFn = async (d: number[][], k?: number, t?: number) => pythonProvider.searchFaces(d, k, t, 120000);
+            const searchFn = async (d: number[][], k?: number, t?: number) => pythonProvider.searchFaces(d, k, t, 300000);
             const matches = await FaceService.matchBatch(descriptors, { threshold, searchFn });
 
             const results = matches.map((m, i) => m ? {
@@ -395,7 +434,7 @@ export function registerAIHandlers() {
 
     // Get FAISS Index Status
     ipcMain.handle('ai:getIndexStatus', async () => {
-        return await pythonProvider.sendRequest('get_index_status', {}, 60000);
+        return await pythonProvider.sendRequest('get_index_status', {}, 180000);
     });
 
     // Compare specific faces (cosine similarity)
@@ -466,7 +505,7 @@ export function registerAIHandlers() {
             };
 
             logger.info(`[Main] Debug clustering ${faces.length} faces with eps=${eps.toFixed(3)}`);
-            const result = await pythonProvider.sendRequest('cluster_faces', payload, 300000);
+            const result = await pythonProvider.sendRequest('cluster_faces', payload, 600000);
 
             return result;
         } catch (e) {

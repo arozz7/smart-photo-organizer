@@ -50,6 +50,7 @@ export interface SmartIgnoreSettings {
     enableAutoTiering: boolean;
     enableAiSuggestions: boolean;
     aiSuggestionThreshold: number;
+    ungroupableDistanceThreshold: number; // Faces farther than this from any named person go to Ungroupable
 }
 
 const PeopleContext = createContext<PeopleContextType | undefined>(undefined)

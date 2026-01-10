@@ -136,7 +136,7 @@ export function registerDBHandlers() {
     });
 
     ipcMain.handle('db:getIgnoredFaces', async (_, args) => {
-        return FaceRepository.getIgnoredFaces(args?.page || 1, args?.limit || 50);
+        return FaceRepository.getIgnoredFaces(args?.page || 1, args?.limit || 50, args?.order || 'asc');
     });
 
     ipcMain.handle('db:restoreFaces', async (_, { faceIds, personId }) => {

@@ -1060,6 +1060,36 @@ def handle_command(command):
             logger.error(f"Clustering error: {e}")
             response = {"type": "cluster_result", "error": str(e), "reqId": req_id}
 
+    elif cmd_type == 'find_ungroupable_faces':
+        faces_data = payload.get('faces', [])
+        centroids = payload.get('centroids', [])
+        distance_threshold = float(payload.get('distanceThreshold', 1.0))
+        
+        # Support file-based payload for large datasets
+        if 'dataPath' in payload:
+            dpath = payload['dataPath']
+            if os.path.exists(dpath):
+                try:
+                    with open(dpath, 'r') as f:
+                        file_payload = json.load(f)
+                        faces_data = file_payload.get('faces', faces_data)
+                        centroids = file_payload.get('centroids', centroids)
+                except Exception as e:
+                    logger.error(f"Failed to read data path: {e}")
+        
+        logger.info(f"Finding ungroupable faces from {len(faces_data)} faces (threshold: {distance_threshold})...")
+        
+        try:
+            # Extract IDs and descriptors from faces_data
+            face_ids = [f['id'] for f in faces_data]
+            descriptors = [f['descriptor'] for f in faces_data]
+            
+            result = faces.find_ungroupable_faces(face_ids, descriptors, centroids, distance_threshold)
+            response = {"type": "ungroupable_faces_result", "success": True, **result, "reqId": req_id}
+        except Exception as e:
+            logger.error(f"Find ungroupable faces error: {e}")
+            response = {"type": "ungroupable_faces_result", "success": False, "error": str(e), "reqId": req_id}
+
     elif cmd_type == 'detect_background_faces':
         faces_data = payload.get('faces', [])
         centroids = payload.get('centroids', [])

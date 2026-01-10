@@ -150,7 +150,7 @@ export class PythonAIProvider implements IAIProvider {
         }
     }
 
-    sendRequest(type: string, payload: any, timeoutMs = 30000): Promise<any> {
+    sendRequest(type: string, payload: any, timeoutMs = 120000): Promise<any> {
         return new Promise((resolve, reject) => {
             const requestId = Math.floor(Math.random() * 1000000);
             this.scanPromises.set(requestId, { resolve, reject });
@@ -169,11 +169,11 @@ export class PythonAIProvider implements IAIProvider {
         return this.sendRequest('analyze_image', { filePath, ...options });
     }
 
-    async clusterFaces(faces: { id: number; descriptor: number[]; }[], eps?: number, minSamples?: number, timeoutMs = 300000): Promise<any> {
+    async clusterFaces(faces: { id: number; descriptor: number[]; }[], eps?: number, minSamples?: number, timeoutMs = 900000): Promise<any> {
         return this.sendRequest('cluster_faces', { faces, eps, minSamples }, timeoutMs);
     }
 
-    async searchFaces(descriptors: number[][], k?: number, threshold?: number, timeoutMs = 60000): Promise<{ id: number; distance: number; }[][]> {
+    async searchFaces(descriptors: number[][], k?: number, threshold?: number, timeoutMs = 300000): Promise<{ id: number; distance: number; }[][]> {
         const res = await this.sendRequest('batch_search_index', { descriptors, k, threshold }, timeoutMs);
         if (res.error) throw new Error(res.error);
         return res.results;
@@ -188,7 +188,7 @@ export class PythonAIProvider implements IAIProvider {
     }
 
     async checkStatus(options: any = {}): Promise<any> {
-        return this.sendRequest('get_system_status', options, 5000);
+        return this.sendRequest('get_system_status', options, 15000);
     }
 
     // Custom helper

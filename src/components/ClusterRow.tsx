@@ -16,6 +16,8 @@ interface ClusterRowProps {
     onIgnoreGroup: (ids: number[]) => void
     onUngroup: (index: number) => void
     onOpenNaming: (ids: number[]) => void
+    isFocused?: boolean
+    onSuggestionFound?: (index: number, suggestion: any) => void
 }
 
 const ClusterRow = memo(({
@@ -29,7 +31,9 @@ const ClusterRow = memo(({
     onNameGroup,
     onIgnoreGroup,
     onUngroup,
-    onOpenNaming
+    onOpenNaming,
+    isFocused,
+    onSuggestionFound
 }: ClusterRowProps) => {
     const [clusterFaces, setClusterFaces] = useState<Face[]>([])
     const [loaded, setLoaded] = useState(false)
@@ -63,6 +67,7 @@ const ClusterRow = memo(({
         // 0. Use Backend Suggestion if available (Fastest)
         if (initialSuggestion) {
             setSuggestion(initialSuggestion);
+            onSuggestionFound?.(index, initialSuggestion);
             return;
         }
 
@@ -92,11 +97,13 @@ const ClusterRow = memo(({
                     .filter(f => f.suggested_person_id === bestStoredId && f.match_distance !== undefined)
                     .map(f => f.match_distance || 1));
 
-                setSuggestion({
+                const suggestionData = {
                     personId: person.id,
                     personName: person.name,
                     similarity: 1 / (1 + bestDist)
-                });
+                };
+                setSuggestion(suggestionData);
+                onSuggestionFound?.(index, suggestionData);
                 return; // Skip expensive matchBatch if we have a stored suggestion
             }
         }
@@ -121,6 +128,7 @@ const ClusterRow = memo(({
                 const winner = winners[0] as any;
                 if (winner && winner.maxSim > 0.6) {
                     setSuggestion(winner.person);
+                    onSuggestionFound?.(index, winner.person);
                 }
             });
         }
@@ -148,7 +156,11 @@ const ClusterRow = memo(({
     const selectionCount = faceIds.filter(id => selectedFaceIds.has(id)).length
 
     return (
-        <div className={`rounded-xl p-4 mb-4 border transition-colors ${selectionCount > 0 ? 'bg-indigo-900/20 border-indigo-500/30' : 'bg-gray-800/30 border-gray-700/30'
+        <div className={`rounded-xl p-4 mb-4 border transition-colors ${isFocused
+            ? 'bg-indigo-800/30 border-indigo-400 ring-2 ring-indigo-500/50'
+            : selectionCount > 0
+                ? 'bg-indigo-900/20 border-indigo-500/30'
+                : 'bg-gray-800/30 border-gray-700/30'
             }`}>
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">

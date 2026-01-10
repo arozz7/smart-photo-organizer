@@ -117,7 +117,10 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
         const sample = selectedFaces.slice(0, 5).map(f => f.descriptor).filter(Boolean);
 
         if (sample.length > 0) {
-            matchBatch(sample, { threshold }).then(results => {
+            // Convert similarity (slider value) to L2 distance for backend
+            // similarity = 1/(1+distance), so distance = 1/similarity - 1
+            const distanceThreshold = (1 / threshold) - 1;
+            matchBatch(sample, { threshold: distanceThreshold }).then(results => {
                 const counts: any = {};
                 results.forEach(r => {
                     if (r && r.personId) {

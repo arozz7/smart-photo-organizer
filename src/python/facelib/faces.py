@@ -276,6 +276,85 @@ def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2, debug=False):
     return result_clusters
 
 
+def find_ungroupable_faces(face_ids, descriptors, centroids, distance_threshold=1.0):
+    """
+    Identify faces that are too far from any named person to ever be matched.
+    
+    Args:
+        face_ids: List of face IDs
+        descriptors: List of face descriptor vectors (512-dim)
+        centroids: List of dicts with 'descriptor' and 'name' keys for named people
+        distance_threshold: Max L2 distance (normalized) to nearest centroid (default 1.0)
+    
+    Returns:
+        dict with:
+            - ungroupable_ids: List of face IDs exceeding threshold
+            - groupable_ids: List of face IDs within threshold
+            - stats: Summary statistics
+    """
+    if not descriptors or not face_ids:
+        return {'ungroupable_ids': [], 'groupable_ids': [], 'stats': {'total': 0}}
+    
+    # Convert to numpy and normalize
+    X = np.array(descriptors)
+    norm = np.linalg.norm(X, axis=1, keepdims=True)
+    norm[norm == 0] = 1e-10
+    X_normalized = X / norm
+    
+    ungroupable_ids = []
+    groupable_ids = []
+    distances = []
+    
+    if not centroids or len(centroids) == 0:
+        # No centroids = all faces are ungroupable
+        logger.info(f"[Ungroupable] No named person centroids. All {len(face_ids)} faces are ungroupable.")
+        return {
+            'ungroupable_ids': list(face_ids),
+            'groupable_ids': [],
+            'stats': {
+                'total': len(face_ids),
+                'ungroupable': len(face_ids),
+                'groupable': 0,
+                'threshold': distance_threshold,
+                'centroidCount': 0
+            }
+        }
+    
+    # Prepare centroids
+    centroid_descriptors = np.array([c['descriptor'] for c in centroids])
+    centroid_norm = np.linalg.norm(centroid_descriptors, axis=1, keepdims=True)
+    centroid_norm[centroid_norm == 0] = 1e-10
+    centroid_descriptors_normalized = centroid_descriptors / centroid_norm
+    
+    # Calculate nearest distance for each face
+    for i, face_id in enumerate(face_ids):
+        face_vec = X_normalized[i].reshape(1, -1)
+        dists = np.linalg.norm(centroid_descriptors_normalized - face_vec, axis=1)
+        min_dist = float(np.min(dists))
+        distances.append(min_dist)
+        
+        if min_dist > distance_threshold:
+            ungroupable_ids.append(face_id)
+        else:
+            groupable_ids.append(face_id)
+    
+    logger.info(f"[Ungroupable] Threshold {distance_threshold}: {len(ungroupable_ids)} ungroupable, {len(groupable_ids)} groupable")
+    
+    return {
+        'ungroupable_ids': ungroupable_ids,
+        'groupable_ids': groupable_ids,
+        'stats': {
+            'total': len(face_ids),
+            'ungroupable': len(ungroupable_ids),
+            'groupable': len(groupable_ids),
+            'threshold': distance_threshold,
+            'centroidCount': len(centroids),
+            'meanDistance': float(np.mean(distances)) if distances else 0,
+            'maxDistance': float(np.max(distances)) if distances else 0
+        }
+    }
+
+
 def detect_background_faces(faces_data, centroids, min_photo_appearances=3, max_cluster_size=2, distance_threshold=0.7, eps=0.55, min_samples=2):
     """
     Detect background/noise faces that are likely one-time appearances.

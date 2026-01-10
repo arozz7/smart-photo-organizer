@@ -56,6 +56,8 @@ export interface SmartIgnoreSettings {
     maxSamplesPerPerson: number;
     enableQualityAdjustedThresholds: boolean;
     lowQualityThresholdBoost: number;
+    /** Faces farther than this L2 distance from any named person go to Ungroupable. Default: 1.0 */
+    ungroupableDistanceThreshold: number;
 }
 
 export interface AppConfig {
@@ -96,7 +98,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         enableMultiSampleVoting: true,
         maxSamplesPerPerson: 50,
         enableQualityAdjustedThresholds: true,
-        lowQualityThresholdBoost: 0.15
+        lowQualityThresholdBoost: 0.15,
+        ungroupableDistanceThreshold: 1.0
     },
     ai_queue: []
 };

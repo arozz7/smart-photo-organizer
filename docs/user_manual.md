@@ -50,11 +50,26 @@ The AI automatically detects faces during the scan. Your job is to give them nam
     - **Group by AI Suggestion:** Switch to this mode to have the AI automatically group faces by who it thinks they are.
         - **Smart Grouping:** The AI preserves coherent clusters (e.g., 50 faces from the same event) and tags the entire group with a suggestion (e.g., "Suggested: Mom").
         - **Bulk Action:** Clicking "Accept" on a group assigns **all** faces in that cluster at once.
-    - **Filter Background Faces:** A powerful tool to bulk-ignore "noise".
-        - **Single Photo Only:** Strictly targets faces that appear in only one photo.
-        - **Max Cluster Size:** Filter out small clusters (e.g., size ≤ 2).
-    - **Ignore All Groups:** Use the **"Ignore All Groups"** button to dismiss all currently visible suggestions.
-    - **Debug Tools:** (Bottom Right) Use the **"Debug"** button to inspect why faces are grouping (or not) and check if selected faces match anyone in your database.
+### ⚡ 3.1 High-Density Review UX (Power Users)
+When managing libraries with 10,000+ unnamed faces, use these tools to speed up your workflow:
+
+#### ⌨️ Keyboard Navigation
+*   `Arrow Keys` / `J` / `K`: Move focus between groups.
+*   `A`: **Accept Suggestion** (names the group and moves to next).
+*   `N`: **Open Naming Modal** (manual naming).
+*   `X`: **Ignore Group** (hides from view).
+*   `/`: Quick-start keyboard focus.
+
+#### 🔍 Filtering & Searching
+*   **Progressive Loading:** Scroll down to the bottom of the list and click **"Show More"** to load the next 100 groups. This keeps the interface fast while managing massive datasets.
+*   **Cluster Size Filters:** Toggle buttons in the toolbar to focus on **Large (10+)**, **Medium (5-9)**, or **Small (2-4)** groups.
+*   **Find Ungroupable Faces:** A specialized tool to find faces that definitely *don't* belong to your current people.
+
+> [!IMPORTANT]
+> **Understanding Filters: Background vs. Ungroupable**
+> *   **Background Filter:** A "trash disposal" for mass noise. It finds people who only appear once or twice in your library (strangers in crowds, blurry background faces) so you can bulk-ignore them.
+> *   **Ungroupable Search:** A "sorting tool" to find potential new people. It looks for faces that have clear AI data but are far (distant) from your *Identified People*.
+
 6.  **Ignored Faces:** Managing ignored faces is easy. Open the Ignored Faces modal to review hidden faces. 
     - **Group Similar**: Automatically cluster the "ignored" pile to quickly find accidental ignores.
     - **Sensitivity Slider**: Use the slider to increase matching sensitivity if you don't see suggestions for blurry or lower-quality photos.
