@@ -136,6 +136,13 @@ export class PersonService {
             console.warn("Failed to save person history:", e);
         }
 
+        try {
+            // ensure cover face is valid/set
+            PersonRepository.refreshPersonCover(personId);
+        } catch (e) {
+            console.error(`[PersonService] Failed to refresh cover for ${personId}`, e);
+        }
+
         return { success: true, drift: driftDetected, driftDistance: diff };
     }
 

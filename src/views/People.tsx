@@ -32,7 +32,7 @@ export default function People() {
         handleAutoAssign, handleNameGroup, handleConfirmName, handleOpenNaming, handleIgnoreGroup,
         handleUngroup, handleIgnoreAllGroups, handleSuggestionFound,
         // Progressive Loading
-        hasMoreGroups, remainingGroupCount, loadMoreGroups, totalGroupCount,
+        hasMoreGroups, remainingGroupCount, loadMoreGroups, totalGroupCount, totalUnassigned,
         // Ungroupable faces setter
         setUngroupableFaces
     } = usePeopleCluster()
@@ -405,7 +405,7 @@ export default function People() {
                             stats={{
                                 autoIgnored: 0, // TODO: Wire up real stats if available
                                 backgroundIdentified: 0,
-                                pendingReview: clusters.reduce((acc, c) => acc + c.faces.length, 0) + singles.length // Total unnamed faces
+                                pendingReview: totalUnassigned // Total unnamed faces including background
                             }}
                         />
 
@@ -484,6 +484,7 @@ export default function People() {
                             <div className="flex items-center gap-4">
                                 <div className="text-sm text-gray-400">
                                     Showing <span className="text-white font-medium">{filteredClusters.length}</span> of <span className="text-white font-medium">{totalGroupCount}</span> groups and <span className="text-white font-medium">{singles.length}</span> single faces.
+                                    <span className="ml-2 text-gray-500">({totalUnassigned} total faces left to review)</span>
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">

@@ -3,8 +3,13 @@
 ## 🚀 Priority Roadmap
 
 ### 1. Advanced Library Filtering
-- **Goal:** Combine multiple filter types with conditional logic (AND/OR).
-- **New Filters:** Blur Score, Date (Year/Month), Compound Logic.
+- **Goal:** Comprehensive filtering system with AND/OR/NOT logic, dedicated Search View, and Smart Albums.
+- **Core Features:**
+    - **Search View:** Dedicated tab with advanced filter sidebar.
+    - **New Filters:** Blur Score, Dual Dates (File/EXIF), Camera Model, File Type.
+    - **Compound Logic:** AND/OR/NOT combinations with a visual filter builder.
+    - **Smart Albums:** Save and reuse filter presets (Smart Searches).
+- **Implementation Plan:** See [Advanced Filtering Plan](file:///j:/Projects/smart-photo-organizer/docs/advanced_library_filtering_plan.md)
 
 ### 2. Home Page Dashboard
 - **Goal:** Replace Library as default startup page with an engaging, widget-based home experience.
@@ -53,6 +58,13 @@
 - **Approach:** Add folder/date metadata to the clustering payload.
 - **Status:** Backlog.
 
+### 6. Pet vs Human Classification
+- **Goal:** Prevent pet faces from being incorrectly assigned to human persons.
+- **Approach:**
+    - Use landmark confidence scores as a first-pass classifier.
+    - Add `entity_type` field to distinguish People from Pets.
+    - Maintain separate matching pools (Humans only match Humans).
+- **Plan:** See [Pet Classification Plan](file:///j:/Projects/smart-photo-organizer/docs/pet-classification-plan.md)
 
 ---
 

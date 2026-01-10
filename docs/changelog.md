@@ -8,6 +8,9 @@
 - **Confirmed Assignments:** Faces assigned via the "Assign to [Name]" suggestion button are now correctly marked as **confirmed** (green checkmark), ensuring they contribute to era calculation and person centroids properly.
 - **Empty State Transitions:** Fixed an issue where the last few processed faces would linger in modals; added a clean transition to the "All Done" view.
 - **State Reliability:** Improved state synchronization for "Ungroupable Faces" to ensure UI updates immediately after manual assignments.
+- **Comprehensive Face Statistics:** Updated the "Unnamed Faces" toolbar and "Smart Ignore" panel to display the **overall total** number of unreviewed faces. This count now explicitly includes background and ungroupable faces that were previously hidden from the clustering statistics, providing a more accurate reflection of the work remaining in the library.
+- **Performance Optimization:** The "Identified People" grid now loads instantly by persisting the "best face" (cover photo) in the database, eliminating expensive re-calculations on every page load.
+- **Bug Fix:** Fixed an issue where the Background Face Filter would auto-select invisible faces when filters were active. Auto-selection is now disabled when any filter (like "Person Search") is applied.
 
 ---
 
