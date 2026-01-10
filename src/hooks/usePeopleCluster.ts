@@ -205,19 +205,20 @@ export function usePeopleCluster() {
         // API Call - pass confirm flag if accepting a suggestion
         await autoNameFaces(ids, name, confirm)
         addToast({ type: 'success', description: `Named ${ids.length} faces.` })
-    }, [autoNameFaces, addToast])
+
+        // Remove from ungroupable list if present
+        setUngroupableFaces(prev => {
+            if (prev.length === 0) return prev;
+            const idsSet = new Set(ids);
+            return prev.filter(id => !idsSet.has(id));
+        });
+    }, [autoNameFaces, addToast, setUngroupableFaces])
 
     const handleConfirmName = useCallback(async (selectedIds: number[], name: string) => {
         if (!name || selectedIds.length === 0) return
         setNamingGroup(null)
         // Manual naming is always confirmed
         await handleNameGroup(selectedIds, name, true)
-
-        // Remove from ungroupable list if present
-        setUngroupableFaces(prev => {
-            if (prev.length === 0) return prev;
-            return prev.filter(id => !selectedIds.includes(id));
-        });
     }, [handleNameGroup])
 
     const handleOpenNaming = useCallback(async (ids: number[]) => {

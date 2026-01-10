@@ -15,6 +15,9 @@ Improved the performance and usability of the Unnamed Faces review workflow to s
 - **Timeout Reliability**: Increased AI IPC timeouts significantly (up to 15min for clustering) to handle massive library updates.
 - **JSON Safety**: Added null-checks to `descriptor_mean_json` parsing in `aiHandlers.ts`.
 - **Match Consistency**: Fixed the sensitivity slider to correctly scale similarity to L2 distance for predictable matching.
+- **Modal Pagination Stability**: Updated `UnmatchedFacesModal` to maintain its loaded count after actions (replenishing the view) instead of resetting to the initial batch size.
+- **Auto-Confirm naming**: Added `confirm` flag support to the "Assign to X" feature in `UnmatchedFacesModal`, ensuring user-accepted suggestions are marked as `is_confirmed = 1`.
+- **Empty State Lifecycle**: Fixed a bug where actioned faces would linger in modals after the final batch was processed; added explicit state clearing for empty `faceIds`.
 
 ### 📄 Documentation
 - Updated `future_features.md` (moved roadmap items to implemented).

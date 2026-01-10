@@ -1,7 +1,17 @@
 # Changelog
 
+## v0.5.1
+*Release Date: 2026-01-10*
+
+### 🐛 UX & Modal Fixes
+- **Modal Pagination Stability:** Fixed "jumpy" behavior in face modals. The view now correctly replenishes itself when faces are named/ignored without resetting the scroll position or loaded count.
+- **Confirmed Assignments:** Faces assigned via the "Assign to [Name]" suggestion button are now correctly marked as **confirmed** (green checkmark), ensuring they contribute to era calculation and person centroids properly.
+- **Empty State Transitions:** Fixed an issue where the last few processed faces would linger in modals; added a clean transition to the "All Done" view.
+- **State Reliability:** Improved state synchronization for "Ungroupable Faces" to ensure UI updates immediately after manual assignments.
+
+---
+
 ## v0.5.0
-*Release Date: 2026-01-07*
 
 ### 🐛 Critical Fixes
 - **RAW Photo Previews:** Fixed "Preview Unavailable" errors for RAW files (ARW, NEF, etc.) by implementing on-the-fly regeneration fallback and resolving React Strict Mode race conditions.

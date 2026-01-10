@@ -9,7 +9,7 @@ interface UnmatchedFacesModalProps {
     onClose: () => void
     faceIds: number[]
     onName: (ids: number[]) => void
-    onAutoName: (ids: number[], name: string) => Promise<void>
+    onAutoName: (ids: number[], name: string, confirm?: boolean) => Promise<void>
     onIgnore: (ids: number[]) => void
 }
 
@@ -28,18 +28,26 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
     const BATCH_SIZE = 100 // Load manageable chunks
 
     useEffect(() => {
-        if (isOpen && faceIds.length > 0) {
-            loadInitialBatch()
-            setSelectedIds(new Set())
+        if (isOpen) {
+            if (faceIds.length > 0) {
+                loadInitialBatch()
+                setSelectedIds(new Set())
+            } else {
+                setFaces([])
+                setDisplayedCount(0)
+            }
         } else {
             setFaces([])
+            setDisplayedCount(0)
+            setSelectedIds(new Set())
         }
     }, [isOpen, faceIds])
 
     const loadInitialBatch = async () => {
         setLoading(true)
         try {
-            const batchIds = faceIds.slice(0, BATCH_SIZE)
+            const currentLimit = Math.max(BATCH_SIZE, displayedCount)
+            const batchIds = faceIds.slice(0, currentLimit)
             const result = await fetchFacesByIds(batchIds)
             if (result.length > 0) {
                 // console.log('[DEBUG] First unmatched face:', JSON.stringify(result[0], null, 2));
@@ -147,7 +155,7 @@ export default function UnmatchedFacesModal({ isOpen, onClose, faceIds, onName, 
         setActionLoading(true)
         try {
             if (action === 'name') onName(ids)
-            if (action === 'autoName' && suggestion) await onAutoName(ids, suggestion.personName)
+            if (action === 'autoName' && suggestion) await onAutoName(ids, suggestion.personName, true)
             if (action === 'ignore') await onIgnore(ids)
 
             // Clear selection on success for these actions
