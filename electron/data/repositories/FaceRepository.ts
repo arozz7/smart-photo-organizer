@@ -108,9 +108,10 @@ export class FaceRepository {
         db.prepare(query).run(...params);
     }
 
-    static getIgnoredFaces(page = 1, limit = 50) {
+    static getIgnoredFaces(page = 1, limit = 50, order: 'asc' | 'desc' = 'asc') {
         const db = getDB();
         const offset = (page - 1) * limit;
+        const orderDirection = order === 'desc' ? 'DESC' : 'ASC';
 
         const total = db.prepare('SELECT COUNT(*) as count FROM faces WHERE is_ignored = 1').get() as { count: number };
 
@@ -120,6 +121,7 @@ export class FaceRepository {
             FROM faces f
             JOIN photos p ON f.photo_id = p.id
             WHERE f.is_ignored = 1
+            ORDER BY f.id ${orderDirection}
             LIMIT ? OFFSET ?
         `).all(limit, offset);
 

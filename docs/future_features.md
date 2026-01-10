@@ -48,6 +48,12 @@
     - Create `ipcUtils.ts` for file-based IPC transfer helpers.
 - **Trigger:** Refactor when next feature addition would exceed 600 lines.
 
+### 5. Photo Session Grouping
+- **Goal:** Group unnamed faces by folder or time-window (e.g. "Photos from Dec 2024") to provide better context during review.
+- **Approach:** Add folder/date metadata to the clustering payload.
+- **Status:** Backlog.
+
+
 ---
 
 ## 🔮 Feature Backlog
@@ -149,7 +155,9 @@
 - **Configurable Settings (Phase F):** UI controls for Era generation parameters (K-Means, Merge thresholds).
 - **Test Backfill (Phase G):** Comprehensive unit tests added for FaceService, PersonService, and Repositories.
 - **Fixes & QoL (Phase 26):** Fixed RAW Previews, Era Generation bugs, Clustering Thresholds, and improved UX feedback (Toasts). [See Changelog](aiChangeLog/phase-26-fix-raw-and-eras.md)
-- **Clustering & Performance (Phase 27):** Fixed clustering logic (Metric Mismatch), optimized background detection speed (20x), and added Face Debug tools. [See Changelog](aiChangeLog/phase-27-clustering-optimization.md)
+- **Clustering & Performance (Phase 27):** Fixed clustering logic (Metric Mismatch), optimized background detection speed (20x), added Face Debug tools, and optimized FAISS Index (sync tracking & alerts). [See Changelog](aiChangeLog/phase-27-clustering-optimization.md)
+- **High-Density Review UX (Phase 28):** Implemented progressive loading, keyboard navigation (`A`/`X`/`N`), cluster size filters, and "Ungroupable" search to handle 10k+ face libraries. [See Walkthrough](file:///C:/Users/arozz/.gemini/antigravity/brain/34a6fc69-1e09-40eb-974f-d34f6ae8103b/walkthrough.md)
+
 
 ### Other Features
 - **Person Thumbnail Management:**

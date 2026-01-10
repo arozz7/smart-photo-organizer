@@ -31,6 +31,22 @@ export function setWindowBounds(bounds: any) {
     ConfigService.updateSettings({ windowBounds: bounds });
 }
 
+// FAISS Stale Count Tracking
+// Tracks faces removed/ignored that were in the FAISS index
+// When count > 0, UI should suggest rebuild
+export function getFaissStaleCount(): number {
+    return ConfigService.getSettings().faissStaleCount || 0;
+}
+
+export function incrementFaissStaleCount(amount: number = 1): void {
+    const current = getFaissStaleCount();
+    ConfigService.updateSettings({ faissStaleCount: current + amount });
+}
+
+export function resetFaissStaleCount(): void {
+    ConfigService.updateSettings({ faissStaleCount: 0 });
+}
+
 // Legacy accessor used in some places?
 export const store = {
     get: (key: string, def?: any) => {

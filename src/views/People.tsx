@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePeople } from '../context/PeopleContext'
 import PersonCard from '../components/PersonCard'
@@ -12,38 +12,104 @@ import ClusteringSettingsModal from '../components/ClusteringSettingsModal'
 import BackgroundFaceFilterModal from '../components/BackgroundFaceFilterModal'
 import { useAI } from '../context/AIContext'
 import { useAlert } from '../context/AlertContext'
+import { useToast } from '../context/ToastContext'
 import { usePeopleCluster } from '../hooks/usePeopleCluster'
 import SmartIgnorePanel from '../components/SmartIgnorePanel'
 import FaceDebugModal from '../components/FaceDebugModal'
 
 export default function People() {
     const navigate = useNavigate()
-    const { people, loadPeople, fetchFacesByIds, loading } = usePeople()
+    const { people, loadPeople, fetchFacesByIds, loading, smartIgnoreSettings } = usePeople()
     const { onPhotoProcessed, addToQueue, setThrottled } = useAI()
     const { showAlert } = useAlert()
+    const { addToast } = useToast()
 
     // Extracted Hook
     const {
-        clusters, singles, totalFaces, isClustering, isAutoAssigning,
+        clusters, singles, ungroupableFaces, totalFaces, isClustering, isAutoAssigning,
         selectedFaceIds, namingGroup, setNamingGroup,
         loadClusteredFaces, toggleFace, toggleGroup, clearSelection, selectAllGroups,
         handleAutoAssign, handleNameGroup, handleConfirmName, handleOpenNaming, handleIgnoreGroup,
-        handleUngroup, handleIgnoreAllGroups
+        handleUngroup, handleIgnoreAllGroups, handleSuggestionFound,
+        // Progressive Loading
+        hasMoreGroups, remainingGroupCount, loadMoreGroups, totalGroupCount,
+        // Ungroupable faces setter
+        setUngroupableFaces
     } = usePeopleCluster()
 
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
     const [showBlurryModal, setShowBlurryModal] = useState(false)
     const [showIgnoredModal, setShowIgnoredModal] = useState(false)
     const [showUnmatchedModal, setShowUnmatchedModal] = useState(false)
+    const [showUngroupableModal, setShowUngroupableModal] = useState(false)
     const [showBackgroundFilterModal, setShowBackgroundFilterModal] = useState(false)
     const [hasNewFaces, setHasNewFaces] = useState(false)
     const [isScanning, setIsScanning] = useState(false)
     const [isScanModalOpen, setIsScanModalOpen] = useState(false)
     const [showGroupingModal, setShowGroupingModal] = useState(false)
     const [showDebugModal, setShowDebugModal] = useState(false)
+    const [faissStaleCount, setFaissStaleCount] = useState(0)
+    const [isRebuildingIndex, setIsRebuildingIndex] = useState(false)
+    const [isCheckingUngroupable, setIsCheckingUngroupable] = useState(false)
+
+    // Keyboard Navigation State
+    const [focusedClusterIndex, setFocusedClusterIndex] = useState(-1)
+
+    // Size Filter State
+    type SizeFilter = 'all' | 'large' | 'medium' | 'small'
+    const [sizeFilter, setSizeFilter] = useState<SizeFilter>('all')
+
+    // Filter clusters by size
+    const filteredClusters = useMemo(() => {
+        if (sizeFilter === 'all') return clusters;
+        return clusters.filter(c => {
+            const size = c.faces.length;
+            switch (sizeFilter) {
+                case 'large': return size >= 10;
+                case 'medium': return size >= 5 && size <= 9;
+                case 'small': return size >= 2 && size <= 4;
+                default: return true;
+            }
+        });
+    }, [clusters, sizeFilter]);
 
     // Check if dev mode (show debug features)
     const isDev = import.meta.env.DEV
+
+    // Load FAISS stale count on mount for "Identified" tab
+    useEffect(() => {
+        if (activeTab === 'identified') {
+            // @ts-ignore
+            window.ipcRenderer.invoke('ai:getFaissStaleCount').then((count: number) => {
+                setFaissStaleCount(count);
+            });
+        }
+    }, [activeTab]);
+
+    // Handle FAISS rebuild from alert
+    const handleFaissRebuild = async () => {
+        setIsRebuildingIndex(true);
+        try {
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('ai:rebuildIndex');
+            if (result && result.success !== false) {
+                setFaissStaleCount(0);
+                showAlert({
+                    title: 'Face Index Rebuilt',
+                    description: 'The face recognition index has been updated.'
+                });
+            } else {
+                showAlert({
+                    title: 'Rebuild Failed',
+                    description: result?.error || 'An error occurred while rebuilding the index.'
+                });
+            }
+        } catch (err) {
+            console.error('FAISS rebuild failed:', err);
+        } finally {
+            setIsRebuildingIndex(false);
+        }
+    };
 
     // Load initial batch when tab changes
     useEffect(() => {
@@ -57,6 +123,86 @@ export default function People() {
         setThrottled(true);
         return () => setThrottled(false);
     }, [setThrottled]);
+
+    // Auto-focus first group when clusters load and tab is active
+    useEffect(() => {
+        if (activeTab === 'unnamed' && filteredClusters.length > 0 && !isClustering && focusedClusterIndex < 0) {
+            setFocusedClusterIndex(0);
+        }
+    }, [activeTab, filteredClusters.length, isClustering, focusedClusterIndex]);
+
+    // Keyboard Navigation for Unnamed Faces tab
+    useEffect(() => {
+        if (activeTab !== 'unnamed' || filteredClusters.length === 0) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Don't handle if user is typing in an input
+            if ((e.target as HTMLElement).tagName === 'INPUT' ||
+                (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+
+            const currentCluster = filteredClusters[focusedClusterIndex];
+            const isKeyboardModeActive = focusedClusterIndex >= 0;
+
+            switch (e.key.toLowerCase()) {
+                case '/': // Activate keyboard mode
+                    e.preventDefault();
+                    if (!isKeyboardModeActive) {
+                        setFocusedClusterIndex(0);
+                    }
+                    break;
+                case 'arrowdown':
+                case 'arrowright':
+                case 'j': // vim-style
+                    e.preventDefault();
+                    if (!isKeyboardModeActive) {
+                        // Start at first group if nothing focused
+                        setFocusedClusterIndex(0);
+                    } else {
+                        setFocusedClusterIndex(prev =>
+                            prev < filteredClusters.length - 1 ? prev + 1 : prev
+                        );
+                    }
+                    break;
+                case 'arrowup':
+                case 'arrowleft':
+                case 'k': // vim-style
+                    e.preventDefault();
+                    if (!isKeyboardModeActive) {
+                        setFocusedClusterIndex(0);
+                    } else {
+                        setFocusedClusterIndex(prev => prev > 0 ? prev - 1 : 0);
+                    }
+                    break;
+                case 'a': // Accept suggestion
+                    // Support both backend format (personName) and frontend format (name)
+                    const suggestionName = currentCluster?.suggestion?.personName || currentCluster?.suggestion?.name;
+                    if (suggestionName) {
+                        e.preventDefault();
+                        handleNameGroup(currentCluster.faces, suggestionName, true);
+                        // Stay at same index - cluster is removed and next one slides into position
+                        // If we're at the last cluster, clamp to new last index
+                        setFocusedClusterIndex(prev => Math.min(prev, filteredClusters.length - 2));
+                    }
+                    break;
+                case 'x': // Ignore/Reject
+                    if (currentCluster) {
+                        e.preventDefault();
+                        handleIgnoreGroup(currentCluster.faces);
+                        // Stay at same index (next group slides into position)
+                    }
+                    break;
+                case 'n': // Open naming modal
+                    if (currentCluster) {
+                        e.preventDefault();
+                        handleOpenNaming(currentCluster.faces);
+                    }
+                    break;
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [activeTab, filteredClusters, focusedClusterIndex, handleNameGroup, handleIgnoreGroup, handleOpenNaming]);
 
     useEffect(() => {
         const cleanup = onPhotoProcessed((_photoId) => {
@@ -103,13 +249,34 @@ export default function People() {
         navigate(`/people/${personId}`)
     }
 
+    // Check for ungroupable faces (faces too far from any named person)
+    const checkUngroupableFaces = async () => {
+        setIsCheckingUngroupable(true);
+        try {
+            // Get threshold from settings
+            const threshold = smartIgnoreSettings?.ungroupableDistanceThreshold ?? 1.0;
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('ai:findUngroupableFaces', { distanceThreshold: threshold });
+            if (result?.ungroupable_ids) {
+                setUngroupableFaces(result.ungroupable_ids);
+                if (result.ungroupable_ids.length > 0) {
+                    addToast({ type: 'info', description: `Found ${result.ungroupable_ids.length} ungroupable faces` });
+                }
+            }
+        } catch (e) {
+            console.error('Failed to check ungroupable faces:', e);
+        } finally {
+            setIsCheckingUngroupable(false);
+        }
+    };
+
     return (
         <div className="flex flex-col h-full bg-gray-950 text-white overflow-hidden">
             {/* Header / Tabs */}
-            <div className="flex-none p-6 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl z-10">
-                <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-8">
-                        <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+            <div className="flex-none px-4 py-3 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl z-10">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-6">
+                        <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
                             People
                         </h1>
 
@@ -176,6 +343,35 @@ export default function People() {
             >
                 {activeTab === 'identified' && (
                     <div className="p-6">
+                        {/* FAISS Rebuild Alert Banner */}
+                        {faissStaleCount > 0 && (
+                            <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    <div>
+                                        <p className="text-amber-300 font-medium text-sm">Face Index Needs Update</p>
+                                        <p className="text-amber-400/70 text-xs">{faissStaleCount} faces have been removed or reassigned since the last rebuild.</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={handleFaissRebuild}
+                                    disabled={isRebuildingIndex}
+                                    className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                                >
+                                    {isRebuildingIndex ? (
+                                        <div className="animate-spin h-4 w-4 border-2 border-amber-400 border-t-transparent rounded-full" />
+                                    ) : (
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                    )}
+                                    {isRebuildingIndex ? 'Rebuilding...' : 'Rebuild Index'}
+                                </button>
+                            </div>
+                        )}
+
                         {loading && people.length === 0 ? (
                             <div className="flex items-center justify-center h-full p-20">
                                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
@@ -202,7 +398,7 @@ export default function People() {
                     </div>
                 )}
                 {activeTab === 'unnamed' && (
-                    <div className="animate-fade-in space-y-8 p-6">
+                    <div className="animate-fade-in space-y-4 p-4">
                         <SmartIgnorePanel
                             onFilterBackground={() => setShowBackgroundFilterModal(true)}
                             onIgnoreAllGroups={handleIgnoreAllGroups}
@@ -213,11 +409,81 @@ export default function People() {
                             }}
                         />
 
+                        {/* Compact Toolbar - Keyboard hints + Filters + Actions in one row */}
+                        {clusters.length > 0 && (
+                            <div className="flex items-center justify-between gap-4 py-2 px-3 bg-gray-800/30 border border-gray-700/50 rounded-lg text-xs">
+                                {/* Left: Keyboard hints */}
+                                <div className="flex items-center gap-2 text-indigo-300 whitespace-nowrap">
+                                    <span className="font-medium">Group {focusedClusterIndex + 1}</span>
+                                    <span className="text-gray-600">|</span>
+                                    <span className="text-gray-400">
+                                        <kbd className="px-1 bg-gray-700/50 rounded">A</kbd> Accept ·
+                                        <kbd className="px-1 bg-gray-700/50 rounded">X</kbd> Ignore ·
+                                        <kbd className="px-1 bg-gray-700/50 rounded">N</kbd> Name ·
+                                        <kbd className="px-1 bg-gray-700/50 rounded">↑↓</kbd> Nav
+                                    </span>
+                                </div>
+
+                                {/* Center: Size Filters */}
+                                <div className="flex items-center gap-1.5">
+                                    {(['all', 'large', 'medium', 'small'] as const).map((filter) => {
+                                        const labels: Record<SizeFilter, string> = { all: 'All', large: '10+', medium: '5-9', small: '2-4' };
+                                        const counts: Record<SizeFilter, number> = {
+                                            all: clusters.length,
+                                            large: clusters.filter(c => c.faces.length >= 10).length,
+                                            medium: clusters.filter(c => c.faces.length >= 5 && c.faces.length <= 9).length,
+                                            small: clusters.filter(c => c.faces.length >= 2 && c.faces.length <= 4).length
+                                        };
+                                        return (
+                                            <button
+                                                key={filter}
+                                                onClick={() => { setSizeFilter(filter); setFocusedClusterIndex(0); }}
+                                                className={`px-2 py-0.5 text-xs rounded border transition-colors ${sizeFilter === filter
+                                                    ? 'bg-indigo-600/30 text-indigo-300 border-indigo-500/50'
+                                                    : 'bg-gray-800/50 text-gray-400 border-gray-700 hover:bg-gray-700 hover:text-gray-300'
+                                                    }`}
+                                            >
+                                                {labels[filter]} ({counts[filter]})
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Right: Ungroupable check */}
+                                <button
+                                    onClick={() => {
+                                        if (ungroupableFaces.length > 0) {
+                                            setShowUngroupableModal(true);
+                                        } else {
+                                            checkUngroupableFaces();
+                                        }
+                                    }}
+                                    disabled={isCheckingUngroupable}
+                                    className={`px-2 py-0.5 text-xs rounded border transition-colors flex items-center gap-1 ${ungroupableFaces.length > 0
+                                        ? 'bg-amber-600/30 text-amber-300 border-amber-500/50 hover:bg-amber-600/40'
+                                        : 'bg-gray-800/50 text-gray-400 border-gray-700 hover:bg-gray-700 hover:text-gray-300'
+                                        }`}
+                                >
+                                    {isCheckingUngroupable ? (
+                                        <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+                                        </svg>
+                                    ) : (
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                        </svg>
+                                    )}
+                                    {ungroupableFaces.length > 0 ? `Ungroupable (${ungroupableFaces.length})` : 'Find Ungroupable'}
+                                </button>
+                            </div>
+                        )}
+
                         {/* Actions Toolbar */}
                         <div className="flex items-center justify-between bg-gray-800/30 p-4 rounded-xl border border-gray-800 backdrop-blur-sm">
                             <div className="flex items-center gap-4">
                                 <div className="text-sm text-gray-400">
-                                    Found <span className="text-white font-medium">{clusters.length}</span> suggested groups and <span className="text-white font-medium">{singles.length}</span> single faces.
+                                    Showing <span className="text-white font-medium">{filteredClusters.length}</span> of <span className="text-white font-medium">{totalGroupCount}</span> groups and <span className="text-white font-medium">{singles.length}</span> single faces.
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">
@@ -286,9 +552,9 @@ export default function People() {
                         ) : (
                             <div className="space-y-6">
                                 {/* Clusters */}
-                                {clusters.length > 0 && (
+                                {filteredClusters.length > 0 && (
                                     <ClusterList
-                                        clusters={clusters}
+                                        clusters={filteredClusters}
                                         selectedFaceIds={selectedFaceIds}
                                         toggleFace={toggleFace}
                                         toggleGroup={toggleGroup}
@@ -297,6 +563,15 @@ export default function People() {
                                         handleIgnoreGroup={handleIgnoreGroup}
                                         handleUngroup={handleUngroup}
                                         handleOpenNaming={handleOpenNaming}
+                                        // Progressive Loading
+                                        hasMoreGroups={hasMoreGroups}
+                                        remainingGroupCount={remainingGroupCount}
+                                        onLoadMore={loadMoreGroups}
+                                        totalGroupCount={totalGroupCount}
+                                        // Keyboard Navigation
+                                        focusedIndex={focusedClusterIndex}
+                                        // Suggestion sync for keyboard nav
+                                        onSuggestionFound={handleSuggestionFound}
                                     />
                                 )}
 
@@ -395,6 +670,18 @@ export default function People() {
                 onClose={() => setShowUnmatchedModal(false)}
                 faceIds={singles}
                 onName={handleOpenNaming}
+                onAutoName={handleNameGroup}
+                onIgnore={handleIgnoreGroup}
+            />
+
+            {/* Ungroupable Faces Review Modal */}
+            <UnmatchedFacesModal
+                isOpen={showUngroupableModal}
+                onClose={() => setShowUngroupableModal(false)}
+                faceIds={ungroupableFaces}
+                onName={(ids) => {
+                    handleOpenNaming(ids);
+                }}
                 onAutoName={handleNameGroup}
                 onIgnore={handleIgnoreGroup}
             />

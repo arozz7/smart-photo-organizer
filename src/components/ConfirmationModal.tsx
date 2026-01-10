@@ -27,20 +27,54 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     const [isLoading, setIsLoading] = React.useState(false);
     const [inputValue, setInputValue] = React.useState(defaultValue || '');
 
-    // Focus input on open if present
+    // Refs for focus management
     const inputRef = React.useRef<HTMLInputElement>(null);
+    const confirmButtonRef = React.useRef<HTMLButtonElement>(null);
+
+    // Focus appropriate element on open
     React.useEffect(() => {
-        if (open && defaultValue !== undefined) {
-            setInputValue(defaultValue);
-            setTimeout(() => inputRef.current?.focus(), 100);
+        if (open) {
+            if (defaultValue !== undefined) {
+                setInputValue(defaultValue);
+                setTimeout(() => inputRef.current?.focus(), 100);
+            } else {
+                // Focus confirm button for non-prompt modals
+                setTimeout(() => confirmButtonRef.current?.focus(), 100);
+            }
         }
     }, [open, defaultValue]);
+
+    const handleConfirm = async () => {
+        setIsLoading(true);
+        try {
+            await onConfirm(defaultValue !== undefined ? inputValue : undefined);
+        } finally {
+            if (open) setIsLoading(false);
+        }
+    };
+
+    // Handle keyboard events on the modal content
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        // Stop propagation to prevent page-level keyboard handlers
+        e.stopPropagation();
+
+        if (e.key === 'Enter' && !isLoading) {
+            e.preventDefault();
+            handleConfirm();
+        } else if (e.key === 'Escape' && !isLoading) {
+            e.preventDefault();
+            onOpenChange(false);
+        }
+    };
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
             <Dialog.Portal>
                 <Dialog.Overlay className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[200]" />
-                <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-gray-900 border border-gray-700 p-6 rounded-xl shadow-2xl z-[201] animate-in fade-in zoom-in duration-200">
+                <Dialog.Content
+                    className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-gray-900 border border-gray-700 p-6 rounded-xl shadow-2xl z-[201] animate-in fade-in zoom-in duration-200"
+                    onKeyDown={handleKeyDown}
+                >
                     <Dialog.Title className="text-xl font-bold text-white mb-2">
                         {title}
                     </Dialog.Title>
@@ -57,8 +91,8 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                             onChange={(e) => setInputValue(e.target.value)}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
-                                    // Trigger confirm
-                                    onConfirm(inputValue);
+                                    e.stopPropagation();
+                                    handleConfirm();
                                 }
                             }}
                         />
@@ -73,15 +107,9 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                             </Dialog.Close>
                         )}
                         <button
+                            ref={confirmButtonRef}
                             disabled={isLoading}
-                            onClick={async () => {
-                                setIsLoading(true);
-                                try {
-                                    await onConfirm(defaultValue !== undefined ? inputValue : undefined);
-                                } finally {
-                                    if (open) setIsLoading(false);
-                                }
-                            }}
+                            onClick={handleConfirm}
                             className={`px-6 py-2 rounded-md text-white font-medium transition-all shadow-lg flex items-center gap-2 ${variant === 'danger'
                                 ? 'bg-red-600 hover:bg-red-500 shadow-red-900/20 disabled:bg-red-600/50'
                                 : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/20 disabled:bg-indigo-600/50'

@@ -28,6 +28,9 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
     const [singles, setSingles] = useState<any[]>([])
     const [clustering, setClustering] = useState(false)
 
+    // Sort Order (most recent first = desc)
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc') // Default to most recent first
+
     useEffect(() => {
         if (isOpen) {
             loadIgnoredFaces(0)
@@ -43,14 +46,19 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
 
         try {
             // @ts-ignore
-            const res = await window.ipcRenderer.invoke('db:getIgnoredFaces', { page: pageNum, limit: LIMIT })
+            const res = await window.ipcRenderer.invoke('db:getIgnoredFaces', { page: pageNum, limit: LIMIT, order: sortOrder })
 
             // Backend returns { faces: [...], total: number }
             const newFaces = res.faces || []
             setTotalCount(res.total || 0)
 
             if (isLoadMore) {
-                setFaces(prev => [...prev, ...newFaces])
+                // Deduplicate by face.id to prevent React key warnings
+                setFaces(prev => {
+                    const existingIds = new Set(prev.map(f => f.id));
+                    const uniqueNewFaces = newFaces.filter((f: any) => !existingIds.has(f.id));
+                    return [...prev, ...uniqueNewFaces];
+                });
 
                 // If grouping was active, we should re-cluster everything
                 // Ideally we'd do this automatically, but for now let's just turn it off to avoid confusion
@@ -86,11 +94,11 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
             setClustering(true)
             try {
                 const faceIds = faces.map(f => f.id)
-                // Use looser threshold for "Deleted/Ignored" faces as they might be bad angles
+                // Use same threshold as Unnamed Faces for consistent grouping
                 // @ts-ignore
                 const res = await window.ipcRenderer.invoke('ai:clusterFaces', {
                     faceIds,
-                    eps: 0.75,
+                    eps: 0.45,     // Tighter threshold (was 0.75, now matches Unnamed Faces)
                     min_samples: 2
                 })
 
@@ -147,7 +155,10 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
         console.log(`[IgnoredFaces] Selection changed. Selected: ${selectedIds.size}, Descriptors: ${sample.length}`);
 
         if (sample.length > 0) {
-            matchBatch(sample, { threshold }).then(results => {
+            // Convert similarity (slider value) to L2 distance for backend
+            // similarity = 1/(1+distance), so distance = 1/similarity - 1
+            const distanceThreshold = (1 / threshold) - 1;
+            matchBatch(sample, { threshold: distanceThreshold }).then(results => {
                 console.log("[IgnoredFaces] matchBatch results:", results);
                 const counts: any = {};
                 results.forEach(r => {
@@ -258,6 +269,41 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                         </Dialog.Title>
 
                         <div className="flex items-center gap-3">
+                            {/* Sort Order Toggle */}
+                            <button
+                                onClick={() => {
+                                    const newOrder = sortOrder === 'desc' ? 'asc' : 'desc';
+                                    setSortOrder(newOrder);
+                                    setFaces([]);
+                                    setPage(0);
+                                    setIsGrouping(false);
+                                    setClusters([]);
+                                    setSingles([]);
+                                    setSelectedIds(new Set());
+                                    // Reload with new order
+                                    (async () => {
+                                        setLoading(true);
+                                        try {
+                                            // @ts-ignore
+                                            const res = await window.ipcRenderer.invoke('db:getIgnoredFaces', { page: 0, limit: LIMIT, order: newOrder });
+                                            setFaces(res.faces || []);
+                                            setTotalCount(res.total || 0);
+                                        } finally {
+                                            setLoading(false);
+                                        }
+                                    })();
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors flex items-center gap-2 ${sortOrder === 'desc'
+                                    ? 'bg-amber-600/20 text-amber-300 border-amber-500/50'
+                                    : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'
+                                    }`}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
+                                </svg>
+                                <span>{sortOrder === 'desc' ? 'Most Recent First' : 'Oldest First'}</span>
+                            </button>
+
                             <button
                                 onClick={handleClusterToggle}
                                 disabled={clustering || faces.length === 0}

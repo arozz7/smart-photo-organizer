@@ -118,6 +118,58 @@ def calculate_mean_embedding(descriptors):
         
     return mean_vec.tolist()
 
+def split_oversized_cluster(cluster_ids, X_normalized, id_to_idx, max_size=25):
+    """
+    Split a large cluster into smaller sub-clusters using hierarchical clustering.
+    ALWAYS splits clusters larger than max_size - no cohesion exception.
+    
+    Args:
+        cluster_ids: List of face IDs in the cluster
+        X_normalized: Full normalized embedding matrix (all faces)
+        id_to_idx: Dict mapping face ID to index in X_normalized
+        max_size: Maximum allowed cluster size
+        
+    Returns:
+        List of sub-cluster ID lists, each with size ≤ max_size
+    """
+    if len(cluster_ids) <= max_size:
+        return [cluster_ids]
+    
+    try:
+        from scipy.cluster.hierarchy import linkage, fcluster
+    except ImportError:
+        logger.warning("scipy not found. Skipping cluster splitting.")
+        return [cluster_ids]
+    
+    # Extract embeddings for this cluster
+    indices = [id_to_idx[fid] for fid in cluster_ids]
+    X_sub = X_normalized[indices]
+    
+    # Ward's method for balanced clusters
+    Z = linkage(X_sub, method='ward')
+    
+    # Split into 2 initially
+    labels = fcluster(Z, t=2, criterion='maxclust')
+    
+    # Group IDs by sub-cluster label
+    sub_clusters = {}
+    for i, label in enumerate(labels):
+        if label not in sub_clusters:
+            sub_clusters[label] = []
+        sub_clusters[label].append(cluster_ids[i])
+    
+    # RECURSIVELY split any sub-clusters that are still too large
+    final_clusters = []
+    for sub_ids in sub_clusters.values():
+        if len(sub_ids) > max_size:
+            deeper_split = split_oversized_cluster(sub_ids, X_normalized, id_to_idx, max_size)
+            final_clusters.extend(deeper_split)
+        else:
+            final_clusters.append(sub_ids)
+    
+    return final_clusters
+
+
 def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2, debug=False):
     """
     Clusters faces using DBSCAN.
@@ -222,6 +274,85 @@ def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2, debug=False):
         return {'clusters': result_clusters, 'debug_info': debug_info}
         
     return result_clusters
+
+
+def find_ungroupable_faces(face_ids, descriptors, centroids, distance_threshold=1.0):
+    """
+    Identify faces that are too far from any named person to ever be matched.
+    
+    Args:
+        face_ids: List of face IDs
+        descriptors: List of face descriptor vectors (512-dim)
+        centroids: List of dicts with 'descriptor' and 'name' keys for named people
+        distance_threshold: Max L2 distance (normalized) to nearest centroid (default 1.0)
+    
+    Returns:
+        dict with:
+            - ungroupable_ids: List of face IDs exceeding threshold
+            - groupable_ids: List of face IDs within threshold
+            - stats: Summary statistics
+    """
+    if not descriptors or not face_ids:
+        return {'ungroupable_ids': [], 'groupable_ids': [], 'stats': {'total': 0}}
+    
+    # Convert to numpy and normalize
+    X = np.array(descriptors)
+    norm = np.linalg.norm(X, axis=1, keepdims=True)
+    norm[norm == 0] = 1e-10
+    X_normalized = X / norm
+    
+    ungroupable_ids = []
+    groupable_ids = []
+    distances = []
+    
+    if not centroids or len(centroids) == 0:
+        # No centroids = all faces are ungroupable
+        logger.info(f"[Ungroupable] No named person centroids. All {len(face_ids)} faces are ungroupable.")
+        return {
+            'ungroupable_ids': list(face_ids),
+            'groupable_ids': [],
+            'stats': {
+                'total': len(face_ids),
+                'ungroupable': len(face_ids),
+                'groupable': 0,
+                'threshold': distance_threshold,
+                'centroidCount': 0
+            }
+        }
+    
+    # Prepare centroids
+    centroid_descriptors = np.array([c['descriptor'] for c in centroids])
+    centroid_norm = np.linalg.norm(centroid_descriptors, axis=1, keepdims=True)
+    centroid_norm[centroid_norm == 0] = 1e-10
+    centroid_descriptors_normalized = centroid_descriptors / centroid_norm
+    
+    # Calculate nearest distance for each face
+    for i, face_id in enumerate(face_ids):
+        face_vec = X_normalized[i].reshape(1, -1)
+        dists = np.linalg.norm(centroid_descriptors_normalized - face_vec, axis=1)
+        min_dist = float(np.min(dists))
+        distances.append(min_dist)
+        
+        if min_dist > distance_threshold:
+            ungroupable_ids.append(face_id)
+        else:
+            groupable_ids.append(face_id)
+    
+    logger.info(f"[Ungroupable] Threshold {distance_threshold}: {len(ungroupable_ids)} ungroupable, {len(groupable_ids)} groupable")
+    
+    return {
+        'ungroupable_ids': ungroupable_ids,
+        'groupable_ids': groupable_ids,
+        'stats': {
+            'total': len(face_ids),
+            'ungroupable': len(ungroupable_ids),
+            'groupable': len(groupable_ids),
+            'threshold': distance_threshold,
+            'centroidCount': len(centroids),
+            'meanDistance': float(np.mean(distances)) if distances else 0,
+            'maxDistance': float(np.max(distances)) if distances else 0
+        }
+    }
 
 
 def detect_background_faces(faces_data, centroids, min_photo_appearances=3, max_cluster_size=2, distance_threshold=0.7, eps=0.55, min_samples=2):

@@ -14,9 +14,14 @@ export function usePeopleCluster() {
     // Clustering State
     const [clusters, setClusters] = useState<{ faces: number[], suggestion?: any }[]>([])
     const [singles, setSingles] = useState<number[]>([])
+    const [ungroupableFaces, setUngroupableFaces] = useState<number[]>([])
     const [totalFaces, setTotalFaces] = useState(0)
     const [isClustering, setIsClustering] = useState(false)
     const [isAutoAssigning, setIsAutoAssigning] = useState(false);
+
+    // Progressive Loading State
+    const [displayedGroupCount, setDisplayedGroupCount] = useState(100);
+    const PAGE_SIZE = 100;
 
     // Selection State
     const [selectedFaceIds, setSelectedFaceIds] = useState<Set<number>>(new Set())
@@ -122,6 +127,17 @@ export function usePeopleCluster() {
         setSelectedFaceIds(newSet);
     }, [clusters, clearSelection]);
 
+    // Handle suggestion found by ClusterRow - update cluster so keyboard nav can access it
+    const handleSuggestionFound = useCallback((index: number, suggestion: any) => {
+        setClusters(prev => {
+            const updated = [...prev];
+            if (updated[index]) {
+                updated[index] = { ...updated[index], suggestion };
+            }
+            return updated;
+        });
+    }, []);
+
     const handleAutoAssign = async () => {
         if (totalFaces === 0) return;
 
@@ -175,6 +191,7 @@ export function usePeopleCluster() {
         // Optimistic: Remove from clusters immediately
         const idsSet = new Set(ids)
         setClusters(prev => prev.map(c => ({
+            ...c, // Preserve suggestion and other properties
             faces: c.faces.filter(id => !idsSet.has(id))
         })).filter(c => c.faces.length > 0))
         setSingles(prev => prev.filter(id => !idsSet.has(id)))
@@ -195,6 +212,12 @@ export function usePeopleCluster() {
         setNamingGroup(null)
         // Manual naming is always confirmed
         await handleNameGroup(selectedIds, name, true)
+
+        // Remove from ungroupable list if present
+        setUngroupableFaces(prev => {
+            if (prev.length === 0) return prev;
+            return prev.filter(id => !selectedIds.includes(id));
+        });
     }, [handleNameGroup])
 
     const handleOpenNaming = useCallback(async (ids: number[]) => {
@@ -217,6 +240,7 @@ export function usePeopleCluster() {
                 // Optimistic Update
                 const idsSet = new Set(ids)
                 setClusters(prev => prev.map(c => ({
+                    ...c, // Preserve suggestion and other properties
                     faces: c.faces.filter(id => !idsSet.has(id))
                 })).filter(c => c.faces.length > 0))
                 setSingles(prev => prev.filter(id => !idsSet.has(id)))
@@ -226,6 +250,13 @@ export function usePeopleCluster() {
                     ids.forEach(id => next.delete(id))
                     return next
                 })
+
+                // Also remove from ungroupable list if present
+                setUngroupableFaces(prev => {
+                    if (prev.length === 0) return prev;
+                    const idsSet = new Set(ids);
+                    return prev.filter(id => !idsSet.has(id));
+                });
 
                 // @ts-ignore
                 await window.ipcRenderer.invoke('db:ignoreFaces', ids)
@@ -286,9 +317,25 @@ export function usePeopleCluster() {
         });
     }, [clusters, showConfirm, addToast]);
 
+    // Progressive Loading: Compute displayed clusters
+    const displayedClusters = clusters.slice(0, displayedGroupCount);
+    const hasMoreGroups = clusters.length > displayedGroupCount;
+    const remainingGroupCount = clusters.length - displayedGroupCount;
+
+    const loadMoreGroups = useCallback(() => {
+        setDisplayedGroupCount(prev => prev + PAGE_SIZE);
+    }, [PAGE_SIZE]);
+
+    // Reset displayed count when clusters change
+    const resetDisplayedCount = useCallback(() => {
+        setDisplayedGroupCount(PAGE_SIZE);
+    }, [PAGE_SIZE]);
+
     return {
-        clusters,
+        clusters: displayedClusters, // Now returns only displayed subset
+        allClusters: clusters, // Full list if needed
         singles,
+        ungroupableFaces, // Faces too far from any named person
         totalFaces,
         isClustering,
         isAutoAssigning,
@@ -307,8 +354,17 @@ export function usePeopleCluster() {
         handleIgnoreGroup,
         handleUngroup,
         handleIgnoreAllGroups,
+        handleSuggestionFound,
+        // Progressive Loading
+        hasMoreGroups,
+        remainingGroupCount,
+        loadMoreGroups,
+        resetDisplayedCount,
+        displayedGroupCount,
+        totalGroupCount: clusters.length,
         setClusters, // Exposed in case view needs manual manipulation, though ideally avoided
         setSingles,
+        setUngroupableFaces,
         setTotalFaces,
         setSelectedFaceIds
     }
