@@ -44,3 +44,18 @@ export interface PotentialMatch {
         distance: number;
     };
 }
+
+export interface FaceBucket {
+    id: number;
+    bucket_type: 'suggestion' | 'discovery';
+    suggested_person_id?: number | null;
+    person_name?: string;
+    face_count: number;
+    status: 'active' | 'completed';
+    session_folder?: string;
+    session_date?: string;
+    created_at?: string;
+    updated_at?: string;
+    face_ids: number[];
+}
+

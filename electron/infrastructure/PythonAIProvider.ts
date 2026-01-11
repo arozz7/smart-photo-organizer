@@ -99,7 +99,31 @@ export class PythonAIProvider implements IAIProvider {
         // 3. Process Logic (Delegated to Services)
         if (message.type === 'analysis_result') {
             if (!message.error && message.faces && message.faces.length > 0) {
-                await FaceService.processAnalysisResult(message.photoId, message.faces, message.width, message.height, this);
+                // Extract session data for Phase P2
+                const sessionFolder = message.filePath ? path.dirname(message.filePath) : undefined;
+                // Try to extract date from photo metadata if available
+                let sessionDate: string | undefined;
+                try {
+                    const photo = PhotoRepository.getPhotoById(message.photoId);
+                    if (photo?.metadata_json) {
+                        const meta = JSON.parse(photo.metadata_json);
+                        // Common EXIF date fields
+                        sessionDate = meta.DateTimeOriginal || meta.CreateDate || meta.MediaCreateDate;
+                        // Convert to ISO date string if present
+                        if (sessionDate && typeof sessionDate === 'string') {
+                            sessionDate = sessionDate.split(' ')[0].replace(/:/g, '-');
+                        }
+                    }
+                } catch (e) { /* ignore metadata parse errors */ }
+
+                await FaceService.processAnalysisResult(
+                    message.photoId,
+                    message.faces,
+                    message.width,
+                    message.height,
+                    this,
+                    { sessionFolder, sessionDate }
+                );
             }
 
             // Record Scan History for Metrics

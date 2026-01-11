@@ -93,6 +93,7 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
 
     CREATE INDEX IF NOT EXISTS idx_faces_person_id ON faces(person_id);
     CREATE INDEX IF NOT EXISTS idx_faces_photo_id ON faces(photo_id);
+    CREATE INDEX IF NOT EXISTS idx_faces_bucket_id ON faces(bucket_id);
   `);
 
   // Migration for existing databases
@@ -192,6 +193,24 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     db.exec('ALTER TABLE people ADD COLUMN last_drift_check INTEGER');
   } catch (e) { /* Column exists */ }
 
+  // --- MIGRATION: Photo Session Grouping (Phase P2) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN session_folder TEXT');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN session_date TEXT');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: Pet Classification (Phase P3) ---
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN entity_type TEXT DEFAULT 'human'");
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec("ALTER TABLE people ADD COLUMN entity_type TEXT DEFAULT 'human'");
+  } catch (e) { /* Column exists */ }
+
   // Create person_eras table for era-aware clustering
   db.exec(`
     CREATE TABLE IF NOT EXISTS person_eras (
@@ -235,7 +254,64 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     );
     CREATE INDEX IF NOT EXISTS idx_person_alerts_person_id ON person_alerts(person_id);
     CREATE INDEX IF NOT EXISTS idx_person_alerts_dismissed ON person_alerts(dismissed_at);
+
+    -- Phase B1: Background Bucketing Schema
+    CREATE TABLE IF NOT EXISTS face_buckets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bucket_type TEXT NOT NULL DEFAULT 'discovery',
+      suggested_person_id INTEGER,
+      centroid BLOB,
+      status TEXT DEFAULT 'active',
+      session_folder TEXT,
+      session_date TEXT,
+      face_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (suggested_person_id) REFERENCES people(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_face_buckets_status ON face_buckets(status);
+    CREATE INDEX IF NOT EXISTS idx_face_buckets_type ON face_buckets(bucket_type);
+
+    -- App State: Key-value store for service flags and checkpoints
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
+
+  // --- MIGRATION: Background Bucketing Columns (Phase B1) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN needs_bucketing INTEGER DEFAULT 0');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN bucket_id INTEGER');
+  } catch (e) { /* Column exists */ }
+
+  // Backfill needs_bucketing=1 for existing unassigned/unbucketed faces
+  // This ensures old faces get picked up by the background service
+  db.prepare(`
+    UPDATE faces 
+    SET needs_bucketing = 1 
+    WHERE person_id IS NULL 
+      AND bucket_id IS NULL 
+      AND needs_bucketing = 0
+      AND (is_ignored = 0 OR is_ignored IS NULL)
+  `).run();
+
+  // Initialize app_state with default values if not present
+  const initAppState = db.prepare(`INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)`);
+  initAppState.run('scan_in_progress', '0');
+  initAppState.run('scan_paused', '0');
+  initAppState.run('bucketing_dirty', '0');
+  initAppState.run('bucketing_checkpoint_offset', '0');
+  initAppState.run('bucketing_total_faces', '0');
+  initAppState.run('bucketing_last_run', null);
+  initAppState.run('shutdown_requested', '0');
+  initAppState.run('last_clean_shutdown', null);
+  initAppState.run('ignored_recheck_active', '0');
+  initAppState.run('ignored_recheck_offset', '0');
 
   // --- MIGRATION: Smart Face Storage (BLOBs + Pruning) ---
   try {

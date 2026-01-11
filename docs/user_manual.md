@@ -50,7 +50,7 @@ The AI automatically detects faces during the scan. Your job is to give them nam
     - **Group by AI Suggestion:** Switch to this mode to have the AI automatically group faces by who it thinks they are.
         - **Smart Grouping:** The AI preserves coherent clusters (e.g., 50 faces from the same event) and tags the entire group with a suggestion (e.g., "Suggested: Mom").
         - **Bulk Action:** Clicking "Accept" on a group assigns **all** faces in that cluster at once.
-### ⚡ 3.1 High-Density Review UX (Power Users)
+## ⚡ 3.1 High-Density Review UX (Power Users)
 When managing libraries with 10,000+ unnamed faces, use these tools to speed up your workflow:
 
 #### ⌨️ Keyboard Navigation
@@ -70,6 +70,12 @@ When managing libraries with 10,000+ unnamed faces, use these tools to speed up 
 > *   **Background Filter:** A "trash disposal" for mass noise. It finds people who only appear once or twice in your library (strangers in crowds, blurry background faces) so you can bulk-ignore them.
 > *   **Ungroupable Search:** A "sorting tool" to find potential new people. It looks for faces that have clear AI data but are far (distant) from your *Identified People*.
 
+### 🧠 3.2 Automated Suggestions & Discoveries
+The app works in the background to organize your photos even when you aren't naming them.
+- **Suggestion Buckets:** Groups of faces that match people you've already named. Click "Confirm" to accept them all at once.
+- **Discovery Buckets:** New groups of unknown people found by the AI. You can name these groups to create a new Person.
+- **Cleaning Groups:** If a group has mixed faces, you can select individual faces to name them correctly, or click "Ungroup" to dissolve the bucket.
+
 6.  **Ignored Faces:** Managing ignored faces is easy. Open the Ignored Faces modal to review hidden faces. 
     - **Group Similar**: Automatically cluster the "ignored" pile to quickly find accidental ignores.
     - **Sensitivity Slider**: Use the slider to increase matching sensitivity if you don't see suggestions for blurry or lower-quality photos.
@@ -82,7 +88,7 @@ When managing libraries with 10,000+ unnamed faces, use these tools to speed up 
     - **Stale Index Alert:** If you see an amber "Face Index Needs Update" banner on the "Identified People" tab, it means faces have been removed or reassigned, and the search index is out of date.
     - **Rebuild Index:** Click the **"Rebuild Index"** button on the banner to refresh the AI search index. This is quick (usually < 10 seconds) and ensures accurate duplicate detection.
 
-## ⏳ 3.1 Era Generation (Advanced)
+## ⏳ 3.3 Era Generation (Advanced)
 Some people change significantly over time (e.g., from child to adult). A single facial model might struggle to match both "Baby Nick" and "Adult Nick" accurately.
 
 1.  **Generate Eras:** On a Person's detail page, click the **"Generate Eras"** button (Clock icon).

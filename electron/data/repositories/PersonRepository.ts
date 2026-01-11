@@ -1,9 +1,16 @@
 import { getDB } from '../../db';
 
 export class PersonRepository {
+    // Flag to ensure cover face migration only runs once per session
+    private static coverFacesInitialized = false;
+
     static getPeople() {
-        // Ensure covers are populated (lazy migration/maintenance)
-        this.updateAllCoverFaces();
+        // Ensure covers are populated ONCE (lazy migration/maintenance)
+        // Running on every call was causing severe UI blocking
+        if (!this.coverFacesInitialized) {
+            this.updateAllCoverFaces();
+            this.coverFacesInitialized = true;
+        }
 
         const db = getDB();
         try {
@@ -55,7 +62,7 @@ export class PersonRepository {
     static getPeopleWithDescriptors() {
         const db = getDB();
         try {
-            const people = db.prepare('SELECT id, name, descriptor_mean_json FROM people WHERE descriptor_mean_json IS NOT NULL').all();
+            const people = db.prepare('SELECT id, name, descriptor_mean_json, entity_type FROM people WHERE descriptor_mean_json IS NOT NULL').all();
             const eras = db.prepare('SELECT * FROM person_eras').all(); // Fetch all eras
 
             // Map eras to personId
@@ -72,6 +79,7 @@ export class PersonRepository {
                 id: r.id,
                 name: r.name,
                 descriptor: JSON.parse(r.descriptor_mean_json),
+                entity_type: r.entity_type || 'human',
                 eras: erasMap.get(r.id) || []
             }));
         } catch (error) {

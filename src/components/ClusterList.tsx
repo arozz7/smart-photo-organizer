@@ -9,7 +9,7 @@ interface ClusterListProps {
     toggleFace: (id: number) => void
     toggleGroup: (ids: number[]) => void
     fetchFacesByIds: (ids: number[]) => Promise<Face[]>
-    handleNameGroup: (ids: number[], name: string) => Promise<void>
+    handleNameGroup: (ids: number[], name: string, confirm?: boolean) => Promise<void>
     handleIgnoreGroup: (ids: number[]) => void
     handleUngroup: (index: number) => void
     handleOpenNaming: (ids: number[]) => Promise<void>

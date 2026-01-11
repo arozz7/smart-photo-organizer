@@ -14,8 +14,10 @@ import { useAI } from '../context/AIContext'
 import { useAlert } from '../context/AlertContext'
 import { useToast } from '../context/ToastContext'
 import { usePeopleCluster } from '../hooks/usePeopleCluster'
+import { useBuckets } from '../hooks/useBuckets'
 import SmartIgnorePanel from '../components/SmartIgnorePanel'
 import FaceDebugModal from '../components/FaceDebugModal'
+import RecoveredFacesModal from '../components/RecoveredFacesModal'
 
 export default function People() {
     const navigate = useNavigate()
@@ -37,7 +39,44 @@ export default function People() {
         setUngroupableFaces
     } = usePeopleCluster()
 
-    const [activeTab, setActiveTab] = useState<'identified' | 'unnamed'>('identified')
+    const [activeTab, setActiveTab] = useState<'identified' | 'unnamed' | 'suggestions' | 'discoveries'>('identified')
+
+    // Buckets Hook
+    const {
+        suggestionBuckets, discoveryBuckets, loadingBuckets, loadBuckets,
+        totalSuggestionCount, totalDiscoveryCount,
+        hasMoreSuggestions, hasMoreDiscoveries,
+        remainingSuggestionCount, remainingDiscoveryCount,
+        loadMoreSuggestions, loadMoreDiscoveries,
+        handleConfirmSuggestion, handleRejectSuggestion, handleNameBucket, handleIgnoreBucket,
+        recheckStatus, handleStartRecheck
+    } = useBuckets()
+
+    const suggestionClusters = useMemo(() => suggestionBuckets.map(b => ({
+        faces: b.face_ids,
+        suggestion: { personId: b.suggested_person_id, personName: b.person_name, similarity: 1 }
+    })), [suggestionBuckets])
+
+    const discoveryClusters = useMemo(() => discoveryBuckets.map(b => ({
+        faces: b.face_ids,
+        suggestion: null
+    })), [discoveryBuckets])
+
+    // Load bucket counts on initial mount for tab indicators
+    useEffect(() => {
+        loadBuckets();
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Reload full bucket data when switching to bucket tabs
+    useEffect(() => {
+        if (activeTab === 'suggestions' || activeTab === 'discoveries') {
+            loadBuckets()
+        }
+    }, [activeTab, loadBuckets])
+
+
+
+
     const [showBlurryModal, setShowBlurryModal] = useState(false)
     const [showIgnoredModal, setShowIgnoredModal] = useState(false)
     const [showUnmatchedModal, setShowUnmatchedModal] = useState(false)
@@ -46,11 +85,15 @@ export default function People() {
     const [hasNewFaces, setHasNewFaces] = useState(false)
     const [isScanning, setIsScanning] = useState(false)
     const [isScanModalOpen, setIsScanModalOpen] = useState(false)
+    const [showRecoveredModal, setShowRecoveredModal] = useState(false)
     const [showGroupingModal, setShowGroupingModal] = useState(false)
     const [showDebugModal, setShowDebugModal] = useState(false)
     const [faissStaleCount, setFaissStaleCount] = useState(0)
     const [isRebuildingIndex, setIsRebuildingIndex] = useState(false)
     const [isCheckingUngroupable, setIsCheckingUngroupable] = useState(false)
+
+    // Bucket naming state - tracks which bucket we're naming (if any)
+    const [pendingBucketNaming, setPendingBucketNaming] = useState<{ bucket: any, type: 'suggestion' | 'discovery' } | null>(null);
 
     // Keyboard Navigation State
     const [focusedClusterIndex, setFocusedClusterIndex] = useState(-1)
@@ -300,6 +343,25 @@ export default function People() {
                                 >
                                     Unnamed Faces
                                 </button>
+                                <button
+                                    onClick={() => setActiveTab('suggestions')}
+                                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === 'suggestions'
+                                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
+                                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                                        }`}
+                                >
+                                    Suggestions <span className="ml-2 opacity-50 text-xs">({totalSuggestionCount})</span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('discoveries')}
+                                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === 'discoveries'
+                                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
+                                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                                        }`}
+                                >
+                                    Discoveries <span className="ml-2 opacity-50 text-xs">({totalDiscoveryCount})</span>
+                                </button>
+
                                 {activeTab === 'unnamed' && (
                                     <div className="flex items-center">
                                         <button
@@ -331,6 +393,37 @@ export default function People() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                             </svg>
                             {isScanning ? 'Preparing...' : 'Scan for All Named People'}
+                        </button>
+                        <button
+                            onClick={handleStartRecheck}
+                            disabled={recheckStatus.active}
+                            className={`px-3 py-2 rounded-lg transition-colors flex items-center gap-2 border ${recheckStatus.active
+                                ? 'bg-indigo-600/10 text-indigo-400 border-indigo-500/30'
+                                : 'bg-gray-800/50 hover:bg-gray-700 text-gray-400 border-gray-700'
+                                }`}
+                            title={recheckStatus.active ? "Re-check in progress..." : "Re-check Ignored Faces"}
+                        >
+                            {recheckStatus.active ? (
+                                <>
+                                    <div className="animate-spin h-4 w-4 border-b-2 border-indigo-400 rounded-full" />
+                                    <span className="text-xs">
+                                        {recheckStatus.total > 0
+                                            ? `${recheckStatus.offset}/${recheckStatus.total}`
+                                            : 'Checking...'}
+                                    </span>
+                                </>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => setShowRecoveredModal(true)}
+                            className="bg-gray-800/50 hover:bg-gray-700 text-gray-400 border border-gray-700 px-3 py-2 rounded-lg transition-colors flex items-center gap-2"
+                            title="View Recovered Faces"
+                        >
+                            <span className="text-sm">⚡</span>
                         </button>
                     </div>
                 </div>
@@ -397,6 +490,99 @@ export default function People() {
                         )}
                     </div>
                 )}
+
+                {activeTab === 'suggestions' && (
+                    <div className="p-6">
+                        {loadingBuckets ? (
+                            <div className="flex items-center justify-center h-full p-20">
+                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
+                            </div>
+                        ) : totalSuggestionCount === 0 ? (
+                            <div className="text-center py-20 text-gray-500">
+                                <span className="text-4xl mb-4 block">✨</span>
+                                <p>No naming suggestions found yet.</p>
+                            </div>
+                        ) : (
+                            <ClusterList
+                                clusters={suggestionClusters}
+                                selectedFaceIds={selectedFaceIds}
+                                toggleFace={toggleFace}
+                                toggleGroup={toggleGroup}
+                                fetchFacesByIds={fetchFacesByIds}
+                                handleNameGroup={async (ids, _name, _confirm) => {
+                                    const bucket = suggestionBuckets.find(b => b.face_ids.includes(ids[0]));
+                                    if (bucket) await handleConfirmSuggestion(bucket, ids);
+                                }}
+                                handleUngroup={(index) => {
+                                    const bucket = suggestionBuckets[index];
+                                    if (bucket) handleRejectSuggestion(bucket);
+                                }}
+                                handleIgnoreGroup={(ids) => {
+                                    const bucket = suggestionBuckets.find(b => b.face_ids[0] === ids[0]);
+                                    if (bucket) handleIgnoreBucket(bucket);
+                                }}
+                                handleOpenNaming={handleOpenNaming}
+                                // Progressive Loading
+                                hasMoreGroups={hasMoreSuggestions}
+                                remainingGroupCount={remainingSuggestionCount}
+                                onLoadMore={loadMoreSuggestions}
+                                totalGroupCount={totalSuggestionCount}
+                            />
+                        )}
+                    </div>
+                )}
+
+                {activeTab === 'discoveries' && (
+                    <div className="p-6">
+                        {loadingBuckets ? (
+                            <div className="flex items-center justify-center h-full p-20">
+                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
+                            </div>
+                        ) : totalDiscoveryCount === 0 ? (
+                            <div className="text-center py-20 text-gray-500">
+                                <span className="text-4xl mb-4 block">🔍</span>
+                                <p>No new discoveries yet.</p>
+                            </div>
+                        ) : (
+                            <ClusterList
+                                clusters={discoveryClusters}
+                                selectedFaceIds={selectedFaceIds}
+                                toggleFace={toggleFace}
+                                toggleGroup={toggleGroup}
+                                fetchFacesByIds={fetchFacesByIds}
+                                handleNameGroup={async (ids, name, _confirm) => {
+                                    console.log('[People] handleNameGroup called:', { firstId: ids[0], name, discoveryBucketsLen: discoveryBuckets.length });
+                                    console.log('[People] First few buckets:', discoveryBuckets.slice(0, 3).map(b => ({ id: b.id, firstFaceId: b.face_ids?.[0] })));
+                                    const bucket = discoveryBuckets.find(b => b.face_ids[0] === ids[0]);
+                                    console.log('[People] Found bucket:', bucket?.id);
+                                    if (bucket) await handleNameBucket(bucket, name);
+                                }}
+                                handleUngroup={(index) => {
+                                    const bucket = discoveryBuckets[index];
+                                    if (bucket) handleRejectSuggestion(bucket); // Same logic: dissolve/unassign
+                                }}
+                                handleIgnoreGroup={(ids) => {
+                                    const bucket = discoveryBuckets.find(b => b.face_ids[0] === ids[0]);
+                                    if (bucket) handleIgnoreBucket(bucket);
+                                }}
+                                handleOpenNaming={async (ids) => {
+                                    // Find bucket and track it for bucket-aware naming
+                                    const bucket = discoveryBuckets.find(b => b.face_ids[0] === ids[0]);
+                                    if (bucket) {
+                                        setPendingBucketNaming({ bucket, type: 'discovery' });
+                                    }
+                                    handleOpenNaming(ids);
+                                }}
+                                // Progressive Loading
+                                hasMoreGroups={hasMoreDiscoveries}
+                                remainingGroupCount={remainingDiscoveryCount}
+                                onLoadMore={loadMoreDiscoveries}
+                                totalGroupCount={totalDiscoveryCount}
+                            />
+                        )}
+                    </div>
+                )}
+
                 {activeTab === 'unnamed' && (
                     <div className="animate-fade-in space-y-4 p-4">
                         <SmartIgnorePanel
@@ -626,10 +812,34 @@ export default function People() {
                         onOpenChange={(open) => {
                             if (!open) {
                                 setNamingGroup(null);
+                                setPendingBucketNaming(null); // Clear bucket context
                             }
                         }}
                         faces={namingGroup.faces}
-                        onConfirm={handleConfirmName}
+                        onConfirm={async (selectedIds, name) => {
+                            // Bucket-aware naming: if we have a pending bucket, use handleNameBucket
+                            if (pendingBucketNaming) {
+                                // Check if user selected ALL faces in the bucket (allow partial)
+                                const isFullBucket = pendingBucketNaming.bucket.face_ids.length === selectedIds.length;
+
+                                if (isFullBucket) {
+                                    await handleNameBucket(pendingBucketNaming.bucket, name);
+                                } else {
+                                    // Partial naming context - treat as standard name + reload
+                                    await handleConfirmName(selectedIds, name);
+                                    loadBuckets();
+                                }
+                                setPendingBucketNaming(null);
+                                setNamingGroup(null);
+                            } else {
+                                // Standard naming flow
+                                await handleConfirmName(selectedIds, name);
+                                // Refresh buckets if in bucket view
+                                if (activeTab === 'suggestions' || activeTab === 'discoveries') {
+                                    loadBuckets();
+                                }
+                            }
+                        }}
                         people={people}
                     />
                 )
@@ -767,6 +977,12 @@ export default function People() {
                         </p>
                     </div>
                 </div>
+            )}
+            {showRecoveredModal && (
+                <RecoveredFacesModal
+                    isOpen={showRecoveredModal}
+                    onClose={() => setShowRecoveredModal(false)}
+                />
             )}
         </div>
     )

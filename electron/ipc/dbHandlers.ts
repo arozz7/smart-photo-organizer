@@ -2,13 +2,14 @@ import { ipcMain } from 'electron';
 import { PhotoRepository } from '../data/repositories/PhotoRepository';
 import { FaceRepository } from '../data/repositories/FaceRepository';
 import { PersonRepository } from '../data/repositories/PersonRepository';
+import { BucketRepository } from '../data/repositories/BucketRepository';
+import { AppStateRepository } from '../data/repositories/AppStateRepository';
 import { PersonService } from '../core/services/PersonService';
 import { FaceService } from '../core/services/FaceService';
 import { FaceAnalysisService } from '../core/services/FaceAnalysisService';
 import { pythonProvider } from '../infrastructure/PythonAIProvider';
 import { getDB } from '../db';
 import { ConfigService } from '../core/services/ConfigService';
-
 
 export function registerDBHandlers() {
     // --- METRICS & STATS ---
@@ -232,7 +233,13 @@ export function registerDBHandlers() {
     });
 
     // --- PEOPLE ---
-    ipcMain.handle('db:getPeople', async () => PersonRepository.getPeople());
+    ipcMain.handle('db:getPeople', async () => {
+        console.log('[IPC] db:getPeople START');
+        const start = Date.now();
+        const result = PersonRepository.getPeople();
+        console.log(`[IPC] db:getPeople END - took ${Date.now() - start}ms`);
+        return result;
+    });
 
     ipcMain.handle('db:setPersonCover', async (_, { personId, faceId }) => {
         PersonRepository.setPersonCover(personId, faceId);
@@ -537,5 +544,185 @@ export function registerDBHandlers() {
         return { success: true };
     });
 
+
+    // --- BACKGROUND BUCKETING (Phase B6) ---
+
+    // Get Buckets
+    ipcMain.handle('db:getSuggestionBuckets', async () => {
+        console.log('[IPC] db:getSuggestionBuckets START');
+        const start = Date.now();
+        try {
+            const buckets = BucketRepository.getSuggestionBuckets();
+            console.log(`[IPC] db:getSuggestionBuckets END - took ${Date.now() - start}ms, ${buckets.length} buckets`);
+            return { success: true, buckets };
+        } catch (e) {
+            console.log(`[IPC] db:getSuggestionBuckets ERROR - took ${Date.now() - start}ms`);
+            return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('db:getDiscoveryBuckets', async () => {
+        console.log('[IPC] db:getDiscoveryBuckets START');
+        const start = Date.now();
+        try {
+            const buckets = BucketRepository.getDiscoveryBuckets();
+            console.log(`[IPC] db:getDiscoveryBuckets END - took ${Date.now() - start}ms, ${buckets.length} buckets`);
+            return { success: true, buckets };
+        } catch (e) {
+            console.log(`[IPC] db:getDiscoveryBuckets ERROR - took ${Date.now() - start}ms`);
+            return { success: false, error: String(e) };
+        }
+    });
+
+    // Re-check Control
+    ipcMain.handle('db:startIgnoredRecheck', async () => {
+        // Count total ignored faces for progress tracking
+        const db = getDB();
+        const result = db.prepare('SELECT COUNT(*) as count FROM faces WHERE is_ignored = 1').get() as { count: number };
+        const total = result?.count || 0;
+
+        AppStateRepository.setRecheckActive(true);
+        AppStateRepository.setRecheckOffset(0);
+        AppStateRepository.setRecheckTotal(total);
+        console.log(`[BackgroundBucketingService] Starting recheck of ${total} ignored faces`);
+        return { success: true, total };
+    });
+
+    ipcMain.handle('db:getIgnoredRecheckStatus', async () => {
+        return {
+            active: AppStateRepository.isRecheckActive(),
+            offset: AppStateRepository.getRecheckOffset(),
+            total: AppStateRepository.getRecheckTotal()
+        };
+    });
+
+    ipcMain.handle('db:getBucketingStatus', async () => {
+        const db = getDB();
+        // Count remaining faces needing bucketing
+        const remaining = db.prepare('SELECT COUNT(*) as count FROM faces WHERE needs_bucketing = 1 AND person_id IS NULL AND is_ignored = 0').get() as { count: number };
+        // Get checkpoint offset (faces already processed)
+        const offset = AppStateRepository.getBucketingOffset();
+        let total = AppStateRepository.getBucketingTotal();
+        const isDirty = AppStateRepository.isBucketingDirty();
+
+        // If total is 0 (service hasn't started setting it yet), estimate it so UI shows pending work
+        if (total === 0 && remaining.count > 0) {
+            total = offset + remaining.count;
+        }
+
+        // Sanitize Offset: The infinite loop bug might have inflated the offset.
+        // Use (Total - Remaining) as the source of truth for progress if available.
+        const effectiveOffset = total > 0 ? Math.max(0, total - remaining.count) : offset;
+
+        return {
+            active: isDirty || remaining.count > 0,
+            offset: effectiveOffset,
+            total,
+            remaining: remaining.count
+        };
+    });
+
+    // Lifecycle Actions
+    // Lifecycle Actions
+    ipcMain.handle('db:confirmSuggestionBucket', async (_, { bucketId, personId, faceIds }) => {
+        try {
+            const db = getDB();
+            let targetFaceIds: number[] = [];
+
+            if (faceIds && Array.isArray(faceIds) && faceIds.length > 0) {
+                targetFaceIds = faceIds;
+            } else {
+                const faces = db.prepare('SELECT id FROM faces WHERE bucket_id = ?').all(bucketId) as { id: number }[];
+                targetFaceIds = faces.map(f => f.id);
+            }
+
+            if (targetFaceIds.length > 0) {
+                FaceRepository.updateFacePerson(targetFaceIds, personId, true);
+                await PersonService.recalculatePersonMean(personId);
+            }
+
+            // Cleanup
+            if (faceIds && faceIds.length > 0) {
+                // Partial confirm: Re-count and check if empty
+                BucketRepository.updateFaceCount(bucketId);
+                const updatedBucket = BucketRepository.getBucketById(bucketId);
+                if (updatedBucket && updatedBucket.face_count === 0) {
+                    BucketRepository.deleteBucket(bucketId);
+                }
+            } else {
+                // Full confirm
+                BucketRepository.markCompleted(bucketId);
+            }
+
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('db:rejectSuggestionBucket', async (_, bucketId) => {
+        try {
+            const db = getDB();
+            db.prepare('UPDATE faces SET bucket_id = NULL WHERE bucket_id = ?').run(bucketId);
+            BucketRepository.deleteBucket(bucketId);
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('db:assignBucketToPerson', async (_, { bucketId, personId }) => {
+        try {
+            const db = getDB();
+            const faces = db.prepare('SELECT id FROM faces WHERE bucket_id = ?').all(bucketId) as { id: number }[];
+            const faceIds = faces.map(f => f.id);
+
+            if (faceIds.length > 0) {
+                FaceRepository.updateFacePerson(faceIds, personId, true);
+                await PersonService.recalculatePersonMean(personId);
+            }
+            BucketRepository.markCompleted(bucketId);
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('db:nameDiscoveryBucket', async (_, { bucketId, newName }) => {
+        try {
+            const db = getDB();
+            const faces = db.prepare('SELECT id FROM faces WHERE bucket_id = ?').all(bucketId) as { id: number }[];
+            const faceIds = faces.map(f => f.id);
+
+            if (faceIds.length > 0) {
+                const person = PersonRepository.createPerson(newName);
+                FaceRepository.updateFacePerson(faceIds, person.id, true);
+                await PersonService.recalculatePersonMean(person.id);
+            }
+            BucketRepository.markCompleted(bucketId);
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
+
+
+    // Recovered Faces
+    ipcMain.handle('db:getRecoveredFaces', async () => {
+        try {
+            return { success: true, faces: BucketRepository.getRecoveredFaces() };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('db:recoverFaces', async (_, faceIds) => {
+        try {
+            BucketRepository.recoverFaces(faceIds);
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
 }
 

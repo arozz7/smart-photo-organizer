@@ -153,9 +153,38 @@
 
 ---
 
+## Testing Strategy
+- Unit tests: Follow existing patterns in `tests/backend/unit/`
+- Mock database: Update `mockDatabase.ts` schema
+- Integration tests: Database migration tests
+
+---
+
+## Current Phase
+- [x] Planning and documentation
+- [x] Phase P2: Session Grouping
+- [x] Phase P3: Pet Classification (schema + matching)
+- [x] Phase B1: Schema and State Flags
+- [x] Phase B2: Scan-Time Handoff
+- [x] Phase B3: BackgroundBucketingService (Core Logic)
+- [x] Phase B4: Graceful Shutdown Protocol
+- [x] Phase B5: Ignored Face Re-check Service
+
+---
+
 # ✅ Implemented Features
 
-## v0.5.5 (In Development)
+## v0.5.5 (Current Release)
+
+### Background Auto Face Bucketing
+*Details: See [Background Bucketing Plan](file:///j:/Projects/smart-photo-organizer/docs/background-bucketing-plan.md)*
+
+- **Core Service (Phase 1-4):** Background process that organizing unassigned faces into Suggestions and Discoveries during idle time. [See Changelog](aiChangeLog/phase-34-b3-background-service.md)
+- **UI Updates (Phase 37):**
+    - **Suggestion Buckets:** Confirm/Reject groups of faces matching known people.
+    - **Discovery Buckets:** Name/Ignore new unknown clusters found by DBSCAN.
+    - **Re-check Ignored:** Recover faces from the "Ignored" pool.
+    - [See Changelog](aiChangeLog/phase-37-b6-ui-updates.md)
 
 ### Smart Face Management
 *Details: See [Smart Ignore Implementation Plan](file:///j:/Projects/smart-photo-organizer/docs/smart-ignore-implementation-plan.md) for full technical specs.*

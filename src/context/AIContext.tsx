@@ -74,6 +74,9 @@ interface AIContextType {
     // Smart Throttling
     isThrottled: boolean;
     setThrottled: (throttled: boolean) => void;
+    // Bucketing Status
+    bucketingStatus: { active: boolean; offset: number; total: number; remaining: number };
+    recheckStatus: { active: boolean; offset: number; total: number };
 }
 
 const AIContext = createContext<AIContextType>({
@@ -102,7 +105,9 @@ const AIContext = createContext<AIContextType>({
     scanMetrics: null,
     performanceStats: { averageTime: 0, bestTime: 0, photosProcessed: 0, averagePerFace: 0 },
     isThrottled: false,
-    setThrottled: () => { }
+    setThrottled: () => { },
+    bucketingStatus: { active: false, offset: 0, total: 0, remaining: 0 },
+    recheckStatus: { active: false, offset: 0, total: 0 }
 });
 
 export const useAI = () => useContext(AIContext);
@@ -234,19 +239,45 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
     }, []);
 
+    // Bucketing Status Polling
+    const [bucketingStatus, setBucketingStatus] = useState({ active: false, offset: 0, total: 0, remaining: 0 });
+    const [recheckStatus, setRecheckStatus] = useState({ active: false, offset: 0, total: 0 });
+
+    const fetchBucketingStatus = useCallback(async () => {
+        try {
+            // @ts-ignore
+            const bStatus = await window.ipcRenderer.invoke('db:getBucketingStatus');
+            if (bStatus) setBucketingStatus(bStatus);
+
+            // @ts-ignore
+            const rStatus = await window.ipcRenderer.invoke('db:getIgnoredRecheckStatus');
+            if (rStatus) setRecheckStatus(rStatus);
+        } catch (e) {
+            console.error("Failed to fetch bucketing status", e);
+        }
+    }, []);
+
     // Status Polling Effect
     useEffect(() => {
         // Run once on mount
         fetchSystemStatus();
+        fetchBucketingStatus();
 
         // Determine interval: 
-        // - 5s if we are processing OR if aiMode is unknown (initializing)
+        // - 1s if bucketing/recheck active (for smooth progress)
+        // - 5s if we are processing OR if aiMode is unknown
         // - 30s if idle
-        const interval = (isProcessing || aiMode === 'UNKNOWN') ? 5000 : 30000;
-        const intervalId = setInterval(fetchSystemStatus, interval);
+        let intervalTime = 30000;
+        if (bucketingStatus.active || recheckStatus.active) intervalTime = 1000;
+        else if (isProcessing || aiMode === 'UNKNOWN') intervalTime = 5000;
+
+        const intervalId = setInterval(() => {
+            fetchSystemStatus();
+            fetchBucketingStatus();
+        }, intervalTime);
 
         return () => clearInterval(intervalId);
-    }, [fetchSystemStatus, isProcessing, aiMode]);
+    }, [fetchSystemStatus, fetchBucketingStatus, isProcessing, aiMode, bucketingStatus.active, recheckStatus.active]);
 
     // Blur Calculation State
     const [calculatingBlur, setCalculatingBlur] = useState(false);
@@ -786,7 +817,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             performanceStats,
             isThrottled,
             setThrottled,
-            isProcessing // Exposed for UI status
+            isProcessing, // Exposed for UI status
+            bucketingStatus,
+            recheckStatus
         }}>
             {children}
         </AIContext.Provider>
