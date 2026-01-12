@@ -12,12 +12,14 @@ export default function StatusBar() {
         isThrottled,
         isProcessing,
         isPaused,
-        setIsPaused
+        setIsPaused,
+        recheckStatus,
+        bucketingStatus
     } = useAI();
     const { scanning, scanCount } = useScan();
 
     // Show if ANY activity is happening
-    const isActive = calculatingBlur || isModelLoading || isCoolingDown || processingQueue.length > 0 || scanning;
+    const isActive = calculatingBlur || isModelLoading || isCoolingDown || processingQueue.length > 0 || scanning || recheckStatus.active || bucketingStatus.active;
 
     if (!isActive) return null;
 
@@ -65,6 +67,20 @@ export default function StatusBar() {
                             </span>
                         )}
                     </>
+                )}
+
+                {recheckStatus.active && (
+                    <span className="flex items-center gap-2 text-purple-400 font-medium">
+                        <span className="animate-spin h-3 w-3 border-b-2 border-purple-400 rounded-full" />
+                        Re-checking Faces: {recheckStatus.offset} / {recheckStatus.total}
+                    </span>
+                )}
+
+                {bucketingStatus.active && (
+                    <span className="flex items-center gap-2 text-pink-400 font-medium">
+                        <span className="animate-spin h-3 w-3 border-b-2 border-pink-400 rounded-full" />
+                        Grouping Faces: {bucketingStatus.offset} / {bucketingStatus.total}
+                    </span>
                 )}
 
                 {isCoolingDown && (

@@ -25,7 +25,7 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<Library />} />
           <Route path="people" element={<People />} />
-          <Route path="people/:personId" element={<PersonDetail />} />
+          <Route path="person/:personId" element={<PersonDetail />} />
           <Route path="create" element={<Create />} />
           <Route path="enhance/:photoId" element={<EnhanceLab />} /> {/* Added */}
           <Route path="locations" element={<Locations />} />

@@ -7,6 +7,7 @@ import { registerDBHandlers } from './ipc/dbHandlers';
 import { registerSettingsHandlers } from './ipc/settingsHandlers';
 import { registerFileHandlers } from './ipc/fileHandlers';
 import { registerAppHandlers } from './ipc/appHandlers';
+import { scanQueue } from './scanQueue';
 import { initDB } from './db'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -14,6 +15,13 @@ import { getLibraryPath } from './store';
 import * as fs from 'node:fs/promises';
 import logger from './logger';
 import { WindowManager } from './windows/windowManager';
+import { BackgroundBucketingService } from './core/services/BackgroundBucketingService';
+import { AppStateRepository } from './data/repositories/AppStateRepository';
+import { BucketRepository } from './data/repositories/BucketRepository';
+
+// Global service reference for shutdown
+let bucketingService: BackgroundBucketingService | null = null;
+let isQuitting = false;
 
 // ES Module __dirname equivalent
 const __filename = fileURLToPath(import.meta.url);
@@ -29,6 +37,30 @@ export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+
+app.on('before-quit', async (event) => {
+  if (isQuitting) return;
+
+  event.preventDefault();
+  isQuitting = true;
+  logger.info('[Main] Graceful shutdown started...');
+
+  try {
+    AppStateRepository.requestShutdown();
+
+    scanQueue.stop();
+
+    if (bucketingService) await bucketingService.stop();
+
+    pythonProvider.stop();
+  } catch (e) {
+    logger.error('[Main] Error stopping services:', e);
+  }
+
+  AppStateRepository.recordCleanShutdown();
+  logger.info('[Main] Graceful shutdown complete.');
+  app.quit();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -56,6 +88,15 @@ app.whenReady().then(async () => {
     await initDB(LIBRARY_PATH, (status: string) => {
       WindowManager.updateSplashStatus(status);
     })
+
+    // Recovery / Cleanup (B4)
+    try {
+      AppStateRepository.clearShutdownRequest();
+      const cleaned = BucketRepository.deleteOrphanBuckets();
+      if (cleaned > 0) logger.info(`[Main] Cleaned up ${cleaned} orphan buckets.`);
+    } catch (err) {
+      logger.error('[Main] Recovery cleanup failed:', err);
+    }
   } catch (e) {
     logger.error("DB Init Failed", e);
   }
@@ -63,6 +104,10 @@ app.whenReady().then(async () => {
   // Start Services
   // Old: startPythonBackend();
   pythonProvider.start();
+
+  // Start Background Bucketing Service (Phase B3)
+  bucketingService = new BackgroundBucketingService(pythonProvider);
+  bucketingService.start();
 
   registerAIHandlers();
   registerDBHandlers();

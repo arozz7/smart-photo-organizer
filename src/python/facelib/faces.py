@@ -206,9 +206,23 @@ def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2, debug=False):
     import math
     eps_euclidean = math.sqrt(2 * eps)
     
+    logger.info(f"[DBSCAN] Input eps (cosine)={eps}, converted eps_euclidean={eps_euclidean:.4f}, min_samples={min_samples}, n_faces={len(ids)}")
+    
+    # Debug: Check pairwise distance stats (sample for large datasets)
+    from sklearn.metrics import pairwise_distances
+    n_sample = min(50, len(X))
+    sample_dists = pairwise_distances(X[:n_sample], metric='euclidean')
+    sample_dists_upper = sample_dists[np.triu_indices(n_sample, k=1)]
+    if len(sample_dists_upper) > 0:
+        logger.info(f"[DBSCAN] Sample distances (first {n_sample} faces): min={sample_dists_upper.min():.4f}, mean={sample_dists_upper.mean():.4f}, max={sample_dists_upper.max():.4f}")
+    
     clustering = DBSCAN(eps=eps_euclidean, min_samples=min_samples, metric='euclidean').fit(X)
     
     labels = clustering.labels_
+    
+    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+    n_noise = list(labels).count(-1)
+    logger.info(f"[DBSCAN] Result: {n_clusters} clusters, {n_noise} noise points")
     
     clusters = {}
     for idx, label in enumerate(labels):

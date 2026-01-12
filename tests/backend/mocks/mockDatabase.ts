@@ -49,6 +49,7 @@ const TEST_SCHEMA = `
     name TEXT UNIQUE NOT NULL,
     face_count INTEGER DEFAULT 0,
     cover_face_id INTEGER,
+    entity_type TEXT DEFAULT 'human',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
@@ -72,9 +73,35 @@ const TEST_SCHEMA = `
     pose_pitch REAL,
     pose_roll REAL,
     face_quality REAL,
+    session_folder TEXT,
+    session_date TEXT,
+    entity_type TEXT DEFAULT 'human',
+    needs_bucketing INTEGER DEFAULT 0,
+    bucket_id INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
     FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
+  );
+
+  -- Face Buckets table (Phase B1)
+  CREATE TABLE IF NOT EXISTS face_buckets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bucket_type TEXT NOT NULL DEFAULT 'discovery',
+    suggested_person_id INTEGER,
+    centroid BLOB,
+    status TEXT DEFAULT 'active',
+    session_folder TEXT,
+    session_date TEXT,
+    face_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- App State table (Phase B1)
+  CREATE TABLE IF NOT EXISTS app_state (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
   -- Indexes for performance
@@ -184,12 +211,12 @@ export function seedFace(
     INSERT INTO faces (
         photo_id, person_id, box_json, descriptor, confidence, blur_score, 
         is_ignored, is_reference, confidence_tier, suggested_person_id, match_distance,
-        pose_yaw, pose_pitch, pose_roll, face_quality
+        pose_yaw, pose_pitch, pose_roll, face_quality, session_folder, session_date, entity_type
     )
     VALUES (
         @photo_id, @person_id, @box_json, @descriptor, @confidence, @blur_score, 
         @is_ignored, @is_reference, @confidence_tier, @suggested_person_id, @match_distance,
-        @pose_yaw, @pose_pitch, @pose_roll, @face_quality
+        @pose_yaw, @pose_pitch, @pose_roll, @face_quality, @session_folder, @session_date, @entity_type
     )
   `);
 
@@ -202,7 +229,10 @@ export function seedFace(
         pose_yaw: face.pose_yaw ?? null,
         pose_pitch: face.pose_pitch ?? null,
         pose_roll: face.pose_roll ?? null,
-        face_quality: face.face_quality ?? null
+        face_quality: face.face_quality ?? null,
+        session_folder: face.session_folder ?? null,
+        session_date: face.session_date ?? null,
+        entity_type: face.entity_type ?? 'human'
     });
 
     return result.lastInsertRowid as number;
@@ -244,4 +274,7 @@ interface TestFace {
     pose_pitch?: number;
     pose_roll?: number;
     face_quality?: number;
+    session_folder?: string | null;
+    session_date?: string | null;
+    entity_type?: string;
 }

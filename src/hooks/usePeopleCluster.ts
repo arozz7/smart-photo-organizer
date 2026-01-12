@@ -4,6 +4,7 @@ import { usePeople } from '../context/PeopleContext'
 import { useAlert } from '../context/AlertContext'
 import { useToast } from '../context/ToastContext'
 import { Face } from '../types'
+import { useClusterController } from './useClusterController'
 
 export function usePeopleCluster() {
     const { loadPeople, loadUnnamedFaces, autoNameFaces, fetchFacesByIds } = usePeople()
@@ -11,7 +12,7 @@ export function usePeopleCluster() {
     const { showAlert, showConfirm } = useAlert()
     const { addToast } = useToast()
 
-    // Clustering State
+    // Clustering Data State
     const [clusters, setClusters] = useState<{ faces: number[], suggestion?: any }[]>([])
     const [singles, setSingles] = useState<number[]>([])
     const [ungroupableFaces, setUngroupableFaces] = useState<number[]>([])
@@ -20,12 +21,13 @@ export function usePeopleCluster() {
     const [isClustering, setIsClustering] = useState(false)
     const [isAutoAssigning, setIsAutoAssigning] = useState(false);
 
-    // Progressive Loading State
-    const [displayedGroupCount, setDisplayedGroupCount] = useState(100);
-    const PAGE_SIZE = 100;
-
-    // Selection State
-    const [selectedFaceIds, setSelectedFaceIds] = useState<Set<number>>(new Set())
+    // Controller Hook
+    // We map simple number[] clusters to match the controller's expectation if needed,
+    // but the controller handles generic T, so { faces: number[], suggestion: any } fits ClusterType<any>
+    const controller = useClusterController({
+        clusters: clusters,
+        pageSize: 100
+    });
 
     // Group Naming Modal State
     const [namingGroup, setNamingGroup] = useState<{ faces: Face[], name: string } | null>(null)
@@ -88,72 +90,40 @@ export function usePeopleCluster() {
                 const clusterCount = normalizedClusters.reduce((acc, c) => acc + c.faces.length, 0);
                 setTotalFaces(clusterCount + res.singles.length);
                 setTotalUnassigned(res.totalUnassigned || (clusterCount + res.singles.length));
+
+                // Reset pagination when data reloads
+                controller.resetPagination();
             }
         } catch (e) {
             console.error("Failed to load clusters", e)
         } finally {
             setIsClustering(false)
         }
-    }, [loadUnnamedFaces, fetchFacesByIds])
+    }, [loadUnnamedFaces, fetchFacesByIds, controller.resetPagination])
 
-    const toggleFace = useCallback((id: number) => {
-        const newSet = new Set(selectedFaceIds)
-        if (newSet.has(id)) newSet.delete(id)
-        else newSet.add(id)
-        setSelectedFaceIds(newSet)
-    }, [selectedFaceIds])
+    // --- Actions ---
 
-    const toggleGroup = useCallback((ids: number[]) => {
-        const newSet = new Set(selectedFaceIds)
-        const allSelected = ids.every(id => newSet.has(id))
+    const handleAutoAssign = async (targetFaceIds?: number[]) => {
+        // If specific IDs provided, use them. Otherwise check total count.
+        const countToCheck = targetFaceIds ? targetFaceIds.length : totalFaces;
+        if (countToCheck === 0) return;
 
-        if (allSelected) {
-            ids.forEach(id => newSet.delete(id))
-        } else {
-            ids.forEach(id => newSet.add(id))
-        }
-        setSelectedFaceIds(newSet)
-    }, [selectedFaceIds])
-
-    const clearSelection = useCallback(() => setSelectedFaceIds(new Set()), [])
-
-    const selectAllGroups = useCallback((select: boolean = true) => {
-        if (!select) {
-            clearSelection();
-            return;
-        }
-        const newSet = new Set<number>();
-        clusters.forEach(c => {
-            c.faces.forEach(id => newSet.add(id));
-        });
-        setSelectedFaceIds(newSet);
-    }, [clusters, clearSelection]);
-
-    // Handle suggestion found by ClusterRow - update cluster so keyboard nav can access it
-    const handleSuggestionFound = useCallback((index: number, suggestion: any) => {
-        setClusters(prev => {
-            const updated = [...prev];
-            if (updated[index]) {
-                updated[index] = { ...updated[index], suggestion };
-            }
-            return updated;
-        });
-    }, []);
-
-    const handleAutoAssign = async () => {
-        if (totalFaces === 0) return;
+        const isTargeted = !!targetFaceIds && targetFaceIds.length > 0;
+        const description = isTargeted
+            ? `Cross-check ${targetFaceIds.length} selected faces against your identified people?`
+            : `This will cross-check ALL unassigned faces in your library against your identified people. This may take a while depending on the number of faces.`;
 
         showConfirm({
-            title: 'Auto-Identify All Faces',
-            description: `This will cross-check ALL unassigned faces in your library against your identified people. This may take a while depending on the number of faces.`,
-            confirmLabel: 'Run Auto-Identify All',
+            title: isTargeted ? 'Auto-Identify Faces' : 'Auto-Identify All Faces',
+            description,
+            confirmLabel: 'Run Auto-Identify',
             onConfirm: async () => {
-                console.log("[People] User confirmed Auto-Identify All. Starting...");
+                console.log("[People] User confirmed Auto-Identify. Starting...");
                 setIsAutoAssigning(true);
                 try {
-                    console.log(`[People] Invoking db:autoAssignFaces for ALL unassigned faces...`);
+                    console.log(`[People] Invoking db:autoAssignFaces... Target count: ${countToCheck}`);
                     // @ts-ignore
-                    const res = await window.ipcRenderer.invoke('db:autoAssignFaces', { faceIds: [] });
+                    const res = await window.ipcRenderer.invoke('db:autoAssignFaces', { faceIds: targetFaceIds || [] });
                     console.log("[People] db:autoAssignFaces result:", res);
 
                     if (res.success) {
@@ -171,7 +141,7 @@ export function usePeopleCluster() {
                             setTimeout(() => {
                                 showAlert({
                                     title: 'No Matches',
-                                    description: 'No confident matches found among visible faces.',
+                                    description: 'No confident matches found.',
                                     variant: 'primary'
                                 });
                             }, 100);
@@ -198,11 +168,9 @@ export function usePeopleCluster() {
         })).filter(c => c.faces.length > 0))
         setSingles(prev => prev.filter(id => !idsSet.has(id)))
         setTotalFaces(prev => prev - ids.length)
-        setSelectedFaceIds(prev => {
-            const next = new Set(prev)
-            ids.forEach(id => next.delete(id))
-            return next
-        })
+
+        // Clear these from controller selection
+        controller.removeFacesFromSelection(ids);
 
         // API Call - pass confirm flag if accepting a suggestion
         await autoNameFaces(ids, name, confirm)
@@ -214,7 +182,7 @@ export function usePeopleCluster() {
             const idsSet = new Set(ids);
             return prev.filter(id => !idsSet.has(id));
         });
-    }, [autoNameFaces, addToast, setUngroupableFaces])
+    }, [autoNameFaces, addToast, setUngroupableFaces, controller.removeFacesFromSelection])
 
     const handleConfirmName = useCallback(async (selectedIds: number[], name: string) => {
         if (!name || selectedIds.length === 0) return
@@ -248,11 +216,8 @@ export function usePeopleCluster() {
                 })).filter(c => c.faces.length > 0))
                 setSingles(prev => prev.filter(id => !idsSet.has(id)))
                 setTotalFaces(prev => prev - ids.length)
-                setSelectedFaceIds(prev => {
-                    const next = new Set(prev)
-                    ids.forEach(id => next.delete(id))
-                    return next
-                })
+
+                controller.removeFacesFromSelection(ids);
 
                 // Also remove from ungroupable list if present
                 setUngroupableFaces(prev => {
@@ -266,91 +231,96 @@ export function usePeopleCluster() {
                 addToast({ type: 'success', description: `Ignored ${ids.length} faces.` })
             }
         })
-    }, [showConfirm, addToast])
+    }, [showConfirm, addToast, controller.removeFacesFromSelection])
 
     const handleUngroup = useCallback((clusterIndex: number) => {
-        const cluster = clusters[clusterIndex];
+        // Warning: This index is likely from `filteredClusters`. 
+        // We need to find the correct cluster in the main list or handle it via ID.
+        // Legacy: ClusterList passed index from map.
+        // New: `clusterIndex` passed from `ClusterList` is based on its display.
+        // We should really handle this by cluster object reference or unique ID, but we don't strictly have IDs for DBSCAN clusters yet.
+        // For now, let's assume specific cluster object matches.
+
+        const cluster = controller.displayedClusters[clusterIndex];
         if (!cluster) return;
 
         const ids = cluster.faces;
 
         // Optimistic Update: Move from clusters to singles
-        setClusters(prev => prev.filter((_, idx) => idx !== clusterIndex));
+        setClusters(prev => prev.filter(c => c !== cluster)); // Reference equality should work
         setSingles(prev => [...prev, ...ids]);
 
-        // Clean up selection if any of these were selected
-        setSelectedFaceIds(prev => {
-            const next = new Set(prev);
-            let changed = false;
-            ids.forEach(id => {
-                if (next.has(id)) {
-                    next.delete(id);
-                    changed = true;
-                }
-            });
-            return changed ? next : prev;
-        });
+        controller.removeFacesFromSelection(ids);
 
         addToast({ type: 'info', description: `Ungrouped ${ids.length} faces` });
 
-    }, [clusters, addToast]);
+    }, [controller.displayedClusters, addToast, controller.removeFacesFromSelection]);
 
     const handleIgnoreAllGroups = useCallback(() => {
-        if (clusters.length === 0) return;
+        // Ignore all VISIBLE (Filtered) or ALL?
+        // Let's do ALL to be safe/consistent with old behavior, 
+        // OR better: All Filtered.
+        const targetClusters = controller.filteredClusters;
+
+        if (targetClusters.length === 0) return;
 
         showConfirm({
             title: 'Ignore All Groups',
-            description: `This will ignore ALL ${clusters.length} currently visible groups (${clusters.reduce((acc, c) => acc + c.faces.length, 0)} faces). They will be hidden.`,
+            description: `This will ignore ALL ${targetClusters.length} matching groups (${targetClusters.reduce((acc, c) => acc + c.faces.length, 0)} faces). They will be hidden.`,
             confirmLabel: 'Ignore All',
             variant: 'danger',
             onConfirm: async () => {
                 const allIds: number[] = [];
-                clusters.forEach(c => allIds.push(...c.faces));
+                targetClusters.forEach(c => allIds.push(...c.faces));
 
                 // Optimistic Clear
-                setClusters([]);
+                // We must remove these specific clusters from the main list
+                const targetSet = new Set(targetClusters);
+                setClusters(prev => prev.filter(c => !targetSet.has(c)));
+
                 setTotalFaces(prev => prev - allIds.length);
-                setSelectedFaceIds(new Set()); // Clear all selection
+                controller.clearSelection();
 
                 // API Call
                 // @ts-ignore
                 await window.ipcRenderer.invoke('db:ignoreFaces', allIds);
-                addToast({ type: 'success', description: `Ignored all ${clusters.length} groups.` });
+                addToast({ type: 'success', description: `Ignored all ${targetClusters.length} groups.` });
             }
         });
-    }, [clusters, showConfirm, addToast]);
+    }, [controller.filteredClusters, showConfirm, addToast, controller.clearSelection]);
 
-    // Progressive Loading: Compute displayed clusters
-    const displayedClusters = clusters.slice(0, displayedGroupCount);
-    const hasMoreGroups = clusters.length > displayedGroupCount;
-    const remainingGroupCount = clusters.length - displayedGroupCount;
+    // Handle suggestion found by ClusterRow - update cluster so keyboard nav can access it
+    const handleSuggestionFound = useCallback((index: number, suggestion: any) => {
+        // This is tricky with filtering/virtualization. 
+        // Ideal: Update the cluster data in place in the master list.
+        // We need to find *which* cluster this is.
+        // `index` here comes from `ClusterList` mapping `displayedClusters`.
 
-    const loadMoreGroups = useCallback(() => {
-        setDisplayedGroupCount(prev => prev + PAGE_SIZE);
-    }, [PAGE_SIZE]);
+        const targetCluster = controller.displayedClusters[index];
+        if (!targetCluster) return;
 
-    // Reset displayed count when clusters change
-    const resetDisplayedCount = useCallback(() => {
-        setDisplayedGroupCount(PAGE_SIZE);
-    }, [PAGE_SIZE]);
+        setClusters(prev => prev.map(c =>
+            c === targetCluster ? { ...c, suggestion } : c
+        ));
+    }, [controller.displayedClusters]);
 
     return {
-        clusters: displayedClusters, // Now returns only displayed subset
-        allClusters: clusters, // Full list if needed
+        // Expose Controller State
+        ...controller,
+        clusters: controller.displayedClusters, // Legacy name compat
+
+        // Data & UI State
         singles,
-        ungroupableFaces, // Faces too far from any named person
+        ungroupableFaces,
         totalFaces,
         totalUnassigned,
         isClustering,
         isAutoAssigning,
-        selectedFaceIds,
         namingGroup,
         setNamingGroup,
+
+        // Actions
         loadClusteredFaces,
-        toggleFace,
-        toggleGroup,
-        selectAllGroups,
-        clearSelection,
         handleAutoAssign,
         handleNameGroup,
         handleConfirmName,
@@ -359,17 +329,20 @@ export function usePeopleCluster() {
         handleUngroup,
         handleIgnoreAllGroups,
         handleSuggestionFound,
-        // Progressive Loading
-        hasMoreGroups,
-        remainingGroupCount,
-        loadMoreGroups,
-        resetDisplayedCount,
-        displayedGroupCount,
-        totalGroupCount: clusters.length,
-        setClusters, // Exposed in case view needs manual manipulation, though ideally avoided
+
+        // Pagination Compat (Controller handles logic, we map props)
+        displayedGroupCount: controller.displayedClusters.length,
+        hasMoreGroups: controller.hasMore,
+        remainingGroupCount: controller.remainingCount,
+        loadMoreGroups: controller.loadMore,
+        resetDisplayedCount: controller.resetPagination,
+        totalGroupCount: controller.filteredClusters.length, // or allClusters.length based on view needs
+
+        // Setters (Legacy compat, though mostly internal now)
+        setClusters,
         setSingles,
         setUngroupableFaces,
         setTotalFaces,
-        setSelectedFaceIds
+        setSelectedFaceIds: controller.setSelectedFaceIds
     }
 }

@@ -85,7 +85,8 @@ export class FaceRepository {
         const db = getDB();
         if (ids.length === 0) return;
         const placeholders = ids.map(() => '?').join(',');
-        const query = `UPDATE faces SET is_ignored = 1 WHERE id IN (${placeholders})`;
+        // CRITICAL: Unassign from person when ignoring so they are removed from FAISS index logic
+        const query = `UPDATE faces SET is_ignored = 1, person_id = NULL WHERE id IN (${placeholders})`;
         db.prepare(query).run(...ids);
     }
 
@@ -284,6 +285,18 @@ export class FaceRepository {
         let query = `UPDATE faces SET person_id = ?`;
         const params: any[] = [personId];
 
+        // Always clear bucket link when status changes
+        query += `, bucket_id = NULL`;
+
+        // Update bucketing status
+        if (personId === null) {
+            // If unassigning, mark for re-bucketing
+            query += `, needs_bucketing = 1`;
+        } else {
+            // If assigning, mark as complete
+            query += `, needs_bucketing = 0`;
+        }
+
         if (setConfirmed !== null) {
             query += `, is_confirmed = ?`;
             params.push(setConfirmed ? 1 : 0);
@@ -319,7 +332,7 @@ export class FaceRepository {
             SELECT f.id, f.descriptor 
             FROM faces f 
             JOIN people p ON f.person_id = p.id 
-            WHERE f.descriptor IS NOT NULL AND f.person_id IS NOT NULL
+            WHERE f.descriptor IS NOT NULL AND f.person_id IS NOT NULL AND f.is_ignored = 0
         `).all() as any[];
         return rows.map(r => ({
             id: r.id,
@@ -640,5 +653,162 @@ export class FaceRepository {
     static updateFaceEra(faceId: number, eraId: number) {
         const db = getDB();
         db.prepare('UPDATE faces SET era_id = ? WHERE id = ?').run(eraId, faceId);
+    }
+
+    // ============== BACKGROUND BUCKETING (Phase B1) ==============
+
+    /**
+     * Set needs_bucketing flag on faces.
+     */
+    static setNeedsBucketing(faceIds: number[], value: boolean): void {
+        if (!faceIds || faceIds.length === 0) return;
+        const db = getDB();
+        const placeholders = faceIds.map(() => '?').join(',');
+        db.prepare(`UPDATE faces SET needs_bucketing = ? WHERE id IN (${placeholders})`).run(
+            value ? 1 : 0,
+            ...faceIds
+        );
+    }
+
+    /**
+     * Get faces that need bucketing (for background processing).
+     */
+    static getFacesNeedingBucketing(limit: number, offset: number): Array<{
+        id: number;
+        descriptor: Buffer | null;
+        session_folder: string | null;
+        session_date: string | null;
+        suggested_person_id: number | null;
+        match_distance: number | null;
+        entity_type: string;
+    }> {
+        const db = getDB();
+        try {
+            return db.prepare(`
+                SELECT id, descriptor, session_folder, session_date, suggested_person_id, match_distance, entity_type
+                FROM faces
+                WHERE needs_bucketing = 1
+                  AND person_id IS NULL
+                  AND (is_ignored = 0 OR is_ignored IS NULL)
+                  AND descriptor IS NOT NULL
+                ORDER BY id ASC
+                LIMIT ? OFFSET ?
+            `).all(limit, offset) as Array<{
+                id: number;
+                descriptor: Buffer | null;
+                session_folder: string | null;
+                session_date: string | null;
+                suggested_person_id: number | null;
+                match_distance: number | null;
+                entity_type: string;
+            }>;
+        } catch (error) {
+            throw new Error(`FaceRepository.getFacesNeedingBucketing failed: ${String(error)}`);
+        }
+    }
+
+    /**
+     * Get ignored faces for re-check (Phase B5).
+     */
+    static getIgnoredFacesForBucketing(limit: number, offset: number): Array<{
+        id: number;
+        descriptor: Buffer | null;
+        entity_type: string;
+    }> {
+        const db = getDB();
+        try {
+            return db.prepare(`
+                SELECT id, descriptor, entity_type
+                FROM faces
+                WHERE is_ignored = 1
+                  AND descriptor IS NOT NULL
+                ORDER BY id ASC
+                LIMIT ? OFFSET ?
+            `).all(limit, offset) as Array<{
+                id: number;
+                descriptor: Buffer | null;
+                entity_type: string;
+            }>;
+        } catch (error) {
+            throw new Error(`FaceRepository.getIgnoredFaces failed: ${String(error)}`);
+        }
+    }
+
+    /**
+     * Get count of faces needing bucketing.
+     */
+    static getFacesNeedingBucketingCount(): number {
+        const db = getDB();
+        const result = db.prepare(`
+            SELECT COUNT(*) as count FROM faces
+            WHERE needs_bucketing = 1
+              AND person_id IS NULL
+              AND (is_ignored = 0 OR is_ignored IS NULL)
+              AND descriptor IS NOT NULL
+        `).get() as { count: number };
+        return result?.count || 0;
+    }
+
+    /**
+     * Assign faces to a bucket.
+     */
+    static assignToBucket(faceIds: number[], bucketId: number): void {
+        if (!faceIds || faceIds.length === 0) return;
+        const db = getDB();
+        const placeholders = faceIds.map(() => '?').join(',');
+        db.prepare(`UPDATE faces SET bucket_id = ?, needs_bucketing = 0 WHERE id IN (${placeholders})`).run(
+            bucketId,
+            ...faceIds
+        );
+    }
+
+    /**
+     * Get faces in a bucket.
+     */
+    static getFacesByBucket(bucketId: number): Array<{
+        id: number;
+        photo_id: number;
+        box_json: string;
+        file_path: string;
+        preview_cache_path: string | null;
+        width: number;
+        height: number;
+    }> {
+        const db = getDB();
+        return db.prepare(`
+            SELECT f.id, f.photo_id, f.box_json, p.file_path, p.preview_cache_path, p.width, p.height
+            FROM faces f
+            JOIN photos p ON f.photo_id = p.id
+            WHERE f.bucket_id = ? AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
+        `).all(bucketId) as Array<{
+            id: number;
+            photo_id: number;
+            box_json: string;
+            file_path: string;
+            preview_cache_path: string | null;
+            width: number;
+            height: number;
+        }>;
+    }
+
+    /**
+     * Cleanup duplicate face records (same photo_id and box_json).
+     * Keeps the record with the lowest ID, deletes duplicates.
+     * @returns Number of deleted duplicate records
+     */
+    static cleanupDuplicates(): number {
+        const db = getDB();
+        try {
+            const result = db.prepare(`
+                DELETE FROM faces 
+                WHERE id NOT IN (
+                    SELECT MIN(id) FROM faces GROUP BY photo_id, box_json
+                )
+            `).run();
+            return result.changes;
+        } catch (error) {
+            console.error('FaceRepository.cleanupDuplicates failed:', error);
+            return 0;
+        }
     }
 }

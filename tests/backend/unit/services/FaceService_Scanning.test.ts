@@ -118,4 +118,39 @@ describe('FaceService Scanning Verification', () => {
         expect(insertCall[5]).toBe('high');
         expect(insertCall[1]).toBe(11); // Person ID should be assigned automatically
     });
+
+    it('should populate session_folder, session_date and needs_bucketing=1 for unassigned faces', async () => {
+        // Arrange
+        const photoId = 125;
+        const faces = [{
+            box: { x: 0, y: 0, width: 100, height: 100 },
+            descriptor: Array(128).fill(0.1),
+            blurScore: 100
+        }];
+        const sessionData = {
+            sessionFolder: '/path/to/folder',
+            sessionDate: '2023-01-01'
+        };
+
+        // Mock matchBatch to return NO match
+        vi.spyOn(FaceService, 'matchBatch').mockResolvedValue([]);
+
+        const mockAiProvider = { addToIndex: vi.fn(), searchFaces: vi.fn() };
+
+        // Act
+        await FaceService.processAnalysisResult(photoId, faces, 1000, 1000, mockAiProvider as any, sessionData);
+
+        // Assert
+        const calls = mockRun.mock.calls;
+        const insertCall = calls.find(args => args.length > 10);
+
+        expect(insertCall).toBeDefined();
+        // Check session data (indices 12 and 13)
+        expect(insertCall[12]).toBe('/path/to/folder');
+        expect(insertCall[13]).toBe('2023-01-01');
+
+        // Check needs_bucketing (index 14) - should be 1 since personId is null
+        expect(insertCall[14]).toBe(1);
+        expect(insertCall[1]).toBeNull(); // person_id
+    });
 });

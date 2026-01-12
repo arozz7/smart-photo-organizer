@@ -38,6 +38,10 @@ interface PeopleContextType {
     matchBatch: (descriptors: any[], options?: any) => Promise<any[]>
     smartIgnoreSettings: SmartIgnoreSettings | null
     updateSmartIgnoreSettings: (settings: Partial<SmartIgnoreSettings>) => Promise<void>
+    // Stats & Indexing
+    rebuildFaissIndex: () => Promise<{ success: boolean; count?: number; error?: string } | void>
+    isRebuildingIndex: boolean
+    faissStaleCount: number
 }
 
 export interface SmartIgnoreSettings {
@@ -60,6 +64,8 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     const [faces, setFaces] = useState<Face[]>([])
     const [loading, setLoading] = useState(false)
     const [smartIgnoreSettings, setSmartIgnoreSettings] = useState<SmartIgnoreSettings | null>(null)
+    const [isRebuildingIndex, setIsRebuildingIndex] = useState(false)
+    const [faissStaleCount, setFaissStaleCount] = useState(0) // TODO: Sync with backend stats
 
     const loadSmartIgnoreSettings = useCallback(async () => {
         try {
@@ -86,18 +92,57 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         loadSmartIgnoreSettings();
     }, [loadSmartIgnoreSettings]);
 
+    const syncFaissStatus = useCallback(async () => {
+        try {
+            // @ts-ignore
+            const count = await window.ipcRenderer.invoke('ai:getFaissStaleCount');
+            setFaissStaleCount(count);
+        } catch (e) {
+            console.error('[PeopleContext] Failed to sync FAISS status:', e);
+        }
+    }, []);
+
+    const rebuildIndex = useCallback(async () => {
+        setIsRebuildingIndex(true)
+        try {
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('ai:rebuildIndex');
+            // Check result format
+            if (res.success) {
+                console.log(`[PeopleContext] Index rebuilt with ${res.count} vectors.`);
+            }
+            await syncFaissStatus(); // Refresh status after rebuild (should be 0)
+            return res;
+        } catch (e) {
+            console.error("Failed to rebuild index", e)
+            return { success: false, error: String(e) }
+        } finally {
+            setIsRebuildingIndex(false)
+        }
+    }, [syncFaissStatus]);
+
+    const rebuildFaissIndex = useCallback(async () => {
+        return await rebuildIndex();
+    }, [rebuildIndex]);
+
     const loadPeople = useCallback(async () => {
         setLoading(true)
         try {
             // @ts-ignore
             const result = await window.ipcRenderer.invoke('db:getPeople')
             setPeople(result)
+            syncFaissStatus(); // Sync FAISS status whenever we reload people (common refresh point)
         } catch (e) {
             console.error("Failed to load people", e)
         } finally {
             setLoading(false)
         }
-    }, [])
+    }, [syncFaissStatus])
+
+    // Initial Sync
+    React.useEffect(() => {
+        syncFaissStatus();
+    }, [syncFaissStatus]);
 
     const loadFaces = useCallback(async (filter: any = {}) => {
         setLoading(true)
@@ -190,14 +235,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     }, [loadPeople])
 
 
-    const rebuildIndex = useCallback(async () => {
-        // @ts-ignore
-        const res = await window.ipcRenderer.invoke('ai:rebuildIndex');
-        if (res.success) {
-            console.log(`[PeopleContext] Index rebuilt with ${res.count} vectors.`);
-        }
-        return res;
-    }, []);
+
 
     const matchFace = useCallback(async (descriptor: any, options?: any) => {
         // @ts-ignore
@@ -270,8 +308,17 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         ignoreFace, ignoreFaces, autoNameFaces,
         rebuildIndex,
         matchFace, matchBatch,
-        smartIgnoreSettings, updateSmartIgnoreSettings
-    }), [people, faces, loading, matchFace, matchBatch, smartIgnoreSettings, updateSmartIgnoreSettings])
+        smartIgnoreSettings, updateSmartIgnoreSettings,
+        // Stats & Indexing
+        rebuildFaissIndex,
+        isRebuildingIndex,
+        faissStaleCount
+    }), [
+        people, faces, loading, matchFace, matchBatch, smartIgnoreSettings, updateSmartIgnoreSettings,
+        rebuildFaissIndex, isRebuildingIndex, faissStaleCount,
+        loadPeople, loadFaces, loadUnnamedFaces, fetchFacesByIds, assignPerson,
+        ignoreFace, ignoreFaces, autoNameFaces, rebuildIndex
+    ])
 
     return (
         <PeopleContext.Provider value={value}>

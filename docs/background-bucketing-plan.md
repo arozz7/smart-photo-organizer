@@ -134,6 +134,113 @@ INSERT INTO app_state (key, value) VALUES ('bucketing_dirty', '0');
 | `0.6 - 0.8` | Tag `unknown` tier | Loose Suggestion |
 | `> 0.8` | No match | Discovery Clustering |
 
+## Ignored Face Re-check
+
+### Purpose
+Users may ignore faces prematurely, then later decide to track a person who appears in those ignored faces. This feature allows a **user-initiated** re-scan of ignored faces.
+
+### Workflow
+1. User clicks "Re-check Ignored Faces" button in the People/Settings UI.
+2. System sets `ignored_recheck_active=1` in `app_state`.
+3. Background bucketing **pauses** (yields to this operation).
+4. Re-check process queries `WHERE is_ignored=1` and runs the same two-pass logic:
+   - **Pass 1:** Match against all Named People centroids + Eras.
+   - **Pass 2:** Cluster remaining ignored faces via DBSCAN.
+5. Results are surfaced in a dedicated "Recovered Faces" modal.
+6. User reviews: Confirm (assign to person), Keep Ignored, or Move to Unnamed.
+7. When complete, sets `ignored_recheck_active=0`, background bucketing resumes.
+
+### Database Changes
+```sql
+INSERT INTO app_state (key, value) VALUES ('ignored_recheck_active', '0');
+INSERT INTO app_state (key, value) VALUES ('ignored_recheck_offset', '0');
+```
+
+### UI Elements
+- **Button:** "Re-check Ignored Faces" (People page or Settings).
+- **Progress Indicator:** "Checking ignored faces: 1,234 / 5,678".
+- **Results Modal:** Shows faces grouped by match (Suggestions) or cluster (Discoveries).
+
+---
+
+## Resumability & Checkpointing
+
+### Problem
+If the application closes mid-processing (user quits, crash, power loss), we must not lose progress or leave the database in an inconsistent state.
+
+### Checkpoint Strategy
+Each batch (1000 faces) is treated as an **atomic unit**:
+1. **Before batch:** Record `checkpoint_offset` in `app_state`.
+2. **Process batch:** Update faces, create buckets.
+3. **After batch:** Commit transaction, update `checkpoint_offset`.
+
+### Database Schema
+```sql
+INSERT INTO app_state (key, value) VALUES ('bucketing_checkpoint_offset', '0');
+INSERT INTO app_state (key, value) VALUES ('bucketing_total_faces', '0');
+INSERT INTO app_state (key, value) VALUES ('bucketing_last_run', NULL);
+```
+
+### Recovery on Startup
+```
+App Startup:
+1. Read bucketing_checkpoint_offset
+2. If offset > 0 AND bucketing_dirty=1:
+   - Resume from offset (continue where stopped)
+3. Else:
+   - Normal startup
+```
+
+### Progress Visibility
+- **Status Bar:** "Background bucketing: 3,000 / 12,000 faces processed".
+- **Persisted:** Progress survives app restart.
+
+---
+
+## Graceful Shutdown
+
+### Problem
+Abruptly terminating the backend mid-batch can leave:
+- Faces partially processed (some flagged, some not).
+- Orphaned bucket rows.
+- Corrupted FAISS index state.
+
+### Shutdown Protocol
+```
+User Closes App:
+1. Frontend sends `shutdown_requested=1` signal.
+2. Backend services check flag at batch boundaries.
+3. Each service:
+   a. Completes current batch (atomic).
+   b. Persists checkpoint to DB.
+   c. Signals "ready to shutdown".
+4. Main process waits for all services (timeout: 30s).
+5. If timeout: Force kill with warning logged.
+6. Clean exit.
+```
+
+### Service Shutdown Order
+| Priority | Service | Max Wait |
+|---|---|---|
+| 1 | Active Scan (if running) | 10s |
+| 2 | Background Bucketing | 10s |
+| 3 | Ignored Face Re-check | 10s |
+| 4 | Python AI Backend | 5s |
+
+### Database Flags
+```sql
+INSERT INTO app_state (key, value) VALUES ('shutdown_requested', '0');
+INSERT INTO app_state (key, value) VALUES ('last_clean_shutdown', NULL);
+```
+
+### Recovery from Dirty Shutdown
+On startup, if `last_clean_shutdown` is NULL or `shutdown_requested=1`:
+- Log warning: "Previous session did not shut down cleanly."
+- Run integrity check on `face_buckets` (delete orphans).
+- Resume from `bucketing_checkpoint_offset`.
+
+---
+
 ## Prerequisites
 These features should be completed first:
 1. **Era-Aware Matching** - Ensure FAISS path uses era centroids.
@@ -144,7 +251,9 @@ These features should be completed first:
 - [ ] **Phase P1:** Complete Era-Aware Matching
 - [ ] **Phase P2:** Photo Session Grouping
 - [ ] **Phase P3:** Pet Classification
-- [ ] **Phase B1:** Schema migration + state flags
+- [ ] **Phase B1:** Schema migration + state flags + checkpoint columns
 - [ ] **Phase B2:** Scan-time handoff (populate new columns)
-- [ ] **Phase B3:** BackgroundBucketingService implementation
-- [ ] **Phase B4:** UI updates (Suggestion/Discovery sections)
+- [ ] **Phase B3:** BackgroundBucketingService with checkpointing
+- [ ] **Phase B4:** Graceful shutdown protocol
+- [ ] **Phase B5:** Ignored Face Re-check service
+- [ ] **Phase B6:** UI updates (Suggestion/Discovery/Re-check sections)

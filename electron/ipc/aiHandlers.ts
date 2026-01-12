@@ -100,6 +100,13 @@ export function registerAIHandlers() {
         return FaceRepository.getBlurryFaces(args);
     });
 
+    // Concurrency Control
+    ipcMain.handle('ai:setProcessingStatus', async (_event, active: boolean) => {
+        const { AppStateRepository } = await import('../data/repositories/AppStateRepository');
+        AppStateRepository.setAIProcessingActive(active);
+        return true;
+    });
+
     // ... Other handlers mapped to PythonProvider ...
     ipcMain.handle('ai:clusterFaces', async (_, args) => {
         const { faceIds, eps, min_samples } = args;

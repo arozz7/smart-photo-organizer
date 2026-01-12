@@ -199,8 +199,17 @@ export class FaceService {
         return results;
     }
 
-    private static matchAgainstCentroids(descriptor: number[], candidates: { id: number, name: string, mean: number[], eras?: any[] }[], threshold: number) {
+    public static matchAgainstCentroids(
+        descriptor: number[],
+        candidates: { id: number, name: string, mean: number[], eras?: any[], entity_type?: string }[],
+        threshold: number,
+        entityType: string = 'human'
+    ) {
         if (!descriptor || candidates.length === 0) return null;
+
+        // Phase P3: Filter candidates by entity_type (humans match humans, pets match pets)
+        const filteredCandidates = candidates.filter(c => (c.entity_type || 'human') === entityType);
+        if (filteredCandidates.length === 0) return null;
 
         let mag = 0;
         for (const val of descriptor) mag += val * val;
@@ -212,7 +221,7 @@ export class FaceService {
 
 
 
-        for (const person of candidates) {
+        for (const person of filteredCandidates) {
             // Check global centroid
             const globalCentroid = (person as any).descriptor || (person as any).mean;
 
@@ -413,7 +422,14 @@ export class FaceService {
         }
     }
 
-    static async processAnalysisResult(photoId: number, faces: any[], width: number, height: number, aiProvider: any) {
+    static async processAnalysisResult(
+        photoId: number,
+        faces: any[],
+        width: number,
+        height: number,
+        aiProvider: any,
+        sessionData?: { sessionFolder?: string; sessionDate?: string }
+    ) {
         logger.info(`[FaceService] Processing ${faces.length} faces for photo ${photoId}`);
         const db = getDB();
         const existingFaces = FaceRepository.getFacesByPhoto(photoId);
@@ -454,6 +470,27 @@ export class FaceService {
 
         let matchIdx = 0;
         let assignedCount = 0;
+
+        const updateStmt = db.prepare(`
+            UPDATE faces 
+            SET descriptor = ?, box_json = ?, blur_score = ?, 
+                confidence_tier = ?, suggested_person_id = ?, match_distance = ?,
+                pose_yaw = ?, pose_pitch = ?, pose_roll = ?, face_quality = ?,
+                session_folder = COALESCE(session_folder, ?),
+                session_date = COALESCE(session_date, ?),
+                person_id = COALESCE(person_id, ?)
+            WHERE id = ?
+        `);
+
+        const insertStmt = db.prepare(`
+            INSERT INTO faces (
+                photo_id, person_id, descriptor, box_json, blur_score, 
+                is_reference, confidence_tier, suggested_person_id, match_distance,
+                pose_yaw, pose_pitch, pose_roll, face_quality,
+                session_folder, session_date, needs_bucketing
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
 
         db.transaction(() => {
             for (const face of faces) {
@@ -522,67 +559,73 @@ export class FaceService {
                             confidenceTier = 'review';
                             suggestedPersonId = matchData.personId;
                             // Log why we are in review (distance vs threshold)
-                            logger.info(`[FaceService] Face classified as REVIEW tier (dist=${matchDistance?.toFixed(3)} < ${adjReviewThreshold.toFixed(3)}). Suggested: ${matchData.personId}`);
+                            // logger.info(`[FaceService] Face classified as REVIEW tier (dist=${matchDistance?.toFixed(3)} < ${adjReviewThreshold.toFixed(3)}). Suggested: ${matchData.personId}`);
                         }
                     } else {
                         // Unknown Tier
-                        logger.info(`[FaceService] Face classified as UNKNOWN tier (dist=${matchDistance?.toFixed(3)} >= ${adjReviewThreshold.toFixed(3)})`);
+                        // logger.info(`[FaceService] Face classified as UNKNOWN tier (dist=${matchDistance?.toFixed(3)} >= ${adjReviewThreshold.toFixed(3)})`);
                     }
                 }
 
                 let finalId = 0;
 
+                // Ensure sessionData values are strings (sessionDate may be ExifDateTime object)
+                const sessionFolder = sessionData?.sessionFolder ?? null;
+                const sessionDateValue = sessionData?.sessionDate;
+                const sessionDateStr = sessionDateValue
+                    ? (typeof sessionDateValue === 'string' ? sessionDateValue : (sessionDateValue as any).rawValue ?? JSON.stringify(sessionDateValue))
+                    : null;
+
                 if (bestMatch) {
                     // Update
-                    // We only update classification if the face was previously unassigned/unknown
-                    // OR if we want to constantly simple update. 
-                    // Let's perform update.
-                    db.prepare(`
-                        UPDATE faces 
-                        SET descriptor = ?, box_json = ?, blur_score = ?, 
-                            confidence_tier = ?, suggested_person_id = ?, match_distance = ?,
-                            pose_yaw = ?, pose_pitch = ?, pose_roll = ?, face_quality = ?,
-                            person_id = COALESCE(person_id, ?) -- Only set if null
-                        WHERE id = ?
-                    `).run(
-                        descriptorBuffer,
-                        JSON.stringify(face.box),
-                        face.blurScore,
-                        confidenceTier,
-                        suggestedPersonId,
-                        matchDistance,
+                    updateStmt.run(
+                        descriptorBuffer ?? null,
+                        JSON.stringify(face.box) ?? null,
+                        face.blurScore ?? null,
+                        confidenceTier ?? null,
+                        suggestedPersonId ?? null,
+                        matchDistance ?? null,
                         face.poseYaw ?? null,
                         face.posePitch ?? null,
                         face.poseRoll ?? null,
                         face.faceQuality ?? null,
-                        personId, // Coalesce fallback
+                        sessionFolder,
+                        sessionDateStr,
+                        personId ?? null, // Coalesce fallback
                         bestMatch.id
                     );
                     finalId = bestMatch.id;
                 } else {
                     // Insert
-                    const info = db.prepare(`
-                        INSERT INTO faces (
-                            photo_id, person_id, descriptor, box_json, blur_score, 
-                            is_reference, confidence_tier, suggested_person_id, match_distance,
-                            pose_yaw, pose_pitch, pose_roll, face_quality
-                        )
-                        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
-                     `).run(
+                    const insertParams = [
                         photoId,
-                        personId,
-                        descriptorBuffer,
-                        JSON.stringify(face.box),
-                        face.blurScore,
-                        confidenceTier,
-                        suggestedPersonId,
-                        matchDistance,
+                        personId ?? null,
+                        descriptorBuffer ?? null,
+                        JSON.stringify(face.box) ?? null,
+                        face.blurScore ?? null,
+                        0, // is_reference
+                        confidenceTier ?? 'unknown',
+                        suggestedPersonId ?? null,
+                        matchDistance ?? null,
                         face.poseYaw ?? null,
                         face.posePitch ?? null,
                         face.poseRoll ?? null,
-                        face.faceQuality ?? null
-                    );
-                    finalId = Number(info.lastInsertRowid);
+                        face.faceQuality ?? null,
+                        sessionFolder,
+                        sessionDateStr,
+                        personId ? 0 : 1 // Needs bucketing if unassigned
+                    ];
+
+                    // DEBUG: Log parameter count and types
+                    logger.info(`[FaceService] INSERT params count: ${insertParams.length}, types: ${insertParams.map((p, i) => `${i}:${p === null ? 'null' : typeof p}`).join(', ')}`);
+
+                    try {
+                        const info = insertStmt.run(...insertParams);
+                        finalId = Number(info.lastInsertRowid);
+                    } catch (insertError) {
+                        logger.error(`[FaceService] INSERT FAILED! Params: ${JSON.stringify(insertParams.map(p => p instanceof Buffer ? '[Buffer]' : p))}`);
+                        throw insertError;
+                    }
                 }
 
                 insertedIds.push(finalId);
