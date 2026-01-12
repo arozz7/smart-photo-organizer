@@ -131,12 +131,13 @@ export class BucketRepository {
         return db.prepare(`
             SELECT 
                 b.*, 
-                p.name as person_name,
+                per.name as person_name,
                 COUNT(f.id) as face_count,
                 GROUP_CONCAT(f.id) as face_ids_str
             FROM face_buckets b
-            LEFT JOIN people p ON b.suggested_person_id = p.id
-            LEFT JOIN faces f ON f.bucket_id = b.id AND f.is_ignored = 0
+            LEFT JOIN people per ON b.suggested_person_id = per.id
+            JOIN faces f ON f.bucket_id = b.id AND f.is_ignored = 0
+            JOIN photos p ON f.photo_id = p.id
             WHERE b.bucket_type = 'suggestion' AND b.status = 'active'
             GROUP BY b.id
             HAVING face_count > 0
@@ -158,7 +159,8 @@ export class BucketRepository {
                 COUNT(f.id) as face_count,
                 GROUP_CONCAT(f.id) as face_ids_str
             FROM face_buckets b
-            LEFT JOIN faces f ON f.bucket_id = b.id AND f.is_ignored = 0
+            JOIN faces f ON f.bucket_id = b.id AND f.is_ignored = 0
+            JOIN photos p ON f.photo_id = p.id
             WHERE b.bucket_type = 'discovery' AND b.status = 'active'
             GROUP BY b.id
             HAVING face_count > 0

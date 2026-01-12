@@ -38,6 +38,10 @@ interface PeopleContextType {
     matchBatch: (descriptors: any[], options?: any) => Promise<any[]>
     smartIgnoreSettings: SmartIgnoreSettings | null
     updateSmartIgnoreSettings: (settings: Partial<SmartIgnoreSettings>) => Promise<void>
+    // Stats & Indexing
+    rebuildFaissIndex: () => Promise<void>
+    isRebuildingIndex: boolean
+    faissStaleCount: number
 }
 
 export interface SmartIgnoreSettings {
@@ -60,6 +64,8 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     const [faces, setFaces] = useState<Face[]>([])
     const [loading, setLoading] = useState(false)
     const [smartIgnoreSettings, setSmartIgnoreSettings] = useState<SmartIgnoreSettings | null>(null)
+    const [isRebuildingIndex, setIsRebuildingIndex] = useState(false)
+    const [faissStaleCount, setFaissStaleCount] = useState(0) // TODO: Sync with backend stats
 
     const loadSmartIgnoreSettings = useCallback(async () => {
         try {
@@ -85,6 +91,28 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     React.useEffect(() => {
         loadSmartIgnoreSettings();
     }, [loadSmartIgnoreSettings]);
+
+    const rebuildIndex = useCallback(async () => {
+        setIsRebuildingIndex(true)
+        try {
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('ai:rebuildIndex');
+            // Check result format
+            if (res.success) {
+                console.log(`[PeopleContext] Index rebuilt with ${res.count} vectors.`);
+            }
+            return res;
+        } catch (e) {
+            console.error("Failed to rebuild index", e)
+            return { success: false, error: String(e) }
+        } finally {
+            setIsRebuildingIndex(false)
+        }
+    }, []);
+
+    const rebuildFaissIndex = useCallback(async () => {
+        await rebuildIndex();
+    }, [rebuildIndex]);
 
     const loadPeople = useCallback(async () => {
         setLoading(true)
@@ -190,14 +218,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     }, [loadPeople])
 
 
-    const rebuildIndex = useCallback(async () => {
-        // @ts-ignore
-        const res = await window.ipcRenderer.invoke('ai:rebuildIndex');
-        if (res.success) {
-            console.log(`[PeopleContext] Index rebuilt with ${res.count} vectors.`);
-        }
-        return res;
-    }, []);
+
 
     const matchFace = useCallback(async (descriptor: any, options?: any) => {
         // @ts-ignore

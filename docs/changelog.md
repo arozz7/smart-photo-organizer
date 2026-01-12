@@ -4,6 +4,25 @@
 *Release Date: 2026-01-10*
 
 ### 🐛 UX & Modal Fixes
+
+## v0.5.2
+*Release Date: 2026-01-11*
+
+### 🛠️ People Page & Actions Restoration
+- **Restored Floating Action Bar:** Re-implemented the floating action bar for "Unnamed Faces" with "Name", "Ignore", and "Debug" actions.
+- **Fixed "Check all singles" Scope:** The "Check all singles" button now correctly targets only the visible single faces instead of triggering a full library scan.
+- **Fixed "Debug" Action:** Restored the ability to inspect face details via the new floating bar.
+- **Fixed `db:reassignFaces` Error:** Updated the "Name" action to properly open the naming modal instead of triggering a backend error.
+- **Background Bucketing Fix:** Resolved an infinite loop where the background service would re-process "noise" faces on restart.
+- **People Page Fixes:** 
+    - Fixed filtering logic for Suggestions and Discoveries tabs.
+    - Added loading indicators to "Unnamed Faces" tab.
+    - Fixed routing issues for Person Detail pages.
+    - Improved rendering of single ungrouped faces using `FaceThumbnail`.
+
+---
+
+### 🐛 UX & Modal Fixes
 - **Modal Pagination Stability:** Fixed "jumpy" behavior in face modals. The view now correctly replenishes itself when faces are named/ignored without resetting the scroll position or loaded count.
 - **Confirmed Assignments:** Faces assigned via the "Assign to [Name]" suggestion button are now correctly marked as **confirmed** (green checkmark), ensuring they contribute to era calculation and person centroids properly.
 - **Empty State Transitions:** Fixed an issue where the last few processed faces would linger in modals; added a clean transition to the "All Done" view.

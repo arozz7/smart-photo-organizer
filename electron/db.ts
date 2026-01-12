@@ -291,14 +291,24 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
 
   // Backfill needs_bucketing=1 for existing unassigned/unbucketed faces
   // This ensures old faces get picked up by the background service
-  db.prepare(`
-    UPDATE faces 
-    SET needs_bucketing = 1 
-    WHERE person_id IS NULL 
-      AND bucket_id IS NULL 
-      AND needs_bucketing = 0
-      AND (is_ignored = 0 OR is_ignored IS NULL)
-  `).run();
+  // FIX: Make this a ONE-TIME migration to prevent resetting noise (needs_bucketing=0) on every restart
+  const bucketingMigrationKey = 'migration_bucketing_backfill_v1';
+  const migrationCheck = db.prepare('SELECT value FROM app_state WHERE key = ?').get(bucketingMigrationKey);
+
+  if (!migrationCheck) {
+    logger.info('[DB Module] Running one-time migration: Backfilling needs_bucketing=1...');
+    db.prepare(`
+      UPDATE faces 
+      SET needs_bucketing = 1 
+      WHERE person_id IS NULL 
+        AND bucket_id IS NULL 
+        AND needs_bucketing = 0
+        AND (is_ignored = 0 OR is_ignored IS NULL)
+    `).run();
+
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(bucketingMigrationKey, '1');
+    logger.info('[DB Module] Migration complete.');
+  }
 
   // Initialize app_state with default values if not present
   const initAppState = db.prepare(`INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)`);

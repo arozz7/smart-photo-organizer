@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import FaceThumbnail from './FaceThumbnail';
 import { useToast } from '../context/ToastContext';
+import { useClusterController } from '../hooks/useClusterController';
 
 interface RecoveredFacesModalProps {
     isOpen: boolean;
@@ -12,12 +13,42 @@ export default function RecoveredFacesModal({ isOpen, onClose }: RecoveredFacesM
     const { addToast } = useToast();
     const [faces, setFaces] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
-    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+    // Group faces by suggested person for the controller
+    const clustersData = useMemo(() => {
+        const groups: Record<string, { name: string, personId: number | null, faces: any[] }> = {};
+
+        faces.forEach(face => {
+            const key = face.suggested_person_id || 'unknown';
+            if (!groups[key]) {
+                groups[key] = {
+                    name: face.suggested_name || 'Unknown',
+                    personId: face.suggested_person_id,
+                    faces: []
+                };
+            }
+            groups[key].faces.push(face);
+        });
+
+        // Convert to array of clusters
+        return Object.entries(groups).map(([key, group]) => ({
+            faces: group.faces.map(f => f.id),
+            data: { ...group, key }
+        }));
+    }, [faces]);
+
+    const controller = useClusterController({
+        clusters: clustersData,
+        pageSize: 1000 // Show all effectively
+    });
+
+    const { selectedFaceIds } = controller;
 
     // Load recovered faces on mount/open
     useEffect(() => {
         if (isOpen) {
             loadFaces();
+            controller.clearSelection();
         }
     }, [isOpen]);
 
@@ -28,9 +59,8 @@ export default function RecoveredFacesModal({ isOpen, onClose }: RecoveredFacesM
             const res = await window.ipcRenderer.invoke('db:getRecoveredFaces');
             if (res.success) {
                 setFaces(res.faces);
-                // Auto-select all by default? Or let user pick.
-                // Let's select all initially for easy "Recover All".
-                setSelectedIds(new Set(res.faces.map((f: any) => f.id)));
+                // Select all by default for easy "Recover All"
+                controller.selectAll(new Set(res.faces.map((f: any) => f.id)));
             } else {
                 throw new Error(res.error);
             }
@@ -42,18 +72,11 @@ export default function RecoveredFacesModal({ isOpen, onClose }: RecoveredFacesM
         }
     };
 
-    const toggleSelection = (id: number) => {
-        const newSet = new Set(selectedIds);
-        if (newSet.has(id)) newSet.delete(id);
-        else newSet.add(id);
-        setSelectedIds(newSet);
-    };
-
     const handleRecover = async () => {
-        if (selectedIds.size === 0) return;
+        if (selectedFaceIds.size === 0) return;
 
         try {
-            const ids = Array.from(selectedIds);
+            const ids = Array.from(selectedFaceIds);
             // @ts-ignore
             const res = await window.ipcRenderer.invoke('db:recoverFaces', ids);
             if (res.success) {
@@ -106,55 +129,36 @@ export default function RecoveredFacesModal({ isOpen, onClose }: RecoveredFacesM
                             </button>
                         </div>
                     ) : (
-                        (Object.entries(faces.reduce((acc, face) => {
-                            const key = face.suggested_person_id || 'unknown';
-                            if (!acc[key]) acc[key] = {
-                                name: face.suggested_name || 'Unknown',
-                                personId: face.suggested_person_id,
-                                faces: []
-                            };
-                            acc[key].faces.push(face);
-                            return acc;
-                        }, {} as Record<string, { name: string, personId: number | null, faces: any[] }>)) as [string, { name: string, personId: number | null, faces: any[] }][])
-                            .map(([key, group]) => (
-                                <div key={key} className="bg-gray-800/20 rounded-xl border border-gray-800 overflow-hidden">
+                        controller.allClusters.map((cluster) => {
+                            const groupData = cluster.data;
+                            const facesInGroup = groupData.faces; // Original full face objects need to be retrieved via the data prop we passed
+
+                            return (
+                                <div key={groupData.key} className="bg-gray-800/20 rounded-xl border border-gray-800 overflow-hidden">
                                     {/* Group Header */}
                                     <div className="flex items-center justify-between px-4 py-3 bg-gray-900/40 border-b border-gray-800">
                                         <div className="flex items-center gap-3">
                                             <input
                                                 type="checkbox"
-                                                checked={group.faces.every((f: any) => selectedIds.has(f.id))}
-                                                onChange={() => {
-                                                    const allSelected = group.faces.every((f: any) => selectedIds.has(f.id));
-                                                    const newSet = new Set(selectedIds);
-                                                    group.faces.forEach((f: any) => {
-                                                        if (allSelected) newSet.delete(f.id);
-                                                        else newSet.add(f.id);
-                                                    });
-                                                    setSelectedIds(newSet);
-                                                }}
+                                                checked={facesInGroup.every((f: any) => selectedFaceIds.has(f.id))}
+                                                onChange={() => controller.toggleGroup(facesInGroup.map((f: any) => f.id))}
                                                 className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-gray-900 cursor-pointer"
                                             />
                                             <div className="flex flex-col">
-                                                <span className="text-sm font-bold text-gray-200">{group.name}</span>
-                                                <span className="text-xs text-gray-500">{group.faces.length} faces matched</span>
+                                                <span className="text-sm font-bold text-gray-200">{groupData.name}</span>
+                                                <span className="text-xs text-gray-500">{facesInGroup.length} faces matched</span>
                                             </div>
                                         </div>
                                         <button
                                             onClick={async () => {
-                                                const ids = group.faces.map((f: any) => f.id);
+                                                const ids = facesInGroup.map((f: any) => f.id);
                                                 try {
                                                     // @ts-ignore
                                                     await window.ipcRenderer.invoke('db:recoverFaces', ids);
-                                                    addToast({ type: 'success', description: `Recovered ${ids.length} faces for ${group.name}` });
+                                                    addToast({ type: 'success', description: `Recovered ${ids.length} faces for ${groupData.name}` });
                                                     // Remove from state
                                                     setFaces(prev => prev.filter(f => !ids.includes(f.id)));
-                                                    // Clear selection for these output
-                                                    setSelectedIds(prev => {
-                                                        const next = new Set(prev);
-                                                        ids.forEach((id: number) => next.delete(id));
-                                                        return next;
-                                                    });
+                                                    controller.clearSelection(); // Simplest reset
                                                 } catch (e) {
                                                     console.error(e);
                                                     addToast({ type: 'error', description: 'Failed to recover group.' });
@@ -168,11 +172,11 @@ export default function RecoveredFacesModal({ isOpen, onClose }: RecoveredFacesM
 
                                     {/* Faces Grid */}
                                     <div className="p-4 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
-                                        {group.faces.map((face: any) => (
+                                        {facesInGroup.map((face: any) => (
                                             <div
                                                 key={face.id}
-                                                onClick={() => toggleSelection(face.id)}
-                                                className={`relative group cursor-pointer aspect-square rounded-lg overflow-hidden border-2 transition-all ${selectedIds.has(face.id)
+                                                onClick={() => controller.toggleFace(face.id)}
+                                                className={`relative group cursor-pointer aspect-square rounded-lg overflow-hidden border-2 transition-all ${selectedFaceIds.has(face.id)
                                                     ? 'border-indigo-500 ring-2 ring-indigo-500/30'
                                                     : 'border-transparent hover:border-gray-600'
                                                     }`}
@@ -182,10 +186,10 @@ export default function RecoveredFacesModal({ isOpen, onClose }: RecoveredFacesM
                                                     box={JSON.parse(face.box)}
                                                     originalImageWidth={face.width}
                                                     useServerCrop={true}
-                                                    className={`w-full h-full object-cover transition-opacity ${selectedIds.has(face.id) ? 'opacity-100' : 'opacity-90 group-hover:opacity-100'}`}
+                                                    className={`w-full h-full object-cover transition-opacity ${selectedFaceIds.has(face.id) ? 'opacity-100' : 'opacity-90 group-hover:opacity-100'}`}
                                                 />
 
-                                                {selectedIds.has(face.id) && (
+                                                {selectedFaceIds.has(face.id) && (
                                                     <div className="absolute inset-0 bg-indigo-500/20 flex items-center justify-center">
                                                         <div className="bg-indigo-500 rounded-full p-0.5">
                                                             <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -198,7 +202,8 @@ export default function RecoveredFacesModal({ isOpen, onClose }: RecoveredFacesM
                                         ))}
                                     </div>
                                 </div>
-                            ))
+                            );
+                        })
                     )}
                 </div>
 
@@ -206,7 +211,7 @@ export default function RecoveredFacesModal({ isOpen, onClose }: RecoveredFacesM
                 {faces.length > 0 && (
                     <div className="p-4 border-t border-gray-800 bg-gray-900/50 flex justify-between items-center backdrop-blur-xl">
                         <div className="text-sm text-gray-400">
-                            <span className="text-white font-bold">{selectedIds.size}</span> Selected
+                            <span className="text-white font-bold">{selectedFaceIds.size}</span> Selected
                         </div>
                         <div className="flex gap-3">
                             <button
@@ -217,13 +222,13 @@ export default function RecoveredFacesModal({ isOpen, onClose }: RecoveredFacesM
                             </button>
                             <button
                                 onClick={handleRecover}
-                                disabled={selectedIds.size === 0}
-                                className={`px-6 py-2 rounded-lg text-sm font-bold text-white transition-all transform active:scale-95 ${selectedIds.size > 0
+                                disabled={selectedFaceIds.size === 0}
+                                className={`px-6 py-2 rounded-lg text-sm font-bold text-white transition-all transform active:scale-95 ${selectedFaceIds.size > 0
                                     ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-lg shadow-indigo-900/40'
                                     : 'bg-gray-800 cursor-not-allowed opacity-50'
                                     }`}
                             >
-                                Recover {selectedIds.size} Selected
+                                Recover {selectedFaceIds.size} Selected
                             </button>
                         </div>
                     </div>

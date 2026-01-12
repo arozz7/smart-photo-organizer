@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import FaceThumbnail from './FaceThumbnail'
 import { usePeople } from '../context/PeopleContext'
+import { useClusterController } from '../hooks/useClusterController'
+import { ClusterToolbar, ClusterToolbarButton } from './ClusterToolbar'
 
 interface IgnoredFacesModalProps {
     isOpen: boolean
@@ -12,7 +14,6 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
     const { loadFaces, matchBatch } = usePeople()
     const [faces, setFaces] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
-    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
     const [suggestion, setSuggestion] = useState<any>(null)
 
     // Pagination
@@ -29,15 +30,67 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
     const [clustering, setClustering] = useState(false)
 
     // Sort Order (most recent first = desc)
-    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc') // Default to most recent first
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+
+    // --- Cluster Controller Integration ---
+    // We map both flat and grouped states to the controller's expected format.
+    // For flat view, we create one massive "cluster" so the controller can track all IDs.
+    const controllerData = useMemo(() => {
+        if (isGrouping) {
+            const groupClusters = clusters.map(c => ({
+                faces: c.faces.map(f => Number(f.id)),
+                data: c
+            }));
+            if (singles.length > 0) {
+                groupClusters.push({
+                    faces: singles.map(f => Number(f.id)),
+                    data: { id: 'singles', faces: singles }
+                });
+            }
+            return groupClusters;
+        } else {
+            // Flat View: One cluster containing all faces
+            if (faces.length === 0) return [];
+            return [{
+                faces: faces.map(f => Number(f.id)),
+                data: { id: 'flat', faces: faces }
+            }];
+        }
+    }, [isGrouping, clusters, singles, faces]);
+
+    const controller = useClusterController({
+        clusters: controllerData,
+        pageSize: 50 // Only applies if we use controller's pagination
+    });
+
+    // Sync selectedIds for backward compatibility (if needed) or direct usage
+    const selectedIds = controller.selectedFaceIds;
 
     useEffect(() => {
         if (isOpen) {
             loadIgnoredFaces(0)
-            setSelectedIds(new Set())
+            controller.clearSelection()
             setIsGrouping(false)
         }
     }, [isOpen])
+
+    // Keyboard Navigation
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const handleKey = (e: KeyboardEvent) => {
+            controller.handleKeyDown(e, {
+                onAccept: (index) => {
+                    // Restore group. Use controller.displayedClusters to respect pagination/filtering filters
+                    const cluster = controller.displayedClusters[index];
+                    if (cluster) handleRestore(undefined, cluster.faces);
+                }
+            });
+        };
+
+        window.addEventListener('keydown', handleKey);
+        return () => window.removeEventListener('keydown', handleKey);
+    }, [isOpen, controller.handleKeyDown, controllerData]);
 
     const loadIgnoredFaces = async (pageNum: number = 0) => {
         const isLoadMore = pageNum > 0
@@ -60,9 +113,6 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                     return [...prev, ...uniqueNewFaces];
                 });
 
-                // If grouping was active, we should re-cluster everything
-                // Ideally we'd do this automatically, but for now let's just turn it off to avoid confusion
-                // or user can press Group Similar again
                 if (isGrouping) {
                     setIsGrouping(false) // Reset grouping on new data for simplicity
                 }
@@ -85,10 +135,10 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
     }
 
     const handleClusterToggle = async () => {
-        // ... (rest of logic same) ...
         if (!isGrouping) {
             // Turn ON grouping
             setIsGrouping(true)
+            controller.clearSelection() // Clear selection when switching modes to avoid confusion
             if (faces.length === 0) return
 
             setClustering(true)
@@ -102,7 +152,6 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                     min_samples: 2
                 })
 
-                // Backend might not return 'success: true' for this specific command, just 'clusters'
                 if (res.clusters) {
                     const idMap = new Map(faces.map(f => [f.id, f]))
 
@@ -118,7 +167,6 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                     setClusters(newClusters)
                     setSingles(newSingles)
                 } else {
-                    // No clusters found or unexpected response
                     console.warn("Clustering returned no clusters or invalid format:", res)
                     setClusters([])
                     setSingles(faces) // Show all as singles
@@ -132,34 +180,28 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
         } else {
             // Turn OFF
             setIsGrouping(false)
+            controller.clearSelection()
         }
     }
 
-    const toggleSelection = (id: number) => {
-        const next = new Set(selectedIds)
-        if (next.has(id)) next.delete(id)
-        else next.add(id)
-        setSelectedIds(next)
-    }
-
     // Toggle Suggestion on selection change
+    // Updated to use controller.selectedFaceIds (via selectedIds alias)
     useEffect(() => {
         if (selectedIds.size === 0) {
             setSuggestion(null);
             return;
         }
 
+        // We need to look up face objects from ID selection
+        // Since 'faces' has the full list (loaded so far), we can look up there
         const selectedFaces = faces.filter(f => selectedIds.has(f.id));
         const sample = selectedFaces.map(f => f.descriptor).filter(Boolean).slice(0, 10);
 
-        console.log(`[IgnoredFaces] Selection changed. Selected: ${selectedIds.size}, Descriptors: ${sample.length}`);
+        // console.log(`[IgnoredFaces] Selection changed: ${selectedIds.size}`);
 
         if (sample.length > 0) {
-            // Convert similarity (slider value) to L2 distance for backend
-            // similarity = 1/(1+distance), so distance = 1/similarity - 1
             const distanceThreshold = (1 / threshold) - 1;
             matchBatch(sample, { threshold: distanceThreshold }).then(results => {
-                console.log("[IgnoredFaces] matchBatch results:", results);
                 const counts: any = {};
                 results.forEach(r => {
                     if (r && r.personId) {
@@ -172,12 +214,6 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                 const sorted = Object.values(counts).sort((a: any, b: any) => b.count - a.count || b.maxSim - a.maxSim) as any[];
                 const winner = sorted[0];
 
-                if (winner) {
-                    console.log(`[IgnoredFaces] Best match: ${winner.person.personName} (Sim: ${winner.maxSim.toFixed(3)}, Count: ${winner.count})`);
-                } else {
-                    console.log("[IgnoredFaces] No matches found in library.");
-                }
-
                 if (winner && winner.maxSim >= threshold) {
                     setSuggestion(winner.person);
                 } else {
@@ -189,18 +225,6 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
         }
     }, [selectedIds, faces, matchBatch, threshold]);
 
-    const toggleGroupSelection = (facesInGroup: any[]) => {
-        const ids = facesInGroup.map(f => f.id)
-        const allSelected = ids.every(id => selectedIds.has(id))
-        const next = new Set(selectedIds)
-
-        if (allSelected) {
-            ids.forEach(id => next.delete(id))
-        } else {
-            ids.forEach(id => next.add(id))
-        }
-        setSelectedIds(next)
-    }
 
     const removeFacesFromState = (idsToRemove: number[]) => {
         const idSet = new Set(idsToRemove);
@@ -211,11 +235,7 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
         setTotalCount(prev => Math.max(0, prev - idsToRemove.length));
 
         // 2. Clear selection
-        setSelectedIds(prev => {
-            const next = new Set(prev);
-            idsToRemove.forEach(id => next.delete(id));
-            return next;
-        });
+        controller.clearSelection();
 
         // 3. Update grouped view if active
         if (isGrouping) {
@@ -227,8 +247,8 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
         }
     };
 
-    const handleRestore = async (targetPersonId?: number) => {
-        const ids = Array.from(selectedIds)
+    const handleRestore = async (targetPersonId?: number, specificIds?: number[]) => {
+        const ids = specificIds || Array.from(selectedIds)
         if (ids.length === 0) return
 
         try {
@@ -240,6 +260,8 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
 
             removeFacesFromState(ids);
 
+            // Allow time for state update before refresh if needed, 
+            // but we usually want immediate feedback.
             // Trigger main app refresh to show restored faces in Library/Unnamed
             loadFaces({ unnamed: true })
         } catch (e) {
@@ -254,9 +276,6 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                 <Dialog.Content className="fixed inset-4 md:inset-10 bg-gray-900 rounded-xl border border-gray-800 shadow-2xl z-50 flex flex-col overflow-hidden animate-scale-in">
 
                     {/* Header */}
-                    <Dialog.Description className="sr-only">
-                        Modal for viewing and restoring ignored faces. You can group similar faces to restore them in bulk.
-                    </Dialog.Description>
                     <div className="flex-none p-4 border-b border-gray-800 flex items-center justify-between text-white bg-gray-900/50 backdrop-blur">
                         <Dialog.Title className="text-xl font-semibold flex items-center gap-2">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -269,7 +288,6 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                         </Dialog.Title>
 
                         <div className="flex items-center gap-3">
-                            {/* Sort Order Toggle */}
                             <button
                                 onClick={() => {
                                     const newOrder = sortOrder === 'desc' ? 'asc' : 'desc';
@@ -279,8 +297,8 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                                     setIsGrouping(false);
                                     setClusters([]);
                                     setSingles([]);
-                                    setSelectedIds(new Set());
-                                    // Reload with new order
+                                    controller.clearSelection();
+
                                     (async () => {
                                         setLoading(true);
                                         try {
@@ -315,7 +333,7 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                                 {clustering ? (
                                     <>
                                         <div className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
-                                        <span>Analyzing {faces.length} faces...</span>
+                                        <span>Analyzing...</span>
                                     </>
                                 ) : (
                                     <>
@@ -338,32 +356,37 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
 
                     {/* Toolbar */}
                     <div className="flex-none p-3 bg-gray-800/30 border-b border-gray-800 flex items-center gap-4">
-                        <div className="text-sm text-gray-400">
-                            {selectedIds.size} selected
-                        </div>
-
-                        <div className="flex-1" />
-
-                        <div className="flex items-center gap-3 px-3 py-1 bg-gray-900/50 rounded-lg border border-gray-700 mx-2">
-                            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Sensitivity</span>
-                            <input
-                                type="range"
-                                min="0.1"
-                                max="0.95"
-                                step="0.05"
-                                value={threshold}
-                                onChange={(e) => setThreshold(parseFloat(e.target.value))}
-                                className="w-20 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                            />
-                            <span className="text-xs font-mono text-indigo-400 w-8">{threshold.toFixed(2)}</span>
-                        </div>
-
-                        <button
-                            onClick={() => setSelectedIds(new Set(faces.map(f => f.id)))}
-                            className="text-xs text-gray-500 hover:text-white"
+                        <ClusterToolbar
+                            selectedCount={selectedIds.size}
+                            totalCount={faces.length}
+                            filteredCount={faces.length}
+                            onSelectAll={() => controller.selectAll()}
+                            onClearSelection={() => controller.clearSelection()}
+                            sizeFilter="all"
+                            onSizeFilterChange={() => { }}
                         >
-                            Select All (Loaded)
-                        </button>
+                            <div className="flex items-center gap-3 px-3 py-1 bg-gray-900/50 rounded-lg border border-gray-700 mx-2">
+                                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Sensitivity</span>
+                                <input
+                                    type="range"
+                                    min="0.1"
+                                    max="0.95"
+                                    step="0.05"
+                                    value={threshold}
+                                    onChange={(e) => setThreshold(parseFloat(e.target.value))}
+                                    className="w-20 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                />
+                                <span className="text-xs font-mono text-indigo-400 w-8">{threshold.toFixed(2)}</span>
+                            </div>
+
+                            {selectedIds.size > 0 && (
+                                <ClusterToolbarButton
+                                    label="Restore"
+                                    onClick={() => handleRestore()}
+                                    variant="primary"
+                                />
+                            )}
+                        </ClusterToolbar>
                     </div>
 
                     {/* Content */}
@@ -374,23 +397,26 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                             </div>
                         ) : faces.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
                                 <p>No ignored faces found.</p>
                             </div>
                         ) : (
                             <>
                                 {isGrouping ? (
                                     <div className="space-y-6">
-                                        {clusters.map(cluster => (
-                                            <div key={cluster.id} className="bg-gray-800/20 rounded-xl border border-gray-800 overflow-hidden">
+                                        {clusters.map((cluster, idx) => (
+                                            <div
+                                                key={cluster.id}
+                                                className={`rounded-xl border overflow-hidden transition-all ${controller.focusedClusterIndex === idx
+                                                    ? 'bg-gray-800/40 border-indigo-400 ring-2 ring-indigo-500/50'
+                                                    : 'bg-gray-800/20 border-gray-800'
+                                                    }`}
+                                            >
                                                 <div className="flex items-center justify-between px-4 py-3 bg-gray-900/40 border-b border-gray-800">
                                                     <div className="flex items-center gap-3">
                                                         <input
                                                             type="checkbox"
-                                                            checked={cluster.faces.every(f => selectedIds.has(f.id))}
-                                                            onChange={() => toggleGroupSelection(cluster.faces)}
+                                                            checked={cluster.faces.every(f => selectedIds.has(Number(f.id)))}
+                                                            onChange={() => controller.toggleGroup(cluster.faces.map(f => Number(f.id)))}
                                                             className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-gray-900 cursor-pointer"
                                                         />
                                                         <span className="text-sm font-medium text-indigo-300">Group {cluster.id.replace('group-', '')}</span>
@@ -402,8 +428,8 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                                                         <IgnoredFaceItem
                                                             key={face.id}
                                                             face={face}
-                                                            selected={selectedIds.has(face.id)}
-                                                            onToggle={() => toggleSelection(face.id)}
+                                                            selected={selectedIds.has(Number(face.id))}
+                                                            onToggle={() => controller.toggleFace(Number(face.id))}
                                                         />
                                                     ))}
                                                 </div>
@@ -424,8 +450,8 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                                                             <IgnoredFaceItem
                                                                 key={face.id}
                                                                 face={face}
-                                                                selected={selectedIds.has(face.id)}
-                                                                onToggle={() => toggleSelection(face.id)}
+                                                                selected={selectedIds.has(Number(face.id))}
+                                                                onToggle={() => controller.toggleFace(Number(face.id))}
                                                             />
                                                         ))}
                                                     </div>
@@ -439,8 +465,8 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                                             <IgnoredFaceItem
                                                 key={face.id}
                                                 face={face}
-                                                selected={selectedIds.has(face.id)}
-                                                onToggle={() => toggleSelection(face.id)}
+                                                selected={selectedIds.has(Number(face.id))}
+                                                onToggle={() => controller.toggleFace(Number(face.id))}
                                             />
                                         ))}
                                     </div>
@@ -454,14 +480,7 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                                             disabled={loadingMore}
                                             className="bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 px-6 py-2 rounded-full font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                                         >
-                                            {loadingMore ? (
-                                                <>
-                                                    <div className="animate-spin h-4 w-4 border-2 border-indigo-400 border-t-transparent rounded-full" />
-                                                    Loading...
-                                                </>
-                                            ) : (
-                                                `Load More (${totalCount - faces.length} remaining)`
-                                            )}
+                                            {loadingMore ? 'Loading...' : `Load More (${totalCount - faces.length} remaining)`}
                                         </button>
                                     </div>
                                 )}
@@ -511,7 +530,7 @@ export default function IgnoredFacesModal({ isOpen, onClose }: IgnoredFacesModal
                             )}
                             <div className="border-l border-gray-700 pl-4">
                                 <button
-                                    onClick={() => setSelectedIds(new Set())}
+                                    onClick={() => controller.clearSelection()}
                                     className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
                                 >
                                     Cancel

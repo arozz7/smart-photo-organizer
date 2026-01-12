@@ -32,26 +32,24 @@ const ClusterList = memo(({
 
     const renderClusterRow = useCallback((index: number) => {
         const cluster = clusters[index];
-        if (!cluster || !cluster.faces) return null;
+        if (!cluster || !cluster.faces || cluster.faces.length === 0) return null;
 
         return (
-            <div className="border-b border-gray-800 pb-4 pr-2">
-                <ClusterRow
-                    faceIds={cluster.faces}
-                    initialSuggestion={cluster.suggestion}
-                    index={index}
-                    selectedFaceIds={selectedFaceIds}
-                    toggleFace={toggleFace}
-                    toggleGroup={toggleGroup}
-                    fetchFacesByIds={fetchFacesByIds}
-                    onNameGroup={handleNameGroup}
-                    onIgnoreGroup={handleIgnoreGroup}
-                    onUngroup={handleUngroup}
-                    onOpenNaming={handleOpenNaming}
-                    isFocused={focusedIndex === index}
-                    onSuggestionFound={onSuggestionFound}
-                />
-            </div>
+            <ClusterRow
+                faceIds={cluster.faces}
+                initialSuggestion={cluster.suggestion}
+                index={index}
+                selectedFaceIds={selectedFaceIds}
+                toggleFace={toggleFace}
+                toggleGroup={toggleGroup}
+                fetchFacesByIds={fetchFacesByIds}
+                onNameGroup={handleNameGroup}
+                onIgnoreGroup={handleIgnoreGroup}
+                onUngroup={handleUngroup}
+                onOpenNaming={handleOpenNaming}
+                isFocused={focusedIndex === index}
+                onSuggestionFound={onSuggestionFound}
+            />
         );
     }, [clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleUngroup, handleOpenNaming, focusedIndex, onSuggestionFound]);
 

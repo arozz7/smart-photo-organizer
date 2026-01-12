@@ -156,125 +156,127 @@ const ClusterRow = memo(({
     const selectionCount = faceIds.filter(id => selectedFaceIds.has(id)).length
 
     return (
-        <div className={`rounded-xl p-4 mb-4 border transition-colors ${isFocused
-            ? 'bg-indigo-800/30 border-indigo-400 ring-2 ring-indigo-500/50'
-            : selectionCount > 0
-                ? 'bg-indigo-900/20 border-indigo-500/30'
-                : 'bg-gray-800/30 border-gray-700/30'
-            }`}>
-            <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                    <div className="flex items-center h-5">
-                        <input
-                            type="checkbox"
-                            checked={isAllSelected}
-                            ref={input => {
-                                if (input) input.indeterminate = isSomeSelected && !isAllSelected
+        <div className="border-b border-gray-800 pb-4 pr-2">
+            <div className={`rounded-xl p-4 mb-4 border transition-colors ${isFocused
+                ? 'bg-indigo-800/30 border-indigo-400 ring-2 ring-indigo-500/50'
+                : selectionCount > 0
+                    ? 'bg-indigo-900/20 border-indigo-500/30'
+                    : 'bg-gray-800/30 border-gray-700/30'
+                }`}>
+                <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center h-5">
+                            <input
+                                type="checkbox"
+                                checked={isAllSelected}
+                                ref={input => {
+                                    if (input) input.indeterminate = isSomeSelected && !isAllSelected
+                                }}
+                                onChange={() => toggleGroup(faceIds)}
+                                className="h-4 w-4 rounded border-gray-600 bg-gray-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                        </div>
+                        <div className="bg-indigo-500/20 text-indigo-300 px-3 py-1 rounded-full text-xs font-bold">
+                            Group {index + 1}
+                        </div>
+                        {suggestion && (
+                            <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 text-green-300 px-2 py-1 rounded text-xs animate-fade-in shadow-sm">
+                                <span className="opacity-70">Suggested:</span>
+                                <span className="font-bold underline cursor-help" title={`Match confidence: ${Math.round(suggestion.similarity * 100)}%`}>
+                                    {suggestion.personName}
+                                </span>
+                                <button
+                                    onClick={() => onNameGroup(faceIds, suggestion.personName, true)}
+                                    className="ml-1 bg-green-600 hover:bg-green-500 text-white rounded px-1.5 py-0.5 text-[10px] uppercase font-bold transition-colors"
+                                >
+                                    Accept
+                                </button>
+                            </div>
+                        )}
+                        <span className="text-gray-400 text-sm">{clusterFaces.length} faces</span>
+                    </div>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => onUngroup(index)}
+                            className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 px-3 py-1.5 rounded-md transition-colors"
+                            title="Ungroup these faces (move back to singles)"
+                        >
+                            Ungroup
+                        </button>
+                        <button
+                            onClick={() => onIgnoreGroup(faceIds)}
+                            className="text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 border border-red-900/50 px-3 py-1.5 rounded-md transition-colors"
+                        >
+                            Ignore Group
+                        </button>
+                        <button
+                            onClick={() => {
+                                // Select group if not already, then open namer
+                                if (!isAllSelected) toggleGroup(faceIds)
+                                onOpenNaming(faceIds)
                             }}
-                            onChange={() => toggleGroup(faceIds)}
-                            className="h-4 w-4 rounded border-gray-600 bg-gray-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                        />
+                            className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1.5 rounded-md transition-colors"
+                        >
+                            Name Group
+                        </button>
                     </div>
-                    <div className="bg-indigo-500/20 text-indigo-300 px-3 py-1 rounded-full text-xs font-bold">
-                        Group {index + 1}
-                    </div>
-                    {suggestion && (
-                        <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 text-green-300 px-2 py-1 rounded text-xs animate-fade-in shadow-sm">
-                            <span className="opacity-70">Suggested:</span>
-                            <span className="font-bold underline cursor-help" title={`Match confidence: ${Math.round(suggestion.similarity * 100)}%`}>
-                                {suggestion.personName}
-                            </span>
-                            <button
-                                onClick={() => onNameGroup(faceIds, suggestion.personName, true)}
-                                className="ml-1 bg-green-600 hover:bg-green-500 text-white rounded px-1.5 py-0.5 text-[10px] uppercase font-bold transition-colors"
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-700">
+                    {clusterFaces.slice(0, 50).map(face => {
+                        const isSelected = selectedFaceIds.has(face.id)
+                        return (
+                            <div
+                                key={face.id}
+                                onClick={() => toggleFace(face.id)}
+                                className={`w-24 h-24 flex-none relative group cursor-pointer rounded-md overflow-hidden transition-all ${isSelected
+                                    ? 'ring-4 ring-indigo-500 ring-offset-2 ring-offset-gray-900 z-10'
+                                    : face.confidence_tier === 'high'
+                                        ? 'ring-2 ring-green-500/80 hover:ring-green-500 z-0'
+                                        : (face.confidence_tier === 'review' || suggestion)
+                                            ? 'ring-2 ring-amber-500/80 hover:ring-amber-500 z-0'
+                                            : 'hover:opacity-90'
+                                    }`}
                             >
-                                Accept
-                            </button>
+                                <FaceThumbnail
+                                    src={`local-resource://${encodeURIComponent(face.file_path || '')}`}
+                                    fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
+                                    box={face.box}
+                                    originalImageWidth={face.width}
+                                    useServerCrop={true}
+                                    className="w-full h-full object-cover"
+                                />
+                                {isSelected && (
+                                    <div className="absolute inset-0 bg-indigo-500/20 flex items-center justify-center">
+                                        <div className="bg-indigo-500 rounded-full p-1">
+                                            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* View Original Button */}
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        viewPhoto(face.photo_id);
+                                    }}
+                                    className="absolute bottom-1 right-1 bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-all z-20 shadow-lg"
+                                    title="View Original Photo"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        )
+                    })}
+                    {clusterFaces.length > 50 && (
+                        <div className="w-24 h-24 flex-none bg-gray-800 rounded-md flex items-center justify-center text-gray-500 text-xs">
+                            +{clusterFaces.length - 50} more
                         </div>
                     )}
-                    <span className="text-gray-400 text-sm">{clusterFaces.length} faces</span>
                 </div>
-                <div className="flex gap-2">
-                    <button
-                        onClick={() => onUngroup(index)}
-                        className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 px-3 py-1.5 rounded-md transition-colors"
-                        title="Ungroup these faces (move back to singles)"
-                    >
-                        Ungroup
-                    </button>
-                    <button
-                        onClick={() => onIgnoreGroup(faceIds)}
-                        className="text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 border border-red-900/50 px-3 py-1.5 rounded-md transition-colors"
-                    >
-                        Ignore Group
-                    </button>
-                    <button
-                        onClick={() => {
-                            // Select group if not already, then open namer
-                            if (!isAllSelected) toggleGroup(faceIds)
-                            onOpenNaming(faceIds)
-                        }}
-                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1.5 rounded-md transition-colors"
-                    >
-                        Name Group
-                    </button>
-                </div>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-700">
-                {clusterFaces.slice(0, 50).map(face => {
-                    const isSelected = selectedFaceIds.has(face.id)
-                    return (
-                        <div
-                            key={face.id}
-                            onClick={() => toggleFace(face.id)}
-                            className={`w-24 h-24 flex-none relative group cursor-pointer rounded-md overflow-hidden transition-all ${isSelected
-                                ? 'ring-4 ring-indigo-500 ring-offset-2 ring-offset-gray-900 z-10'
-                                : face.confidence_tier === 'high'
-                                    ? 'ring-2 ring-green-500/80 hover:ring-green-500 z-0'
-                                    : (face.confidence_tier === 'review' || suggestion)
-                                        ? 'ring-2 ring-amber-500/80 hover:ring-amber-500 z-0'
-                                        : 'hover:opacity-90'
-                                }`}
-                        >
-                            <FaceThumbnail
-                                src={`local-resource://${encodeURIComponent(face.file_path || '')}`}
-                                fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
-                                box={face.box}
-                                originalImageWidth={face.width}
-                                useServerCrop={true}
-                                className="w-full h-full object-cover"
-                            />
-                            {isSelected && (
-                                <div className="absolute inset-0 bg-indigo-500/20 flex items-center justify-center">
-                                    <div className="bg-indigo-500 rounded-full p-1">
-                                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* View Original Button */}
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    viewPhoto(face.photo_id);
-                                }}
-                                className="absolute bottom-1 right-1 bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-all z-20 shadow-lg"
-                                title="View Original Photo"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-                                </svg>
-                            </button>
-                        </div>
-                    )
-                })}
-                {clusterFaces.length > 50 && (
-                    <div className="w-24 h-24 flex-none bg-gray-800 rounded-md flex items-center justify-center text-gray-500 text-xs">
-                        +{clusterFaces.length - 50} more
-                    </div>
-                )}
             </div>
         </div>
     )

@@ -1,10 +1,10 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { usePeople } from '../context/PeopleContext';
 import { useAlert } from '../context/AlertContext';
 import { useToast } from '../context/ToastContext';
 import { FaceBucket } from '../types';
 
-const PAGE_SIZE = 10; // Number of buckets to show initially and per "load more"
+
 
 export function useBuckets() {
     const { people, loadPeople, fetchFacesByIds } = usePeople();
@@ -15,10 +15,6 @@ export function useBuckets() {
     const [discoveryBuckets, setDiscoveryBuckets] = useState<FaceBucket[]>([]);
     const [loadingBuckets, setLoadingBuckets] = useState(false);
     const [recheckStatus, setRecheckStatus] = useState({ active: false, offset: 0, total: 0 });
-
-    // Progressive loading state
-    const [displayedSuggestionCount, setDisplayedSuggestionCount] = useState(PAGE_SIZE);
-    const [displayedDiscoveryCount, setDisplayedDiscoveryCount] = useState(PAGE_SIZE);
 
     const checkRecheckStatus = useCallback(async () => {
         try {
@@ -33,9 +29,6 @@ export function useBuckets() {
     // Initial load & Polling
     const loadBuckets = useCallback(async () => {
         setLoadingBuckets(true);
-        // Reset display counts on full reload (not on optimistic updates)
-        setDisplayedSuggestionCount(PAGE_SIZE);
-        setDisplayedDiscoveryCount(PAGE_SIZE);
         try {
             // @ts-ignore
             const suggestionsRes = await window.ipcRenderer.invoke('db:getSuggestionBuckets');
@@ -239,46 +232,16 @@ export function useBuckets() {
         }
     }, [addToast, checkRecheckStatus]);
 
-    // Progressive loading: Compute displayed buckets
-    const displayedSuggestions = useMemo(() =>
-        suggestionBuckets.slice(0, displayedSuggestionCount),
-        [suggestionBuckets, displayedSuggestionCount]
-    );
-    const displayedDiscoveries = useMemo(() =>
-        discoveryBuckets.slice(0, displayedDiscoveryCount),
-        [discoveryBuckets, displayedDiscoveryCount]
-    );
-
-    const hasMoreSuggestions = suggestionBuckets.length > displayedSuggestionCount;
-    const hasMoreDiscoveries = discoveryBuckets.length > displayedDiscoveryCount;
-    const remainingSuggestionCount = suggestionBuckets.length - displayedSuggestionCount;
-    const remainingDiscoveryCount = discoveryBuckets.length - displayedDiscoveryCount;
-
-    const loadMoreSuggestions = useCallback(() => {
-        setDisplayedSuggestionCount(prev => prev + PAGE_SIZE);
-    }, []);
-
-    const loadMoreDiscoveries = useCallback(() => {
-        setDisplayedDiscoveryCount(prev => prev + PAGE_SIZE);
-    }, []);
-
-    // NOTE: Display counts are reset in loadBuckets, NOT on length change
-    // This prevents reset after optimistic updates (naming/ignoring buckets)
+    // NOTE: Pagination is now handled by the consumer (useClusterController) to perform client-side filtering/virtualization.
+    // We export the full bucket lists.
 
     return {
-        // Return displayed subsets for progressive loading
-        suggestionBuckets: displayedSuggestions,
-        discoveryBuckets: displayedDiscoveries,
+        // Return FULL lists
+        suggestionBuckets,
+        discoveryBuckets,
         // Full counts for tab indicators
         totalSuggestionCount: suggestionBuckets.length,
         totalDiscoveryCount: discoveryBuckets.length,
-        // Progressive loading controls
-        hasMoreSuggestions,
-        hasMoreDiscoveries,
-        remainingSuggestionCount,
-        remainingDiscoveryCount,
-        loadMoreSuggestions,
-        loadMoreDiscoveries,
         // Other exports
         loadingBuckets,
         recheckStatus,
@@ -288,6 +251,6 @@ export function useBuckets() {
         handleNameBucket,
         handleIgnoreBucket,
         handleStartRecheck,
-        fetchFacesByIds // Export for ClusterList
+        fetchFacesByIds
     };
 }
