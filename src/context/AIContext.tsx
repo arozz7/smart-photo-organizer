@@ -279,6 +279,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return () => clearInterval(intervalId);
     }, [fetchSystemStatus, fetchBucketingStatus, isProcessing, aiMode, bucketingStatus.active, recheckStatus.active]);
 
+    // Sync Processing State to Backend (Concurrency Control)
+    useEffect(() => {
+        // @ts-ignore
+        window.ipcRenderer.invoke('ai:setProcessingStatus', isProcessing).catch(console.error);
+        return () => {
+            // Safety: ensure we clear flag if component unmounts
+            // @ts-ignore
+            window.ipcRenderer.invoke('ai:setProcessingStatus', false).catch(console.error);
+        }
+    }, [isProcessing]);
+
     // Blur Calculation State
     const [calculatingBlur, setCalculatingBlur] = useState(false);
     const [blurProgress, setBlurProgress] = useState({ current: 0, total: 0 });

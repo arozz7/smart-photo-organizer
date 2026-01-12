@@ -185,6 +185,9 @@
     - **Discovery Buckets:** Name/Ignore new unknown clusters found by DBSCAN.
     - **Re-check Ignored:** Recover faces from the "Ignored" pool.
     - [See Changelog](aiChangeLog/phase-37-b6-ui-updates.md)
+- **Concurrency & Polish (Phase 39):**
+    - **Smart Scheduling:** Service now creates zero overhead during active AI scans by pausing immediately.
+    - [See Changelog](aiChangeLog/phase-39-concurrency-fix.md)
 
 ### Smart Face Management
 *Details: See [Smart Ignore Implementation Plan](file:///j:/Projects/smart-photo-organizer/docs/smart-ignore-implementation-plan.md) for full technical specs.*

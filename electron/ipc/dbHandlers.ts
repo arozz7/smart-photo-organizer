@@ -642,8 +642,11 @@ export function registerDBHandlers() {
         // Use (Total - Remaining) as the source of truth for progress if available.
         const effectiveOffset = total > 0 ? Math.max(0, total - remaining.count) : offset;
 
+        // Check if service is paused due to concurrency
+        const isPaused = AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive();
+
         return {
-            active: isDirty || remaining.count > 0,
+            active: (isDirty || remaining.count > 0) && !isPaused, // Only active if pending AND not paused
             offset: effectiveOffset,
             total,
             remaining: remaining.count

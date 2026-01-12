@@ -92,8 +92,8 @@ export class BackgroundBucketingService {
                     break;
                 }
 
-                // 2. Check Active Scan - yield to scan operations
-                if (AppStateRepository.isScanActive()) {
+                // 2. Check Active Scan OR Active AI Queue - yield to intensive operations
+                if (AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive()) {
                     await this.sleep(this.loopIntervalMs);
                     continue;
                 }
@@ -187,8 +187,18 @@ export class BackgroundBucketingService {
         const settings = getAISettings();
         const threshold = settings.faceSimilarityThreshold ?? 0.65;
 
+        let processedCount = 0;
         for (const face of faces) {
-            if (!face.descriptor) continue;
+            // Check interrupts
+            if (AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive()) {
+                logger.info('[BackgroundBucketingService] Re-check batch interrupted.');
+                break;
+            }
+
+            if (!face.descriptor) {
+                processedCount++;
+                continue;
+            }
 
             const match = FaceService.matchAgainstCentroids(
                 Array.from(face.descriptor),
@@ -204,6 +214,8 @@ export class BackgroundBucketingService {
                     distance: match.distance
                 });
             }
+
+            processedCount++;
         }
 
         if (suggestions.length > 0) {
@@ -217,9 +229,9 @@ export class BackgroundBucketingService {
         // Note: updateFace changes bucket_id, but NOT is_ignored.
         // So the face still matches "WHERE is_ignored = 1".
         // So simple offset increment works.
-        AppStateRepository.setRecheckOffset(offset + faces.length);
+        AppStateRepository.setRecheckOffset(offset + processedCount);
 
-        return faces.length;
+        return processedCount;
     }
 
     private lastBatchIds: string = '';
@@ -259,17 +271,24 @@ export class BackgroundBucketingService {
         // Strict threshold for suggestions? Maybe loosen it for buckets?
         // Plan says: "If distance < threshold, add to Suggestion Bucket"
 
+        let processedCount = 0;
         for (let i = 0; i < faces.length; i++) {
             const face = faces[i];
 
             // Yield every 10 faces to allow IPC handlers to process
             if (i > 0 && i % 10 === 0) {
                 await this.yield();
+                // Check interrupts during batch
+                if (AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive()) {
+                    logger.info('[BackgroundBucketingService] Interrupted by active processing. Aborting batch.');
+                    break;
+                }
             }
 
             if (!face.descriptor) {
                 // If no descriptor, we cannot bucket it. Mark as processed.
                 FaceRepository.setNeedsBucketing([face.id], false);
+                processedCount++;
                 continue;
             }
 
@@ -295,6 +314,8 @@ export class BackgroundBucketingService {
             } else {
                 remainingFaces.push(face);
             }
+
+            processedCount++;
         }
 
         logger.info(`[BackgroundBucketingService] Pass 1 complete: ${suggestions.length} suggestions, ${remainingFaces.length} remaining for Pass 2`);
@@ -311,9 +332,11 @@ export class BackgroundBucketingService {
 
         // Update checkpoint stats
         const currentOffset = AppStateRepository.getBucketingOffset();
-        AppStateRepository.setBucketingOffset(currentOffset + faces.length);
+        // Only advance by what we actually touched.
+        // Since we use offset 0 for fetching, this is just for UI Progress Store.
+        AppStateRepository.setBucketingOffset(currentOffset + processedCount);
 
-        return faces.length;
+        return processedCount;
     }
 
     private processSuggestions(suggestions: { faceId: number, personId: number, distance: number }[]) {

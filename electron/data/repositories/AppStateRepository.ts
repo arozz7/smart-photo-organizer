@@ -172,4 +172,20 @@ export class AppStateRepository {
     static setRecheckTotal(total: number): void {
         this.setFlag('ignored_recheck_total', String(total));
     }
+
+    // --- AI Processing State (Concurrency Control) ---
+
+    /**
+     * Check if AI processing is currently active (queue running).
+     */
+    static isAIProcessingActive(): boolean {
+        return this.getFlag('ai_processing_active') === '1';
+    }
+
+    /**
+     * Set AI processing state.
+     */
+    static setAIProcessingActive(active: boolean): void {
+        this.setFlag('ai_processing_active', active ? '1' : '0');
+    }
 }
