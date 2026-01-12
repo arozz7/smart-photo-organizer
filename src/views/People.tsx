@@ -372,6 +372,15 @@ export default function People() {
 
 
 
+    const handleRebuildIndex = async () => {
+        const res = await rebuildFaissIndex();
+        if (res && res.success) {
+            addToast({ type: 'success', description: 'Face index rebuilt successfully' });
+        } else {
+            addToast({ type: 'error', description: 'Failed to rebuild index' });
+        }
+    }
+
     return (
         <div className="flex flex-col h-full bg-gray-950 text-white overflow-hidden">
             {/* Header / Tabs */}
@@ -499,7 +508,7 @@ export default function People() {
                                     </div>
                                 </div>
                                 <button
-                                    onClick={rebuildFaissIndex}
+                                    onClick={handleRebuildIndex}
                                     disabled={isRebuildingIndex}
                                     className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
                                 >

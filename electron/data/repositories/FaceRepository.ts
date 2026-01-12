@@ -85,7 +85,8 @@ export class FaceRepository {
         const db = getDB();
         if (ids.length === 0) return;
         const placeholders = ids.map(() => '?').join(',');
-        const query = `UPDATE faces SET is_ignored = 1 WHERE id IN (${placeholders})`;
+        // CRITICAL: Unassign from person when ignoring so they are removed from FAISS index logic
+        const query = `UPDATE faces SET is_ignored = 1, person_id = NULL WHERE id IN (${placeholders})`;
         db.prepare(query).run(...ids);
     }
 
@@ -331,7 +332,7 @@ export class FaceRepository {
             SELECT f.id, f.descriptor 
             FROM faces f 
             JOIN people p ON f.person_id = p.id 
-            WHERE f.descriptor IS NOT NULL AND f.person_id IS NOT NULL
+            WHERE f.descriptor IS NOT NULL AND f.person_id IS NOT NULL AND f.is_ignored = 0
         `).all() as any[];
         return rows.map(r => ({
             id: r.id,

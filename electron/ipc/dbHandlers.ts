@@ -126,13 +126,41 @@ export function registerDBHandlers() {
         return FaceRepository.getAllFaces(args.limit, args.offset, args.filter, args.includeDescriptors);
     });
 
-    ipcMain.handle('db:ignoreFaces', async (_, ids) => {
-        FaceRepository.ignoreFaces(ids);
+    // Updated to track FAISS staleness when ignoring named faces
+    ipcMain.handle('db:ignoreFace', async (_, faceId) => {
+        const db = getDB();
+        // Check if face was assigned to a person (FAISS index impact)
+        // We select person_id before it gets nulled by FaceRepository.ignoreFace
+        const face = db.prepare('SELECT person_id FROM faces WHERE id = ?').get(faceId) as { person_id: number | null };
+        const wasNamed = face && face.person_id !== null;
+
+        await FaceRepository.ignoreFaces([faceId]);
+
+        if (wasNamed) {
+            const { incrementFaissStaleCount } = await import('../store');
+            incrementFaissStaleCount(1);
+        }
+
         return { success: true };
     });
 
-    ipcMain.handle('db:ignoreFace', async (_, id) => {
-        FaceRepository.ignoreFaces([id]);
+    ipcMain.handle('db:ignoreFaces', async (_, faceIds) => {
+        if (!faceIds || faceIds.length === 0) return { success: true };
+
+        const db = getDB();
+        const placeholders = faceIds.map(() => '?').join(',');
+
+        // Count how many are assigned to a person
+        const result = db.prepare(`SELECT COUNT(*) as count FROM faces WHERE id IN (${placeholders}) AND person_id IS NOT NULL`).get(...faceIds) as { count: number };
+        const staleCount = result.count || 0;
+
+        await FaceRepository.ignoreFaces(faceIds);
+
+        if (staleCount > 0) {
+            const { incrementFaissStaleCount } = await import('../store');
+            incrementFaissStaleCount(staleCount);
+        }
+
         return { success: true };
     });
 
