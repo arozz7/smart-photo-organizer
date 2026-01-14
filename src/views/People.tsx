@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePeople } from '../context/PeopleContext'
 import { useAI } from '../context/AIContext'
 import { usePeopleCluster } from '../hooks/usePeopleCluster'
 import { useBuckets } from '../hooks/useBuckets'
+import { useMergedBuckets } from '../hooks/useMergedBuckets'
 import PersonCard from '../components/PersonCard'
 import ClusterList from '../components/ClusterList'
 import SmartIgnorePanel from '../components/SmartIgnorePanel'
@@ -21,7 +22,7 @@ import UnmatchedFacesModal from '../components/UnmatchedFacesModal'
 import ClusteringSettingsModal from '../components/ClusteringSettingsModal'
 import FaceDebugModal from '../components/FaceDebugModal'
 import FaceThumbnail from '../components/FaceThumbnail'
-import { Face } from '../types'
+import { Face, FaceBucket, MergedBucket } from '../types'
 import { FloatingActionBar, FloatingActionButton } from '../components/FloatingActionBar'
 
 export default function People() {
@@ -95,35 +96,60 @@ export default function People() {
         loadBuckets: refreshBuckets,
         handleConfirmSuggestion,
         handleRejectSuggestion,
-        handleNameBucket,
+        handleNameBucket: useBucketsHandleNameBucket,
         handleIgnoreBucket,
         handleStartRecheck,
         recheckStatus
     } = useBuckets()
+
+    const [combineSuggestions, setCombineSuggestions] = useState(true);
+    const { mergedBuckets, isMerging: isMergingBuckets } = useMergedBuckets(suggestionBuckets, {
+        enabled: combineSuggestions,
+        maxMergedSize: 50
+    });
+
+    // Bulk Action Progress State
+    const [bulkProgress, setBulkProgress] = useState<{ active: boolean; current: number; total: number; type: 'confirm' | 'ignore' } | null>(null);
 
     // --- Controllers for Buckets Tabs ---
 
     // 1. Suggestions Controller
     // Map buckets to ClusterType
     const suggestionClustersData = useMemo(() => {
-        return suggestionBuckets.map(b => ({
+        return mergedBuckets.map(b => ({
             faces: b.face_ids,
             data: b // store full bucket object
         }));
-    }, [suggestionBuckets]);
+    }, [mergedBuckets]);
 
     const suggestionsController = useClusterController({
         clusters: suggestionClustersData,
         pageSize: 50
     });
 
+    // Reset when toggling merge mode
+    useEffect(() => {
+        suggestionsController.resetPagination();
+        suggestionsController.clearSelection();
+    }, [combineSuggestions]);
+
     // 2. Discoveries Controller
     const discoveryClustersData = useMemo(() => {
-        return discoveryBuckets.map(b => ({
-            faces: b.face_ids,
-            data: b
-        }));
-    }, [discoveryBuckets]);
+        return discoveryBuckets.map(b => {
+            let suggestion = undefined;
+            if (b.suggested_person_id) {
+                const person = people.find(p => p.id === b.suggested_person_id);
+                if (person) {
+                    suggestion = { personId: person.id, name: person.name, confirmLabel: 'Confirm', confidence: 0.8 };
+                }
+            }
+            return {
+                faces: b.face_ids,
+                data: b,
+                suggestion // Pass suggestion to ClusterRow
+            };
+        });
+    }, [discoveryBuckets, people]);
 
     const discoveriesController = useClusterController({
         clusters: discoveryClustersData,
@@ -197,7 +223,219 @@ export default function People() {
 
     }, [activeTab, suggestionsController, discoveriesController, suggestionClustersData, discoveryClustersData])
 
-    // Effect for Unnamed Tab Keydown (easier to separate)
+    // --- Helper: Shared Confirmation Logic ---
+    const confirmMergedGroup = useCallback(async (
+        bucket: FaceBucket | MergedBucket,
+        facesToConfirm: number[],
+        onSubProgress?: () => Promise<void>
+    ) => {
+        const sources = (bucket as MergedBucket).source_buckets || [bucket];
+
+        for (let i = 0; i < sources.length; i++) {
+            const source = sources[i];
+            const isLast = i === sources.length - 1;
+
+            // Intersection of desired faces and this bucket's faces
+            const sourceFaces = source.face_ids.filter(fid => facesToConfirm.includes(fid));
+
+            if (sourceFaces.length > 0) {
+                // Skip recalc for all but last source
+                const shouldSkipRecalc = sources.length > 1 && !isLast;
+
+                await handleConfirmSuggestion(source, sourceFaces, {
+                    suppressToast: true,
+                    skipRecalc: shouldSkipRecalc
+                });
+            }
+
+            if (onSubProgress) await onSubProgress();
+        }
+    }, [handleConfirmSuggestion]);
+
+    const ignoreMergedGroup = useCallback(async (
+        bucket: FaceBucket | MergedBucket,
+        facesToIgnore: number[],
+        onSubProgress?: () => Promise<void>
+    ) => {
+        const sources = (bucket as MergedBucket).source_buckets || [bucket];
+
+        for (const source of sources) {
+            const relevantFaces = source.face_ids.filter(fid => facesToIgnore.includes(fid));
+
+            if (relevantFaces.length > 0) {
+                if (relevantFaces.length === source.face_ids.length) {
+                    // Ignore whole bucket
+                    await handleIgnoreBucket(source, { suppressToast: true, skipConfirmation: true });
+                } else {
+                    // Ignore specific faces
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:ignoreFaces', relevantFaces);
+                }
+            }
+            if (onSubProgress) await onSubProgress();
+        }
+    }, [handleIgnoreBucket]);
+
+    const rejectMergedGroup = useCallback(async (
+        bucket: FaceBucket | MergedBucket,
+        onSubProgress?: () => Promise<void>
+    ) => {
+        const sources = (bucket as MergedBucket).source_buckets || [bucket];
+        for (const source of sources) {
+            await handleRejectSuggestion(source, { suppressToast: true });
+            if (onSubProgress) await onSubProgress();
+        }
+    }, [handleRejectSuggestion]);
+
+    // --- Unified Cluster Action Handlers (Progress & Merged Support) ---
+    const handleConfirmCluster = useCallback(async (clusterData: FaceBucket | MergedBucket, faces: number[]) => {
+        const sources = (clusterData as MergedBucket).source_buckets || [clusterData];
+
+        if (sources.length > 1) {
+            setBulkProgress({ active: true, current: 0, total: sources.length, type: 'confirm' });
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        let count = 0;
+        await confirmMergedGroup(clusterData, faces, async () => {
+            if (sources.length > 1) {
+                count++;
+                setBulkProgress({ active: true, current: count, total: sources.length, type: 'confirm' });
+                await new Promise(resolve => setTimeout(resolve, 5));
+            }
+        });
+
+        if (sources.length > 1) {
+            setBulkProgress(null);
+            addToast({ type: 'success', description: `Confirmed group` });
+        }
+    }, [confirmMergedGroup, addToast]);
+
+    const handleIgnoreCluster = useCallback(async (clusterData: FaceBucket | MergedBucket, faces: number[]) => {
+        const sources = (clusterData as MergedBucket).source_buckets || [clusterData];
+
+        if (sources.length > 1) {
+            setBulkProgress({ active: true, current: 0, total: sources.length, type: 'ignore' });
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        let count = 0;
+        await ignoreMergedGroup(clusterData, faces, async () => {
+            if (sources.length > 1) {
+                count++;
+                setBulkProgress({ active: true, current: count, total: sources.length, type: 'ignore' });
+                await new Promise(resolve => setTimeout(resolve, 5));
+            }
+        });
+
+        if (sources.length > 1) {
+            setBulkProgress(null);
+            addToast({ type: 'success', description: `Ignored group` });
+        }
+    }, [ignoreMergedGroup, addToast]);
+
+    const handleUngroupCluster = useCallback(async (clusterData: FaceBucket | MergedBucket) => {
+        const sources = (clusterData as MergedBucket).source_buckets || [clusterData];
+
+        if (sources.length > 1) {
+            setBulkProgress({ active: true, current: 0, total: sources.length, type: 'ignore' });
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        let count = 0;
+        await rejectMergedGroup(clusterData, async () => {
+            if (sources.length > 1) {
+                count++;
+                setBulkProgress({ active: true, current: count, total: sources.length, type: 'ignore' });
+                await new Promise(resolve => setTimeout(resolve, 5));
+            }
+        });
+
+        if (sources.length > 1) {
+            setBulkProgress(null);
+            addToast({ type: 'success', description: `Ungrouped suggestion` });
+        } else {
+            // Single ungroup already toasts if not suppressed? 
+            // handleRejectSuggestion has toast "Rejected suggestion..." logic
+        }
+    }, [rejectMergedGroup, addToast]);
+
+    // --- Tab Switching Cleanup ---
+    // Reset pagination/selection when switching tabs
+    useEffect(() => {
+        if (activeTab === 'unnamed') resetDisplayedCount();
+        if (activeTab === 'suggestions') {
+            suggestionsController.resetPagination();
+            suggestionsController.clearSelection();
+        }
+        if (activeTab === 'discoveries') {
+            discoveriesController.resetPagination();
+            discoveriesController.clearSelection();
+        }
+    }, [activeTab]);
+
+    // --- Keyboard Handling (Suggestions) ---
+    useEffect(() => {
+        if (activeTab === 'suggestions') {
+            const handleKey = (e: KeyboardEvent) => {
+                suggestionsController.handleKeyDown(e, {
+                    onAccept: (index) => {
+                        const cluster = suggestionsController.displayedClusters[index];
+                        if (cluster && cluster.data) {
+                            handleConfirmCluster(cluster.data, cluster.faces);
+                        }
+                    },
+                    onIgnore: (index) => {
+                        const cluster = suggestionsController.displayedClusters[index];
+                        if (cluster && cluster.data) {
+                            handleIgnoreCluster(cluster.data, cluster.faces);
+                        }
+                    },
+                    onName: (index) => {
+                        // Open naming for focused cluster
+                        const cluster = suggestionsController.displayedClusters[index];
+                        if (cluster) handleOpenNaming(cluster.faces);
+                    }
+                });
+            };
+            window.addEventListener('keydown', handleKey);
+            return () => window.removeEventListener('keydown', handleKey);
+        }
+        if (activeTab === 'discoveries') {
+            const handleKey = (e: KeyboardEvent) => {
+                discoveriesController.handleKeyDown(e, {
+                    onAccept: (index) => {
+                        const cluster = discoveriesController.displayedClusters[index];
+                        // Check if cluster has a suggestion (attached in useMemo above)
+                        if (cluster && (cluster as any).suggestion) {
+                            const suggestionName = (cluster as any).suggestion.name;
+                            if (cluster.data && suggestionName) {
+                                handleNameBucket(cluster.data, suggestionName);
+                            }
+                        }
+                    },
+                    onIgnore: (index) => {
+                        const cluster = discoveriesController.displayedClusters[index];
+                        if (cluster && cluster.data) {
+                            handleIgnoreBucket(cluster.data);
+                        }
+                    },
+                    onName: (index) => {
+                        const cluster = discoveriesController.displayedClusters[index];
+                        if (cluster && cluster.data) {
+                            // Important: Set pending bucket so specific bucket logic is used (e.g. marking as discovery)
+                            setPendingBucketNaming({ buckets: [cluster.data], type: 'discovery' });
+                            handleOpenNaming(cluster.faces);
+                        }
+                    }
+                });
+            };
+            window.addEventListener('keydown', handleKey);
+            return () => window.removeEventListener('keydown', handleKey);
+        }
+    }, [activeTab, suggestionsController, discoveriesController, handleConfirmCluster, handleIgnoreCluster]);
+
+    // Effect for Unnamed Tab Keydown
     useEffect(() => {
         if (activeTab !== 'unnamed') return;
 
@@ -205,10 +443,9 @@ export default function People() {
         const handler = (e: KeyboardEvent) => handleKeyDown(e, {
             onAccept: (index) => {
                 const cluster = clusters[index];
-                if (cluster && cluster.suggestion) {
-                    handleConfirmName(cluster.faces, cluster.suggestion.person.name);
+                if (cluster && (cluster as any).suggestion) {
+                    handleConfirmName(cluster.faces, (cluster as any).suggestion.person.name);
                 } else if (cluster) {
-                    // Fallback: Open naming if no suggestion
                     handleOpenNaming(cluster.faces);
                 }
             },
@@ -224,15 +461,14 @@ export default function People() {
 
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, [activeTab, handleKeyDown /* from usePeopleCluster */, clusters, handleOpenNaming, handleIgnoreGroup, handleConfirmName]);
+    }, [activeTab, clusters, handleOpenNaming, handleIgnoreGroup, handleConfirmName]);
 
     // --- Bulk Action Handlers (Suggestions) ---
     const handleBulkConfirmSuggestions = async () => {
         const selectedIds = suggestionsController.selectedFaceIds;
         if (selectedIds.size === 0) return;
 
-        // Find buckets involved
-        const affectedBuckets = suggestionBuckets.filter(b =>
+        const affectedBuckets = mergedBuckets.filter(b =>
             b.face_ids.some(id => selectedIds.has(id))
         );
 
@@ -243,10 +479,24 @@ export default function People() {
             description: `Confirm suggestions for ${affectedBuckets.length} groups?`,
             confirmLabel: 'Confirm All',
             onConfirm: async () => {
-                // Optimistic UI updates handled by useBuckets or we manually trigger refresh
-                for (const bucket of affectedBuckets) {
-                    await handleConfirmSuggestion(bucket, bucket.face_ids);
+                setBulkProgress({ active: true, current: 0, total: affectedBuckets.length, type: 'confirm' });
+                await new Promise(resolve => setTimeout(resolve, 50));
+
+                let count = 0;
+
+                for (const mb of affectedBuckets) {
+                    // Refined: Only confirm selected faces for this bucket
+                    const relevantFaces = mb.face_ids.filter(fid => selectedIds.has(fid));
+
+                    await confirmMergedGroup(mb, relevantFaces, async () => {
+                        await new Promise(resolve => setTimeout(resolve, 5));
+                    });
+
+                    count++;
+                    setBulkProgress({ active: true, current: count, total: affectedBuckets.length, type: 'confirm' });
                 }
+
+                setBulkProgress(null);
                 suggestionsController.clearSelection();
                 addToast({ type: 'success', description: `Confirmed ${affectedBuckets.length} groups` });
             }
@@ -257,8 +507,7 @@ export default function People() {
         const selectedIds = suggestionsController.selectedFaceIds;
         if (selectedIds.size === 0) return;
 
-        // Map to buckets
-        const affectedBuckets = suggestionBuckets.filter(b =>
+        const affectedBuckets = mergedBuckets.filter(b =>
             b.face_ids.some(id => selectedIds.has(id))
         );
 
@@ -268,14 +517,28 @@ export default function People() {
             confirmLabel: 'Ignore',
             variant: 'danger',
             onConfirm: async () => {
-                for (const bucket of affectedBuckets) {
-                    await handleIgnoreBucket(bucket);
+                setBulkProgress({ active: true, current: 0, total: affectedBuckets.length, type: 'ignore' });
+                await new Promise(resolve => setTimeout(resolve, 50));
+
+                let count = 0;
+
+                for (const mb of affectedBuckets) {
+                    const relevantFaces = mb.face_ids.filter(fid => selectedIds.has(fid));
+
+                    await ignoreMergedGroup(mb, relevantFaces, async () => {
+                        await new Promise(resolve => setTimeout(resolve, 5));
+                    });
+
+                    count++;
+                    setBulkProgress({ active: true, current: count, total: affectedBuckets.length, type: 'ignore' });
                 }
+
+                setBulkProgress(null);
                 suggestionsController.clearSelection();
                 addToast({ type: 'success', description: `Ignored ${affectedBuckets.length} groups` });
             }
         });
-    }
+    };
 
     // --- Bulk Action Handlers (Discoveries) ---
     const handleBulkIgnoreDiscoveries = async () => {
@@ -293,12 +556,32 @@ export default function People() {
             variant: 'danger',
             onConfirm: async () => {
                 for (const bucket of affectedBuckets) {
-                    await handleIgnoreBucket(bucket);
+                    await handleIgnoreBucket(bucket, { skipConfirmation: true, suppressToast: true });
                 }
                 discoveriesController.clearSelection();
                 addToast({ type: 'success', description: `Ignored ${affectedBuckets.length} groups` });
             }
         });
+    };
+
+    const handleNameBucket = async (bucket: FaceBucket, name: string) => {
+        await useBucketsHandleNameBucket(bucket, name);
+    };
+
+    const handleBulkNameDiscoveries = () => {
+        const selectedIds = discoveriesController.selectedFaceIds;
+        if (selectedIds.size === 0) return;
+
+        // Find all buckets that contain at least one selected face
+        const affectedBuckets = discoveryBuckets.filter(b =>
+            b.face_ids.some(id => selectedIds.has(id))
+        );
+
+        // If buckets are affected, set pendingBucketNaming so modal knows which buckets to update
+        if (affectedBuckets.length > 0) {
+            setPendingBucketNaming({ buckets: affectedBuckets, type: 'discovery' });
+            handleOpenNaming(Array.from(selectedIds));
+        }
     };
 
 
@@ -315,8 +598,8 @@ export default function People() {
     const [showIgnoredModal, setShowIgnoredModal] = useState(false)
     const [showUnmatchedModal, setShowUnmatchedModal] = useState(false)
 
-    // Pending bucket naming state
-    const [pendingBucketNaming, setPendingBucketNaming] = useState<{ bucket: any, type: 'suggestion' | 'discovery' } | null>(null);
+    // Pending bucket naming state (supports multiple buckets for bulk actions)
+    const [pendingBucketNaming, setPendingBucketNaming] = useState<{ buckets: any[], type: 'suggestion' | 'discovery' } | null>(null);
     const [selectedFaceForDebug, setSelectedFaceForDebug] = useState<number | null>(null)
 
     // Single faces batch loading
@@ -553,8 +836,8 @@ export default function People() {
                 {activeTab === 'suggestions' && (
                     <div className="p-6">
                         {/* New Standard Toolbar */}
-                        {suggestionBuckets.length > 0 && (
-                            <div className="mb-6 sticky top-0 z-10 bg-gray-950/80 backdrop-blur-md py-2">
+                        {mergedBuckets.length > 0 && (
+                            <div className="mb-6 sticky top-0 z-10 bg-gray-950/80 backdrop-blur-md py-2 flex items-center gap-4">
                                 <ClusterToolbar
                                     selectedCount={suggestionsController.selectedFaceIds.size}
                                     totalCount={suggestionsController.allClusters.length}
@@ -565,33 +848,57 @@ export default function People() {
                                     onSizeFilterChange={suggestionsController.setSizeFilter}
                                 >
                                     {/* Suggestion-specific Actions */}
-                                    <ClusterToolbarButton
-                                        label="Confirm Selected"
-                                        onClick={handleBulkConfirmSuggestions}
-                                        disabled={suggestionsController.selectedFaceIds.size === 0}
-                                        variant="primary"
-                                        icon={
-                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                        }
-                                    />
-                                    <ClusterToolbarButton
-                                        label="Ignore Selected"
-                                        onClick={handleBulkIgnoreSuggestions}
-                                        disabled={suggestionsController.selectedFaceIds.size === 0}
-                                        variant="danger"
-                                    />
+                                    {bulkProgress && bulkProgress.active ? (
+                                        <div className="flex items-center gap-3 px-3 py-1.5 bg-indigo-500/10 text-indigo-400 rounded-md border border-indigo-500/20">
+                                            <div className="animate-spin h-3.5 w-3.5 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full" />
+                                            <span className="text-xs font-medium tabular-nums">
+                                                {bulkProgress.type === 'confirm' ? 'Confirming' : 'Ignoring'} {bulkProgress.current} / {bulkProgress.total}...
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <ClusterToolbarButton
+                                                label="Confirm Selected"
+                                                onClick={handleBulkConfirmSuggestions}
+                                                disabled={suggestionsController.selectedFaceIds.size === 0}
+                                                variant="primary"
+                                                icon={
+                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                }
+                                            />
+                                            <ClusterToolbarButton
+                                                label="Ignore Selected"
+                                                onClick={handleBulkIgnoreSuggestions}
+                                                disabled={suggestionsController.selectedFaceIds.size === 0}
+                                                variant="danger"
+                                            />
+                                        </>
+                                    )}
                                 </ClusterToolbar>
+
+                                <div className="h-6 w-px bg-gray-800 mx-2" />
+
+                                <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-gray-400 hover:text-white transition-colors select-none">
+                                    <input
+                                        type="checkbox"
+                                        checked={combineSuggestions}
+                                        onChange={(e) => setCombineSuggestions(e.target.checked)}
+                                        className="rounded border-gray-700 bg-gray-800 text-indigo-500 focus:ring-indigo-500/50"
+                                    />
+                                    <span>Combine by Person</span>
+                                </label>
                             </div>
                         )}
 
-                        {areBucketsLoading ? (
-                            <div className="flex items-center justify-center h-full p-20">
+                        {areBucketsLoading || isMergingBuckets ? (
+                            <div className="flex flex-col items-center justify-center p-20 gap-4">
                                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
+                                {isMergingBuckets && <span className="text-gray-400 text-sm animate-pulse">Designing groups...</span>}
                             </div>
                         ) : totalSuggestionCount === 0 ? (
-                            <div className="text-center py-20 text-gray-500">
+                            <div className="flex flex-col items-center justify-center p-20 text-gray-500 border border-dashed border-gray-800 rounded-2xl">
                                 <span className="text-4xl mb-4 block">✨</span>
                                 <p>No naming suggestions found yet.</p>
                             </div>
@@ -603,22 +910,21 @@ export default function People() {
                                 toggleGroup={suggestionsController.toggleGroup}
                                 fetchFacesByIds={fetchFacesByIds}
                                 handleNameGroup={async (ids, _name, _confirm) => {
-                                    const bucket = suggestionBuckets.find(b => b.face_ids.includes(ids[0]));
-                                    if (bucket) await handleConfirmSuggestion(bucket, ids);
+                                    const bucket = mergedBuckets.find(b => b.face_ids.some(fid => fid === ids[0]));
+                                    if (bucket) await handleConfirmCluster(bucket, ids);
                                 }}
                                 handleUngroup={(index) => {
                                     const cluster = suggestionsController.displayedClusters[index];
-                                    const bucket = (cluster as any).data;
-                                    if (bucket) handleRejectSuggestion(bucket);
+                                    if (cluster && cluster.data) handleUngroupCluster(cluster.data);
                                 }}
                                 handleIgnoreGroup={(ids) => {
-                                    const bucket = suggestionBuckets.find(b => b.face_ids[0] === ids[0]);
-                                    if (bucket) handleIgnoreBucket(bucket);
+                                    const bucket = mergedBuckets.find(b => b.face_ids.some(fid => fid === ids[0]));
+                                    if (bucket) handleIgnoreCluster(bucket, ids);
                                 }}
                                 handleOpenNaming={async (ids) => {
-                                    const bucket = suggestionBuckets.find(b => b.face_ids[0] === ids[0]);
+                                    const bucket = mergedBuckets.find(b => b.face_ids.some(fid => fid === ids[0]));
                                     if (bucket) {
-                                        setPendingBucketNaming({ bucket, type: 'suggestion' });
+                                        setPendingBucketNaming({ buckets: [bucket], type: 'suggestion' });
                                     }
                                     handleOpenNaming(ids);
                                 }}
@@ -629,6 +935,7 @@ export default function People() {
                                 totalGroupCount={suggestionsController.filteredClusters.length}
                                 // Keyboard
                                 focusedIndex={suggestionsController.focusedClusterIndex}
+                                onFocus={suggestionsController.setFocusedClusterIndex}
                             />
                         )}
                     </div>
@@ -654,6 +961,17 @@ export default function People() {
                                         disabled={discoveriesController.selectedFaceIds.size === 0}
                                         variant="danger"
                                     />
+                                    <ClusterToolbarButton
+                                        label="Name Selected"
+                                        onClick={handleBulkNameDiscoveries}
+                                        disabled={discoveriesController.selectedFaceIds.size === 0}
+                                        variant="primary"
+                                        icon={
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                            </svg>
+                                        }
+                                    />
                                 </ClusterToolbar>
                             </div>
                         )}
@@ -678,10 +996,20 @@ export default function People() {
                                 toggleFace={discoveriesController.toggleFace}
                                 toggleGroup={discoveriesController.toggleGroup}
                                 fetchFacesByIds={fetchFacesByIds}
-                                handleNameGroup={async (ids, name, _confirm) => {
-                                    console.log('[People] handleNameGroup called:', { firstId: ids[0], name, len: discoveryBuckets.length });
+                                handleNameGroup={async (ids, name, confirm) => {
+                                    console.log('[People] handleNameGroup called:', { firstId: ids[0], name, confirm, len: discoveryBuckets.length });
                                     const bucket = discoveryBuckets.find(b => b.face_ids[0] === ids[0]);
-                                    if (bucket) await handleNameBucket(bucket, name);
+
+                                    if (bucket) {
+                                        if (confirm && name) {
+                                            // Direct confirm (Accept)
+                                            await handleNameBucket(bucket, name);
+                                        } else {
+                                            // Open modal (should be handled by handleOpenNaming usually, but just in case)
+                                            setPendingBucketNaming({ buckets: [bucket], type: 'discovery' });
+                                            handleOpenNaming(ids);
+                                        }
+                                    }
                                 }}
                                 handleUngroup={(index) => {
                                     const cluster = discoveriesController.displayedClusters[index];
@@ -693,7 +1021,7 @@ export default function People() {
                                     // Find bucket and track it for bucket-aware naming
                                     const bucket = discoveryBuckets.find(b => b.face_ids[0] === ids[0]);
                                     if (bucket) {
-                                        setPendingBucketNaming({ bucket, type: 'discovery' });
+                                        setPendingBucketNaming({ buckets: [bucket], type: 'discovery' });
                                     }
                                     handleOpenNaming(ids);
                                 }}
@@ -704,7 +1032,39 @@ export default function People() {
                                 totalGroupCount={discoveriesController.filteredClusters.length}
                                 // Keyboard
                                 focusedIndex={discoveriesController.focusedClusterIndex}
+                                onFocus={discoveriesController.setFocusedClusterIndex}
                             />
+                        )}
+
+                        {/* Floating Action Bar for Discoveries */}
+                        {discoveriesController.selectedFaceIds.size > 0 && (
+                            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in-up">
+                                <FloatingActionBar
+                                    selectedCount={discoveriesController.selectedFaceIds.size}
+                                    onClearSelection={discoveriesController.clearSelection}
+                                >
+                                    <FloatingActionButton
+                                        label="Name"
+                                        icon={
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                            </svg>
+                                        }
+                                        onClick={handleBulkNameDiscoveries}
+                                    />
+                                    <div className="h-4 w-px bg-gray-700 mx-2" />
+                                    <FloatingActionButton
+                                        label="Ignore"
+                                        icon={
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                            </svg>
+                                        }
+                                        onClick={handleBulkIgnoreDiscoveries}
+                                        variant="danger"
+                                    />
+                                </FloatingActionBar>
+                            </div>
                         )}
                     </div>
                 )}
@@ -742,7 +1102,7 @@ export default function People() {
                                         Regroup
                                     </button>
                                     <button
-                                        onClick={handleAutoAssign}
+                                        onClick={() => handleAutoAssign()}
                                         disabled={isAutoAssigning}
                                         className="px-3 py-1.5 text-sm bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg transition-colors flex items-center gap-2"
                                     >
@@ -932,7 +1292,12 @@ export default function People() {
                         if (pendingBucketNaming.type === 'suggestion') {
                             await handleConfirmName(ids, name);
                         } else {
-                            await handleNameBucket(pendingBucketNaming.bucket, name);
+                            // Discoveries loop
+                            for (const bucket of pendingBucketNaming.buckets) {
+                                await handleNameBucket(bucket as FaceBucket, name);
+                            }
+                            // Clear selection for discoveries
+                            discoveriesController.clearSelection();
                         }
                         setPendingBucketNaming(null);
                     } else {

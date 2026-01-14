@@ -64,48 +64,51 @@ export function useBuckets() {
     }, [checkRecheckStatus, recheckStatus.active]);
 
     // Handle Confirm Suggestion
-    const handleConfirmSuggestion = useCallback(async (bucket: FaceBucket, faceIds?: number[]) => {
+    const handleConfirmSuggestion = useCallback(async (bucket: FaceBucket, faceIds?: number[], options: { suppressToast?: boolean, skipRecalc?: boolean } = {}) => {
         if (!bucket.suggested_person_id) return;
-
-        // Optimistic update
-        if (faceIds && faceIds.length > 0) {
-            setSuggestionBuckets(prev => prev.map(b => {
-                if (b.id === bucket.id) {
-                    const remainingIds = b.face_ids.filter(id => !faceIds.includes(id));
-                    if (remainingIds.length === 0) return null;
-                    return { ...b, face_ids: remainingIds, face_count: remainingIds.length };
-                }
-                return b;
-            }).filter((b): b is FaceBucket => b !== null));
-        } else {
-            setSuggestionBuckets(prev => prev.filter(b => b.id !== bucket.id));
-        }
 
         try {
             // @ts-ignore
             const res = await window.ipcRenderer.invoke('db:confirmSuggestionBucket', {
                 bucketId: bucket.id,
                 personId: bucket.suggested_person_id,
-                faceIds
+                faceIds,
+                skipRecalc: options.skipRecalc
             });
 
             if (res.success) {
-                const count = faceIds ? faceIds.length : bucket.face_count;
-                addToast({ type: 'success', description: `Confirmed ${count} faces for ${bucket.person_name}` });
-                // Reload people counts eventually
-                loadPeople(); // Background refresh
+                setSuggestionBuckets(prev => {
+                    // Logic to remove bucket or update face count...
+                    // (Matches existing logic logic below)
+                    if (faceIds && faceIds.length < bucket.face_count) {
+                        return prev.map(b => b.id === bucket.id ? { ...b, face_ids: b.face_ids.filter(id => !faceIds.includes(id)), face_count: b.face_count - faceIds.length } : b);
+                    }
+                    return prev.filter(b => b.id !== bucket.id);
+                });
+
+                if (!options.suppressToast) {
+                    addToast({
+                        type: 'success',
+                        title: 'Suggestion Confirmed',
+                        description: `Confirmed faces for ${bucket.person_name}`
+                    });
+                }
+
+                // Only reload if not skipping recalc (usually they go together)
+                if (!options.skipRecalc) {
+                    loadPeople();
+                }
             } else {
-                throw new Error(res.error);
+                addToast({ type: 'error', title: 'Error', description: res.error });
             }
-        } catch (e) {
-            console.error(e);
-            addToast({ type: 'error', description: 'Failed to confirm suggestion.' });
-            loadBuckets(); // Revert
+        } catch (error) {
+            console.error(error);
+            addToast({ type: 'error', title: 'Error', description: 'Failed to confirm suggestion' });
         }
-    }, [loadPeople, addToast, loadBuckets]);
+    }, [addToast, loadPeople]);
 
     // Handle Reject Suggestion (Dissolve bucket, unassign faces)
-    const handleRejectSuggestion = useCallback(async (bucket: FaceBucket) => {
+    const handleRejectSuggestion = useCallback(async (bucket: FaceBucket, options: { suppressToast?: boolean } = {}) => {
         // Optimistic update
         setSuggestionBuckets(prev => prev.filter(b => b.id !== bucket.id));
 
@@ -114,7 +117,9 @@ export function useBuckets() {
             const res = await window.ipcRenderer.invoke('db:rejectSuggestionBucket', bucket.id);
 
             if (res.success) {
-                addToast({ type: 'info', description: `Rejected suggestion. Faces moved to Unnamed.` });
+                if (!options.suppressToast) {
+                    addToast({ type: 'info', description: `Rejected suggestion. Faces moved to Unnamed.` });
+                }
             } else {
                 throw new Error(res.error);
             }
@@ -126,17 +131,23 @@ export function useBuckets() {
     }, [addToast, loadBuckets]);
 
     // Handle Naming Discovery Bucket
-    const handleNameBucket = useCallback(async (bucket: FaceBucket, name: string) => {
+    const handleNameBucket = useCallback(async (bucket: FaceBucket, name: string, options: { suppressToast?: boolean } = {}) => {
         if (!name.trim()) return;
 
         console.log('[useBuckets] handleNameBucket called:', { bucketId: bucket.id, name, faceCount: bucket.face_count });
 
-        // Optimistic update
+        // Optimistic update - remove from both lists like handleIgnoreBucket does
         setDiscoveryBuckets(prev => {
-            const filtered = prev.filter(b => b.id !== bucket.id);
-            console.log('[useBuckets] Optimistic update: prev=', prev.length, 'filtered=', filtered.length);
+            const filtered = prev.filter(b => String(b.id) !== String(bucket.id));
+            console.log('[useBuckets] Optimistic update (discoveries):', {
+                bucketId: bucket.id,
+                prevLength: prev.length,
+                filteredLength: filtered.length,
+                removedCount: prev.length - filtered.length
+            });
             return filtered;
         });
+        setSuggestionBuckets(prev => prev.filter(b => String(b.id) !== String(bucket.id)));
 
         // Check if person exists
         const existingPerson = people.find(p => p.name.toLowerCase() === name.toLowerCase());
@@ -160,7 +171,9 @@ export function useBuckets() {
             }
 
             if (res.success) {
-                addToast({ type: 'success', description: `Named group "${name}"` });
+                if (!options.suppressToast) {
+                    addToast({ type: 'success', description: `Named group "${name}"` });
+                }
                 loadPeople();
             } else {
                 throw new Error(res.error);
@@ -173,52 +186,40 @@ export function useBuckets() {
     }, [people, loadPeople, addToast, loadBuckets]);
 
     // Handle Ignore Bucket
-    const handleIgnoreBucket = useCallback(async (bucket: FaceBucket) => {
-        showConfirm({
-            title: 'Ignore Group',
-            description: `Ignore these ${bucket.face_count} faces? They will be hidden from Unnamed faces.`,
-            confirmLabel: 'Ignore',
-            variant: 'danger',
-            onConfirm: async () => {
-                // Optimistic
-                setDiscoveryBuckets(prev => prev.filter(b => b.id !== bucket.id));
-                setSuggestionBuckets(prev => prev.filter(b => b.id !== bucket.id));
+    const handleIgnoreBucket = useCallback(async (bucket: FaceBucket, options: { suppressToast?: boolean, skipConfirmation?: boolean } = {}) => {
+        const executeIgnore = async () => {
+            // Optimistic
+            setDiscoveryBuckets(prev => prev.filter(b => b.id !== bucket.id));
+            setSuggestionBuckets(prev => prev.filter(b => b.id !== bucket.id));
 
-                try {
-                    // Using the generic face ignore, but we might want a bucket specific ignore if we want to change bucket status?
-                    // For now, let's just ignore the faces. The bucket remains 'active' but empty?
-                    // Actually, if we ignore faces, they technically leave the bucket logic (if queries filter ignored faces).
-                    // But the bucket itself should probably be marked completed or deleted?
-                    // Let's use db:ignoreFaces on the ids.
-
-                    // We need the IDs? The bucket object has them.
-                    if (bucket.face_ids.length > 0) {
-                        // @ts-ignore
-                        await window.ipcRenderer.invoke('db:ignoreFaces', bucket.face_ids);
-                        // Also, we should probably delete the bucket or mark it handled so it doesn't show up empty.
-                        // db:rejectSuggestionBucket deletes it.
-                        // Let's call reject as well? Or just rely on re-scan cleaning it up.
-                        // Ideally we have db:ignoreBucket.
-                        // Since we don't, we'll fall back to ignoring faces + rejecting/deleting bucket structure.
-
-                        // Actually, just calling rejectSuggestionBucket effectively "unbuckets" them.
-                        // But we want to set is_ignored=1 on faces.
-
-                        // Correct flow: Ignore faces -> Faces.is_ignored=1.
-                        // Bucket query filters is_ignored=0. So bucket becomes empty.
-                        // Orphan cleanup (on startup) handles empty buckets.
-                        // So just ignoring faces is sufficient for UI.
-                    }
-
-                    addToast({ type: 'success', description: `Ignored group.` });
-                } catch (e) {
-                    console.error(e);
-                    addToast({ type: 'error', description: 'Failed to ignore group.' });
-                    loadBuckets();
+            try {
+                if (bucket.face_ids.length > 0) {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:ignoreFaces', bucket.face_ids);
                 }
+
+                if (!options.suppressToast) {
+                    addToast({ type: 'success', description: `Ignored group.` });
+                }
+            } catch (e) {
+                console.error(e);
+                addToast({ type: 'error', description: 'Failed to ignore group.' });
+                loadBuckets();
             }
-        });
-    }, [showConfirm, addToast, loadBuckets]);
+        };
+
+        if (options.skipConfirmation) {
+            await executeIgnore();
+        } else {
+            showConfirm({
+                title: 'Ignore Group',
+                description: `Ignore these ${bucket.face_count} faces? They will be hidden from Unnamed faces.`,
+                confirmLabel: 'Ignore',
+                variant: 'danger',
+                onConfirm: executeIgnore
+            });
+        }
+    }, [addToast, loadBuckets, showConfirm]);
 
     const handleStartRecheck = useCallback(async () => {
         try {

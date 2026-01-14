@@ -71,6 +71,31 @@
 - **Prerequisites:** Requires #3 (Eras), #4 (Sessions), #5 (Pets) to be completed first.
 - **Plan:** See [Background Bucketing Plan](file:///j:/Projects/smart-photo-organizer/docs/background-bucketing-plan.md)
 
+### 7. Bucket Merge by Person (UX Enhancement)
+- **Goal:** Reduce user workload by combining multiple suggestion buckets for the same person into a single merged group.
+- **Core Features:**
+    - **Frontend Merge:** Presentation-layer grouping that combines buckets by `suggested_person_id`.
+    - **Size Limits:** Merged groups capped at configurable max (default: 50 faces) to prevent overwhelming UIs.
+    - **Source Tracking:** Actions (Confirm/Ignore) route through original buckets for correct backend handling.
+    - **Loading Indicator:** Visual feedback during merge computation for large bucket sets.
+    - **Toggle Control:** Toolbar switch to enable/disable combined view.
+- **Scope:** Applies to Suggestions tab, optionally Discoveries (grouped by session/similarity).
+- **Prerequisites:** Requires #6 (Background Bucketing) to be implemented.
+- **Status:** In Progress
+
+### 8. Frontend Streamlining (UX Consolidation)
+- **Goal:** Simplify the People management workflow by consolidating overlapping features, reducing modal fatigue, and clearly separating primary workflows from edge-case tools.
+- **Core Features:**
+    - **Tab Renaming:** "Unnamed Faces" → "Edge Cases" to clarify its niche role.
+    - **Button Repurposing:** "Auto-Identify All" → "Reprocess Edge Cases" for retry workflows.
+    - **Inline Filters:** Replace modals (Ignored, Ungroupable, Blurry, Background) with filter pill toggles.
+    - **Notification Badges:** Guide users to tabs needing attention (new suggestions, rebuild alerts).
+    - **Keyboard Enhancement:** Global shortcuts for power users (`1-4` tab switching, `?` help overlay).
+- **Testing Strategy:** Pre/post-implementation baseline tests for all tabs, modals, and keyboard navigation.
+- **Prerequisites:** Requires #6 (Background Bucketing) and #7 (Bucket Merge) to be stable.
+- **Plan:** See [Frontend Streamlining Plan](file:///j:/Projects/smart-photo-organizer/docs/frontend-streamlining-plan.md)
+- **Status:** Planning
+
 ---
 
 ## 🔮 Feature Backlog

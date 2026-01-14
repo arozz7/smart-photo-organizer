@@ -655,7 +655,7 @@ export function registerDBHandlers() {
 
     // Lifecycle Actions
     // Lifecycle Actions
-    ipcMain.handle('db:confirmSuggestionBucket', async (_, { bucketId, personId, faceIds }) => {
+    ipcMain.handle('db:confirmSuggestionBucket', async (_, { bucketId, personId, faceIds, skipRecalc }) => {
         try {
             const db = getDB();
             let targetFaceIds: number[] = [];
@@ -669,7 +669,9 @@ export function registerDBHandlers() {
 
             if (targetFaceIds.length > 0) {
                 FaceRepository.updateFacePerson(targetFaceIds, personId, true);
-                await PersonService.recalculatePersonMean(personId);
+                if (!skipRecalc) {
+                    await PersonService.recalculatePersonMean(personId);
+                }
             }
 
             // Cleanup
