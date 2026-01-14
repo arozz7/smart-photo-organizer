@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useMemo } from 'react';
 import { FaceBucket, MergedBucket } from '../types';
 
 interface UseMergedBucketsOptions {
@@ -10,7 +10,7 @@ export function useMergedBuckets(buckets: FaceBucket[], options: UseMergedBucket
     // Defatul options
     const { enabled = true, maxMergedSize = 50 } = options;
 
-    const [isMerging, setIsMerging] = useState(false);
+    const isMerging = false; // Placeholder if we need it later, or just remove it. Keeping const to match return signature.
 
     // We use a debounced effect or just simple useMemo. 
     // Since merging is synchronous and relatively fast for < 5000 buckets, useMemo is fine.

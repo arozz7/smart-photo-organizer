@@ -84,17 +84,21 @@
 - **Status:** In Progress
 
 ### 8. Frontend Streamlining (UX Consolidation)
-- **Goal:** Simplify the People management workflow by consolidating overlapping features, reducing modal fatigue, and clearly separating primary workflows from edge-case tools.
+- **Goal:** Simplify the People management workflow by automating high-confidence assignments, reducing tabs from 4 to 3, and consolidating modal-heavy interactions.
 - **Core Features:**
-    - **Tab Renaming:** "Unnamed Faces" → "Edge Cases" to clarify its niche role.
-    - **Button Repurposing:** "Auto-Identify All" → "Reprocess Edge Cases" for retry workflows.
+    - **Auto-Assign Suggestions:** Eliminate Suggestions tab; auto-assign high-confidence matches directly to people.
+    - **Centroid Protection:** Exclude auto-assigned faces from centroid calculation until confirmed.
+    - **Discoveries Merge:** Group discovery buckets by suggested name (like Suggestions merge).
+    - **Tab Consolidation:** 3 tabs (Identified People, Discoveries, Edge Cases) instead of 4.
     - **Inline Filters:** Replace modals (Ignored, Ungroupable, Blurry, Background) with filter pill toggles.
-    - **Notification Badges:** Guide users to tabs needing attention (new suggestions, rebuild alerts).
-    - **Keyboard Enhancement:** Global shortcuts for power users (`1-4` tab switching, `?` help overlay).
-- **Testing Strategy:** Pre/post-implementation baseline tests for all tabs, modals, and keyboard navigation.
+    - **Notification Badges:** Guide users to tabs needing attention (new auto-assignments, rebuild alerts).
+    - **Keyboard Enhancement:** Global shortcuts for power users (`1-3` tab switching, `?` help overlay).
+- **User Review Path:** Auto-assigned faces reviewed via existing "Unconfirmed Faces" filter on person detail page.
+- **Testing Strategy:** Pre/post-implementation baseline tests for all tabs, centroid calculation, and keyboard navigation.
 - **Prerequisites:** Requires #6 (Background Bucketing) and #7 (Bucket Merge) to be stable.
 - **Plan:** See [Frontend Streamlining Plan](file:///j:/Projects/smart-photo-organizer/docs/frontend-streamlining-plan.md)
 - **Status:** Planning
+
 
 ---
 

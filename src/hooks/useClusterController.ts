@@ -165,6 +165,7 @@ export function useClusterController<T>({
         sizeFilter,
         handleKeyDown,
         setFocusedClusterIndex,
+        setSelectedFaceIds, // Expose for external control (e.g. legacy compat)
         removeFacesFromSelection: (ids: number[]) => {
             setSelectedFaceIds(prev => {
                 const next = new Set(prev);
