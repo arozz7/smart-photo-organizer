@@ -357,6 +357,11 @@ export function usePeopleCluster() {
         setSingles,
         setUngroupableFaces,
         setTotalFaces,
-        setSelectedFaceIds: controller.setSelectedFaceIds
+        setSelectedFaceIds: controller.setSelectedFaceIds,
+
+        // Focus / Keyboard
+        focusedClusterIndex: controller.focusedClusterIndex,
+        setFocusedClusterIndex: controller.setFocusedClusterIndex,
+        handleKeyDown: controller.handleKeyDown
     }
 }

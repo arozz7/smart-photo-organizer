@@ -1030,6 +1030,7 @@ def handle_command(command):
             ids = [f['id'] for f in faces_data]
             eps = float(payload.get('eps', 0.55))
             min_samples = int(payload.get('min_samples', 2))
+            max_size = int(payload.get('max_size', 200)) # Default to 200
             debug = bool(payload.get('debug', False))
             
             result = faces.cluster_faces_dbscan(descriptors, ids, eps, min_samples, debug=debug)
@@ -1041,6 +1042,27 @@ def handle_command(command):
             else:
                 cluster_list = result
                 debug_info = None
+            
+            # Use normalized descriptors for splitting
+            X = np.array(descriptors)
+            norm = np.linalg.norm(X, axis=1, keepdims=True)
+            norm[norm == 0] = 1e-10
+            X_normalized = X / norm
+            
+            id_to_idx = {fid: idx for idx, fid in enumerate(ids)}
+            
+            # Split oversized clusters
+            final_clusters = []
+            for cluster in cluster_list:
+                if len(cluster) > max_size:
+                    logger.info(f"Splitting oversized cluster of size {len(cluster)} (max={max_size})")
+                    sub_clusters = faces.split_oversized_cluster(cluster, X_normalized, id_to_idx, max_size)
+                    final_clusters.extend(sub_clusters)
+                else:
+                    final_clusters.append(cluster)
+            
+            cluster_list = final_clusters 
+
             
             # Identify singles (all IDs not in flattened cluster list)
             clustered_ids = set([i for c in cluster_list for i in c])

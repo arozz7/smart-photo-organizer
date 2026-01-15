@@ -257,7 +257,8 @@ export function registerAIHandlers() {
             const payload = {
                 faces: faces, // [{id, descriptor}, ...]
                 eps: eps,
-                min_samples: options?.min_samples || 2
+                min_samples: options?.min_samples || 2,
+                max_size: 200 // Enforce max cluster size
             };
 
             logger.info(`[Main] Clustering ${faces.length} faces with eps=${eps.toFixed(3)}, groupBySuggestion=${options?.groupBySuggestion || false}`);

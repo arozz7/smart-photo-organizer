@@ -51,7 +51,6 @@ export default function People() {
         totalUnassigned,
         isClustering,
         isAutoAssigning,
-        controller,
         loadClusteredFaces,
         // @ts-ignore
         ungroupableFaces,
@@ -85,11 +84,10 @@ export default function People() {
         // @ts-ignore
         handleKeyDown,
         // @ts-ignore
-        focusedClusterIndex
+        focusedClusterIndex,
+        // @ts-ignore
+        setFocusedClusterIndex
     } = usePeopleCluster()
-
-    // Capture the whole object to access focusedClusterIndex easily if destructured var isn't enough context (it is)
-    const usePeopleClusterRet = { focusedClusterIndex };
 
     // @ts-ignore
     const [activeTab, setActiveTab] = useState<'identified' | 'unnamed' | 'discoveries'>('identified')
@@ -265,7 +263,9 @@ export default function People() {
             onAccept: (index) => {
                 const cluster = clusters[index];
                 if (cluster && (cluster as any).suggestion) {
-                    handleConfirmName(cluster.faces, (cluster as any).suggestion.person.name);
+                    const suggestion = (cluster as any).suggestion;
+                    const name = suggestion.personName || suggestion.name || (suggestion.person && suggestion.person.name);
+                    if (name) handleConfirmName(cluster.faces, name);
                 } else if (cluster) {
                     handleOpenNaming(cluster.faces);
                 }
@@ -797,7 +797,8 @@ export default function People() {
                                             onLoadMore={loadMoreGroups}
                                             totalGroupCount={totalGroupCount}
                                             // Keyboard
-                                            focusedIndex={usePeopleClusterRet.focusedClusterIndex}
+                                            focusedIndex={focusedClusterIndex}
+                                            onFocus={setFocusedClusterIndex}
                                         />
 
                                         {/* Singles Section */}
