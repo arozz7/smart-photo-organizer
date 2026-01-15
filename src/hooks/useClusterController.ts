@@ -90,33 +90,18 @@ export function useClusterController<T>({
         }
 
         const allIds = new Set<number>();
-        // Select only from FILTERED clusters (what the user sees)
-        filteredClusters.forEach(c => {
+        // Select only from DISPLAYED clusters (what the user actually sees on screen)
+        displayedClusters.forEach(c => {
             c.faces.forEach(id => allIds.add(id));
         });
         setSelectedFaceIds(allIds);
         onSelectionChange?.(allIds);
-    }, [filteredClusters, onSelectionChange]);
+    }, [displayedClusters, onSelectionChange]);
 
-    const clearSelection = useCallback(() => {
-        setSelectedFaceIds(new Set());
-        onSelectionChange?.(new Set());
-    }, [onSelectionChange]);
+
 
     // Optimistic Logic Helpers
-    const removeFacesFromSelection = useCallback((idsToRemove: number[]) => {
-        setSelectedFaceIds(prev => {
-            const next = new Set(prev);
-            let changed = false;
-            idsToRemove.forEach(id => {
-                if (next.has(id)) {
-                    next.delete(id);
-                    changed = true;
-                }
-            });
-            return changed ? next : prev;
-        });
-    }, []);
+
 
     // Keyboard Navigation Handlers
     const handleKeyDown = useCallback((e: KeyboardEvent, handlers?: {
@@ -162,10 +147,6 @@ export function useClusterController<T>({
         // State
         selectedFaceIds,
         focusedClusterIndex,
-        setFocusedClusterIndex,
-        sizeFilter,
-        setSizeFilter,
-
         // Data
         allClusters: clusters,
         filteredClusters,
@@ -179,11 +160,19 @@ export function useClusterController<T>({
         toggleFace: handleToggleFace,
         toggleGroup: handleToggleGroup,
         selectAll: handleSelectAll,
-        clearSelection,
-        removeFacesFromSelection,
-        setSelectedFaceIds, // Escape hatch if needed
-
-        // Keyboard
+        clearSelection: () => handleSelectAll(false),
+        setSizeFilter,
+        sizeFilter,
         handleKeyDown,
+        setFocusedClusterIndex,
+        setSelectedFaceIds, // Expose for external control (e.g. legacy compat)
+        removeFacesFromSelection: (ids: number[]) => {
+            setSelectedFaceIds(prev => {
+                const next = new Set(prev);
+                ids.forEach(id => next.delete(id));
+                onSelectionChange?.(next);
+                return next;
+            });
+        }
     };
 }

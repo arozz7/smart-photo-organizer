@@ -6,6 +6,10 @@
  */
 
 import { vi } from 'vitest';
+console.log('--- MOCK DATABASE INIT ---');
+console.log('RUNTIME NODE VERSION:', process.version);
+console.log('RUNTIME ABI:', process.versions.modules);
+console.log('PROCESS EXEC PATH:', process.execPath);
 import Database from 'better-sqlite3';
 
 let testDb: Database.Database | null = null;

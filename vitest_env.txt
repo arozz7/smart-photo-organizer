@@ -1,0 +1,3 @@
+VITEST NODE VERSION: v21.7.3
+VITEST ABI: 120
+VITEST EXEC PATH: C:\nvm4w\nodejs\node.exe

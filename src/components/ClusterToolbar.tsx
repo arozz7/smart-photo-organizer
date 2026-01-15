@@ -21,7 +21,6 @@ interface ClusterToolbarProps {
 
 export function ClusterToolbar({
     selectedCount,
-    totalCount,
     onSelectAll,
     onClearSelection,
     sizeFilter,

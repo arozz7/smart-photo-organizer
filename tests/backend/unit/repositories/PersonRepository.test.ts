@@ -6,6 +6,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+console.log('RUNTIME NODE VERSION:', process.version);
+console.log('RUNTIME ABI:', process.versions.modules);
+console.log('PROCESS EXEC PATH:', process.execPath);
 import {
     createTestDatabase,
     closeTestDatabase,

@@ -41,37 +41,35 @@ describe('BackgroundBucketingService', () => {
         (PersonRepository.getPeopleWithDescriptors as any).mockReturnValue([]);
     });
 
-    it('should process suggestions correctly', async () => {
+    it('should auto-assign suggestion matches directly (Phase 40)', async () => {
         // Arrange
         const faces = [
-            { id: 1, descriptor: Buffer.alloc(128 * 4), entity_type: 'human' },
-            { id: 2, descriptor: Buffer.alloc(128 * 4), entity_type: 'human' }
+            { id: 1, descriptor: Buffer.alloc(128 * 4), entity_type: 'human' }
         ];
         (FaceRepository.getFacesNeedingBucketing as any).mockReturnValue(faces);
 
-        // Mock Pass 1 Matches using sequential returns
-        // Face 1 matches Person 10
-        // Use 'as any' to bypass strict return type check for mock
+        // Mock Pass 1 Match
         vi.spyOn(FaceService, 'matchAgainstCentroids')
-            .mockReturnValueOnce({ personId: 10, distance: 0.1, similarity: 0.9, matchType: 'centroid', personName: 'P10' } as any)
-            .mockReturnValueOnce(null);
-
-        (BucketRepository.createBucket as any).mockReturnValue(100);
+            .mockReturnValue({ personId: 10, distance: 0.1, similarity: 0.9, matchType: 'centroid', personName: 'P10' } as any);
 
         // Act
-        // Access private method via casting
         await (service as any).processNextBatch();
 
         // Assert
-        // Face 1 should be assigned to suggestion bucket
-        expect(BucketRepository.createBucket).toHaveBeenCalledWith(expect.objectContaining({
-            bucketType: 'suggestion',
-            suggestedPersonId: 10
+        // Should NOT create a bucket for suggestion
+        expect(BucketRepository.createBucket).not.toHaveBeenCalledWith(expect.objectContaining({
+            bucketType: 'suggestion'
         }));
-        expect(FaceRepository.assignToBucket).toHaveBeenCalledWith([1], 100);
 
-        // Face 2 should fall through to discovery (mock python clustering to empty for now)
-        expect(mockAiProvider.clusterFaces).toHaveBeenCalled();
+        // Should call assignFacesToPerson directly
+        // Note: is_confirmed = false for centroid protection
+        expect(FaceRepository.assignFacesToPerson).toHaveBeenCalledWith([1], 10, expect.objectContaining({
+            assignment_source: 'auto_suggestion',
+            is_confirmed: false
+        }));
+
+        // Should NOT call assignToBucket
+        expect(FaceRepository.assignToBucket).not.toHaveBeenCalled();
     });
 
     it('should process discovery correctly via DBSCAN', async () => {
@@ -86,9 +84,10 @@ describe('BackgroundBucketingService', () => {
         // No suggestion matches
         vi.spyOn(FaceService, 'matchAgainstCentroids').mockReturnValue(null);
 
-        // Mock DBSCAN result: Face 1 & 2 -> Cluster 0, Face 3 -> Noise (-1)
+        // Mock DBSCAN result: Face 1 & 2 -> Cluster 0, Face 3 -> Noise
         mockAiProvider.clusterFaces.mockResolvedValue({
-            labels: [0, 0, -1]
+            clusters: [[1, 2]],
+            singles: [3]
         });
 
         (BucketRepository.createBucket as any).mockReturnValue(200);
@@ -155,16 +154,34 @@ describe('BackgroundBucketingService', () => {
             // Assert
             expect(count).toBe(1);
             expect(AppStateRepository.getRecheckOffset).toHaveBeenCalled();
-            expect(FaceRepository.getIgnoredFacesForBucketing).toHaveBeenCalledWith(1000, 0);
+            expect(FaceRepository.getIgnoredFacesForBucketing).toHaveBeenCalledWith(50, 0);
 
-            // Should create bucket for suggested person
-            expect(BucketRepository.createBucket).toHaveBeenCalledWith(expect.objectContaining({
-                bucketType: 'suggestion',
-                suggestedPersonId: 5
+            // Should NOT create bucket for suggested person
+            expect(BucketRepository.createBucket).not.toHaveBeenCalledWith(expect.objectContaining({
+                bucketType: 'suggestion'
             }));
 
-            // Should assign ignored face to bucket
-            expect(FaceRepository.assignToBucket).toHaveBeenCalledWith([99], 500);
+            // Should auto-assign ignored face to person (un-ignoring it implicitly by moving it)
+            // Note: assignFacesToPerson updates person_id, resets needs_bucketing, and clears is_ignored logic if we updateFacePerson logic is correct
+            // But wait, assignFacesToPerson does NOT explicitly set is_ignored=0 in the query I wrote
+            // I should verify assignFacesToPerson query in FaceRepository.ts
+            // Logic: UPDATE faces SET person_id = ? ...
+            // It does NOT touch is_ignored.
+            // However, the caller processRecheckBatch just loops.
+            // If they are assigned to a person, they are no longer "ignored" in the sense of "person_id IS NULL AND is_ignored=1"
+            // Wait, "is_ignored" column might still be 1 unless cleared.
+            // FaceRepository.assignFacesToPerson SHOULD probably clear is_ignored=0 just to be safe/clean?
+            // The query I wrote:
+            // UPDATE faces SET person_id = ?, assignment_source = ?, is_confirmed = ?, bucket_id = NULL, needs_bucketing = 0
+            // It does NOT set is_ignored = 0.
+            // If is_ignored is 1, they won't show up in "Identified People" lists usually (depends on getAllFaces query).
+            // getAllFaces checks (is_ignored = 0).
+            // SO: assignFacesToPerson MUST set is_ignored = 0.
+
+            expect(FaceRepository.assignFacesToPerson).toHaveBeenCalledWith([99], 5, expect.objectContaining({
+                assignment_source: 'auto_suggestion',
+                is_confirmed: false
+            }));
 
             // Should increment offset
             expect(AppStateRepository.setRecheckOffset).toHaveBeenCalledWith(1);

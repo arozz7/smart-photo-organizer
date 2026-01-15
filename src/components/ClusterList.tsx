@@ -20,6 +20,7 @@ interface ClusterListProps {
     totalGroupCount?: number
     // Keyboard Navigation
     focusedIndex?: number
+    onFocus?: (index: number) => void
     // Suggestion sync
     onSuggestionFound?: (index: number, suggestion: any) => void
 }
@@ -27,7 +28,7 @@ interface ClusterListProps {
 const ClusterList = memo(({
     clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleUngroup, handleOpenNaming,
     hasMoreGroups, remainingGroupCount, onLoadMore, totalGroupCount,
-    focusedIndex, onSuggestionFound
+    focusedIndex, onFocus, onSuggestionFound
 }: ClusterListProps) => {
 
     const renderClusterRow = useCallback((index: number) => {
@@ -48,10 +49,11 @@ const ClusterList = memo(({
                 onUngroup={handleUngroup}
                 onOpenNaming={handleOpenNaming}
                 isFocused={focusedIndex === index}
+                onFocus={onFocus}
                 onSuggestionFound={onSuggestionFound}
             />
         );
-    }, [clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleUngroup, handleOpenNaming, focusedIndex, onSuggestionFound]);
+    }, [clusters, selectedFaceIds, toggleFace, toggleGroup, fetchFacesByIds, handleNameGroup, handleIgnoreGroup, handleUngroup, handleOpenNaming, focusedIndex, onFocus, onSuggestionFound]);
 
     // Use memo for style to prevent re-renders on every parent render
     const style = useMemo(() => ({ height: '100%', width: '100%' }), []);

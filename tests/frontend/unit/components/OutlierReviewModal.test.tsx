@@ -10,6 +10,16 @@ vi.mock('../../../../src/components/FaceThumbnail', () => ({
     default: ({ src }: { src: string }) => <img data-testid="face-thumbnail" src={src} />
 }));
 
+// Mock usePeople to avoid PeopleProvider requirement
+vi.mock('../../../../src/context/PeopleContext', () => ({
+    usePeople: () => ({
+        people: [],
+        loading: false,
+        loadPeople: vi.fn(),
+        fetchFacesByIds: vi.fn().mockResolvedValue([])
+    })
+}));
+
 // Fix for Radix UI Dialog
 global.ResizeObserver = vi.fn().mockImplementation(() => ({
     observe: vi.fn(),
@@ -18,6 +28,7 @@ global.ResizeObserver = vi.fn().mockImplementation(() => ({
 }));
 
 describe('OutlierReviewModal', () => {
+
     const mockOutliers = [
         {
             faceId: 101,

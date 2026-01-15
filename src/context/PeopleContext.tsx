@@ -42,6 +42,8 @@ interface PeopleContextType {
     rebuildFaissIndex: () => Promise<{ success: boolean; count?: number; error?: string } | void>
     isRebuildingIndex: boolean
     faissStaleCount: number
+    findUngroupableFaces: (distanceThreshold?: number) => Promise<{ success: boolean; ungroupable_ids: number[] }>
+    getUnassignedCount: () => Promise<number>
 }
 
 export interface SmartIgnoreSettings {
@@ -169,6 +171,16 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
             return { clusters: [], singles: [] };
         }
     }, [])
+
+    const getUnassignedCount = useCallback(async () => {
+        try {
+            // @ts-ignore
+            return await window.ipcRenderer.invoke('ai:getUnassignedCount');
+        } catch (e) {
+            console.error(e);
+            return 0;
+        }
+    }, []);
 
     const fetchFacesByIds = useCallback(async (ids: number[]) => {
         try {
@@ -302,12 +314,24 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         }
     }, [faces, loadPeople])
 
+    const findUngroupableFaces = useCallback(async (distanceThreshold: number = 1.0) => {
+        try {
+            // @ts-ignore
+            return await window.ipcRenderer.invoke('ai:findUngroupableFaces', { distanceThreshold });
+        } catch (e) {
+            console.error("Failed to find ungroupable faces", e);
+            return { success: false, ungroupable_ids: [] };
+        }
+    }, [])
+
     const value = React.useMemo(() => ({
         people, faces, loading,
-        loadPeople, loadFaces, loadUnnamedFaces, fetchFacesByIds, assignPerson,
+        loadPeople, loadFaces, loadUnnamedFaces,
+        getUnassignedCount, fetchFacesByIds, assignPerson,
         ignoreFace, ignoreFaces, autoNameFaces,
         rebuildIndex,
         matchFace, matchBatch,
+        findUngroupableFaces,
         smartIgnoreSettings, updateSmartIgnoreSettings,
         // Stats & Indexing
         rebuildFaissIndex,
@@ -317,7 +341,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         people, faces, loading, matchFace, matchBatch, smartIgnoreSettings, updateSmartIgnoreSettings,
         rebuildFaissIndex, isRebuildingIndex, faissStaleCount,
         loadPeople, loadFaces, loadUnnamedFaces, fetchFacesByIds, assignPerson,
-        ignoreFace, ignoreFaces, autoNameFaces, rebuildIndex
+        ignoreFace, ignoreFaces, autoNameFaces, rebuildIndex, findUngroupableFaces
     ])
 
     return (

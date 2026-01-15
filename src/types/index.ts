@@ -59,3 +59,8 @@ export interface FaceBucket {
     face_ids: number[];
 }
 
+export interface MergedBucket extends FaceBucket {
+    source_buckets: FaceBucket[];
+    is_merged: boolean;
+}
+

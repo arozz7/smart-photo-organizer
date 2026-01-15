@@ -340,8 +340,7 @@ export class BackgroundBucketingService {
     }
 
     private processSuggestions(suggestions: { faceId: number, personId: number, distance: number }[]) {
-        // ... existing code ...
-        // Group by personId to find existing bucket or create new one
+        // Group by personId
         const byPerson = new Map<number, number[]>();
         for (const s of suggestions) {
             if (!byPerson.has(s.personId)) byPerson.set(s.personId, []);
@@ -349,14 +348,14 @@ export class BackgroundBucketingService {
         }
 
         for (const [personId, faceIds] of byPerson) {
-            const bucketId = BucketRepository.createBucket({
-                bucketType: 'suggestion',
-                suggestedPersonId: personId,
-                sessionDate: null // mixed sessions
+            // Phase 40: Auto-Assign instead of creating Suggestion Buckets
+            // This streamlines the workflow by skipping the "Suggestions" tab review.
+            // Centroid protection (is_confirmed = 0) ensures these don't pollute the model until verified.
+            FaceRepository.assignFacesToPerson(faceIds, personId, {
+                assignment_source: 'auto_suggestion',
+                is_confirmed: false
             });
-
-            FaceRepository.assignToBucket(faceIds, bucketId);
-            BucketRepository.updateFaceCount(bucketId);
+            logger.info(`[BackgroundBucketingService] Auto-assigned ${faceIds.length} faces to Person ${personId}`);
         }
     }
 

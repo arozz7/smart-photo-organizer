@@ -215,6 +215,14 @@ export function registerAIHandlers() {
         return await pythonProvider.sendRequest('add_faces_to_vector_index', { vectors, ids }, 180000);
     });
 
+    ipcMain.handle('ai:getUnassignedCount', async () => {
+        // Use getFacesNeedingBucketingCount or similar, or just a direct query for speed
+        // Logic should match getUnassignedDescriptors but just COUNT(*)
+        const db = getDB();
+        const res = db.prepare('SELECT COUNT(*) as count FROM faces WHERE descriptor IS NOT NULL AND person_id IS NULL AND (is_ignored = 0 OR is_ignored IS NULL)').get() as { count: number };
+        return res.count;
+    });
+
     ipcMain.handle('ai:getClusteredFaces', async (_event, options) => {
         try {
             let faces = FaceRepository.getUnassignedDescriptors();

@@ -311,6 +311,37 @@ export class FaceRepository {
         db.prepare(query).run(...params);
     }
 
+    /**
+     * Assign faces to a person with metadata tracking (Phase 40).
+     */
+    static assignFacesToPerson(
+        faceIds: number[],
+        personId: number,
+        options: { assignment_source: string, is_confirmed: boolean }
+    ) {
+        if (!faceIds || faceIds.length === 0) return;
+        const db = getDB();
+        const placeholders = faceIds.map(() => '?').join(',');
+
+        const query = `
+            UPDATE faces 
+            SET person_id = ?, 
+                assignment_source = ?, 
+                is_confirmed = ?,
+                bucket_id = NULL,
+                needs_bucketing = 0,
+                is_ignored = 0
+            WHERE id IN (${placeholders})
+        `;
+
+        db.prepare(query).run(
+            personId,
+            options.assignment_source,
+            options.is_confirmed ? 1 : 0,
+            ...faceIds
+        );
+    }
+
     static getAllDescriptors(): { id: number, descriptor: number[] }[] {
         const db = getDB();
         // Only return faces with descriptors
@@ -588,15 +619,16 @@ export class FaceRepository {
      */
     static getConfirmedFaces(personId: number): Array<{
         id: number;
-        descriptor: Buffer | null;
+        descriptor: number[] | null;
         box_json: string;
         photo_id: number;
         file_path: string;
+        blur_score: number | null;
     }> {
         const db = getDB();
         try {
-            return db.prepare(`
-                SELECT f.id, f.descriptor, f.box_json, f.photo_id, p.file_path
+            const rows = db.prepare(`
+                SELECT f.id, f.descriptor, f.box_json, f.photo_id, f.blur_score, p.file_path
                 FROM faces f
                 JOIN photos p ON f.photo_id = p.id
                 WHERE f.person_id = ?
@@ -609,7 +641,17 @@ export class FaceRepository {
                 box_json: string;
                 photo_id: number;
                 file_path: string;
+                blur_score: number | null;
             }>;
+
+            return rows.map(r => ({
+                id: r.id,
+                descriptor: r.descriptor ? Array.from(new Float32Array(r.descriptor.buffer, r.descriptor.byteOffset, r.descriptor.byteLength / 4)) : null,
+                box_json: r.box_json,
+                photo_id: r.photo_id,
+                file_path: r.file_path,
+                blur_score: r.blur_score
+            }));
         } catch (error) {
             throw new Error(`FaceRepository.getConfirmedFaces failed: ${String(error)}`);
         }
