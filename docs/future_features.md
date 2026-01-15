@@ -35,19 +35,8 @@
 - **Wireframes:** See [Home Page Wireframes](file:///C:/Users/arozz/.gemini/antigravity/brain/e4c43ef8-5d37-4b2a-b227-6fbddeaf706b/home-page-wireframes.md)
 
 
-### 3. Bucket Merge by Person (UX Enhancement)
-- **Goal:** Reduce user workload by combining multiple suggestion buckets for the same person into a single merged group.
-- **Core Features:**
-    - **Frontend Merge:** Presentation-layer grouping that combines buckets by `suggested_person_id`.
-    - **Size Limits:** Merged groups capped at configurable max (default: 50 faces) to prevent overwhelming UIs.
-    - **Source Tracking:** Actions (Confirm/Ignore) route through original buckets for correct backend handling.
-    - **Loading Indicator:** Visual feedback during merge computation for large bucket sets.
-    - **Toggle Control:** Toolbar switch to enable/disable combined view.
-- **Scope:** Applies to Suggestions tab, optionally Discoveries (grouped by session/similarity).
-- **Prerequisites:** Requires #6 (Background Bucketing) to be implemented.
-- **Status:** In Progress
 
-### 4. Frontend Streamlining (UX Consolidation)
+### 3. Frontend Streamlining (UX Consolidation)
 - **Goal:** Simplify the People management workflow by automating high-confidence assignments, reducing tabs from 4 to 3, and consolidating modal-heavy interactions.
 - **Core Features:**
     - **Auto-Assign Suggestions:** Eliminate Suggestions tab; auto-assign high-confidence matches directly to people.
@@ -178,6 +167,9 @@
     - **Discovery Buckets:** Name/Ignore new unknown clusters found by DBSCAN.
     - **Re-check Ignored:** Recover faces from the "Ignored" pool.
     - [See Changelog](aiChangeLog/phase-37-b6-ui-updates.md)
+- **Bucket Merge by Person (Phase 39):**
+    - Reduced user workload by combining multiple suggestion buckets for the same person.
+    - Added "Combine by Person" toggle in Suggestions tab.
 - **Concurrency & Polish (Phase 39):**
     - **Smart Scheduling:** Service now creates zero overhead during active AI scans by pausing immediately.
     - [See Changelog](aiChangeLog/phase-39-concurrency-fix.md)

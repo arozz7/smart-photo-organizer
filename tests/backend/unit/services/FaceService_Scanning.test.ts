@@ -45,7 +45,7 @@ import { FaceService } from '../../../../electron/core/services/FaceService';
 
 describe('FaceService Scanning Verification', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        vi.restoreAllMocks();
     });
 
     it('should persist "review" confidence tier when distance is 0.8', async () => {
@@ -80,10 +80,10 @@ describe('FaceService Scanning Verification', () => {
 
         expect(insertCall).toBeDefined();
         // The query params order:
-        // photo_id, person_id, descriptor, box, blur, confidence, suggested, distance
+        // photo_id(0), person_id(1), descriptor(2), box(3), blur(4), is_reference(5), confidence_tier(6), suggested_person_id(7), distance(8)
 
-        // Index 5 is confidence_tier
-        expect(insertCall[5]).toBe('review');
+        // Index 6 is confidence_tier
+        expect(insertCall![6]).toBe('review');
     });
 
     it('should persist "high" confidence tier when distance is 0.2', async () => {
@@ -115,8 +115,8 @@ describe('FaceService Scanning Verification', () => {
         const insertCall = calls.find(args => args.length > 5);
 
         expect(insertCall).toBeDefined();
-        expect(insertCall[5]).toBe('high');
-        expect(insertCall[1]).toBe(11); // Person ID should be assigned automatically
+        expect(insertCall![6]).toBe('high');
+        expect(insertCall![1]).toBe(11); // Person ID should be assigned automatically
     });
 
     it('should populate session_folder, session_date and needs_bucketing=1 for unassigned faces', async () => {
@@ -145,12 +145,12 @@ describe('FaceService Scanning Verification', () => {
         const insertCall = calls.find(args => args.length > 10);
 
         expect(insertCall).toBeDefined();
-        // Check session data (indices 12 and 13)
-        expect(insertCall[12]).toBe('/path/to/folder');
-        expect(insertCall[13]).toBe('2023-01-01');
+        // Check session data (indices 13 and 14)
+        expect(insertCall![13]).toBe('/path/to/folder');
+        expect(insertCall![14]).toBe('2023-01-01');
 
-        // Check needs_bucketing (index 14) - should be 1 since personId is null
-        expect(insertCall[14]).toBe(1);
-        expect(insertCall[1]).toBeNull(); // person_id
+        // Check needs_bucketing (index 15) - should be 1 since personId is null
+        expect(insertCall![15]).toBe(1);
+        expect(insertCall![1]).toBeNull(); // person_id
     });
 });

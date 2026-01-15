@@ -26,8 +26,31 @@ vi.mock('../../../../electron/data/repositories/FaceRepository', () => ({
     }
 }));
 
+vi.mock('../../../../electron/logger', () => ({
+    default: {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn()
+    }
+}));
+
+vi.mock('../../../../electron/core/services/FaceAnalysisService', () => ({
+    FaceAnalysisService: {
+        consensusVoting: vi.fn(),
+        getQualityAdjustedThreshold: vi.fn()
+    }
+}));
+
 vi.mock('../../../../electron/store', () => ({
     getAISettings: vi.fn(() => ({ faceBlurThreshold: 20 }))
+}));
+
+// Mock DB to avoid real connection attempts (fixes timeout)
+vi.mock('../../../../electron/db', () => ({
+    getDB: vi.fn(() => ({
+        transaction: vi.fn((fn) => () => fn())
+    }))
 }));
 
 // Mock console.time and console.timeEnd to avoid cluttering test output
@@ -37,6 +60,7 @@ vi.spyOn(console, 'timeEnd').mockImplementation(() => { });
 import { PersonService } from '../../../../electron/core/services/PersonService';
 import { PersonRepository } from '../../../../electron/data/repositories/PersonRepository';
 import { FaceRepository } from '../../../../electron/data/repositories/FaceRepository';
+import { getDB } from '../../../../electron/db';
 
 describe('PersonService', () => {
     afterEach(() => {
@@ -190,8 +214,8 @@ describe('PersonService', () => {
 
             // Assert
             expect(PersonRepository.updatePersonName).toHaveBeenCalledWith(1, 'New Name');
-            expect(result.success).toBe(true);
-            expect(result.merged).toBe(false);
+            expect((result as any).success).toBe(true);
+            expect((result as any).merged).toBe(false);
         });
 
         it('should merge if name conflict exists', async () => {

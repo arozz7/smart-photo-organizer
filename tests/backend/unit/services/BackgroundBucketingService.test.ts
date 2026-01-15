@@ -86,9 +86,10 @@ describe('BackgroundBucketingService', () => {
         // No suggestion matches
         vi.spyOn(FaceService, 'matchAgainstCentroids').mockReturnValue(null);
 
-        // Mock DBSCAN result: Face 1 & 2 -> Cluster 0, Face 3 -> Noise (-1)
+        // Mock DBSCAN result: Face 1 & 2 -> Cluster 0, Face 3 -> Noise
         mockAiProvider.clusterFaces.mockResolvedValue({
-            labels: [0, 0, -1]
+            clusters: [[1, 2]],
+            singles: [3]
         });
 
         (BucketRepository.createBucket as any).mockReturnValue(200);
@@ -155,7 +156,7 @@ describe('BackgroundBucketingService', () => {
             // Assert
             expect(count).toBe(1);
             expect(AppStateRepository.getRecheckOffset).toHaveBeenCalled();
-            expect(FaceRepository.getIgnoredFacesForBucketing).toHaveBeenCalledWith(1000, 0);
+            expect(FaceRepository.getIgnoredFacesForBucketing).toHaveBeenCalledWith(50, 0);
 
             // Should create bucket for suggested person
             expect(BucketRepository.createBucket).toHaveBeenCalledWith(expect.objectContaining({

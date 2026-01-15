@@ -65,7 +65,7 @@ import { getDB } from '../../../../electron/db';
 
 describe('FaceService', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        vi.restoreAllMocks();
     });
 
     // Helper to create a normalized descriptor
@@ -228,7 +228,8 @@ describe('FaceService', () => {
 
             // Assert
             expect(mockDBInstance.prepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO faces'));
-            expect(aiProvider.addToIndex).toHaveBeenCalled();
+            // addToIndex should NOT be called because no person was assigned (matchBatch found nothing)
+            expect(aiProvider.addToIndex).not.toHaveBeenCalled();
         });
 
         it('should update existing faces if IoU is high', async () => {
@@ -259,9 +260,10 @@ describe('FaceService', () => {
 
             const aiProvider = {
                 addToIndex: vi.fn(),
-                // Mock search to return a match with distance 0.5 (Review Tier)
+                // Mock search to return a match with distance 0.75 (Review Tier)
+                // (High Threshold is 0.7, so 0.75 is > High and < Review 0.9)
                 searchFaces: vi.fn().mockResolvedValue([
-                    [{ id: 99, distance: 0.5 }]
+                    [{ id: 99, distance: 0.75 }]
                 ])
             };
 
@@ -285,16 +287,15 @@ describe('FaceService', () => {
             const insertCall = runCalls.find((c: any) => c.length >= 7); // Insert has many params
 
             // Param positions based on query:
-            // photo_id, person_id, descriptor, box_json, blur_score, confidence_tier, suggested_person_id, match_distance
-            // indices: 0, 1, 2, 3, 4, 5, 6, 7
+            // photo_id(0), person_id(1), descriptor(2), box_json(3), blur_score(4), is_reference(5), confidence_tier(6), suggested_person_id(7), match_distance(8)
 
             expect(insertCall).toBeDefined();
-            // index 5 is confidence_tier
-            expect(insertCall![5]).toBe('review');
-            // index 6 is suggested_person_id
-            expect(insertCall![6]).toBe(2);
-            // index 7 is match_distance
-            expect(insertCall![7]).toBe(0.5);
+            // index 6 is confidence_tier
+            expect(insertCall![6]).toBe('review');
+            // index 7 is suggested_person_id
+            expect(insertCall![7]).toBe(2);
+            // index 8 is match_distance
+            expect(insertCall![8]).toBe(0.75);
         });
 
         it('should auto-assign High tier if distance < 0.4', async () => {
@@ -328,8 +329,8 @@ describe('FaceService', () => {
 
             // person_id (index 1) should be set
             expect(insertCall![1]).toBe(3);
-            // confidence_tier (index 5) should be 'high'
-            expect(insertCall![5]).toBe('high');
+            // confidence_tier (index 6) should be 'high'
+            expect(insertCall![6]).toBe('high');
         });
     });
 });
