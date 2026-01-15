@@ -34,44 +34,8 @@
     - Offline-capable: Stats & memories work without AI backend.
 - **Wireframes:** See [Home Page Wireframes](file:///C:/Users/arozz/.gemini/antigravity/brain/e4c43ef8-5d37-4b2a-b227-6fbddeaf706b/home-page-wireframes.md)
 
-### 3. Centroid Stability & Face Confirmation
-- **Goal:** Improve face assignment accuracy for people whose photos span many years (children, long-term family archives).
-- **Core Features:**
-    - **Face Confirmation:** Mark potentially misassigned faces as "correct" to exclude from future outlier detection.
-    - **Era-Aware Clustering:** Support multiple centroids per person based on photo date ranges (e.g., "Baby", "Teen", "Adult").
-    - **Centroid Drift Detection:** Alert users after scanning when a person's face signature shifts significantly.
-    - **Auto-Identify Fixes:** Freeze centroids during bulk operations, tier-based assignment, per-person caps to prevent cascade misassignment.
-- **Migration Path:** "Auto-Generate Eras" button analyzes existing photo dates and creates 5-year bands automatically.
-- **Implementation Plan:** See [Centroid Stability Plan](file:///C:/Users/arozz/.gemini/antigravity/brain/4b6766a5-9655-4ded-bc15-d934680dedc9/implementation_plan.md)
 
-### 4. Photo Session Grouping
-- **Goal:** Group unnamed faces by folder or time-window (e.g. "Photos from Dec 2024") to provide better context during review.
-- **Approach:** Add folder/date metadata to the clustering payload.
-- **Schema Changes:**
-    - `faces.session_folder TEXT` — Parent folder path at time of scan.
-    - `faces.session_date TEXT` — Photo date (from EXIF or file timestamp).
-- **Downstream Dependency:** Required by [Background Auto Face Bucketing](#7-background-auto-face-bucketing).
-- **Status:** Backlog.
-
-### 5. Pet vs Human Classification
-- **Goal:** Prevent pet faces from being incorrectly assigned to human persons.
-- **Approach:**
-    - Use landmark confidence scores as a first-pass classifier.
-    - Add `entity_type` field to distinguish People from Pets.
-    - Maintain separate matching pools (Humans only match Humans).
-- **Plan:** See [Pet Classification Plan](file:///j:/Projects/smart-photo-organizer/docs/pet-classification-plan.md)
-
-### 6. Background Auto Face Bucketing
-- **Goal:** Background process that organizes unassigned faces into stable buckets for easier user review.
-- **Core Features:**
-    - **Suggestion Buckets:** Faces matching named people (below auto-assign threshold).
-    - **Discovery Buckets:** Faces clustering with each other (new unknown groups).
-    - **Scan-Aware Scheduling:** Yields to active scans, runs when paused or idle.
-    - **Smart Triggers:** Only runs when `bucketing_dirty=1` (new faces, assignments, eras).
-- **Prerequisites:** Requires #3 (Eras), #4 (Sessions), #5 (Pets) to be completed first.
-- **Plan:** See [Background Bucketing Plan](file:///j:/Projects/smart-photo-organizer/docs/background-bucketing-plan.md)
-
-### 7. Bucket Merge by Person (UX Enhancement)
+### 3. Bucket Merge by Person (UX Enhancement)
 - **Goal:** Reduce user workload by combining multiple suggestion buckets for the same person into a single merged group.
 - **Core Features:**
     - **Frontend Merge:** Presentation-layer grouping that combines buckets by `suggested_person_id`.
@@ -83,7 +47,7 @@
 - **Prerequisites:** Requires #6 (Background Bucketing) to be implemented.
 - **Status:** In Progress
 
-### 8. Frontend Streamlining (UX Consolidation)
+### 4. Frontend Streamlining (UX Consolidation)
 - **Goal:** Simplify the People management workflow by automating high-confidence assignments, reducing tabs from 4 to 3, and consolidating modal-heavy interactions.
 - **Core Features:**
     - **Auto-Assign Suggestions:** Eliminate Suggestions tab; auto-assign high-confidence matches directly to people.
@@ -235,6 +199,16 @@
 - **Fixes & QoL (Phase 26):** Fixed RAW Previews, Era Generation bugs, Clustering Thresholds, and improved UX feedback (Toasts). [See Changelog](aiChangeLog/phase-26-fix-raw-and-eras.md)
 - **Clustering & Performance (Phase 27):** Fixed clustering logic (Metric Mismatch), optimized background detection speed (20x), added Face Debug tools, and optimized FAISS Index (sync tracking & alerts). [See Changelog](aiChangeLog/phase-27-clustering-optimization.md)
 - **High-Density Review UX (Phase 28):** Implemented progressive loading, keyboard navigation (`A`/`X`/`N`), cluster size filters, and "Ungroupable" search to handle 10k+ face libraries. [See Walkthrough](file:///C:/Users/arozz/.gemini/antigravity/brain/34a6fc69-1e09-40eb-974f-d34f6ae8103b/walkthrough.md)
+- **Centroid Stability & Face Confirmation:**
+    - **Face Confirmation:** Mark potentially misassigned faces as "correct" to exclude from future outlier detection.
+    - **Era-Aware Clustering:** Support multiple centroids per person based on photo date ranges.
+    - **Drift Detection:** Alert users when a person's face signature shifts significantly.
+- **Photo Session Grouping:**
+    - Group unnamed faces by folder or time-window for better context.
+    - Added `session_folder` and `session_date` metadata.
+- **Pet vs Human Classification:**
+    - **Entity Type:** Distinguish People from Pets using `entity_type` field.
+    - **Separate Matching:** Humans only match Humans, Pets match Pets.
 
 ### Code Maintenance (v0.5.5)
 - **FaceAnalysisService Refactoring (Phase 29):** Split `FaceAnalysisService.ts` (564→196 lines) into `FaceOutlierService.ts` (~230 lines) and `FaceNoiseService.ts` (~175 lines) for improved maintainability. [See Changelog](aiChangeLog/phase-29-refactoring.md)
