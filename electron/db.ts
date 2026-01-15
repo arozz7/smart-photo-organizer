@@ -211,6 +211,32 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     db.exec("ALTER TABLE people ADD COLUMN entity_type TEXT DEFAULT 'human'");
   } catch (e) { /* Column exists */ }
 
+  // --- MIGRATION: Auto-Assign Suggestions (Phase 40) ---
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN assignment_source TEXT DEFAULT 'manual'");
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN is_confirmed BOOLEAN DEFAULT 0");
+  } catch (e) { /* Column exists */ }
+
+  // Backfill is_confirmed=1 for existing faces with a person_id
+  // Assumption: Any face already assigned to a person was manually confirmed
+  const confirmationMigrationKey = 'migration_confirmation_backfill_v1';
+  const confirmationCheck = db.prepare('SELECT value FROM app_state WHERE key = ?').get(confirmationMigrationKey);
+
+  if (!confirmationCheck) {
+    logger.info('[DB Module] Running one-time migration: Backfilling is_confirmed=1 for existing assignments...');
+    db.prepare(`
+      UPDATE faces 
+      SET is_confirmed = 1 
+      WHERE person_id IS NOT NULL 
+    `).run();
+
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(confirmationMigrationKey, '1');
+    logger.info('[DB Module] Confirmation backfill complete.');
+  }
+
   // Create person_eras table for era-aware clustering
   db.exec(`
     CREATE TABLE IF NOT EXISTS person_eras (

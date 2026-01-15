@@ -50,7 +50,10 @@
 - **Testing Strategy:** Pre/post-implementation baseline tests for all tabs, centroid calculation, and keyboard navigation.
 - **Prerequisites:** Requires #6 (Background Bucketing) and #7 (Bucket Merge) to be stable.
 - **Plan:** See [Frontend Streamlining Plan](file:///j:/Projects/smart-photo-organizer/docs/frontend-streamlining-plan.md)
-- **Status:** Planning
+- **Status:** Implemented (v0.5.5) - [Complete]
+    - **Live Face Counts:** Polling mechanism for real-time unassigned face counts.
+    - **Performance Limits:** Enforced 150-face limit for Ignore/Group views to prevent UI lag.
+    - **UX Polish:** Removed AI suggestions from Move modal; improved Edge Case navigation.
 
 
 ---

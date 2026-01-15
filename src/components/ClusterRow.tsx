@@ -51,7 +51,10 @@ const ClusterRow = memo(({
         setClusterFaces([])
         setSuggestion(null)
 
-        fetchFacesByIds(faceIds).then(res => {
+        // Cap at 150 faces per group as requested
+        const displayIds = faceIds.slice(0, 150);
+
+        fetchFacesByIds(displayIds).then(res => {
             if (mounted) {
                 setClusterFaces(res)
                 setLoaded(true)

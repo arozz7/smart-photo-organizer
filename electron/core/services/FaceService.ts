@@ -473,24 +473,27 @@ export class FaceService {
 
         const updateStmt = db.prepare(`
             UPDATE faces 
-            SET descriptor = ?, box_json = ?, blur_score = ?, 
-                confidence_tier = ?, suggested_person_id = ?, match_distance = ?,
-                pose_yaw = ?, pose_pitch = ?, pose_roll = ?, face_quality = ?,
-                session_folder = COALESCE(session_folder, ?),
-                session_date = COALESCE(session_date, ?),
-                person_id = COALESCE(person_id, ?)
+            SET descriptor = ?, box_json = ?, blur_score = ?,
+            confidence_tier = ?, suggested_person_id = ?, match_distance = ?,
+            pose_yaw = ?, pose_pitch = ?, pose_roll = ?, face_quality = ?,
+            session_folder = COALESCE(session_folder, ?),
+            session_date = COALESCE(session_date, ?),
+            person_id = COALESCE(person_id, ?),
+            assignment_source = COALESCE(assignment_source, ?),
+            is_confirmed = COALESCE(is_confirmed, ?)
             WHERE id = ?
         `);
 
         const insertStmt = db.prepare(`
-            INSERT INTO faces (
-                photo_id, person_id, descriptor, box_json, blur_score, 
+            INSERT INTO faces(
+                photo_id, person_id, descriptor, box_json, blur_score,
                 is_reference, confidence_tier, suggested_person_id, match_distance,
                 pose_yaw, pose_pitch, pose_roll, face_quality,
-                session_folder, session_date, needs_bucketing
+                session_folder, session_date, needs_bucketing,
+                assignment_source, is_confirmed
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `);
 
         db.transaction(() => {
             for (const face of faces) {
@@ -523,16 +526,20 @@ export class FaceService {
                     if (face.descriptor.length > 0) {
                         matchData = matchResults[matchIdx++];
                         if (matchData) {
-                            logger.debug(`[FaceService] Scan match for face: dist=${matchData.distance.toFixed(3)}, person=${matchData.personId}`);
+                            logger.debug(`[FaceService] Scan match for face: dist = ${matchData.distance.toFixed(3)}, person = ${matchData.personId} `);
                         }
                     }
                 }
 
-                // Determine Tier
+                // Determine Tier & Source
                 let personId: number | null = bestMatch ? bestMatch.person_id : null;
                 let suggestedPersonId: number | null = bestMatch ? bestMatch.suggested_person_id : null;
                 let confidenceTier = bestMatch ? bestMatch.confidence_tier : 'unknown';
                 let matchDistance = bestMatch ? bestMatch.match_distance : null;
+
+                // Track Source & Confirmation (Phase 3)
+                let assignmentSource = bestMatch ? bestMatch.assignment_source : 'manual';
+                let isConfirmed = bestMatch ? bestMatch.is_confirmed : 0;
 
                 if (matchData) {
                     const dist = matchData.distance;
@@ -540,7 +547,6 @@ export class FaceService {
 
 
                     // Phase 5: Quality-Adjusted Thresholds
-                    // Dynamic threshold based on face quality (e.g. side profile gets relaxed threshold)
                     const fQuality = face.faceQuality ?? 0.5;
                     const adjHighThreshold = FaceAnalysisService.getQualityAdjustedThreshold(HIGH_THRESHOLD, fQuality);
                     const adjReviewThreshold = FaceAnalysisService.getQualityAdjustedThreshold(REVIEW_THRESHOLD, fQuality);
@@ -552,24 +558,22 @@ export class FaceService {
                             confidenceTier = 'high';
                             suggestedPersonId = matchData.personId;
                             assignedCount++;
+                            // Phase 3: Mark as auto-assigned and unconfirmed
+                            assignmentSource = 'auto_scan';
+                            isConfirmed = 0;
                         }
                     } else if (dist < adjReviewThreshold) {
                         // Review Tier
                         if (!personId) {
                             confidenceTier = 'review';
                             suggestedPersonId = matchData.personId;
-                            // Log why we are in review (distance vs threshold)
-                            // logger.info(`[FaceService] Face classified as REVIEW tier (dist=${matchDistance?.toFixed(3)} < ${adjReviewThreshold.toFixed(3)}). Suggested: ${matchData.personId}`);
                         }
-                    } else {
-                        // Unknown Tier
-                        // logger.info(`[FaceService] Face classified as UNKNOWN tier (dist=${matchDistance?.toFixed(3)} >= ${adjReviewThreshold.toFixed(3)})`);
                     }
                 }
 
                 let finalId = 0;
 
-                // Ensure sessionData values are strings (sessionDate may be ExifDateTime object)
+                // Ensure sessionData values are strings
                 const sessionFolder = sessionData?.sessionFolder ?? null;
                 const sessionDateValue = sessionData?.sessionDate;
                 const sessionDateStr = sessionDateValue
@@ -592,6 +596,10 @@ export class FaceService {
                         sessionFolder,
                         sessionDateStr,
                         personId ?? null, // Coalesce fallback
+                        // Update source/confirmation ONLY if changed (effectively)
+                        // Actually, we calculated the final desired state above.
+                        assignmentSource,
+                        isConfirmed,
                         bestMatch.id
                     );
                     finalId = bestMatch.id;
@@ -613,17 +621,19 @@ export class FaceService {
                         face.faceQuality ?? null,
                         sessionFolder,
                         sessionDateStr,
-                        personId ? 0 : 1 // Needs bucketing if unassigned
+                        personId ? 0 : 1, // Needs bucketing if unassigned
+                        assignmentSource, // assignment_source
+                        isConfirmed      // is_confirmed
                     ];
 
                     // DEBUG: Log parameter count and types
-                    logger.info(`[FaceService] INSERT params count: ${insertParams.length}, types: ${insertParams.map((p, i) => `${i}:${p === null ? 'null' : typeof p}`).join(', ')}`);
+                    logger.info(`[FaceService] INSERT params count: ${insertParams.length}, types: ${insertParams.map((p, i) => `${i}:${p === null ? 'null' : typeof p}`).join(', ')} `);
 
                     try {
                         const info = insertStmt.run(...insertParams);
                         finalId = Number(info.lastInsertRowid);
                     } catch (insertError) {
-                        logger.error(`[FaceService] INSERT FAILED! Params: ${JSON.stringify(insertParams.map(p => p instanceof Buffer ? '[Buffer]' : p))}`);
+                        logger.error(`[FaceService] INSERT FAILED! Params: ${JSON.stringify(insertParams.map(p => p instanceof Buffer ? '[Buffer]' : p))} `);
                         throw insertError;
                     }
                 }
@@ -664,7 +674,7 @@ export class FaceService {
         // BUT `autoAssignFaces` did it.
         // Let's log success.
         // Logic complete.
-        if (assignedCount > 0) logger.info(`[FaceService] Auto-assigned ${assignedCount} faces via scan-time logic.`);
+        if (assignedCount > 0) logger.info(`[FaceService] Auto - assigned ${assignedCount} faces via scan - time logic.`);
 
         // Logic complete.
     }

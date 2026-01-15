@@ -361,6 +361,7 @@ const PersonDetail = () => {
                 initialValue=""
                 count={selectedFaces.size}
                 faceIds={Array.from(selectedFaces)}
+                showSuggestions={false}
             />
 
             <EditPersonNameModal

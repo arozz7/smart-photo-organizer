@@ -7,7 +7,7 @@ import { Face } from '../types'
 import { useClusterController } from './useClusterController'
 
 export function usePeopleCluster() {
-    const { loadPeople, loadUnnamedFaces, autoNameFaces, fetchFacesByIds } = usePeople()
+    const { loadPeople, loadUnnamedFaces, autoNameFaces, fetchFacesByIds, findUngroupableFaces, smartIgnoreSettings } = usePeople()
     // const { addToQueue } = useAI() // Unused
     const { showAlert, showConfirm } = useAlert()
     const { addToast } = useToast()
@@ -92,14 +92,28 @@ export function usePeopleCluster() {
                 setTotalUnassigned(res.totalUnassigned || (clusterCount + res.singles.length));
 
                 // Reset pagination when data reloads
+                // Reset pagination when data reloads
                 controller.resetPagination();
+
+                // Fetch Ungroupable Faces (Ungroupable/Unmatched)
+                try {
+                    const distThreshold = smartIgnoreSettings?.ungroupableDistanceThreshold || 1.0;
+                    console.log(`[People] Finding ungroupable faces (th=${distThreshold})...`);
+                    const ungroupableRes = await findUngroupableFaces(distThreshold);
+                    if (ungroupableRes.success && ungroupableRes.ungroupable_ids) {
+                        console.log(`[People] Found ${ungroupableRes.ungroupable_ids.length} ungroupable faces.`);
+                        setUngroupableFaces(ungroupableRes.ungroupable_ids);
+                    }
+                } catch (e) {
+                    console.warn(`[People] Failed to load ungroupable faces:`, e);
+                }
             }
         } catch (e) {
             console.error("Failed to load clusters", e)
         } finally {
             setIsClustering(false)
         }
-    }, [loadUnnamedFaces, fetchFacesByIds, controller.resetPagination])
+    }, [loadUnnamedFaces, fetchFacesByIds, controller.resetPagination, findUngroupableFaces, smartIgnoreSettings])
 
     // --- Actions ---
 

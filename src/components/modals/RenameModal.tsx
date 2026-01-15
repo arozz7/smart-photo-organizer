@@ -10,6 +10,7 @@ interface RenameModalProps {
     initialValue: string;
     count: number;
     faceIds?: number[];
+    showSuggestions?: boolean;
 }
 
 const RenameModal = ({
@@ -18,7 +19,8 @@ const RenameModal = ({
     onConfirm,
     initialValue,
     count,
-    faceIds
+    faceIds,
+    showSuggestions = true
 }: RenameModalProps) => {
     const [name, setName] = useState(initialValue);
     const [descriptors, setDescriptors] = useState<number[][] | undefined>(undefined);
@@ -72,6 +74,7 @@ const RenameModal = ({
                             onSelect={(_id, selectedName) => {
                                 setName(selectedName);
                             }}
+                            showSuggestions={showSuggestions}
                         />
                         <div className='flex-1 pb-4'></div>
                     </div>

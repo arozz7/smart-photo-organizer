@@ -9,9 +9,10 @@ export class PersonService {
         const settings = getAISettings();
         const blurThreshold = settings.faceBlurThreshold ?? 20;
 
-        const faces = FaceRepository.getAllFaces(10000, 0, { personId }, true);
+        // Phase 3: Use confirmed faces only for stable centroid (Centroid Protection)
+        const faces = FaceRepository.getConfirmedFaces(personId);
 
-        const validFaces = faces.filter((f: any) =>
+        const validFaces = faces.filter((f) =>
             f.descriptor &&
             f.descriptor.length > 0 &&
             (f.blur_score === null || f.blur_score >= blurThreshold)
@@ -22,7 +23,7 @@ export class PersonService {
             return;
         }
 
-        let vectors = validFaces.map((f: any) => f.descriptor as number[]);
+        let vectors = validFaces.map((f) => f.descriptor as number[]);
 
         // --- Robust Centroid Calculation ---
         // Helper to calculate normalized mean vector
@@ -413,8 +414,8 @@ export class PersonService {
             }
         }
 
-        // 3. Move Faces
-        FaceRepository.updateFacePerson(faceIds, targetPerson.id);
+        // 3. Move Faces - Manual move implies confirmation
+        FaceRepository.updateFacePerson(faceIds, targetPerson.id, true);
 
         // 4. Recalculate Means
         // Target

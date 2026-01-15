@@ -15,14 +15,19 @@ vi.mock('../../../../electron/data/repositories/PersonRepository', () => ({
         getPeople: vi.fn(),
         getPersonByName: vi.fn(),
         createPerson: vi.fn(),
-        updatePersonName: vi.fn()
+        updatePersonName: vi.fn(),
+        getPerson: vi.fn(),
+        addHistorySnapshot: vi.fn(),
+        refreshPersonCover: vi.fn(),
+        addAlert: vi.fn()
     }
 }));
 
 vi.mock('../../../../electron/data/repositories/FaceRepository', () => ({
     FaceRepository: {
         getAllFaces: vi.fn(),
-        updateFacePerson: vi.fn()
+        updateFacePerson: vi.fn(),
+        getConfirmedFaces: vi.fn()
     }
 }));
 
@@ -67,13 +72,18 @@ describe('PersonService', () => {
         vi.clearAllMocks();
     });
 
+    beforeEach(() => {
+        // Default mock: return empty array for confirmed faces to prevent undefined crashes
+        vi.mocked(FaceRepository.getConfirmedFaces).mockReturnValue([]);
+    });
+
     // ==========================================
     // recalculatePersonMean
     // ==========================================
     describe('recalculatePersonMean', () => {
         it('should update mean to null if no valid faces are found', async () => {
             // Arrange
-            vi.mocked(FaceRepository.getAllFaces).mockReturnValue([]);
+            vi.mocked(FaceRepository.getConfirmedFaces).mockReturnValue([]);
 
             // Act
             await PersonService.recalculatePersonMean(1);
@@ -85,36 +95,56 @@ describe('PersonService', () => {
         it('should filter out faces with low blur scores', async () => {
             // Arrange
             const faces = [
-                { descriptor: [1, 0], blur_score: 5 },  // Blurry (threshold is 20)
-                { descriptor: [0, 1], blur_score: 50 }, // Clear
+                { id: 1, descriptor: [1, 0, 0], blur_score: 5, photo_id: 1, box_json: '{}', file_path: 'a.jpg' },  // Blurry (threshold is 20)
+                { id: 2, descriptor: [0, 1, 0], blur_score: 50, photo_id: 2, box_json: '{}', file_path: 'b.jpg' }, // Clear
             ];
-            vi.mocked(FaceRepository.getAllFaces).mockReturnValue(faces);
+            vi.mocked(FaceRepository.getConfirmedFaces).mockReturnValue(faces as any);
 
             // Act
             await PersonService.recalculatePersonMean(1);
 
             // Assert
-            // Only the second face should be used, mean of [0, 1] is [0, 1]
-            expect(PersonRepository.updateDescriptorMean).toHaveBeenCalledWith(1, JSON.stringify([0, 1]));
+            // Only the second face should be used, mean of [0, 1, 0] is [0, 1, 0]
+            expect(PersonRepository.updateDescriptorMean).toHaveBeenCalledWith(1, JSON.stringify([0, 1, 0]));
         });
 
         it('should calculate normalized mean of multiple descriptors', async () => {
             // Arrange
             const faces = [
-                { descriptor: [1, 0], blur_score: 50 },
-                { descriptor: [0, 1], blur_score: 50 },
+                { id: 1, descriptor: [1, 0, 0], blur_score: 50, photo_id: 1, box_json: '{}', file_path: 'a.jpg' },
+                { id: 2, descriptor: [0, 1, 0], blur_score: 50, photo_id: 2, box_json: '{}', file_path: 'b.jpg' },
             ];
-            vi.mocked(FaceRepository.getAllFaces).mockReturnValue(faces);
+            vi.mocked(FaceRepository.getConfirmedFaces).mockReturnValue(faces as any);
 
             // Act
             await PersonService.recalculatePersonMean(1);
 
             // Assert
-            // Mean = [0.5, 0.5], Normalized = [0.7071..., 0.7071...]
+            // Mean = [0.5, 0.5, 0], Normalized = [0.7071..., 0.7071..., 0]
             const call = vi.mocked(PersonRepository.updateDescriptorMean).mock.calls[0];
             const resultMean = JSON.parse(call[1] as string);
             expect(resultMean[0]).toBeCloseTo(0.7071);
             expect(resultMean[1]).toBeCloseTo(0.7071);
+        });
+
+        it('should use ONLY confirmed faces for mean calculation (Phase 0.5)', async () => {
+            // Arrange
+            // getAllFaces should NOT be used for centroid
+            vi.mocked(FaceRepository.getAllFaces).mockReturnValue([]);
+
+            const confirmedFaces = [
+                { id: 1, descriptor: [1, 0, 0], blur_score: 50, photo_id: 1, box_json: '{}', file_path: 'a.jpg' },
+                { id: 2, descriptor: [0, 1, 0], blur_score: 50, photo_id: 2, box_json: '{}', file_path: 'b.jpg' },
+            ];
+            vi.mocked(FaceRepository.getConfirmedFaces).mockReturnValue(confirmedFaces as any);
+
+            // Act
+            await PersonService.recalculatePersonMean(1);
+
+            // Assert
+            expect(FaceRepository.getConfirmedFaces).toHaveBeenCalledWith(1);
+            // Should normalize mean of [1,0,0] and [0,1,0] -> [0.707, 0.707, 0]
+            expect(PersonRepository.updateDescriptorMean).toHaveBeenCalledWith(1, expect.stringContaining('0.707'));
         });
     });
 
@@ -132,10 +162,10 @@ describe('PersonService', () => {
             await PersonService.mergePeople(fromId, toId);
 
             // Assert
-            expect(FaceRepository.updateFacePerson).toHaveBeenCalledWith([10, 11], toId);
+            expect(FaceRepository.updateFacePerson).toHaveBeenCalledWith([10, 11], toId, true);
             expect(PersonRepository.deletePerson).toHaveBeenCalledWith(fromId);
-            // Should also trigger recalc for target
-            expect(FaceRepository.getAllFaces).toHaveBeenCalledWith(10000, 0, { personId: toId }, true);
+            // Should also trigger recalc for target (using Phase 3 logic: getConfirmedFaces)
+            expect(FaceRepository.getConfirmedFaces).toHaveBeenCalledWith(toId);
         });
 
         it('should do nothing if fromId and toId are same', async () => {
@@ -155,7 +185,8 @@ describe('PersonService', () => {
         it('should iterate through all people and recalc', async () => {
             // Arrange
             vi.mocked(PersonRepository.getPeople).mockReturnValue([{ id: 1 }, { id: 2 }]);
-            vi.mocked(FaceRepository.getAllFaces).mockReturnValue([]);
+            // getAllFaces/getConfirmedFaces will be called
+            vi.mocked(FaceRepository.getConfirmedFaces).mockReturnValue([]);
 
             // Act
             const result = await PersonService.recalculateAllMeans();
@@ -182,7 +213,7 @@ describe('PersonService', () => {
 
             // Assert
             expect(PersonRepository.createPerson).not.toHaveBeenCalled();
-            expect(FaceRepository.updateFacePerson).toHaveBeenCalledWith([100], 5);
+            expect(FaceRepository.updateFacePerson).toHaveBeenCalledWith([100], 5, true);
             expect(result.person).toEqual(person);
         });
 
@@ -197,7 +228,7 @@ describe('PersonService', () => {
 
             // Assert
             expect(PersonRepository.createPerson).toHaveBeenCalledWith('Bob');
-            expect(FaceRepository.updateFacePerson).toHaveBeenCalledWith([100], 6);
+            expect(FaceRepository.updateFacePerson).toHaveBeenCalledWith([100], 6, true);
         });
     });
 
@@ -229,7 +260,7 @@ describe('PersonService', () => {
 
             // Assert
             expect(PersonRepository.deletePerson).toHaveBeenCalledWith(1);
-            expect(FaceRepository.updateFacePerson).not.toHaveBeenCalled(); // No faces in mock
+            expect(FaceRepository.updateFacePerson).not.toHaveBeenCalled(); // No faces in mock (getAllFaces not called, getConfirmedFaces not called except inside recalc)
         });
     });
 });
