@@ -352,6 +352,7 @@ export default function OutlierReviewModal({
                 onConfirm={handleMoveSelected}
                 initialValue=""
                 count={selectedIds.size}
+                showSuggestions={false}
             />
         </>
     );

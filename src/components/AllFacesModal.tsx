@@ -5,8 +5,9 @@ import PersonFaceItem from './PersonFaceItem';
 import { Face } from '../types';
 import { useAlert } from '../context/AlertContext';
 import { useToast } from '../context/ToastContext';
-import { usePeople } from '../context/PeopleContext';
-import { PersonNameInput } from './PersonNameInput';
+
+
+import RenameModal from './modals/RenameModal';
 
 interface AllFacesModalProps {
     isOpen: boolean;
@@ -23,6 +24,8 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
     const { showAlert, showConfirm } = useAlert();
     const { addToast } = useToast();
     const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+    // Snapshot for stable modal props
+    const [facesToMove, setFacesToMove] = useState<number[]>([]);
 
     // Era Filtering
     const [eras, setEras] = useState<any[]>([]);
@@ -261,7 +264,10 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                             Confirm
                         </button>
                         <button
-                            onClick={() => setIsMoveModalOpen(true)}
+                            onClick={() => {
+                                setFacesToMove(Array.from(selectedFaces));
+                                setIsMoveModalOpen(true);
+                            }}
                             className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-2"
                         >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -290,71 +296,17 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                 )}
             </div>
 
-            <MoveFacesModal
+            <RenameModal
                 isOpen={isMoveModalOpen}
                 onClose={() => setIsMoveModalOpen(false)}
                 onConfirm={handleMove}
-                faceIds={Array.from(selectedFaces)}
+                initialValue=""
+                count={facesToMove.length}
+                faceIds={facesToMove}
+                showSuggestions={false}
             />
         </div>
     );
 }
 
-// Internal Move Modal
-const MoveFacesModal = ({ isOpen, onClose, onConfirm, faceIds }: { isOpen: boolean, onClose: () => void, onConfirm: (name: string) => void, faceIds: number[] }) => {
-    const [name, setName] = useState('');
-    const [descriptors, setDescriptors] = useState<number[][] | undefined>(undefined);
-    const { fetchFacesByIds } = usePeople();
 
-    useEffect(() => {
-        if (isOpen && faceIds.length > 0) {
-            setName('');
-            setDescriptors(undefined);
-
-            // Fetch descriptors for AI suggestions (limit to 5)
-            fetchFacesByIds(faceIds.slice(0, 5)).then(faces => {
-                const descs = faces.map(f => f.descriptor).filter(d => !!d) as number[][];
-                if (descs.length > 0) {
-                    setDescriptors(descs);
-                }
-            });
-        }
-    }, [isOpen, faceIds, fetchFacesByIds]);
-
-    if (!isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="bg-gray-800 p-6 rounded-xl shadow-2xl w-full max-w-md border border-gray-700">
-                <h3 className="text-xl font-bold text-white mb-2">Move {faceIds.length} Faces</h3>
-                <p className="text-gray-400 mb-4 text-sm">Select the target person.</p>
-                <div className="relative mb-6">
-                    <PersonNameInput
-                        autoFocus
-                        value={name}
-                        onChange={setName}
-                        onCommit={() => name.trim() && onConfirm(name)}
-                        descriptors={descriptors}
-                        placeholder="Person Name"
-                        className="w-full"
-                        onSelect={(_id, selectedName) => {
-                            setName(selectedName);
-                            // Optional: auto-commit on select? 
-                            // Usually "Move" button is safer for bulk actions.
-                        }}
-                    />
-                </div>
-                <div className="flex justify-end gap-3">
-                    <button onClick={onClose} className="px-4 py-2 rounded-lg hover:bg-gray-700 text-gray-300">Cancel</button>
-                    <button
-                        onClick={() => name.trim() && onConfirm(name)}
-                        disabled={!name.trim()}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Move
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAlert } from '../context/AlertContext';
 import { useToast } from '../context/ToastContext';
@@ -439,6 +439,24 @@ export const usePersonDetail = (personId: string | undefined) => {
         }
     };
 
+    const actions = useMemo(() => ({
+        moveFaces: handleReassign,
+        // @ts-ignore
+        removeFaces: handleUnassign,
+        setCover: handleSetCover,
+        renamePerson: handleRenamePerson,
+        startTargetedScan: handleTargetedScan,
+        loadMore: async () => { },
+        ignoreFaces: async () => { },
+        confirmFaces: async () => { },
+        findOutliers,
+        clearOutliers: () => setOutliers([]),
+        resolveOutliers,
+        recalculateModel,
+        generateEras,
+        deleteEra
+    }), [handleReassign, handleUnassign, handleSetCover, handleRenamePerson, handleTargetedScan, findOutliers, resolveOutliers]);
+
     return {
         person,
         faces,
@@ -460,22 +478,6 @@ export const usePersonDetail = (personId: string | undefined) => {
         // Eras
         eras,
 
-        actions: {
-            moveFaces: handleReassign,
-            // @ts-ignore
-            removeFaces: handleUnassign,
-            setCover: handleSetCover,
-            renamePerson: handleRenamePerson,
-            startTargetedScan: handleTargetedScan,
-            loadMore: async () => { }, // Placeholder if loadMore is not implemented
-            ignoreFaces: async () => { }, // Placeholder
-            confirmFaces: async () => { }, // Placeholder
-            findOutliers,
-            clearOutliers: () => setOutliers([]),
-            resolveOutliers,
-            recalculateModel,
-            generateEras,
-            deleteEra
-        }
+        actions
     };
 };
