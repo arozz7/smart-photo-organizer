@@ -47,6 +47,7 @@ interface PeopleContextType {
     getUnassignedCount: () => Promise<number>
     unassignedCount: number
     refreshUnassignedCount: () => Promise<void>
+    findUngroupableFaces: (distanceThreshold?: number) => Promise<{ success: boolean; ungroupable_ids: number[] }>
 }
 
 export interface SmartIgnoreSettings {

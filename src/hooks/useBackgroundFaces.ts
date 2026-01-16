@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { usePeople } from '../context/PeopleContext'
 import { useToast } from '../context/ToastContext'
 
