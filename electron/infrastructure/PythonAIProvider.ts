@@ -12,6 +12,7 @@ export class PythonAIProvider implements IAIProvider {
     private process: ChildProcess | null = null;
     private mainWindow: BrowserWindow | null = null;
     private scanPromises = new Map<number, { resolve: (v: any) => void, reject: (err: any) => void }>();
+    private isShuttingDown = false;
 
     constructor() { }
 
@@ -145,6 +146,12 @@ export class PythonAIProvider implements IAIProvider {
             }
         }
 
+
+        // Check shutdown state before attempting to send to UI
+        if (this.isShuttingDown || !this.mainWindow || this.mainWindow.isDestroyed()) {
+            return;
+        }
+
         // 2. Notify UI
         if (this.mainWindow && ['scan_result', 'tags_result', 'analysis_result'].includes(message.type)) {
             this.mainWindow.webContents.send('ai:scan-result', message);
@@ -155,11 +162,17 @@ export class PythonAIProvider implements IAIProvider {
     }
 
     stop() {
+        this.isShuttingDown = true;
         if (this.process) {
             logger.info('[PythonAIProvider] Stopping Python Backend...');
             this.process.kill();
             this.process = null;
         }
+        this.mainWindow = null;
+
+        // Reject any pending promises
+        this.scanPromises.forEach(p => p.reject(new Error('Shutdown')));
+        this.scanPromises.clear();
     }
 
     syncSettings() {

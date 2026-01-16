@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PersonFaceItem from '../components/PersonFaceItem';
 import BlurryFacesModal from '../components/BlurryFacesModal';
@@ -102,12 +102,15 @@ const PersonDetail = () => {
         }
     };
 
-    const onMoveFaces = async (targetName: string) => {
+    const onMoveFaces = useCallback(async (targetName: string) => {
         const success = await actions.moveFaces(targetName);
         if (success) {
             setIsRenameModalOpen(false);
         }
-    };
+    }, [actions]);
+
+    // Stable close handler
+    const onRenameModalClose = useCallback(() => setIsRenameModalOpen(false), []);
 
     const onStartScan = async (options: { folderPath?: string, onlyWithFaces?: boolean }) => {
         setIsScanModalOpen(false);
@@ -139,6 +142,9 @@ const PersonDetail = () => {
     const onUnpinCover = async () => {
         await actions.setCover(null);
     };
+
+    // Snapshot state for modal
+    const [facesToMove, setFacesToMove] = useState<number[]>([]);
 
     if (loading && !person) return <div className="p-8 text-white">Loading...</div>;
     if (!person) return <div className="p-8 text-white">Person not found</div>;
@@ -356,11 +362,11 @@ const PersonDetail = () => {
 
             <RenameModal
                 isOpen={isRenameModalOpen}
-                onClose={() => setIsRenameModalOpen(false)}
+                onClose={onRenameModalClose}
                 onConfirm={onMoveFaces}
                 initialValue=""
-                count={selectedFaces.size}
-                faceIds={Array.from(selectedFaces)}
+                count={facesToMove.length}
+                faceIds={facesToMove}
                 showSuggestions={false}
             />
 
@@ -466,7 +472,10 @@ const PersonDetail = () => {
                         Confirm
                     </button>
                     <button
-                        onClick={() => setIsRenameModalOpen(true)}
+                        onClick={() => {
+                            setFacesToMove(Array.from(selectedFaces));
+                            setIsRenameModalOpen(true);
+                        }}
                         className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-2"
                     >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

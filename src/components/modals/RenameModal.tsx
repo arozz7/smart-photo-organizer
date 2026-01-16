@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { PersonNameInput } from '../PersonNameInput';
 import { usePeople } from '../../context/PeopleContext';
@@ -13,14 +13,14 @@ interface RenameModalProps {
     showSuggestions?: boolean;
 }
 
-const RenameModal = ({
+const RenameModal = memo(({
     isOpen,
     onClose,
     onConfirm,
     initialValue,
     count,
     faceIds,
-    showSuggestions = true
+    showSuggestions = false
 }: RenameModalProps) => {
     const [name, setName] = useState(initialValue);
     const [descriptors, setDescriptors] = useState<number[][] | undefined>(undefined);
@@ -31,7 +31,7 @@ const RenameModal = ({
             setName(initialValue);
             setDescriptors(undefined);
 
-            if (faceIds && faceIds.length > 0) {
+            if (showSuggestions && faceIds && faceIds.length > 0) {
                 fetchFacesByIds(faceIds.slice(0, 5)).then(faces => {
                     const descs = faces.map(f => f.descriptor).filter(d => !!d) as number[][];
                     if (descs.length > 0) {
@@ -40,7 +40,7 @@ const RenameModal = ({
                 });
             }
         }
-    }, [isOpen, initialValue, faceIds, fetchFacesByIds]);
+    }, [isOpen, initialValue, faceIds, fetchFacesByIds, showSuggestions]);
 
     return (
         <Dialog.Root open={isOpen} onOpenChange={open => !open && onClose()}>
@@ -99,6 +99,6 @@ const RenameModal = ({
             </Dialog.Portal>
         </Dialog.Root>
     );
-};
+});
 
 export default RenameModal;

@@ -10,28 +10,38 @@ import { FaceService } from '../core/services/FaceService';
 export function registerAIHandlers() {
     // Generic Proxy 
     ipcMain.handle('ai:command', async (_event, command) => {
-        const { type, payload } = command;
-        let timeout = 120000;
-        if (type === 'cluster_faces' || type === 'analyze_image') timeout = 900000;
-        return await pythonProvider.sendRequest(type, payload, timeout);
+        try {
+            const { type, payload } = command;
+            let timeout = 120000;
+            if (type === 'cluster_faces' || type === 'analyze_image') timeout = 900000;
+            return await pythonProvider.sendRequest(type, payload, timeout);
+        } catch (e: any) {
+            if (e.message === 'Shutdown') return null;
+            throw e;
+        }
     });
 
     ipcMain.handle('ai:analyzeImage', async (_event, options) => {
-        let { photoId, filePath, ...rest } = options;
+        try {
+            let { photoId, filePath, ...rest } = options;
 
-        if (!filePath && photoId) {
-            // const photo = PhotoRepository.getPhotoById(photoId); // Unused
-            const db = getDB();
-            const row = db.prepare('SELECT file_path FROM photos WHERE id = ?').get(photoId) as any;
-            if (row) filePath = row.file_path;
+            if (!filePath && photoId) {
+                // const photo = PhotoRepository.getPhotoById(photoId); // Unused
+                const db = getDB();
+                const row = db.prepare('SELECT file_path FROM photos WHERE id = ?').get(photoId) as any;
+                if (row) filePath = row.file_path;
+            }
+
+            if (!filePath) return { success: false, error: 'Missing filePath' };
+
+            // Debug & VLM logging
+            logger.info(`[Main] Analyze Request ${photoId}`);
+
+            return await PhotoService.analyzeImage({ photoId, filePath, ...rest });
+        } catch (e: any) {
+            if (e.message === 'Shutdown') return { success: false, error: 'Shutdown' };
+            throw e;
         }
-
-        if (!filePath) return { success: false, error: 'Missing filePath' };
-
-        // Debug & VLM logging
-        logger.info(`[Main] Analyze Request ${photoId}`);
-
-        return await PhotoService.analyzeImage({ photoId, filePath, ...rest });
     });
 
     // Alias for analyzeImage used by Blur Calculation and older contexts
@@ -257,7 +267,8 @@ export function registerAIHandlers() {
             const payload = {
                 faces: faces, // [{id, descriptor}, ...]
                 eps: eps,
-                min_samples: options?.min_samples || 2
+                min_samples: options?.min_samples || 2,
+                max_size: 200 // Enforce max cluster size
             };
 
             logger.info(`[Main] Clustering ${faces.length} faces with eps=${eps.toFixed(3)}, groupBySuggestion=${options?.groupBySuggestion || false}`);
