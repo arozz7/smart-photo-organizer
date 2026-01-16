@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePeople } from '../context/PeopleContext'
 import { useAI } from '../context/AIContext'
@@ -35,7 +35,9 @@ export default function People() {
         rebuildFaissIndex,
         isRebuildingIndex,
         faissStaleCount,
-        unassignedCount
+        unassignedCount,
+        peopleScrollPosition,
+        setPeopleScrollPosition
     } = usePeople()
 
     const { onPhotoProcessed } = useAI()
@@ -393,10 +395,23 @@ export default function People() {
     }, [activeTab, loadClusteredFaces])
 
     const handlePersonClick = (personId: string) => {
+        if (scrollContainerRef.current) {
+            setPeopleScrollPosition(scrollContainerRef.current.scrollTop)
+        }
         navigate(`/person/${personId}`)
     }
 
 
+
+
+    // Restore Scroll Position
+    useLayoutEffect(() => {
+        if (activeTab === 'identified' && people.length > 0 && scrollContainerRef.current) {
+            if (peopleScrollPosition > 0) {
+                scrollContainerRef.current.scrollTop = peopleScrollPosition
+            }
+        }
+    }, [activeTab, people.length, peopleScrollPosition])
 
     const handleRebuildIndex = async () => {
         const res = await rebuildFaissIndex();
