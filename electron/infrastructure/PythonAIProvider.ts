@@ -3,12 +3,13 @@ import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { app, BrowserWindow } from 'electron';
 import logger from '../logger';
+import { IService } from '../core/interfaces/IService';
 import { IAIProvider } from '../core/interfaces/IAIProvider';
 import { FaceService } from '../core/services/FaceService';
 import { PhotoRepository } from '../data/repositories/PhotoRepository';
 import { getAISettings, getLibraryPath } from '../store'; // ConfigService later
 
-export class PythonAIProvider implements IAIProvider {
+export class PythonAIProvider implements IAIProvider, IService {
     private process: ChildProcess | null = null;
     private mainWindow: BrowserWindow | null = null;
     private scanPromises = new Map<number, { resolve: (v: any) => void, reject: (err: any) => void }>();

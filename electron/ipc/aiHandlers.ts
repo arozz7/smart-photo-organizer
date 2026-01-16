@@ -3,23 +3,13 @@ import { pythonProvider } from '../infrastructure/PythonAIProvider';
 import { PhotoService } from '../core/services/PhotoService';
 import { setAISettings, getAISettings } from '../store';
 import logger from '../logger';
-import { getDB } from '../db';
+import { getDB, getDBLock } from '../db';
 import { FaceRepository } from '../data/repositories/FaceRepository';
 import { FaceService } from '../core/services/FaceService';
 
 export function registerAIHandlers() {
     // Generic Proxy 
-    ipcMain.handle('ai:command', async (_event, command) => {
-        try {
-            const { type, payload } = command;
-            let timeout = 120000;
-            if (type === 'cluster_faces' || type === 'analyze_image') timeout = 900000;
-            return await pythonProvider.sendRequest(type, payload, timeout);
-        } catch (e: any) {
-            if (e.message === 'Shutdown') return null;
-            throw e;
-        }
-    });
+
 
     ipcMain.handle('ai:analyzeImage', async (_event, options) => {
         try {
@@ -215,6 +205,22 @@ export function registerAIHandlers() {
     ipcMain.handle('ai:getFaissStaleCount', async () => {
         const { getFaissStaleCount } = await import('../store');
         return getFaissStaleCount();
+    });
+
+    ipcMain.handle('ai:command', async (_event, command) => {
+        try {
+            // Check global lock first - if closed, silent failure (expected during move/shutdown)
+            if (!getDBLock()) return null;
+
+            const { type, payload } = command;
+            let timeout = 120000;
+            if (type === 'cluster_faces' || type === 'analyze_image') timeout = 900000;
+            return await pythonProvider.sendRequest(type, payload, timeout);
+        } catch (e: any) {
+            console.warn(`[Main] ai:command failed (likely shutdown): ${e}`);
+            if (e.message === 'Shutdown') return null;
+            return { success: false, error: "Service unavailable" };
+        }
     });
 
     ipcMain.handle('ai:saveVectorIndex', async () => {

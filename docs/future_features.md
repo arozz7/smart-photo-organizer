@@ -55,6 +55,15 @@
     - **Performance Limits:** Enforced 150-face limit for Ignore/Group views to prevent UI lag.
     - **UX Polish:** Removed AI suggestions from Move modal; improved Edge Case navigation.
 
+### 4. Error Export & Library Health
+- **Goal:** Enable users to export scan errors for external review and provide persistent library health visibility.
+- **Phased Approach:**
+    - **Phase 1 (Immediate):** Add "Export CSV" button to existing Scan Errors modal.
+    - **Phase 2 (Home Page):** "Library Health" widget showing error counts with View/Export actions.
+    - **Phase 3 (Tools Page):** Error list feeds into Corrupt File Recovery Center wizards.
+- **Export Format:** CSV with columns: File Path, Error Type, Error Message, Scan Type, Timestamp.
+- **Dependencies:** Phase 2 requires #2 (Home Page Dashboard); Phase 3 requires Corrupt File Recovery Center.
+- **Implementation Plan:** See [Error Export Plan](file:///j:/Projects/smart-photo-organizer/docs/error-export-plan.md)
 
 ---
 

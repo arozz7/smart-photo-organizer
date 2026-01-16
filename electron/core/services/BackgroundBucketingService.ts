@@ -8,6 +8,8 @@ import { FaceService } from './FaceService';
 import { PythonAIProvider } from '../../infrastructure/PythonAIProvider';
 import logger from '../../logger';
 
+import { IService } from '../../core/interfaces/IService';
+
 /**
  * Service managing background face bucketing process.
  * 
@@ -17,7 +19,7 @@ import logger from '../../logger';
  * 3. Respects scanning state (pauses during active scans).
  * 4. Manages lifecycle flags and checkpoints.
  */
-export class BackgroundBucketingService {
+export class BackgroundBucketingService implements IService {
     private isRunning = false;
     private shouldStop = false;
     private aiProvider: PythonAIProvider;

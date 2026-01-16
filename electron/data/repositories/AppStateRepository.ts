@@ -10,10 +10,17 @@ export class AppStateRepository {
      * Get a single state flag value.
      */
     static getFlag(key: string): string | null {
-        const db = getDB();
-        const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get(key) as { value: string | null } | undefined;
-        return row?.value ?? null;
+        try {
+            const db = getDB();
+            const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get(key) as { value: string | null } | undefined;
+            return row?.value ?? null;
+        } catch (e) {
+            return null;
+        }
     }
+
+    // --- In-Memory DB Status (Atomic Switch) ---
+
 
     /**
      * Set a state flag value.

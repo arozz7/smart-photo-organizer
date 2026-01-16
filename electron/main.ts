@@ -18,6 +18,7 @@ import { WindowManager } from './windows/windowManager';
 import { BackgroundBucketingService } from './core/services/BackgroundBucketingService';
 import { AppStateRepository } from './data/repositories/AppStateRepository';
 import { BucketRepository } from './data/repositories/BucketRepository';
+import { ServiceManager } from './core/services/ServiceManager';
 
 // Global service reference for shutdown
 let bucketingService: BackgroundBucketingService | null = null;
@@ -47,12 +48,7 @@ app.on('before-quit', async (event) => {
 
   try {
     AppStateRepository.requestShutdown();
-
-    scanQueue.stop();
-
-    if (bucketingService) await bucketingService.stop();
-
-    pythonProvider.stop();
+    await ServiceManager.getInstance().stopAll();
   } catch (e) {
     logger.error('[Main] Error stopping services:', e);
   }
@@ -108,6 +104,12 @@ app.whenReady().then(async () => {
   // Start Background Bucketing Service (Phase B3)
   bucketingService = new BackgroundBucketingService(pythonProvider);
   bucketingService.start();
+
+  // Register Services
+  const serviceManager = ServiceManager.getInstance();
+  serviceManager.register('PythonAIProvider', pythonProvider);
+  serviceManager.register('BackgroundBucketingService', bucketingService);
+  serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();
   registerDBHandlers();

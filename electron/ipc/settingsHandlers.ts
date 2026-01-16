@@ -1,11 +1,11 @@
 import { ipcMain } from 'electron';
 import { getLibraryPath, setLibraryPath } from '../store';
-import { closeDB } from '../db';
-import { pythonProvider } from '../infrastructure/PythonAIProvider';
-import { app } from 'electron';
+import { closeDB, setDBLock, initDB } from '../db';
+
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { ConfigService } from '../core/services/ConfigService';
+import { ServiceManager } from '../core/services/ServiceManager';
 
 export function registerSettingsHandlers() {
     ipcMain.handle('settings:getLibraryPath', () => {
@@ -24,9 +24,16 @@ export function registerSettingsHandlers() {
         }
 
         try {
+            console.log('[Main] Stopping all services...');
+            // 1. Lock DB access globally via AppState
+            // 1. Lock DB access globally
+            setDBLock(false);
+
+            // 2. Stop services
+            await ServiceManager.getInstance().stopAll();
+
+            // 3. Close DB Connection
             closeDB();
-            // Kill via Provider
-            pythonProvider.stop();
 
             console.log('[Main] Moving files...');
             const itemsToMove = ['library.db', 'previews', 'vectors.index', 'id_map.pkl', 'library.db-shm', 'library.db-wal'];
@@ -55,9 +62,16 @@ export function registerSettingsHandlers() {
                 catch (e) { console.error(`Failed to cleanup ${src}:`, e); }
             }
 
-            console.log('[Main] Restarting application...');
-            app.relaunch();
-            app.exit(0);
+            console.log('[Main] Re-initializing Database...');
+            // 4. Unlock DB Lock (allow init)
+            setDBLock(true);
+
+            // 5. Init new DB
+            await initDB(newPath);
+
+            console.log('[Main] Restarting services...');
+            // 6. Start Services
+            await ServiceManager.getInstance().startAll();
 
             return { success: true };
         } catch (e) {

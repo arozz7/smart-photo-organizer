@@ -601,11 +601,30 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
 }
 
 export function getDB() {
+  // Prevent access if DB is logically closed (even if instance exists)
+  // We need to import AppStateRepository dynamically or via a helper to avoid circular dep issues during init?
+  // Actually, AppStateRepository depends on getDB, so we can't import it here directly at top level.
+  // BUT we can use a module-level variable set by AppStateRepository or just check the flag if we move the flag to db.ts?
+  // Moving the flag to db.ts is cleaner and avoids circular dependency.
+
+  if (!isDBOpen) {
+    throw new Error('Database not initialized (Locked)');
+  }
+
   if (!db) {
     logger.error(`[DB Module ${INSTANCE_ID}] Database not initialized. db is ${db}`);
     throw new Error('Database not initialized');
   }
   return db;
+}
+
+let isDBOpen = true;
+export function setDBLock(isOpen: boolean) {
+  isDBOpen = isOpen;
+}
+
+export function getDBLock() {
+  return isDBOpen;
 }
 
 export function closeDB() {

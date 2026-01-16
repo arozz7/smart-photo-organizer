@@ -21,7 +21,11 @@ export function registerDBHandlers() {
     });
 
     // --- SCAN ERRORS ---
-    ipcMain.handle('db:getScanErrors', async () => PhotoRepository.getScanErrors());
+    ipcMain.handle('db:getScanErrors', async () => {
+        try {
+            return await PhotoRepository.getScanErrors();
+        } catch (e) { return []; }
+    });
 
     ipcMain.handle('db:deleteScanError', async (_, { id, deleteFile }) => PhotoRepository.deleteScanErrorAndFile(id, deleteFile));
 
@@ -90,11 +94,23 @@ export function registerDBHandlers() {
         } catch (e) { return { photos: [], total: 0, error: String(e) }; }
     });
 
-    ipcMain.handle('db:getPhoto', async (_, id) => PhotoRepository.getPhotoById(id));
+    ipcMain.handle('db:getPhoto', async (_, id) => {
+        try {
+            return PhotoRepository.getPhotoById(id);
+        } catch (e) { return null }
+    });
 
-    ipcMain.handle('db:getFolders', async () => PhotoRepository.getFolders());
+    ipcMain.handle('db:getFolders', async () => {
+        try {
+            return PhotoRepository.getFolders();
+        } catch (e) { return []; }
+    });
 
-    ipcMain.handle('db:getUnprocessedItems', async () => PhotoRepository.getUnprocessedPhotos());
+    ipcMain.handle('db:getUnprocessedItems', async () => {
+        try {
+            return PhotoRepository.getUnprocessedPhotos();
+        } catch (e) { return []; }
+    });
 
     ipcMain.handle('db:getPhotosMissingBlurScores', async () => {
         try {
@@ -102,8 +118,8 @@ export function registerDBHandlers() {
             // Only select photos that have been scanned at least once (present in scan_history OR has faces)
             // This prevents picking up purely "new" photos that are waiting in the queue.
             const query = `
-                SELECT id FROM photos 
-                WHERE blur_score IS NULL 
+                SELECT id FROM photos
+                WHERE blur_score IS NULL
                 AND (
                     id IN (SELECT photo_id FROM scan_history)
                     OR
@@ -617,41 +633,52 @@ export function registerDBHandlers() {
     });
 
     ipcMain.handle('db:getIgnoredRecheckStatus', async () => {
-        return {
-            active: AppStateRepository.isRecheckActive(),
-            offset: AppStateRepository.getRecheckOffset(),
-            total: AppStateRepository.getRecheckTotal()
-        };
+        try {
+            return {
+                active: AppStateRepository.isRecheckActive(),
+                offset: AppStateRepository.getRecheckOffset(),
+                total: AppStateRepository.getRecheckTotal()
+            };
+        } catch (e) {
+            return { active: false, offset: 0, total: 0 };
+        }
     });
 
     ipcMain.handle('db:getBucketingStatus', async () => {
-        const db = getDB();
-        // Count remaining faces needing bucketing
-        const remaining = db.prepare('SELECT COUNT(*) as count FROM faces WHERE needs_bucketing = 1 AND person_id IS NULL AND is_ignored = 0').get() as { count: number };
-        // Get checkpoint offset (faces already processed)
-        const offset = AppStateRepository.getBucketingOffset();
-        let total = AppStateRepository.getBucketingTotal();
-        const isDirty = AppStateRepository.isBucketingDirty();
+        try {
+            const db = getDB();
+            // Count remaining faces needing bucketing
+            const remaining = db.prepare('SELECT COUNT(*) as count FROM faces WHERE needs_bucketing = 1 AND person_id IS NULL AND is_ignored = 0').get() as { count: number };
+            // Get checkpoint offset (faces already processed)
+            const offset = AppStateRepository.getBucketingOffset();
+            let total = AppStateRepository.getBucketingTotal();
+            const isDirty = AppStateRepository.isBucketingDirty();
 
-        // If total is 0 (service hasn't started setting it yet), estimate it so UI shows pending work
-        if (total === 0 && remaining.count > 0) {
-            total = offset + remaining.count;
+            // If total is 0 (service hasn't started setting it yet), estimate it so UI shows pending work
+            if (total === 0 && remaining.count > 0) {
+                total = offset + remaining.count;
+            }
+
+            // Sanitize Offset: The infinite loop bug might have inflated the offset.
+            // Use (Total - Remaining) as the source of truth for progress if available.
+            const effectiveOffset = total > 0 ? Math.max(0, total - remaining.count) : offset;
+
+            // Check if service is paused due to concurrency
+            const isPaused = AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive();
+
+            return {
+                active: (isDirty || remaining.count > 0) && !isPaused, // Only active if pending AND not paused
+                offset: effectiveOffset,
+                total,
+                remaining: remaining.count
+            };
+        } catch (e) {
+            // DB might be closed during move or shutdown
+            return { active: false, offset: 0, total: 0, remaining: 0 };
         }
-
-        // Sanitize Offset: The infinite loop bug might have inflated the offset.
-        // Use (Total - Remaining) as the source of truth for progress if available.
-        const effectiveOffset = total > 0 ? Math.max(0, total - remaining.count) : offset;
-
-        // Check if service is paused due to concurrency
-        const isPaused = AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive();
-
-        return {
-            active: (isDirty || remaining.count > 0) && !isPaused, // Only active if pending AND not paused
-            offset: effectiveOffset,
-            total,
-            remaining: remaining.count
-        };
     });
+
+
 
     // Lifecycle Actions
     // Lifecycle Actions
