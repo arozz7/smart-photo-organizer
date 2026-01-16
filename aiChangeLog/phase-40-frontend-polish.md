@@ -10,9 +10,11 @@
     - **Suggestions**: Explicitly disabled AI suggestions in `RenameModal` default props and patched phantom usage in `OutlierReviewModal` and `AllFacesModal`.
     - **Refactor**: Replaced internal `MoveFacesModal` in `AllFacesModal.tsx` with the shared `RenameModal` component for consistency.
 - **Edge Case Filters**: Fixed destructuring issues in `People.tsx` and removed duplicate `ungroupableFaces`.
+- **Graceful Shutdown**: Fixed a race condition in `PythonAIProvider` to prevent "Object has been destroyed" errors when closing the app during active AI processing.
 
 ## Verification
 - Confirmed "Move Faces" modal no longer shows "Suggested:" in both Main View and Review All View.
 - Verified modal input does not clear when background processes refresh the app state.
 - Confirmed "Edge Cases" view loads faster with 150 limit.
 - Confirmed "New faces detected" banner appears when backend count > frontend count.
+- Confirmed "Object has been destroyed" error is resolved during app shutdown.
