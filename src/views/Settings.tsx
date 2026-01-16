@@ -184,6 +184,7 @@ function FaceDataUpgradeManager() {
 
 export default function Settings() {
     const [clearing, setClearing] = useState(false)
+    const [movingLibrary, setMovingLibrary] = useState(false)
     const [message, setMessage] = useState('')
     const [libraryPath, setLibraryPath] = useState(localStorage.getItem('libraryPath') || '')
     const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -314,17 +315,37 @@ export default function Settings() {
                                         if (path) {
                                             showConfirm({
                                                 title: 'Move Library',
-                                                description: `Move library to:\n${path}\n\nThe application will restart automatically.`,
-                                                confirmLabel: 'Move & Restart',
+                                                description: `Move library to:\n${path}\n\nThis may take several minutes for large libraries. The application will pause while moving files.`,
+                                                confirmLabel: 'Move Library',
                                                 onConfirm: async () => {
-                                                    // @ts-ignore
-                                                    const res = await window.ipcRenderer.invoke('settings:moveLibrary', path)
-                                                    if (!res.success) {
+                                                    setClearing(true); // Re-using clearing state or add new one? 
+                                                    // Let's create a dedicated state for blocking modal below
+                                                    setMovingLibrary(true);
+
+                                                    try {
+                                                        // @ts-ignore
+                                                        const res = await window.ipcRenderer.invoke('settings:moveLibrary', path)
+                                                        if (res.success) {
+                                                            showAlert({
+                                                                title: 'Move Complete',
+                                                                description: 'Library moved successfully. The view will now reload.',
+                                                                onConfirm: () => window.location.reload()
+                                                            });
+                                                        } else {
+                                                            showAlert({
+                                                                title: 'Move Failed',
+                                                                description: res.error,
+                                                                variant: 'danger'
+                                                            });
+                                                        }
+                                                    } catch (e) {
                                                         showAlert({
-                                                            title: 'Move Failed',
-                                                            description: res.error,
+                                                            title: 'Error',
+                                                            description: 'Move operation failed: ' + String(e),
                                                             variant: 'danger'
                                                         });
+                                                    } finally {
+                                                        setMovingLibrary(false);
                                                     }
                                                 }
                                             });
@@ -793,6 +814,23 @@ export default function Settings() {
                     </div>
                 )
             }
+
+            {/* Move Library Blocking Modal */}
+            {movingLibrary && (
+                <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100]">
+                    <div className="bg-gray-800 p-8 rounded-lg border border-indigo-500/50 max-w-md w-full shadow-2xl text-center space-y-6">
+                        <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">Moving Library...</h3>
+                            <p className="text-gray-300 text-sm">
+                                Please wait while we move your files and database.
+                                <br />
+                                <span className="text-xs text-gray-500 mt-2 block">Do not close the application.</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

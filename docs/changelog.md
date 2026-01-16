@@ -1,114 +1,46 @@
-# Changelog
+# Release Notes: v0.5.0 to v0.5.5
 
-## v0.5.1
-*Release Date: 2026-01-10*
+## 🌟 Highlights
 
-### 🐛 UX & Modal Fixes
-
-## v0.5.2
-*Release Date: 2026-01-11*
-
-### 🛠️ People Page & Actions Restoration
-- **Restored Floating Action Bar:** Re-implemented the floating action bar for "Unnamed Faces" with "Name", "Ignore", and "Debug" actions.
-- **Fixed "Check all singles" Scope:** The "Check all singles" button now correctly targets only the visible single faces instead of triggering a full library scan.
-- **Fixed "Debug" Action:** Restored the ability to inspect face details via the new floating bar.
-- **Fixed `db:reassignFaces` Error:** Updated the "Name" action to properly open the naming modal instead of triggering a backend error.
-- **Background Bucketing Fix:** Resolved an infinite loop where the background service would re-process "noise" faces on restart.
-- **People Page Fixes:** 
-    - Fixed filtering logic for Suggestions and Discoveries tabs.
-    - Added loading indicators to "Unnamed Faces" tab.
-    - Fixed routing issues for Person Detail pages.
-    - Improved rendering of single ungrouped faces using `FaceThumbnail`.
+This release cycle (v0.5.0 → v0.5.5) focuses on **Scalability and Background Intelligence**. We've moved heavy lifting from the frontend to background services, introduced "Human vs Pet" classification, and streamlined the workflow for managing large photo libraries.
 
 ---
 
-### 🐛 UX & Modal Fixes
-- **Modal Pagination Stability:** Fixed "jumpy" behavior in face modals. The view now correctly replenishes itself when faces are named/ignored without resetting the scroll position or loaded count.
-- **Confirmed Assignments:** Faces assigned via the "Assign to [Name]" suggestion button are now correctly marked as **confirmed** (green checkmark), ensuring they contribute to era calculation and person centroids properly.
-- **Empty State Transitions:** Fixed an issue where the last few processed faces would linger in modals; added a clean transition to the "All Done" view.
-- **State Reliability:** Improved state synchronization for "Ungroupable Faces" to ensure UI updates immediately after manual assignments.
-- **Comprehensive Face Statistics:** Updated the "Unnamed Faces" toolbar and "Smart Ignore" panel to display the **overall total** number of unreviewed faces. This count now explicitly includes background and ungroupable faces that were previously hidden from the clustering statistics, providing a more accurate reflection of the work remaining in the library.
-- **Performance Optimization:** The "Identified People" grid now loads instantly by persisting the "best face" (cover photo) in the database, eliminating expensive re-calculations on every page load.
-- **Bug Fix:** Fixed an issue where the Background Face Filter would auto-select invisible faces when filters were active. Auto-selection is now disabled when any filter (like "Person Search") is applied.
+## 🚀 Key Features
+
+### 1. Background Auto Face Bucketing (The "Always-On" Organizer)
+*Previously, clustering only happened when you opened the page. Now, it runs silently in the background.*
+- **Suggestion Buckets:** The system automatically groups new faces that match existing people. You just click "Confirm" or "Reject".
+- **Discovery Buckets:** Finds new, unknown people in your library and groups them for easy naming.
+- **Smart Scheduling:** The background service detects when you are active and pauses immediately to prevent lag.
+- **Merge by Person:** Automatically combines multiple suggestion buckets for the same person, reducing manual review time.
+
+### 2. Smart Face Management
+- **Background Face Filter:** Automatically identifies and ignores "noise" faces (strangers in the background, blurs) based on customizable thresholds.
+- **Confidence Tiering:** New matches are classified as **High Confidence** (auto-assign) or **Review Needed** (manual confirmation).
+- **Misassigned Face Detection:** Detects faces that statistically don't look like the person they are assigned to (Outliers) and flags them for review.
+- **Unified Naming:** A single, consistent "Name Person" input with autocomplete and AI suggestions across all views.
+
+### 3. Classification & Organization
+- **Human vs. Pet Classification:** 
+  - Distinct `entity_type` (Person vs Pet).
+  - Pets have their own matching logic (Pets only match Pets).
+  - UI badges to easily distinguish profiles.
+- **Photo Session Grouping:** Unassigned faces are now grouped by "Session" (Time & Folder), making it easier to name people from specific events (e.g., "Christmas Party 2025").
+
+### 4. Frontend Streamlining (v0.5.5 Polish)
+- **Live Counts:** "Unnamed Faces" badges update in real-time during scans.
+- **Performance:** Enforced 150-face limit on cluster views to keep the UI buttery smooth even with huge groups.
+- **Move Modal Fixed:** Stabilized the "Move Faces" tool and removed distracting AI suggestions.
+- **Activity Summary:** Fixed the "Items this Session" counter to accurately track your session throughput.
+
+### 5. Stability & Architecture
+- **Graceful Shutdown:** Fixed issue where closing the app during AI processing caused errors.
+- **Era-Aware Matching:** Improved recognition accuracy for people who age significantly by using "Era" driven centroids.
+- **Refactoring:** Major code cleanup in `FaceAnalysisService` for better maintainability.
 
 ---
 
-## v0.5.0
-
-### 🐛 Critical Fixes
-- **RAW Photo Previews:** Fixed "Preview Unavailable" errors for RAW files (ARW, NEF, etc.) by implementing on-the-fly regeneration fallback and resolving React Strict Mode race conditions.
-- **Generate Eras:** Fixed "undefined error" crashes for persons with auto-assigned faces. Now uses all assigned faces (not just confirmed ones) for clustering, enabling visual eras for a wider range of users.
-- **Backend Stability:** Added robust error handling to IPC channels to prevent silent failures.
-
----
-
-## v0.4.5
-### Features
-- **Background Face Filter (New!):** A powerful tool to detect and bulk-ignore "noise" faces (strangers in background, crowds).
-    - Uses DBSCAN clustering and distance analysis to identify irrelevant faces.
-    - Performance-optimized modal handles thousands of candidates instantly.
-    - Includes "Safe Ignore" logic (checks cluster size and distance from known people).
-- **Person Thumbnail Management:** Added ability to manually "Pin" a cover photo, randomize it ("Shuffle"), or revert to the auto-selected best face.
-- **AI Runtime:** Implemented dynamic versioning for the AI Runtime download link, ensuring it matches the application version. Added a manual override option in Settings.
-- **Unified Person Name Input (Phase 6):** Standardized name assignment across the app with a new "Smart Input" component.
-    - **AI Suggestions:** Real-time suggestion bar showing likely matches based on facial similarity (even for unnamed faces).
-    - **Smart Autocomplete:** Keyboard-navigable autocomplete for existing people, sorted by frequency.
-    - **Consistent UI:** Replaces disparate inputs in Photo Detail, All Faces, and Person Detail views.
-- **Unmatched Faces Preview:** Added a "View Original" button to face thumbnails in the Unmatched Faces modal, allowing users to inspect the full-size source image.
-### Fixes
-- **Face Identification:** Implemented "Hybrid Matching" (FAISS + Centroid) to ensure new scans correctly match against named people even if vector distances vary slightly.
-- **System Status:** Fixed "Dimensions: 0" display glitch for the vector index.
-- **RAW/JPG Orientation Mismatch:** Fixed pervasive issue where RAW thumbnails were misaligned ("ghost crops") and JPGs were double-rotated. Implemented "Smart Conditional Rotation" in both Python and Electron backends.
-- **Thumbnail Quality:** Implemented server-side cropping for face thumbnails, ensuring high-resolution displays even for small faces in large RAW files.
-- **Analysis Errors:** Failures during analysis (e.g., corrupt files) now correctly log to the DB instead of failing silently.
-- **Scan for All Named People:** Fixed "0 matches found" issue by correcting IPC payload nesting for `search_index` command. Improved vector search reliability.
-- **Cluster Settings Persistence:** The "Regroup" similarity threshold now persists across sessions, page reloads, and auto-identifications.
-- **UI Standardization:** Unified face thumbnail loading logic across all modals (Blurry, Ignored, Unmatched, Group Naming) to eliminate "Failed to load" errors and improve performance by leveraging backend caching.
-- **Unnamed Faces:** Fixed state leak where naming suggestions persisted across rows when a group was accepted and removed (Virtualized list component reuse fix).
-- **Unmatched Faces Modal:** 
-    - Fixed non-functional "Use Suggestion" button by correctly routing actions through the state hook.
-    - Added loading indicators and better UX feedback during batch naming/ignoring.
-- **AI Model Management:** 
-    - Fixed issue where available models were not displaying in the management modal.
-    - Added an "Extracting..." status indicator during the final phase of model installation to improve UX feedback.
-- **Batch Processing:** Optimized `autoNameFaces` to use bulk database updates, significantly improving performance when naming many faces simultaneously.
-- **Ungroup Faces:** Implemented the ability to break up incorrect clusters in the "Unnamed Faces" page, moving faces back to the single pool.
-- **Ignore All Groups:** Added a bulk action to ignore all currently visible suggested face groups for faster cleanup.
-
-### Refactoring
-- **Core Architecture Refactor (Modularization):** Completed a major transition of the Electron backend to a modular Service/Repository architecture.
-    - Moved all SQLite logic from IPC handlers to dedicated Repositories (`FaceRepository`, `PersonRepository`, `PhotoRepository`).
-    - Centralized business logic in Services (`FaceService`, `PersonService`).
-    - Decoupled AI provider logic into a dedicated Infrastructure layer (`PythonAIProvider`).
-- **IPC Layer:** Slimmed down `aiHandlers.ts` and `dbHandlers.ts` to focus solely on request routing, significantly improving maintainability.
-
-### Fixes
-- **Ignored Faces Modal:**
-    - Fixed identity "suggestions" not appearing by ensuring descriptors are fetched from the DB.
-    - Implemented a **Sensitivity Slider** (0.1 - 0.95) to allow matching blurry or low-quality ignored faces.
-    - Added **AI Data Indicators** (green dots) to visually confirm which faces are ready for matching.
-    - Fixed UI sync issues where assigned faces remained in the grid, particularly in clustered/grouped views.
-    - Fixed a `SyntaxError` in clustering caused by incorrect binary descriptor parsing.
-- **Blurry Faces Modal:** Added missing matching support (`face:findPotentialMatches`) to enable the "Identify Matches" feature.
-- **Match Consistency:** Implemented simultaneous restore-and-assign logic to prevent data inconsistencies when naming ignored faces.
-
-## v0.4.0 (Stability & Refactoring)
-*Release Date: 2025-12-29*
-
-### 🔧 Improvements & Refactoring
-- **Major Architecture Refactor:** Split the monolithic `electron/main.ts` into modular services (`imageProtocol`, `pythonService`, `windowManager`) and IPC handlers. This improves maintainability and stability.
-- **Log Verbosity:** Significantly reduced log noise in the protocol and Python services. Debug logs are now cleaner and easier to read.
-
-### 🐛 Bug Fixes
-- **Face Assignment Data Loss:** Fixed a critical issue where manually assigned names/ignored status were lost when a photo was re-scanned or re-analyzed.
-    - Implemented smart "Intersection over Union" (IoU) matching to preserve assignments even if face coordinates shift slightly.
-- **RAW Photo Rotation:** Fixed an issue where RAW photos (ARW/NEF) were not rotating correctly using the "Rotate Left/Right" tools. Now uses `exiftool` to modify metadata directly.
-- **Preview Generation:** Addressed race conditions in preview generation for RAW files.
-
----
-
-## v0.3.5
-- **Unnamed Faces Performance:** Virtualized grid for 10k+ faces.
-- **Corrupt Photo Tracking:** Better handling of truncated images.
-- **Retrieve Ignored Faces:** UI to restore ignored faces.
-- **Interactive Feedback:** New toast notifications and progress bars.
+## 📊 Stats & Metrics
+- **Performance:** Background clustering is ~20x faster than previous frontend-based clustering.
+- **Reliability:** Comprehensive test backfill added for all core services.

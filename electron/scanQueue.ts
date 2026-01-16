@@ -3,14 +3,21 @@ import { getLibraryPath } from './store';
 import logger from './logger';
 import { AppStateRepository } from './data/repositories/AppStateRepository';
 
+import { IService } from './core/interfaces/IService';
+
 type ScanTask =
     | { type: 'directory'; path: string; options: any; resolve: (res: any) => void; reject: (err: any) => void; sender: Electron.WebContents }
     | { type: 'files'; paths: string[]; options: any; resolve: (res: any) => void; reject: (err: any) => void; sender: Electron.WebContents };
 
-class ScanQueue {
+class ScanQueue implements IService {
     private queue: ScanTask[] = [];
     private isProcessing = false;
     private shouldStop = false;
+
+    start() {
+        this.shouldStop = false;
+        logger.info('[ScanQueue] Started.');
+    }
 
     stop() {
         this.shouldStop = true;
