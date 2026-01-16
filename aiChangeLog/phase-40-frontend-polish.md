@@ -11,6 +11,7 @@
     - **Refactor**: Replaced internal `MoveFacesModal` in `AllFacesModal.tsx` with the shared `RenameModal` component for consistency.
 - **Edge Case Filters**: Fixed destructuring issues in `People.tsx` and removed duplicate `ungroupableFaces`.
 - **Graceful Shutdown**: Fixed a race condition in `PythonAIProvider` to prevent "Object has been destroyed" errors when closing the app during active AI processing.
+- **Activity Summary**: Fixed the "Items this Session" counter in `Queues.tsx` getting stuck at 10 by implementing a dedicated backend count query instead of client-side filtering of truncated history.
 
 ## Verification
 - Confirmed "Move Faces" modal no longer shows "Suggested:" in both Main View and Review All View.
@@ -18,3 +19,4 @@
 - Confirmed "Edge Cases" view loads faster with 150 limit.
 - Confirmed "New faces detected" banner appears when backend count > frontend count.
 - Confirmed "Object has been destroyed" error is resolved during app shutdown.
+- Confirmed "Items this Session" correctly displays the total count of items scanned in the last hour, exceeding the visual history limit.

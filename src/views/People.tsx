@@ -35,7 +35,7 @@ export default function People() {
         rebuildFaissIndex,
         isRebuildingIndex,
         faissStaleCount,
-        getUnassignedCount
+        unassignedCount
     } = usePeople()
 
     const { onPhotoProcessed } = useAI()
@@ -67,7 +67,6 @@ export default function People() {
         handleUngroup,
         handleConfirmName,
         handleOpenNaming,
-        removeFacesFromSelection,
         handleSuggestionFound,
         displayedGroupCount,
         hasMoreGroups,
@@ -101,7 +100,7 @@ export default function People() {
         loadBuckets: refreshBuckets,
         // handleConfirmSuggestion, // Removed
         handleRejectSuggestion, // Restored
-        handleNameBucket: useBucketsHandleNameBucket,
+        handleNameBucket: namedBucketAction,
         handleIgnoreBucket,
         handleStartRecheck,
         recheckStatus
@@ -309,7 +308,7 @@ export default function People() {
     };
 
     const handleNameBucket = async (bucket: FaceBucket, name: string) => {
-        await useBucketsHandleNameBucket(bucket, name);
+        await namedBucketAction(bucket, name);
     };
 
     const handleBulkNameDiscoveries = () => {
@@ -340,6 +339,9 @@ export default function People() {
 
     // Pending bucket naming state (supports multiple buckets for bulk actions)
     const [pendingBucketNaming, setPendingBucketNaming] = useState<{ buckets: any[], type: 'suggestion' | 'discovery' } | null>(null);
+    const [pendingBackgroundNaming, setPendingBackgroundNaming] = useState<boolean>(false);
+    const [pendingUngroupableNaming, setPendingUngroupableNaming] = useState<boolean>(false);
+    const [selectedUngroupableIds, setSelectedUngroupableIds] = useState<Set<number>>(new Set());
     const [selectedFaceForDebug, setSelectedFaceForDebug] = useState<number | null>(null)
 
     // Single faces batch loading
@@ -405,6 +407,56 @@ export default function People() {
         }
     }
 
+    const handleOpenBackgroundNaming = () => {
+        if (bgCtrl.selectedIds.size === 0) return;
+
+        // Convert candidates to minimal Face objects for the modal preview
+        const selectedCandidates = backgroundFaces.filter(c => bgCtrl.selectedIds.has(c.faceId));
+        const facesForModal: Face[] = selectedCandidates.map(c => ({
+            id: c.faceId,
+            box: c.box,
+            file_path: c.file_path,
+            photo_id: c.photo_id,
+            preview_cache_path: c.preview_cache_path || undefined,
+            width: c.photo_width,
+            height: c.photo_height,
+            person_id: null
+        }));
+
+        setPendingBackgroundNaming(true);
+        setNamingGroup({ faces: facesForModal, name: '' });
+    }
+
+    // --- Ungroupable Actions ---
+    const toggleUngroupableSelection = (id: number) => {
+        const next = new Set(selectedUngroupableIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedUngroupableIds(next);
+    }
+
+    const selectAllLoadedUngroupable = () => {
+        const next = new Set(ungroupableFetched.map(f => f.id));
+        setSelectedUngroupableIds(next);
+    }
+
+    const clearUngroupableSelection = () => {
+        setSelectedUngroupableIds(new Set());
+    }
+
+    const handleOpenUngroupableNaming = () => {
+        if (selectedUngroupableIds.size === 0) return;
+        const faces = ungroupableFetched.filter(f => selectedUngroupableIds.has(f.id));
+        setPendingUngroupableNaming(true);
+        setNamingGroup({ faces, name: '' });
+    }
+
+    const handleIgnoreUngroupable = async () => {
+        if (selectedUngroupableIds.size === 0) return;
+        await handleIgnoreGroup(Array.from(selectedUngroupableIds));
+        clearUngroupableSelection();
+    }
+
     return (
         <div className="flex flex-col h-full bg-gray-950 text-white overflow-hidden">
             {/* Header / Tabs */}
@@ -440,7 +492,7 @@ export default function People() {
                                     Edge Cases
                                     <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${activeTab === 'unnamed' ? 'bg-indigo-500/20 text-indigo-200' : 'bg-gray-700 text-gray-300'
                                         }`}>
-                                        {totalUnassigned}
+                                        {unassignedCount}
                                     </span>
                                 </button>
                                 <button
@@ -1032,11 +1084,7 @@ export default function People() {
                                         <button onClick={bgCtrl.selectAllLoaded} className="text-xs text-indigo-400 hover:text-indigo-300">Select All Loaded</button>
                                         <button onClick={bgCtrl.selectNone} className="text-xs text-gray-500 hover:text-gray-400">Deselect</button>
                                     </div>
-                                    {bgCtrl.selectedIds.size > 0 && (
-                                        <div className="flex gap-2">
-                                            <button onClick={bgCtrl.handleIgnoreSelected} className="px-3 py-1.5 bg-red-900/50 text-red-300 rounded-lg text-sm font-medium hover:bg-red-900/70 border border-red-900">Ignore Selected</button>
-                                        </div>
-                                    )}
+                                    {/* Ignore button removed from here, moved to FAB */}
                                 </div>
                                 <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
                                     {backgroundFaces.map(c => (
@@ -1072,25 +1120,69 @@ export default function People() {
                                         <button onClick={bgCtrl.loadMore} className="px-6 py-2 bg-gray-800 hover:bg-gray-700 rounded-full text-sm font-medium transition-colors">Load More</button>
                                     </div>
                                 )}
+
+                                {/* Floating Action Bar for Background Faces */}
+                                {bgCtrl.selectedIds.size > 0 && (
+                                    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in-up">
+                                        <FloatingActionBar
+                                            selectedCount={bgCtrl.selectedIds.size}
+                                            onClearSelection={bgCtrl.selectNone}
+                                        >
+                                            <FloatingActionButton
+                                                label="Name"
+                                                icon={
+                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                    </svg>
+                                                }
+                                                onClick={handleOpenBackgroundNaming}
+                                            />
+                                            <div className="h-4 w-px bg-gray-700 mx-2" />
+                                            <FloatingActionButton
+                                                label="Ignore"
+                                                icon={
+                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                                    </svg>
+                                                }
+                                                onClick={() => bgCtrl.handleIgnoreSelected()}
+                                                variant="danger"
+                                            />
+                                        </FloatingActionBar>
+                                    </div>
+                                )}
                             </div>
                         )}
 
                         {activeEdgeFilter === 'ungroupable' && (
                             <div className="space-y-4">
                                 <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50 flex justify-between items-center">
-                                    <span className="text-sm text-gray-400">Faces that could not be clustered ({ungroupableFaces.length})</span>
+                                    <div className="flex gap-4 items-center">
+                                        <span className="text-sm text-gray-400">Faces that could not be clustered ({ungroupableFaces.length})</span>
+                                        <div className="text-sm text-gray-500">{selectedUngroupableIds.size} selected</div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={selectAllLoadedUngroupable} className="text-xs text-indigo-400 hover:text-indigo-300">Select All Loaded</button>
+                                        <button onClick={clearUngroupableSelection} className="text-xs text-gray-500 hover:text-gray-400">Deselect</button>
+                                    </div>
                                 </div>
                                 <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-2">
                                     {ungroupableFetched.map(face => (
-                                        <div key={face.id} className="aspect-square rounded-lg overflow-hidden border border-gray-800 relative group hover:border-gray-600 transition-colors">
+                                        <div
+                                            key={face.id}
+                                            className={`aspect-square rounded-lg overflow-hidden border cursor-pointer relative group transition-colors ${selectedUngroupableIds.has(face.id) ? 'border-indigo-500' : 'border-gray-800 hover:border-gray-600'
+                                                }`}
+                                            onClick={() => toggleUngroupableSelection(face.id)}
+                                        >
                                             <FaceThumbnail
                                                 src={`local-resource://${encodeURIComponent(face.file_path || '')}`}
                                                 fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
                                                 box={face.box}
                                                 originalImageWidth={face.width}
                                                 useServerCrop={true}
-                                                className="w-full h-full object-cover"
+                                                className={`w-full h-full object-cover ${selectedUngroupableIds.has(face.id) ? 'opacity-80' : ''}`}
                                             />
+                                            {selectedUngroupableIds.has(face.id) && <div className="absolute inset-0 bg-indigo-500/20 flex items-center justify-center">✓</div>}
                                             <button
                                                 className="absolute bottom-1 right-1 p-1 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-all hover:bg-indigo-600 z-20 shadow-lg"
                                                 title="View Original Photo"
@@ -1117,6 +1209,36 @@ export default function People() {
                                         </button>
                                     </div>
                                 )}
+
+                                {selectedUngroupableIds.size > 0 && (
+                                    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in-up">
+                                        <FloatingActionBar
+                                            selectedCount={selectedUngroupableIds.size}
+                                            onClearSelection={clearUngroupableSelection}
+                                        >
+                                            <FloatingActionButton
+                                                label="Name"
+                                                icon={
+                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                    </svg>
+                                                }
+                                                onClick={handleOpenUngroupableNaming}
+                                            />
+                                            <div className="h-4 w-px bg-gray-700 mx-2" />
+                                            <FloatingActionButton
+                                                label="Ignore"
+                                                icon={
+                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                                    </svg>
+                                                }
+                                                onClick={handleIgnoreUngroupable}
+                                                variant="danger"
+                                            />
+                                        </FloatingActionBar>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -1127,7 +1249,13 @@ export default function People() {
 
                 <GroupNamingModal
                     open={!!namingGroup}
-                    onOpenChange={(open) => !open && setNamingGroup(null)}
+                    onOpenChange={(open) => {
+                        if (!open) {
+                            setNamingGroup(null);
+                            setPendingBackgroundNaming(false);
+                            setPendingUngroupableNaming(false);
+                        }
+                    }}
                     faces={namingGroup?.faces || []}
                     onConfirm={async (ids, name) => {
                         // Check if this is a bucket naming
@@ -1141,6 +1269,13 @@ export default function People() {
                                 discoveriesController.clearSelection();
                             }
                             setPendingBucketNaming(null);
+                        } else if (pendingBackgroundNaming) {
+                            await bgCtrl.handleNameSelected(name);
+                            setPendingBackgroundNaming(false);
+                        } else if (pendingUngroupableNaming) {
+                            await handleConfirmName(ids, name); // Existing handler works for IDs
+                            setPendingUngroupableNaming(false);
+                            clearUngroupableSelection();
                         } else {
                             await handleConfirmName(ids, name);
                         }
@@ -1171,6 +1306,6 @@ export default function People() {
                 />
 
             </div>
-        </div>
+        </div >
     )
 }

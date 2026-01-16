@@ -142,12 +142,17 @@ export class PhotoRepository {
                 WHERE status = 'success'
             `).get() as any;
 
+            // Count items in the last hour
+            const oneHourAgo = Date.now() - 3600000;
+            const recent = db.prepare('SELECT COUNT(*) as count FROM scan_history WHERE timestamp > ?').get(oneHourAgo) as any;
+
             // Ensure we return 0s instead of nulls
             const aggregated = {
                 total_scans: stats?.total_scans || 0,
                 face_scans: stats?.face_scans || 0,
                 total_processing_time: stats?.total_processing_time || 0,
-                total_faces: stats?.total_faces || 0
+                total_faces: stats?.total_faces || 0,
+                last_hour_scans: recent?.count || 0
             };
 
             return { success: true, history, stats: aggregated };

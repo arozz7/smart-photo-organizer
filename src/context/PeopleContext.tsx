@@ -42,8 +42,11 @@ interface PeopleContextType {
     rebuildFaissIndex: () => Promise<{ success: boolean; count?: number; error?: string } | void>
     isRebuildingIndex: boolean
     faissStaleCount: number
-    findUngroupableFaces: (distanceThreshold?: number) => Promise<{ success: boolean; ungroupable_ids: number[] }>
+
+
     getUnassignedCount: () => Promise<number>
+    unassignedCount: number
+    refreshUnassignedCount: () => Promise<void>
 }
 
 export interface SmartIgnoreSettings {
@@ -66,8 +69,10 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     const [faces, setFaces] = useState<Face[]>([])
     const [loading, setLoading] = useState(false)
     const [smartIgnoreSettings, setSmartIgnoreSettings] = useState<SmartIgnoreSettings | null>(null)
+
     const [isRebuildingIndex, setIsRebuildingIndex] = useState(false)
     const [faissStaleCount, setFaissStaleCount] = useState(0) // TODO: Sync with backend stats
+    const [unassignedCount, setUnassignedCount] = useState(0)
 
     const loadSmartIgnoreSettings = useCallback(async () => {
         try {
@@ -141,10 +146,21 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         }
     }, [syncFaissStatus])
 
+    const refreshUnassignedCount = useCallback(async () => {
+        try {
+            // @ts-ignore
+            const count = await window.ipcRenderer.invoke('ai:getUnassignedCount');
+            setUnassignedCount(count);
+        } catch (e) {
+            console.error('[PeopleContext] Failed to refresh unassigned count:', e);
+        }
+    }, []);
+
     // Initial Sync
     React.useEffect(() => {
         syncFaissStatus();
-    }, [syncFaissStatus]);
+        refreshUnassignedCount();
+    }, [syncFaissStatus, refreshUnassignedCount]);
 
     const loadFaces = useCallback(async (filter: any = {}) => {
         setLoading(true)
@@ -205,16 +221,21 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         }
     }, [])
 
+
+
     const ignoreFace = useCallback(async (faceId: number) => {
         try {
             // @ts-ignore
             await window.ipcRenderer.invoke('db:ignoreFace', faceId)
             // Remove from local state immediately
             setFaces(prev => prev.filter(f => f.id !== faceId))
+            refreshUnassignedCount()
         } catch (e) {
             console.error("Failed to ignore face", e)
         }
-    }, [])
+    }, [refreshUnassignedCount])
+
+
 
     const ignoreFaces = useCallback(async (faceIds: number[]) => {
         try {
@@ -227,10 +248,13 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
                 if (next.length === prev.length) return prev; // No change, keep reference
                 return next;
             })
+            refreshUnassignedCount()
         } catch (e) {
             console.error("Failed to ignore faces", e)
         }
-    }, [])
+    }, [refreshUnassignedCount])
+
+
 
     const autoNameFaces = useCallback(async (faceIds: number[], name: string, confirm?: boolean) => {
         try {
@@ -241,10 +265,11 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
 
             await loadPeople()
             setFaces(prev => prev.filter(f => !faceIds.includes(f.id)))
+            refreshUnassignedCount()
         } catch (e) {
             console.error("Failed to auto name faces", e)
         }
-    }, [loadPeople])
+    }, [loadPeople, refreshUnassignedCount])
 
 
 
@@ -259,6 +284,8 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         return await window.ipcRenderer.invoke('ai:matchBatch', { descriptors, options });
     }, []);
 
+
+
     const assignPerson = useCallback(async (faceId: number, name: string) => {
         try {
             console.log('[PeopleContext] Assigning person:', { faceId, name });
@@ -272,6 +299,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
                 // Remove assigned face from local list
                 setFaces(prev => prev.filter(f => f.id !== faceId))
                 await loadPeople() // Refresh people count
+                refreshUnassignedCount()
 
                 // 2. Smart Naming: Find similar faces
                 if (namedFace && namedFace.descriptor) {
@@ -314,6 +342,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         }
     }, [faces, loadPeople])
 
+
     const findUngroupableFaces = useCallback(async (distanceThreshold: number = 1.0) => {
         try {
             // @ts-ignore
@@ -336,12 +365,14 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         // Stats & Indexing
         rebuildFaissIndex,
         isRebuildingIndex,
-        faissStaleCount
+        faissStaleCount,
+        unassignedCount, refreshUnassignedCount
     }), [
         people, faces, loading, matchFace, matchBatch, smartIgnoreSettings, updateSmartIgnoreSettings,
-        rebuildFaissIndex, isRebuildingIndex, faissStaleCount,
+        rebuildFaissIndex, isRebuildingIndex, faissStaleCount, unassignedCount,
         loadPeople, loadFaces, loadUnnamedFaces, fetchFacesByIds, assignPerson,
-        ignoreFace, ignoreFaces, autoNameFaces, rebuildIndex, findUngroupableFaces
+        ignoreFace, ignoreFaces, autoNameFaces, rebuildIndex, findUngroupableFaces,
+        refreshUnassignedCount
     ])
 
     return (

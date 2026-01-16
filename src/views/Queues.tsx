@@ -29,6 +29,7 @@ export default function Queues() {
 
     const [syncing, setSyncing] = useState(false);
     const [scanHistory, setScanHistory] = useState([]);
+    const [scanStats, setScanStats] = useState<any>(null);
 
     const reloadHistory = async () => {
         try {
@@ -36,6 +37,7 @@ export default function Queues() {
             const res = await window.ipcRenderer.invoke('db:getMetricsHistory', 10);
             if (res.success && res.history) {
                 setScanHistory(res.history);
+                setScanStats(res.stats);
             }
         } catch (e) {
             console.error("Failed to load history", e);
@@ -300,7 +302,7 @@ export default function Queues() {
                             <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div className="bg-gray-900/30 p-3 rounded">
                                     <div className="text-gray-400 text-xs">Items this Session</div>
-                                    <div className="text-white font-medium">{scanHistory.filter((i: any) => i.timestamp > Date.now() - 3600000).length} <span className="text-gray-500 text-xs">(Last 1h)</span></div>
+                                    <div className="text-white font-medium">{scanStats?.last_hour_scans ?? 0} <span className="text-gray-500 text-xs">(Last 1h)</span></div>
                                 </div>
                                 <div className="bg-gray-900/30 p-3 rounded">
                                     <div className="text-gray-400 text-xs">Last Scanned</div>
