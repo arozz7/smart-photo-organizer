@@ -223,6 +223,12 @@
 - **Service Architecture:** Centralized `ServiceManager` for cleaner startups and shutdowns.
 - [See Changelog](aiChangeLog/phase-41-move-library-fix.md)
 
+### UI Polish & Audit Mode (Phase 41)
+- **Review All & Modals:** Persisted scroll position, optimized virtualization for large lists.
+- **Audit Confirmed Faces:** Re-evaluate confirmed faces against the person's model to clear bad data.
+- **UX Improvements:** Loading overlays, prioritized image loading.
+- [See Changelog](aiChangeLog/phase-41-ui-polish.md)
+
 ### Other Features
 - **Person Thumbnail Management:**
     - **Custom Covers:** Manually "Pin" any face as the person's cover photo.

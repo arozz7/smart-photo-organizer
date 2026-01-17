@@ -175,9 +175,9 @@ export class FaceAnalysisService {
     /**
      * @deprecated Use FaceOutlierService.findOutliersForPerson instead
      */
-    static findOutliersForPerson(personId: number, threshold = 0.85) {
+    static findOutliersForPerson(personId: number, threshold = 0.85, checkConfirmed = false) {
         // Import at top level via re-export, use directly
-        return FaceOutlierService.findOutliersForPerson(personId, threshold);
+        return FaceOutlierService.findOutliersForPerson(personId, threshold, checkConfirmed);
     }
 
     /**

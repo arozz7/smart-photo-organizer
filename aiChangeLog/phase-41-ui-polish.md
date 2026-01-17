@@ -30,6 +30,14 @@ Focused on improving user experience in the Person Details and Photo Details vie
   - **Scroll Virtualization**: Implemented `isScrolling` check in `AllFacesModal`. During fast scrolling, face items render a lightweight placeholder instead of attempting to load images, ensuring smooth 60fps scrolling even with thousands of faces.
 - **Outcome**: Better perceived performance and feedback.
 
+### 4. Audit Confirmed Faces Mode
+- **Context**: Users needed a way to re-evaluate faces they had previously confirmed, especially if the person's model has refined over time.
+- **Change**:
+    - Added "Find Misassigned (Audit Confirmed)" action to Person Detail.
+    - Updated `FaceOutlierService` to optionally include confirmed faces in analysis.
+    - Enhanced `OutlierReviewModal` to support "Audit Mode" with context-specific actions (Move, Unassign, Ignore) and visual cues.
+- **Outcome**: Users can now clean up confirmed dataset errors efficiently.
+
 ## Files Modified
 - `src/views/People.tsx`
 - `src/views/PersonDetail.tsx`

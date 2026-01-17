@@ -21,6 +21,8 @@ interface OutlierReviewModalProps {
     onMoveFaces: (faceIds: number[], targetName: string) => Promise<void>;
     onConfirmFaces?: (faceIds: number[]) => Promise<void>;  // NEW: Mark as correctly assigned
     onRefresh: () => void;
+    isAuditMode?: boolean;
+    onIgnoreFaces?: (faceIds: number[]) => Promise<void>;
 }
 
 export default function OutlierReviewModal({
@@ -31,7 +33,9 @@ export default function OutlierReviewModal({
     onRemoveFaces,
     onMoveFaces,
     onConfirmFaces,
-    onRefresh
+    onIgnoreFaces,
+    onRefresh,
+    isAuditMode
 }: OutlierReviewModalProps) {
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [isProcessing, setIsProcessing] = useState(false);
@@ -39,7 +43,7 @@ export default function OutlierReviewModal({
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     // Local copy of outliers so we can filter out removed faces without closing
     const [localOutliers, setLocalOutliers] = useState<OutlierResult[]>(initialOutliers);
-    // Filter to show only unconfirmed faces
+    // Filter to show only unconfirmed faces - Default false in audit mode
     const [showUnconfirmedOnly, setShowUnconfirmedOnly] = useState(false);
 
     // Sync local outliers when prop changes (e.g., re-opening modal)
@@ -84,6 +88,23 @@ export default function OutlierReviewModal({
             onRefresh();
         } catch (err) {
             console.error('Failed to remove faces:', err);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleIgnoreSelected = async () => {
+        if (selectedIds.size === 0 || !onIgnoreFaces) return;
+
+        setIsProcessing(true);
+        try {
+            await onIgnoreFaces(Array.from(selectedIds));
+            // Filter out ignored faces from local state
+            setLocalOutliers(prev => prev.filter(o => !selectedIds.has(o.faceId)));
+            setSelectedIds(new Set());
+            onRefresh();
+        } catch (err) {
+            console.error('Failed to ignore faces:', err);
         } finally {
             setIsProcessing(false);
         }
@@ -162,10 +183,17 @@ export default function OutlierReviewModal({
                             <div>
                                 <Dialog.Title className="text-xl font-semibold text-white flex items-center gap-2">
                                     <span className="text-2xl">🔍</span>
-                                    Potentially Misassigned Faces
+                                    {isAuditMode ? 'Audit Confirmed Faces' : 'Potentially Misassigned Faces'}
+                                    {isAuditMode && (
+                                        <span className="px-2 py-0.5 text-xs font-bold text-amber-900 bg-amber-500/80 rounded uppercase tracking-wider">
+                                            Audit Mode
+                                        </span>
+                                    )}
                                 </Dialog.Title>
                                 <Dialog.Description className="text-sm text-gray-400 mt-1">
-                                    These faces appear different from {personName}'s typical appearance
+                                    {isAuditMode
+                                        ? `Reviewing confirmed faces of ${personName} that look different from the model`
+                                        : `These faces appear different from ${personName}'s typical appearance`}
                                 </Dialog.Description>
                             </div>
                             <button
@@ -180,19 +208,21 @@ export default function OutlierReviewModal({
                         <div className="flex-none p-3 bg-gray-800/30 border-b border-gray-800 flex items-center gap-4">
                             <div className="text-sm text-gray-400">
                                 {displayedOutliers.length} potential outlier{displayedOutliers.length !== 1 ? 's' : ''} found
-                                {showUnconfirmedOnly && ` (filtering ${localOutliers.length - displayedOutliers.length} confirmed)`}
+                                {!isAuditMode && showUnconfirmedOnly && ` (filtering ${localOutliers.length - displayedOutliers.length} confirmed)`}
                             </div>
                             <div className="flex items-center gap-2">
-                                {/* Unconfirmed filter toggle */}
-                                <button
-                                    onClick={() => setShowUnconfirmedOnly(!showUnconfirmedOnly)}
-                                    className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${showUnconfirmedOnly
-                                        ? 'text-amber-300 bg-amber-900/30 border-amber-500/50 hover:bg-amber-900/50'
-                                        : 'text-gray-400 bg-gray-800/50 border-gray-700 hover:bg-gray-800'
-                                        }`}
-                                >
-                                    {showUnconfirmedOnly ? '✓ Unconfirmed Only' : 'Show Unconfirmed Only'}
-                                </button>
+                                {/* Unconfirmed filter toggle - Only show if NOT in audit mode */}
+                                {!isAuditMode && (
+                                    <button
+                                        onClick={() => setShowUnconfirmedOnly(!showUnconfirmedOnly)}
+                                        className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${showUnconfirmedOnly
+                                            ? 'text-amber-300 bg-amber-900/30 border-amber-500/50 hover:bg-amber-900/50'
+                                            : 'text-gray-400 bg-gray-800/50 border-gray-700 hover:bg-gray-800'
+                                            }`}
+                                    >
+                                        {showUnconfirmedOnly ? '✓ Unconfirmed Only' : 'Show Unconfirmed Only'}
+                                    </button>
+                                )}
                                 <button
                                     onClick={selectedIds.size === displayedOutliers.length ? deselectAll : selectAll}
                                     className="px-3 py-1.5 text-sm font-medium text-indigo-300 bg-indigo-900/20 hover:bg-indigo-900/40 border border-indigo-500/30 rounded-lg transition-colors"
@@ -244,6 +274,13 @@ export default function OutlierReviewModal({
                                                             {(outlier.distance * 100).toFixed(0)}% diff
                                                         </span>
                                                     </div>
+
+                                                    {/* Confirmed Badge */}
+                                                    {outlier.is_confirmed && (
+                                                        <div className="absolute top-2 left-2 bg-green-500/80 backdrop-blur px-1.5 py-0.5 rounded text-[10px] font-bold text-white z-10 uppercase tracking-wider shadow-sm">
+                                                            Confirmed
+                                                        </div>
+                                                    )}
 
                                                     {/* Preview Button (Hover) */}
                                                     <div className="absolute bottom-8 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all z-20">
@@ -297,7 +334,7 @@ export default function OutlierReviewModal({
                                 <div className="text-sm font-medium text-white border-r border-gray-700 pr-4">
                                     {selectedIds.size} selected
                                 </div>
-                                {onConfirmFaces && (
+                                {onConfirmFaces && !isAuditMode && (
                                     <button
                                         onClick={handleConfirmSelected}
                                         disabled={isProcessing}
@@ -320,20 +357,33 @@ export default function OutlierReviewModal({
                                     </svg>
                                     Move / Rename
                                 </button>
+
                                 <button
                                     onClick={handleRemoveSelected}
                                     disabled={isProcessing}
-                                    className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                    className="text-sm font-medium text-orange-400 hover:text-orange-300 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                    title="Unassign faces from this person"
                                 >
-                                    {isProcessing ? (
-                                        <div className="animate-spin h-4 w-4 border-2 border-red-400 border-t-transparent rounded-full" />
-                                    ) : (
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                    )}
-                                    Remove
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7a4 4 0 11-8 0 4 4 0 018 0zM9 14a6 6 0 00-6 2.172V17h10.276a7.688 7.688 0 01.524-1.414A6 6 0 009 14z" />
+                                    </svg>
+                                    Unassign
                                 </button>
+
+                                {onIgnoreFaces && (
+                                    <button
+                                        onClick={handleIgnoreSelected}
+                                        disabled={isProcessing}
+                                        className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                        title="Ignore these faces (remove and hide)"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                        </svg>
+                                        Ignore
+                                    </button>
+                                )}
+
                                 <div className="border-l border-gray-700 pl-4">
                                     <button
                                         onClick={deselectAll}
