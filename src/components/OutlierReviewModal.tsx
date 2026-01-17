@@ -5,7 +5,8 @@
  * distance-from-centroid analysis (Phase 1: Misassigned Face Detection).
  */
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+import { VirtuosoGrid } from 'react-virtuoso';
 import * as Dialog from '@radix-ui/react-dialog';
 import FaceThumbnail from './FaceThumbnail';
 import RenameModal from './modals/RenameModal';
@@ -242,81 +243,85 @@ export default function OutlierReviewModal({
                                 </div>
                             ) : (
                                 <div className="relative h-full">
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                        {displayedOutliers.map(outlier => {
+                                    <VirtuosoGrid
+                                        style={{ height: '100%' }}
+                                        totalCount={displayedOutliers.length}
+                                        overscan={100}
+                                        components={{
+                                            List: React.forwardRef(({ style, children, ...props }: any, ref) => (
+                                                <div
+                                                    ref={ref}
+                                                    {...props}
+                                                    style={style}
+                                                    className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 min-[2000px]:grid-cols-14 gap-2 p-2"
+                                                >
+                                                    {children}
+                                                </div>
+                                            )),
+                                            Item: ({ children, ...props }: any) => (
+                                                <div {...props} className="aspect-square">
+                                                    {children}
+                                                </div>
+                                            ),
+                                        }}
+                                        itemContent={(index) => {
+                                            const outlier = displayedOutliers[index];
+                                            if (!outlier) return null;
                                             const distanceInfo = getDistanceLabel(outlier.distance);
                                             const isSelected = selectedIds.has(outlier.faceId);
-
                                             return (
                                                 <div
-                                                    key={outlier.faceId}
                                                     onClick={() => toggleSelection(outlier.faceId)}
-                                                    className={`relative cursor-pointer rounded-xl overflow-hidden transition-all group border-2 ${isSelected
+                                                    className={`relative cursor-pointer rounded overflow-hidden group border-2 h-full ${isSelected
                                                         ? 'border-red-500 ring-2 ring-red-500/30'
                                                         : 'border-transparent hover:border-gray-600'
                                                         }`}
                                                 >
-                                                    {/* Face Thumbnail */}
-                                                    <div className="aspect-square bg-gray-800">
-                                                        <FaceThumbnail
-                                                            src={`local-resource://${encodeURIComponent(outlier.file_path || '')}`}
-                                                            fallbackSrc={`local-resource://${encodeURIComponent(outlier.preview_cache_path || outlier.file_path || '')}`}
-                                                            box={outlier.box}
-                                                            originalImageWidth={outlier.photo_width}
-                                                            useServerCrop={true}
-                                                            className="w-full h-full object-cover"
-                                                        />
-                                                    </div>
-
-                                                    {/* Distance Badge */}
-                                                    <div className="absolute top-2 right-2 bg-black/70 backdrop-blur px-2 py-1 rounded text-xs font-mono z-10">
+                                                    <FaceThumbnail
+                                                        src={`local-resource://${encodeURIComponent(outlier.file_path || '')}`}
+                                                        fallbackSrc={outlier.preview_cache_path
+                                                            ? `local-resource://${encodeURIComponent(outlier.preview_cache_path)}`
+                                                            : `local-resource://${encodeURIComponent(outlier.file_path || '')}?width=300`}
+                                                        box={outlier.box}
+                                                        originalImageWidth={outlier.photo_width}
+                                                        useServerCrop={true}
+                                                        className="w-full h-full object-cover"
+                                                    />
+                                                    <div className="absolute top-1 right-1 bg-black/70 px-1.5 py-0.5 rounded text-[10px] font-mono z-10">
                                                         <span className={distanceInfo.color}>
-                                                            {(outlier.distance * 100).toFixed(0)}% diff
+                                                            {(outlier.distance * 100).toFixed(0)}%
                                                         </span>
                                                     </div>
-
-                                                    {/* Confirmed Badge */}
                                                     {outlier.is_confirmed && (
-                                                        <div className="absolute top-2 left-2 bg-green-500/80 backdrop-blur px-1.5 py-0.5 rounded text-[10px] font-bold text-white z-10 uppercase tracking-wider shadow-sm">
-                                                            Confirmed
-                                                        </div>
+                                                        <div className="absolute top-1 left-1 bg-green-500/80 px-1 py-0.5 rounded text-[8px] font-bold text-white z-10">✓</div>
                                                     )}
-
-                                                    {/* Preview Button (Hover) */}
-                                                    <div className="absolute bottom-8 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all z-20">
+                                                    <div className="absolute bottom-6 right-1 hidden group-hover:block z-20">
                                                         <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                viewPhoto(outlier.photo_id);
-                                                            }}
-                                                            className="bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1.5 shadow-lg backdrop-blur-sm transform hover:scale-110 transition-transform"
+                                                            onClick={(e) => { e.stopPropagation(); viewPhoto(outlier.photo_id); }}
+                                                            className="bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1"
                                                             title="View Original Photo"
                                                         >
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
                                                                 <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
                                                             </svg>
                                                         </button>
                                                     </div>
-
-                                                    {/* Selection Indicator */}
                                                     {isSelected && (
                                                         <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-red-400 drop-shadow-md" viewBox="0 0 20 20" fill="currentColor">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-400" viewBox="0 0 20 20" fill="currentColor">
                                                                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                                             </svg>
                                                         </div>
                                                     )}
-
-                                                    {/* Label */}
-                                                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-                                                        <div className={`text-xs font-medium ${distanceInfo.color}`}>
+                                                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-1 py-0.5">
+                                                        <div className={`text-[10px] font-medium ${distanceInfo.color}`}>
                                                             {distanceInfo.label}
                                                         </div>
                                                     </div>
                                                 </div>
                                             );
-                                        })}
-                                    </div>
+                                        }}
+                                    />
 
                                     {/* Loading Overlay */}
                                     {isProcessing && (

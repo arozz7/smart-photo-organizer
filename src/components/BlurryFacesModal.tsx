@@ -368,7 +368,7 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                                     <VirtuosoGrid
                                         style={{ height: '100%', width: '100%' }}
                                         totalCount={faces.length}
-                                        overscan={50}
+                                        overscan={100}
                                         context={{ selectedIds, handleToggleSelect, faces, onPreview: setPreviewPhoto }}
                                         endReached={() => {
                                             if (hasMore) loadFaces(false);
@@ -378,8 +378,8 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                                                 <div
                                                     ref={ref}
                                                     {...props}
-                                                    style={{ ...style, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '1rem', alignContent: 'start' }}
-                                                    className="pb-4 pr-2"
+                                                    style={{ ...style }}
+                                                    className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 min-[2000px]:grid-cols-14 gap-2 pb-4 pr-2"
                                                 >
                                                     {children}
                                                 </div>
@@ -538,7 +538,9 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                                                             <div className="w-12 h-12 rounded overflow-hidden shrink-0">
                                                                 <FaceThumbnail
                                                                     src={`local-resource://${encodeURIComponent(face.file_path || '')}`}
-                                                                    fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
+                                                                    fallbackSrc={face.preview_cache_path
+                                                                        ? `local-resource://${encodeURIComponent(face.preview_cache_path)}`
+                                                                        : `local-resource://${encodeURIComponent(face.file_path || '')}?width=300`}
                                                                     box={face.box}
                                                                     originalImageWidth={face.original_width || 0}
                                                                     useServerCrop={true}

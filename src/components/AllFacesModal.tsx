@@ -145,7 +145,7 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                 ref={ref}
                 {...props}
                 style={style}
-                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-4"
+                className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 min-[2000px]:grid-cols-14 gap-2 p-2"
             >
                 {children}
             </div>
@@ -220,6 +220,7 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                     <VirtuosoGrid
                         style={{ height: '100%' }}
                         totalCount={filteredFaces.length}
+                        overscan={100}
                         isScrolling={setIsScrolling}
                         components={gridComponents}
                         itemContent={(index) => {
