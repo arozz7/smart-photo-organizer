@@ -272,53 +272,62 @@ export const usePersonDetail = (personId: string | undefined) => {
     };
 
     // Find potentially misassigned faces (Phase 1)
-    const findOutliers = useCallback(async (threshold?: number) => {
+    const findOutliers = useCallback(async (options?: { threshold?: number, checkConfirmed?: boolean }) => {
         if (!personId) return;
 
         setIsAnalyzingOutliers(true);
+        // Don't clear outliers immediately if just changing view mode, but here we are re-running analysis so yes.
         setOutliers([]);
 
         try {
             // @ts-ignore
             const result = await window.ipcRenderer.invoke('person:findOutliers', {
                 personId: parseInt(personId),
-                threshold: threshold ?? outlierThreshold
+                threshold: options?.threshold ?? outlierThreshold,
+                checkConfirmed: options?.checkConfirmed ?? false
             });
 
             if (result.success) {
                 setOutliers(result.outliers || []);
                 if (!result.centroidValid) {
-                    showAlert({
+                    addToast({
                         title: 'No Reference Available',
-                        description: `${person?.name} has no valid face embeddings to compare against. Try running an AI scan first.`
+                        description: `${person?.name} has no valid face embeddings to compare against.`,
+                        type: 'warning'
                     });
                 } else if (result.outliers.length === 0) {
-                    showAlert({
-                        title: 'All Faces Match',
-                        description: `All ${result.totalFaces} faces appear to be correctly assigned.`
+                    addToast({
+                        title: 'No Outliers Found',
+                        description: options?.checkConfirmed
+                            ? 'All confirmed faces look consistent with the person model.'
+                            : 'All faces look consistent with the person model.',
+                        type: 'success',
+                        duration: 3000
                     });
+                } else {
+                    // Only show modal if we found something
+                    // setShowOutlierModal(true); // Handled by component
                 }
-                return result.outliers;
+                return result.outliers || [];
             } else {
                 showAlert({
                     title: 'Analysis Failed',
-                    description: result.error || 'Unknown error',
+                    description: `Error: ${result.error}`,
                     variant: 'danger'
                 });
-                return [];
             }
         } catch (err) {
-            console.error('findOutliers error:', err);
+            console.error(err);
             showAlert({
                 title: 'Error',
-                description: 'Failed to analyze faces for outliers',
+                description: 'Failed to find outliers',
                 variant: 'danger'
             });
-            return [];
         } finally {
             setIsAnalyzingOutliers(false);
         }
-    }, [personId, outlierThreshold, person, showAlert]);
+    }, [personId, person, outlierThreshold, addToast, showAlert]);
+
 
 
 
@@ -484,6 +493,7 @@ export const usePersonDetail = (personId: string | undefined) => {
         loadMore: async () => { },
         confirmFaces: async () => { },
         findOutliers,
+        auditConfirmed: () => findOutliers({ checkConfirmed: true }),
         clearOutliers: () => setOutliers([]),
         resolveOutliers,
         recalculateModel,

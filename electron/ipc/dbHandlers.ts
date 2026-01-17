@@ -429,11 +429,12 @@ export function registerDBHandlers() {
     });
 
     // --- MISASSIGNED FACE DETECTION (Phase 1) ---
-    ipcMain.handle('person:findOutliers', async (_, { personId, threshold }) => {
+    ipcMain.handle('person:findOutliers', async (_, { personId, threshold, checkConfirmed }) => {
         try {
             const result = FaceAnalysisService.findOutliersForPerson(
                 personId,
-                threshold ?? 0.6
+                threshold ?? 0.6,
+                checkConfirmed ?? false
             );
             return { success: true, ...result };
         } catch (error) {

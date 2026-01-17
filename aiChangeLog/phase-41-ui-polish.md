@@ -19,8 +19,24 @@ Focused on improving user experience in the Person Details and Photo Details vie
 
 ### 3. Photo Detail Loading Indicator
 - **Context**: Large photos or RAW previews can take a moment to load in the lightbox, leaving the user with a blank black screen.
-- **Change**: Added a "Loading Photo..." spinner and overlay that appears while the high-resolution image is being fetched and rendered.
+- **PhotoDetail**: Added loading spinner overlay for main image to prevent UI jumpiness.
+- **Scroll Persistence**:
+  - Refactored `AllFacesModal`, `BlurryFacesModal`, `OutlierReviewModal`, and `PersonDetail` to use a **Loading Overlay** pattern.
+  - Previously, `loading` states unmounted the list/grid, causing the user to lose their scroll position after performing an action (like ignoring faces).
+  - Now, the list remains mounted with a semi-transparent spinner overlay, preserving scroll context.
+
+- **Performance Optimization**:
+  - **Prioritized Cached Previews**: `PersonFaceItem` now attempts to load the lightweight cached preview image first, falling back to the original file only if needed. This significantly reduces I/O on the backend during scrolling.
+  - **Scroll Virtualization**: Implemented `isScrolling` check in `AllFacesModal`. During fast scrolling, face items render a lightweight placeholder instead of attempting to load images, ensuring smooth 60fps scrolling even with thousands of faces.
 - **Outcome**: Better perceived performance and feedback.
+
+### 4. Audit Confirmed Faces Mode
+- **Context**: Users needed a way to re-evaluate faces they had previously confirmed, especially if the person's model has refined over time.
+- **Change**:
+    - Added "Find Misassigned (Audit Confirmed)" action to Person Detail.
+    - Updated `FaceOutlierService` to optionally include confirmed faces in analysis.
+    - Enhanced `OutlierReviewModal` to support "Audit Mode" with context-specific actions (Move, Unassign, Ignore) and visual cues.
+- **Outcome**: Users can now clean up confirmed dataset errors efficiently.
 
 ## Files Modified
 - `src/views/People.tsx`

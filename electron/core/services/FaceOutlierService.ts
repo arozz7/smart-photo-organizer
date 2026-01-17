@@ -43,10 +43,12 @@ export class FaceOutlierService {
      *    Note: IQR fails when contamination >50% (wrong faces become majority).
      * 
      * @param personId The person ID to analyze
+     * @param personId The person ID to analyze
      * @param threshold Distance threshold for reference-based (default 0.85)
+     * @param checkConfirmed If true, also checks confirmed faces against the group average (Audit Mode)
      * @returns Analysis result with outlier list
      */
-    static findOutliersForPerson(personId: number, threshold = 0.85): OutlierAnalysis {
+    static findOutliersForPerson(personId: number, threshold = 0.85, checkConfirmed = false): OutlierAnalysis {
         const person = PersonRepository.getPersonWithDescriptor(personId);
 
         if (!person) {
@@ -85,7 +87,7 @@ export class FaceOutlierService {
 
             if (confirmedDescriptors.length === 0) {
                 console.log(`[FaceOutlier] No valid descriptors in confirmed faces, falling back to IQR`);
-                return this.findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, threshold);
+                return this.findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, threshold, checkConfirmed);
             }
 
             // Compute reference centroid from confirmed faces only
@@ -115,7 +117,12 @@ export class FaceOutlierService {
             // Flag faces far from reference
             const outliers: OutlierResult[] = [];
             for (const face of facesWithParsed) {
-                if (confirmedFaceIds.has(face.id)) continue; // Skip confirmed
+                // Determine if we should skip this face
+                // Standard mode: Skip if already confirmed
+                // Audit mode: Check everything (including confirmed)
+                if (!checkConfirmed && confirmedFaceIds.has(face.id)) continue;
+
+                // Optimization: Skip cached outliers if we trust them? No, recalculate based on current centroid.
 
                 const distance = FaceAnalysisService.computeDistance(face.parsedDescriptor!, normalizedRef);
 
@@ -152,8 +159,9 @@ export class FaceOutlierService {
         }
 
         // STRATEGY 2: IQR FALLBACK (no confirmed faces)
+        // Note: Audit Mode via IQR is risky if contamination is high, but we allow it if requested.
         console.log(`[FaceOutlier] Person ${person.name}: No confirmed faces, using IQR method (may fail if >50% contaminated)`);
-        return this.findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, threshold);
+        return this.findOutliersIQR(personId, person, facesWithParsed, confirmedFaceIds, threshold, checkConfirmed);
     }
 
     /**
@@ -165,8 +173,11 @@ export class FaceOutlierService {
         person: { name: string },
         facesWithParsed: Array<any>,
         confirmedFaceIds: Set<number>,
-        _threshold: number  // Kept for API parity, IQR uses dynamic threshold
+        _threshold: number,  // Kept for API parity, IQR uses dynamic threshold
+        checkConfirmed: boolean // Added
     ): OutlierAnalysis {
+        // ... (rest of computation)
+
         // Compute pairwise distances: avg distance of each face to all others
         const avgDistances: { faceId: number; avgDist: number; idx: number }[] = [];
 
@@ -205,7 +216,8 @@ export class FaceOutlierService {
 
         const outliers: OutlierResult[] = [];
         for (const { faceId, avgDist, idx } of avgDistances) {
-            if (confirmedFaceIds.has(faceId)) continue;
+            // Standard mode: Skip confirmed. Audit mode: Check all.
+            if (!checkConfirmed && confirmedFaceIds.has(faceId)) continue;
 
             if (avgDist > outlierThreshold) {
                 const face = facesWithParsed[idx];

@@ -23,6 +23,7 @@ const PersonDetail = () => {
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     const [isScanModalOpen, setIsScanModalOpen] = useState(false);
     const [isOutlierModalOpen, setIsOutlierModalOpen] = useState(false);
+    const [auditMode, setAuditMode] = useState(false);
 
     // Alert State (for drift detection)
     const [alerts, setAlerts] = useState<Array<{
@@ -146,11 +147,14 @@ const PersonDetail = () => {
     // Snapshot state for modal
     const [facesToMove, setFacesToMove] = useState<number[]>([]);
 
-    if (loading && !person) return <div className="p-8 text-white">Loading...</div>;
-    if (!person) return <div className="p-8 text-white">Person not found</div>;
+    // Initial loading state (no person data yet)
+    if (loading && !person) return <div className="p-8 text-white flex items-center justify-center h-full">Loading...</div>;
+
+    // Error state
+    if (!person) return <div className="p-8 text-white flex items-center justify-center h-full">Person not found</div>;
 
     return (
-        <div className="h-full flex flex-col bg-gray-900 text-white p-6 overflow-hidden">
+        <div className="h-full flex flex-col bg-gray-900 text-white p-6 overflow-hidden relative">
             {/* Alert Banner */}
             {alerts.length > 0 && (
                 <div className="mb-4 bg-red-900/40 border border-red-500/50 rounded-xl p-4">
@@ -274,7 +278,25 @@ const PersonDetail = () => {
                                     </svg>
                                 ),
                                 onClick: async () => {
+                                    setAuditMode(false);
                                     const found = await actions.findOutliers();
+                                    if (found && found.length > 0) {
+                                        setIsOutlierModalOpen(true);
+                                    }
+                                },
+                                loading: isAnalyzingOutliers,
+                            },
+                            {
+                                label: isAnalyzingOutliers ? 'Auditing...' : 'Find Misassigned (Audit Confirmed)',
+                                icon: (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                ),
+                                onClick: async () => {
+                                    setAuditMode(true);
+                                    // @ts-ignore
+                                    const found = await actions.auditConfirmed();
                                     if (found && found.length > 0) {
                                         setIsOutlierModalOpen(true);
                                     }
@@ -333,6 +355,14 @@ const PersonDetail = () => {
                         )}
                     </div>
                 </div>
+                {/* Loading Overlay for Refreshes */}
+                {loading && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
+                        <div className="bg-gray-900/80 p-4 rounded-full shadow-2xl border border-indigo-500/50">
+                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-indigo-500/50 border-t-indigo-400" />
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Modals */}
@@ -382,6 +412,7 @@ const PersonDetail = () => {
                 onClose={() => setIsOutlierModalOpen(false)}
                 personName={person.name}
                 outliers={outliers}
+                isAuditMode={auditMode}
                 onRemoveFaces={async (faceIds) => {
                     // @ts-ignore
                     await window.ipcRenderer.invoke('db:unassignFaces', faceIds);
@@ -396,6 +427,11 @@ const PersonDetail = () => {
                     // @ts-ignore
                     await window.ipcRenderer.invoke('db:confirmFaces', faceIds);
                     // Confirmed faces are removed from outliers list (handled in modal)
+                }}
+                onIgnoreFaces={async (faceIds) => {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:ignoreFaces', faceIds);
+                    actions.resolveOutliers(faceIds);
                 }}
                 onRefresh={refresh}
             />

@@ -8,9 +8,10 @@ interface PersonFaceItemProps {
     toggleSelection: (id: number) => void
     isCover?: boolean
     onSetCover?: (id: number) => void
+    isScrolling?: boolean
 }
 
-const PersonFaceItem = memo(({ face, isSelected, toggleSelection, isCover, onSetCover }: PersonFaceItemProps) => {
+const PersonFaceItem = memo(({ face, isSelected, toggleSelection, isCover, onSetCover, isScrolling }: PersonFaceItemProps) => {
     const { viewPhoto } = useScan();
 
     return (
@@ -20,15 +21,19 @@ const PersonFaceItem = memo(({ face, isSelected, toggleSelection, isCover, onSet
                     }`}
                 onClick={() => toggleSelection(face.id)}
             >
-                <FaceThumbnail
-                    // optimization: Use original file path + server crop to get high quality face from RAW
-                    src={`local-resource://${encodeURIComponent(face.file_path)}`}
-                    fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path)}`}
-                    box={face.box}
-                    originalImageWidth={face.width}
-                    useServerCrop={true}
-                    className="w-full h-full pointer-events-none"
-                />
+                {isScrolling ? (
+                    <div className="w-full h-full bg-gray-800 animate-pulse" />
+                ) : (
+                    <FaceThumbnail
+                        // optimization: Use preview cache (fast) first, fallback to original only if needed
+                        src={face.preview_cache_path ? `local-resource://${encodeURIComponent(face.preview_cache_path)}` : `local-resource://${encodeURIComponent(face.file_path)}`}
+                        fallbackSrc={`local-resource://${encodeURIComponent(face.file_path)}`}
+                        box={face.box}
+                        originalImageWidth={face.width}
+                        useServerCrop={true}
+                        className="w-full h-full pointer-events-none"
+                    />
+                )}
 
                 {/* Confirmed Badge (Green Checkmark) */}
                 {face.is_confirmed && !isSelected && (
@@ -56,7 +61,7 @@ const PersonFaceItem = memo(({ face, isSelected, toggleSelection, isCover, onSet
                 )}
 
                 {/* Data Quality & Confidence Indicators */}
-                {!isSelected && (
+                {!isSelected && !isScrolling && (
                     <div className="absolute top-2 right-2 flex flex-col gap-1 items-end z-10 pointer-events-none">
                         {/* Low Recognition Confidence (Review Tier) */}
                         {face.match_distance !== undefined && face.match_distance > 0.4 && !face.is_confirmed && (
