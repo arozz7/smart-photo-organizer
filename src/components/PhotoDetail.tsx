@@ -47,6 +47,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
     const [reassigningGroup, setReassigningGroup] = useState<{ id: number, name: string, faceIds: number[] } | null>(null);
     const [reassignName, setReassignName] = useState('');
     const [imgRect, setImgRect] = useState<{ width: number, height: number, left: number, top: number } | null>(null)
+    const [isImageLoaded, setIsImageLoaded] = useState(false)
     const imgRef = useRef<HTMLImageElement>(null)
     const photoAreaRef = useRef<HTMLDivElement>(null)
 
@@ -74,10 +75,13 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
             setImagePath(`local-resource://${encodeURIComponent(photo.file_path)}`)
 
             // Fetch tags
+            // Fetch tags
             fetchTags()
+            setIsImageLoaded(false)
         } else {
             setTags([])
             setFaces([])
+            setIsImageLoaded(false)
         }
     }, [photo])
 
@@ -265,6 +269,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
 
     const handleImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
         updateImgRect(e.currentTarget);
+        setIsImageLoaded(true);
     }
 
     const handleGoToFolder = () => {
@@ -413,6 +418,16 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                             </div>
                         )
                     })()}
+
+                    {/* Loading Indicator */}
+                    {!isImageLoaded && (photo.preview_cache_path || ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(photo.file_path.split('.').pop()?.toLowerCase() || '')) && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+                            <div className="flex flex-col items-center gap-3">
+                                <div className="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin backdrop-blur-sm"></div>
+                                <span className="text-indigo-400 text-sm font-medium bg-black/50 px-3 py-1 rounded-full backdrop-blur-md">Loading Photo...</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <button

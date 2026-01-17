@@ -48,6 +48,9 @@ interface PeopleContextType {
     unassignedCount: number
     refreshUnassignedCount: () => Promise<void>
     findUngroupableFaces: (distanceThreshold?: number) => Promise<{ success: boolean; ungroupable_ids: number[] }>
+    // UI State
+    peopleScrollPosition: number
+    setPeopleScrollPosition: (y: number) => void
 }
 
 export interface SmartIgnoreSettings {
@@ -74,6 +77,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
     const [isRebuildingIndex, setIsRebuildingIndex] = useState(false)
     const [faissStaleCount, setFaissStaleCount] = useState(0) // TODO: Sync with backend stats
     const [unassignedCount, setUnassignedCount] = useState(0)
+    const [peopleScrollPosition, setPeopleScrollPosition] = useState(0)
 
     const loadSmartIgnoreSettings = useCallback(async () => {
         try {
@@ -367,13 +371,14 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         rebuildFaissIndex,
         isRebuildingIndex,
         faissStaleCount,
-        unassignedCount, refreshUnassignedCount
+        unassignedCount, refreshUnassignedCount,
+        peopleScrollPosition, setPeopleScrollPosition
     }), [
         people, faces, loading, matchFace, matchBatch, smartIgnoreSettings, updateSmartIgnoreSettings,
         rebuildFaissIndex, isRebuildingIndex, faissStaleCount, unassignedCount,
         loadPeople, loadFaces, loadUnnamedFaces, fetchFacesByIds, assignPerson,
         ignoreFace, ignoreFaces, autoNameFaces, rebuildIndex, findUngroupableFaces,
-        refreshUnassignedCount
+        refreshUnassignedCount, peopleScrollPosition
     ])
 
     return (

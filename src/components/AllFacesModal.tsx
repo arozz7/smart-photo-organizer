@@ -89,25 +89,25 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
         });
     }, []);
 
-    const handleUnassign = async () => {
+    const handleIgnore = async () => {
         if (selectedFaces.size === 0) return;
 
         showConfirm({
-            title: 'Remove Faces',
-            description: `Remove ${selectedFaces.size} faces from ${personName}? They will be returned to 'Unnamed Faces'.`,
-            confirmLabel: 'Remove Faces',
+            title: 'Ignore Faces',
+            description: `Ignore ${selectedFaces.size} faces from ${personName}? They will be removed and marked as ignored.`,
+            confirmLabel: 'Ignore Faces',
             variant: 'danger',
             onConfirm: async () => {
                 try {
                     // @ts-ignore
-                    await window.ipcRenderer.invoke('db:unassignFaces', Array.from(selectedFaces));
-                    addToast({ type: 'success', description: `Removed ${selectedFaces.size} faces.` });
+                    await window.ipcRenderer.invoke('db:ignoreFaces', Array.from(selectedFaces));
+                    addToast({ type: 'success', description: `Ignored ${selectedFaces.size} faces.` });
                     setSelectedFaces(new Set());
                     loadAllFaces(); // Refresh local list
                     onUpdate(); // Signal parent to refresh (though parent might not show all these faces)
                 } catch (err) {
                     console.error(err);
-                    showAlert({ title: 'Error', description: 'Failed to remove faces', variant: 'danger' });
+                    showAlert({ title: 'Error', description: 'Failed to ignore faces', variant: 'danger' });
                 }
             }
         });
@@ -276,13 +276,13 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                             Move
                         </button>
                         <button
-                            onClick={handleUnassign}
+                            onClick={handleIgnore}
                             className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors flex items-center gap-2"
                         >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                             </svg>
-                            Remove
+                            Ignore
                         </button>
                         <div className="border-l border-gray-700 pl-4">
                             <button

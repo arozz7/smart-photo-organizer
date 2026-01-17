@@ -439,15 +439,49 @@ export const usePersonDetail = (personId: string | undefined) => {
         }
     };
 
+    const handleIgnore = async () => {
+        if (selectedFaces.size === 0) return;
+        const count = selectedFaces.size;
+        const personName = person?.name || 'this person';
+
+        showConfirm({
+            title: 'Ignore Faces',
+            description: `Ignore ${selectedFaces.size} faces from ${person?.name}? They will be removed from this person and marked as ignored.`,
+            confirmLabel: 'Ignore Faces',
+            variant: 'danger',
+            onConfirm: async () => {
+                try {
+                    // @ts-ignore
+                    await window.ipcRenderer.invoke('db:ignoreFaces', Array.from(selectedFaces));
+                    clearSelection();
+                    loadData(); // Refresh
+                    addToast({
+                        title: 'Faces Ignored',
+                        description: `Ignored ${count} face${count !== 1 ? 's' : ''} from ${personName}.`,
+                        type: 'success',
+                        duration: 3000
+                    });
+                } catch (err) {
+                    console.error(err);
+                    showAlert({
+                        title: 'Error',
+                        description: 'Failed to ignore faces',
+                        variant: 'danger'
+                    });
+                }
+            }
+        });
+    };
+
     const actions = useMemo(() => ({
         moveFaces: handleReassign,
         // @ts-ignore
         removeFaces: handleUnassign,
+        ignoreFaces: handleIgnore,
         setCover: handleSetCover,
         renamePerson: handleRenamePerson,
         startTargetedScan: handleTargetedScan,
         loadMore: async () => { },
-        ignoreFaces: async () => { },
         confirmFaces: async () => { },
         findOutliers,
         clearOutliers: () => setOutliers([]),
@@ -455,7 +489,7 @@ export const usePersonDetail = (personId: string | undefined) => {
         recalculateModel,
         generateEras,
         deleteEra
-    }), [handleReassign, handleUnassign, handleSetCover, handleRenamePerson, handleTargetedScan, findOutliers, resolveOutliers]);
+    }), [handleReassign, handleUnassign, handleIgnore, handleSetCover, handleRenamePerson, handleTargetedScan, findOutliers, resolveOutliers]);
 
     return {
         person,
