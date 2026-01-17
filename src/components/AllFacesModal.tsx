@@ -215,29 +215,31 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 overflow-hidden bg-gray-950">
-                    {loading ? (
-                        <div className="flex items-center justify-center h-full">
-                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
+                <div className="flex-1 overflow-hidden bg-gray-950 relative">
+                    <VirtuosoGrid
+                        style={{ height: '100%' }}
+                        totalCount={filteredFaces.length}
+                        components={gridComponents}
+                        itemContent={(index) => {
+                            const face = filteredFaces[index];
+                            return (
+                                <div className="h-full">
+                                    <PersonFaceItem
+                                        face={face}
+                                        isSelected={selectedFaces.has(face.id)}
+                                        toggleSelection={toggleSelection}
+                                    />
+                                </div>
+                            );
+                        }}
+                    />
+
+                    {loading && (
+                        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                            <div className="bg-gray-900/80 p-4 rounded-full shadow-xl border border-indigo-500/30">
+                                <div className="animate-spin rounded-full h-10 w-10 border-4 border-indigo-500/30 border-t-indigo-500" />
+                            </div>
                         </div>
-                    ) : (
-                        <VirtuosoGrid
-                            style={{ height: '100%' }}
-                            totalCount={filteredFaces.length}
-                            components={gridComponents}
-                            itemContent={(index) => {
-                                const face = filteredFaces[index];
-                                return (
-                                    <div className="h-full">
-                                        <PersonFaceItem
-                                            face={face}
-                                            isSelected={selectedFaces.has(face.id)}
-                                            toggleSelection={toggleSelection}
-                                        />
-                                    </div>
-                                );
-                            }}
-                        />
                     )}
                 </div>
 

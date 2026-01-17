@@ -364,40 +364,49 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                             {faces.length === 0 && !loading ? (
                                 <div className="flex items-center justify-center h-full text-gray-500">No faces found below this threshold.</div>
                             ) : (
-                                <VirtuosoGrid
-                                    style={{ height: '100%', width: '100%' }}
-                                    totalCount={faces.length}
-                                    overscan={50}
-                                    context={{ selectedIds, handleToggleSelect, faces, onPreview: setPreviewPhoto }}
-                                    endReached={() => {
-                                        if (hasMore) loadFaces(false);
-                                    }}
-                                    components={{
-                                        List: React.forwardRef(({ style, children, ...props }: any, ref) => (
-                                            <div
-                                                ref={ref}
-                                                {...props}
-                                                style={{ ...style, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '1rem', alignContent: 'start' }}
-                                                className="pb-4 pr-2"
-                                            >
-                                                {children}
-                                            </div>
-                                        )),
-                                        Item: ({ children, ...props }: any) => (
-                                            <div {...props} className="aspect-square w-full">
-                                                {children}
-                                            </div>
-                                        ),
-                                        Footer: () => (
-                                            loading ? (
-                                                <div className="col-span-full py-4 flex justify-center text-gray-500">
-                                                    Loading more...
+                                <div className="h-full relative">
+                                    <VirtuosoGrid
+                                        style={{ height: '100%', width: '100%' }}
+                                        totalCount={faces.length}
+                                        overscan={50}
+                                        context={{ selectedIds, handleToggleSelect, faces, onPreview: setPreviewPhoto }}
+                                        endReached={() => {
+                                            if (hasMore) loadFaces(false);
+                                        }}
+                                        components={{
+                                            List: React.forwardRef(({ style, children, ...props }: any, ref) => (
+                                                <div
+                                                    ref={ref}
+                                                    {...props}
+                                                    style={{ ...style, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '1rem', alignContent: 'start' }}
+                                                    className="pb-4 pr-2"
+                                                >
+                                                    {children}
                                                 </div>
-                                            ) : null
-                                        )
-                                    }}
-                                    itemContent={itemContent}
-                                />
+                                            )),
+                                            Item: ({ children, ...props }: any) => (
+                                                <div {...props} className="aspect-square w-full">
+                                                    {children}
+                                                </div>
+                                            ),
+                                            Footer: () => (
+                                                /* Bottom pagination loader remains as footer */
+                                                loading && hasMore ? (
+                                                    <div className="col-span-full py-4 flex justify-center text-gray-500">
+                                                        Loading more...
+                                                    </div>
+                                                ) : null
+                                            )
+                                        }}
+                                        itemContent={itemContent}
+                                    />
+                                    {/* Main overlay loader for initial fetch or blocking updates */}
+                                    {loading && faces.length === 0 && (
+                                        <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm">
+                                            <div className="animate-spin rounded-full h-10 w-10 border-4 border-indigo-500/30 border-t-indigo-500" />
+                                        </div>
+                                    )}
+                                </div>
                             )}
                         </div>
 

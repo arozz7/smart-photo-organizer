@@ -19,7 +19,11 @@ Focused on improving user experience in the Person Details and Photo Details vie
 
 ### 3. Photo Detail Loading Indicator
 - **Context**: Large photos or RAW previews can take a moment to load in the lightbox, leaving the user with a blank black screen.
-- **Change**: Added a "Loading Photo..." spinner and overlay that appears while the high-resolution image is being fetched and rendered.
+- **PhotoDetail**: Added loading spinner overlay for main image to prevent UI jumpiness.
+- **Scroll Persistence**:
+  - Refactored `AllFacesModal`, `BlurryFacesModal`, `OutlierReviewModal`, and `PersonDetail` to use a **Loading Overlay** pattern.
+  - Previously, `loading` states unmounted the list/grid, causing the user to lose their scroll position after performing an action (like ignoring faces).
+  - Now, the list remains mounted with a semi-transparent spinner overlay, preserving scroll context.
 - **Outcome**: Better perceived performance and feedback.
 
 ## Files Modified

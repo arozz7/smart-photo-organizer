@@ -205,79 +205,88 @@ export default function OutlierReviewModal({
 
                         {/* Content */}
                         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                            {displayedOutliers.length === 0 ? (
+                            {displayedOutliers.length === 0 && !isProcessing ? (
                                 <div className="flex flex-col items-center justify-center h-full text-gray-500">
                                     <span className="text-4xl mb-4">✓</span>
                                     <p>{showUnconfirmedOnly ? 'All faces are confirmed' : 'No potential misassignments found'}</p>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                    {displayedOutliers.map(outlier => {
-                                        const distanceInfo = getDistanceLabel(outlier.distance);
-                                        const isSelected = selectedIds.has(outlier.faceId);
+                                <div className="relative h-full">
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                                        {displayedOutliers.map(outlier => {
+                                            const distanceInfo = getDistanceLabel(outlier.distance);
+                                            const isSelected = selectedIds.has(outlier.faceId);
 
-                                        return (
-                                            <div
-                                                key={outlier.faceId}
-                                                onClick={() => toggleSelection(outlier.faceId)}
-                                                className={`relative cursor-pointer rounded-xl overflow-hidden transition-all group border-2 ${isSelected
-                                                    ? 'border-red-500 ring-2 ring-red-500/30'
-                                                    : 'border-transparent hover:border-gray-600'
-                                                    }`}
-                                            >
-                                                {/* Face Thumbnail */}
-                                                <div className="aspect-square bg-gray-800">
-                                                    <FaceThumbnail
-                                                        src={`local-resource://${encodeURIComponent(outlier.file_path || '')}`}
-                                                        fallbackSrc={`local-resource://${encodeURIComponent(outlier.preview_cache_path || outlier.file_path || '')}`}
-                                                        box={outlier.box}
-                                                        originalImageWidth={outlier.photo_width}
-                                                        useServerCrop={true}
-                                                        className="w-full h-full object-cover"
-                                                    />
-                                                </div>
-
-                                                {/* Distance Badge */}
-                                                <div className="absolute top-2 right-2 bg-black/70 backdrop-blur px-2 py-1 rounded text-xs font-mono z-10">
-                                                    <span className={distanceInfo.color}>
-                                                        {(outlier.distance * 100).toFixed(0)}% diff
-                                                    </span>
-                                                </div>
-
-                                                {/* Preview Button (Hover) */}
-                                                <div className="absolute bottom-8 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all z-20">
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            viewPhoto(outlier.photo_id);
-                                                        }}
-                                                        className="bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1.5 shadow-lg backdrop-blur-sm transform hover:scale-110 transition-transform"
-                                                        title="View Original Photo"
-                                                    >
-                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                                            <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-                                                        </svg>
-                                                    </button>
-                                                </div>
-
-                                                {/* Selection Indicator */}
-                                                {isSelected && (
-                                                    <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
-                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-red-400 drop-shadow-md" viewBox="0 0 20 20" fill="currentColor">
-                                                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                        </svg>
+                                            return (
+                                                <div
+                                                    key={outlier.faceId}
+                                                    onClick={() => toggleSelection(outlier.faceId)}
+                                                    className={`relative cursor-pointer rounded-xl overflow-hidden transition-all group border-2 ${isSelected
+                                                        ? 'border-red-500 ring-2 ring-red-500/30'
+                                                        : 'border-transparent hover:border-gray-600'
+                                                        }`}
+                                                >
+                                                    {/* Face Thumbnail */}
+                                                    <div className="aspect-square bg-gray-800">
+                                                        <FaceThumbnail
+                                                            src={`local-resource://${encodeURIComponent(outlier.file_path || '')}`}
+                                                            fallbackSrc={`local-resource://${encodeURIComponent(outlier.preview_cache_path || outlier.file_path || '')}`}
+                                                            box={outlier.box}
+                                                            originalImageWidth={outlier.photo_width}
+                                                            useServerCrop={true}
+                                                            className="w-full h-full object-cover"
+                                                        />
                                                     </div>
-                                                )}
 
-                                                {/* Label */}
-                                                <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-                                                    <div className={`text-xs font-medium ${distanceInfo.color}`}>
-                                                        {distanceInfo.label}
+                                                    {/* Distance Badge */}
+                                                    <div className="absolute top-2 right-2 bg-black/70 backdrop-blur px-2 py-1 rounded text-xs font-mono z-10">
+                                                        <span className={distanceInfo.color}>
+                                                            {(outlier.distance * 100).toFixed(0)}% diff
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Preview Button (Hover) */}
+                                                    <div className="absolute bottom-8 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all z-20">
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                viewPhoto(outlier.photo_id);
+                                                            }}
+                                                            className="bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1.5 shadow-lg backdrop-blur-sm transform hover:scale-110 transition-transform"
+                                                            title="View Original Photo"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                                <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+
+                                                    {/* Selection Indicator */}
+                                                    {isSelected && (
+                                                        <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-red-400 drop-shadow-md" viewBox="0 0 20 20" fill="currentColor">
+                                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                            </svg>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Label */}
+                                                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-2">
+                                                        <div className={`text-xs font-medium ${distanceInfo.color}`}>
+                                                            {distanceInfo.label}
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        );
-                                    })}
+                                            );
+                                        })}
+                                    </div>
+
+                                    {/* Loading Overlay */}
+                                    {isProcessing && (
+                                        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-30 flex items-center justify-center">
+                                            <div className="animate-spin rounded-full h-10 w-10 border-4 border-indigo-500/30 border-t-indigo-500" />
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

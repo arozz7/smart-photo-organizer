@@ -146,11 +146,14 @@ const PersonDetail = () => {
     // Snapshot state for modal
     const [facesToMove, setFacesToMove] = useState<number[]>([]);
 
-    if (loading && !person) return <div className="p-8 text-white">Loading...</div>;
-    if (!person) return <div className="p-8 text-white">Person not found</div>;
+    // Initial loading state (no person data yet)
+    if (loading && !person) return <div className="p-8 text-white flex items-center justify-center h-full">Loading...</div>;
+
+    // Error state
+    if (!person) return <div className="p-8 text-white flex items-center justify-center h-full">Person not found</div>;
 
     return (
-        <div className="h-full flex flex-col bg-gray-900 text-white p-6 overflow-hidden">
+        <div className="h-full flex flex-col bg-gray-900 text-white p-6 overflow-hidden relative">
             {/* Alert Banner */}
             {alerts.length > 0 && (
                 <div className="mb-4 bg-red-900/40 border border-red-500/50 rounded-xl p-4">
@@ -333,6 +336,14 @@ const PersonDetail = () => {
                         )}
                     </div>
                 </div>
+                {/* Loading Overlay for Refreshes */}
+                {loading && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
+                        <div className="bg-gray-900/80 p-4 rounded-full shadow-2xl border border-indigo-500/50">
+                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-indigo-500/50 border-t-indigo-400" />
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Modals */}
