@@ -26,6 +26,7 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
     const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
     // Snapshot for stable modal props
     const [facesToMove, setFacesToMove] = useState<number[]>([]);
+    const [isScrolling, setIsScrolling] = useState(false);
 
     // Era Filtering
     const [eras, setEras] = useState<any[]>([]);
@@ -219,6 +220,7 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                     <VirtuosoGrid
                         style={{ height: '100%' }}
                         totalCount={filteredFaces.length}
+                        isScrolling={setIsScrolling}
                         components={gridComponents}
                         itemContent={(index) => {
                             const face = filteredFaces[index];
@@ -228,6 +230,7 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                                         face={face}
                                         isSelected={selectedFaces.has(face.id)}
                                         toggleSelection={toggleSelection}
+                                        isScrolling={isScrolling}
                                     />
                                 </div>
                             );

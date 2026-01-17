@@ -24,6 +24,10 @@ Focused on improving user experience in the Person Details and Photo Details vie
   - Refactored `AllFacesModal`, `BlurryFacesModal`, `OutlierReviewModal`, and `PersonDetail` to use a **Loading Overlay** pattern.
   - Previously, `loading` states unmounted the list/grid, causing the user to lose their scroll position after performing an action (like ignoring faces).
   - Now, the list remains mounted with a semi-transparent spinner overlay, preserving scroll context.
+
+- **Performance Optimization**:
+  - **Prioritized Cached Previews**: `PersonFaceItem` now attempts to load the lightweight cached preview image first, falling back to the original file only if needed. This significantly reduces I/O on the backend during scrolling.
+  - **Scroll Virtualization**: Implemented `isScrolling` check in `AllFacesModal`. During fast scrolling, face items render a lightweight placeholder instead of attempting to load images, ensuring smooth 60fps scrolling even with thousands of faces.
 - **Outcome**: Better perceived performance and feedback.
 
 ## Files Modified
