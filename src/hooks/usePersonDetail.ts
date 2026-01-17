@@ -296,13 +296,14 @@ export const usePersonDetail = (personId: string | undefined) => {
                         type: 'warning'
                     });
                 } else if (result.outliers.length === 0) {
+                    console.log('[usePersonDetail] Showing toast: No outliers found');
                     addToast({
                         title: 'No Outliers Found',
                         description: options?.checkConfirmed
                             ? 'All confirmed faces look consistent with the person model.'
                             : 'All faces look consistent with the person model.',
                         type: 'success',
-                        duration: 3000
+                        duration: 5000
                     });
                 } else {
                     // Only show modal if we found something

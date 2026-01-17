@@ -106,7 +106,7 @@ export class ImageService {
 
         } catch (resizeErr: any) {
             const errMessage = resizeErr.message || String(resizeErr);
-            // logger.warn(`[Protocol] Transform failed for ${filePath}: ${errMessage}`);
+            logger.warn(`[Protocol] Transform failed for ${filePath}: ${errMessage}`);
 
             // 3. FALLBACK: Generated Preview
             try {
@@ -226,14 +226,27 @@ export class ImageService {
                             const isWebFriendly = ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(srcExt);
 
                             if (isWebFriendly) {
-                                // Serve original file directly - no preview needed
-                                logger.info(`[Protocol] Source is web-friendly, serving directly: ${srcPath}`);
+                                // SAFETY: Even if web-friendly, do NOT serve directly if we were looking for a preview (thumbnail).
+                                // Serving a 20MB original when the client expects a 50KB preview causes UI freezes.
+                                // Instead, use Sharp to generate a safe 1280px preview.
+                                logger.info(`[Protocol] Source is web-friendly (${srcPath}), generating preview thumbnail...`);
                                 try {
-                                    await fs.access(srcPath);
-                                    return await net.fetch(pathToFileURL(srcPath).toString());
-                                } catch (srcErr) {
-                                    logger.warn(`[Protocol] Source file also missing: ${srcPath}`);
-                                    throw srcErr;
+                                    // 1. Get Orientation
+                                    const { orientation } = await this.repo.getImageMetadata(srcPath);
+
+                                    // 2. Generate Resize (Reduced to 640px for performance during storms)
+                                    const buffer = await this.processor.process(srcPath, { width: 640, hq: false }, orientation);
+
+                                    return new Response(buffer as any, {
+                                        headers: {
+                                            'Content-Type': 'image/jpeg',
+                                            'Cache-Control': 'max-age=3600',
+                                            'X-Generated-By': 'Recovery-Resize'
+                                        }
+                                    });
+                                } catch (resizeErr) {
+                                    logger.warn(`[Protocol] Web-friendly resize failed, falling back to Python: ${resizeErr}`);
+                                    // Fall through to Python logic...
                                 }
                             }
 

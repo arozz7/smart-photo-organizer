@@ -82,7 +82,9 @@ The app works in the background to organize your photos even when you aren't nam
     - **AI Readiness**: Look for small **green dots** on the thumbnails; these indicate that the face has high-quality AI fingerprint data ready for matching.
     - **Restore as [Name]**: One-click action to restore and correctly name faces simultaneously.
 7.  **Quality Control:**
-    - **Misassigned Faces:** On any Person's detail page, click the **"Find Misassigned Faces"** button to scan for outliers.
+    - **Review All Faces:** Click **"Review All"** on a Person's detail page to see every assigned face in a scrollable grid. You can bulk-select faces to Confirm, Move, or Ignore them.
+    - **Misassigned Faces:** Click **"More Actions > Find Misassigned"** to scan for outliers (faces that look different from the person's typical model).
+    - **Audit Confirmed Faces:** Select **"Find Misassigned (Audit Confirmed)"** from the dropdown to re-evaluate previously confirmed faces. This helps catch incorrect assignments that might have slipped through as the person's model evolved.
 
 8.  **Face Index Maintenance:**
     - **Stale Index Alert:** If you see an amber "Face Index Needs Update" banner on the "Identified People" tab, it means faces have been removed or reassigned, and the search index is out of date.

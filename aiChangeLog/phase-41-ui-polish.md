@@ -38,6 +38,11 @@ Focused on improving user experience in the Person Details and Photo Details vie
     - Enhanced `OutlierReviewModal` to support "Audit Mode" with context-specific actions (Move, Unassign, Ignore) and visual cues.
 - **Outcome**: Users can now clean up confirmed dataset errors efficiently.
 
+### 5. Fix High-Res Thumbnail Freezing
+- **Issue**: User reported UI freezing when scrolling lists with high-resolution images.
+- **Cause**: `PersonFaceItem` was prioritizing cached previews for server-side crops. However, face coordinates are relative to the *original* image, causing server crops to fail (mismatch) and triggering a fallback to client-side CSS cropping of the FULL resolution original file. This caused massive memory/decode pressure.
+- **Fix**: Reverted `PersonFaceItem` to use the original file path for server-side crops (ensuring coordinate validity) and updated `FaceThumbnail` to explicitly request a resized (300px) buffer from the backend, preventing large image decoding on the client.
+
 ## Files Modified
 - `src/views/People.tsx`
 - `src/views/PersonDetail.tsx`

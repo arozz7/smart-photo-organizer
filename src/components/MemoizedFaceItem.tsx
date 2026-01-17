@@ -18,7 +18,9 @@ const FaceItem = ({ face, isSelected, onToggle, onPreview }: FaceItemProps) => {
         >
             <FaceThumbnail
                 src={`local-resource://${encodeURIComponent(face.file_path || '')}`}
-                fallbackSrc={`local-resource://${encodeURIComponent(face.preview_cache_path || face.file_path || '')}`}
+                fallbackSrc={face.preview_cache_path
+                    ? `local-resource://${encodeURIComponent(face.preview_cache_path)}`
+                    : `local-resource://${encodeURIComponent(face.file_path || '')}?width=300`}
                 box={face.box}
                 originalImageWidth={face.original_width || 0}
                 useServerCrop={true}
@@ -41,7 +43,7 @@ const FaceItem = ({ face, isSelected, onToggle, onPreview }: FaceItemProps) => {
                         e.stopPropagation();
                         onPreview(face);
                     }}
-                    className="absolute bottom-1 right-1 bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-all z-10"
+                    className="absolute bottom-1 right-1 bg-black/50 hover:bg-indigo-600 text-white rounded-full p-1 hidden group-hover:block z-10"
                     title="View Original Photo"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
