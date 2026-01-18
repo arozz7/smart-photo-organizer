@@ -181,12 +181,44 @@ export function registerAIHandlers() {
             // This ensures FAISS matches return valid person IDs for auto-assign
             const faces = FaceRepository.getNamedFaceDescriptors();
             logger.info(`[Main] Rebuilding FAISS index with ${faces.length} named person faces`);
-            // Optimization: If too many faces, write to temp file?
-            // For now, try direct payload.
-            const result = await pythonProvider.sendRequest('rebuild_index', {
-                descriptors: faces.map(f => f.descriptor),
-                ids: faces.map(f => f.id)
-            }, 600000); // 10 min timeout
+
+            // Use streaming JSON write to avoid RangeError with large arrays
+            // JSON.stringify() on 53K+ faces exceeds JavaScript's string length limit
+            const fsSync = await import('fs');
+            const fs = await import('fs/promises');
+            const os = await import('os');
+            const path = await import('path');
+
+            const dataPath = path.join(os.tmpdir(), `spo_rebuild_index_${Date.now()}.json`);
+
+            let result: any;
+            try {
+                // Stream JSON to file - write each face individually to avoid memory limit
+                const writeStream = fsSync.createWriteStream(dataPath, { encoding: 'utf-8' });
+
+                await new Promise<void>((resolve, reject) => {
+                    writeStream.on('error', reject);
+
+                    writeStream.write('{"faces":[');
+
+                    for (let i = 0; i < faces.length; i++) {
+                        const face = faces[i];
+                        const faceJson = JSON.stringify({ id: face.id, descriptor: face.descriptor });
+
+                        if (i > 0) writeStream.write(',');
+                        writeStream.write(faceJson);
+                    }
+
+                    writeStream.write(']}');
+                    writeStream.end(() => resolve());
+                });
+
+                logger.info(`[Main] Wrote ${faces.length} faces to temp file for rebuild`);
+                result = await pythonProvider.sendRequest('rebuild_index', { dataPath }, 600000);
+            } finally {
+                // Cleanup temp file
+                try { await fs.unlink(dataPath); } catch { /* ignore */ }
+            }
 
             // Reset stale count after successful rebuild
             if (result && result.success !== false) {
@@ -197,6 +229,7 @@ export function registerAIHandlers() {
 
             return result;
         } catch (e) {
+            logger.error(`[Main] FAISS rebuild failed: ${e}`);
             return { success: false, error: String(e) };
         }
     });
