@@ -435,6 +435,18 @@ export const usePersonDetail = (personId: string | undefined) => {
         }
     };
 
+    const renameEra = async (eraId: number, newName: string) => {
+        try {
+            // @ts-ignore
+            await window.ipcRenderer.invoke('db:renameEra', { eraId, newName });
+            addToast({ title: 'Era Renamed', description: `Renamed to "${newName}".`, type: 'success' });
+            loadEras();
+        } catch (e) {
+            console.error(e);
+            showAlert({ title: 'Error', description: 'Failed to rename era', variant: 'danger' });
+        }
+    };
+
     const handleSetCover = async (faceId: number | null) => {
         if (!person) return false;
         try {
@@ -499,7 +511,8 @@ export const usePersonDetail = (personId: string | undefined) => {
         resolveOutliers,
         recalculateModel,
         generateEras,
-        deleteEra
+        deleteEra,
+        renameEra
     }), [handleReassign, handleUnassign, handleIgnore, handleSetCover, handleRenamePerson, handleTargetedScan, findOutliers, resolveOutliers]);
 
     return {

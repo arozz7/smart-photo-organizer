@@ -213,6 +213,7 @@ export class PersonRepository {
     static addEra(era: {
         person_id: number,
         era_name: string,
+        user_name?: string | null,
         start_year: number | null,
         end_year: number | null,
         centroid_json: string,
@@ -221,9 +222,9 @@ export class PersonRepository {
     }) {
         const db = getDB();
         const info = db.prepare(`
-            INSERT INTO person_eras (person_id, era_name, start_year, end_year, centroid_json, face_count, is_auto_generated, created_at)
-            VALUES (@person_id, @era_name, @start_year, @end_year, @centroid_json, @face_count, @is_auto_generated, strftime('%s','now'))
-        `).run({ ...era, is_auto_generated: era.is_auto_generated ? 1 : 0 });
+            INSERT INTO person_eras (person_id, era_name, user_name, start_year, end_year, centroid_json, face_count, is_auto_generated, created_at)
+            VALUES (@person_id, @era_name, @user_name, @start_year, @end_year, @centroid_json, @face_count, @is_auto_generated, strftime('%s','now'))
+        `).run({ ...era, user_name: era.user_name || null, is_auto_generated: era.is_auto_generated ? 1 : 0 });
         return info.lastInsertRowid as number;
     }
 
@@ -242,6 +243,16 @@ export class PersonRepository {
         db.prepare('UPDATE faces SET era_id = NULL WHERE era_id = ?').run(eraId);
         db.prepare('DELETE FROM person_eras WHERE id = ?').run(eraId);
     }
+
+    /**
+     * Rename an ERA with a user-provided name.
+     * Sets user_name which takes precedence over auto-generated era_name in UI.
+     */
+    static renameEra(eraId: number, newName: string) {
+        const db = getDB();
+        db.prepare('UPDATE person_eras SET user_name = ? WHERE id = ?').run(newName.trim(), eraId);
+    }
+
 
     // --- Alert Methods (for Drift Detection) ---
 
