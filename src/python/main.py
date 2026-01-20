@@ -518,7 +518,10 @@ def handle_command(command):
                     "poseYaw": pose_yaw,
                     "posePitch": pose_pitch,
                     "poseRoll": pose_roll,
-                    "faceQuality": face_quality
+                    "faceQuality": face_quality,
+                    # Age-Based ERA Categorization: Extract age and gender from genderage module
+                    "estimatedAge": int(face.age) if hasattr(face, 'age') and face.age is not None else None,
+                    "gender": "M" if hasattr(face, 'sex') and face.sex == "M" else ("F" if hasattr(face, 'sex') and face.sex == "F" else None)
                 })
 
             
@@ -603,7 +606,10 @@ def handle_command(command):
                                 "posePitch": pose_pitch,
                                 "poseRoll": pose_roll,
                                 "faceQuality": face_quality,
-                                "rotation_fix": rot_angle
+                                "rotation_fix": rot_angle,
+                                # Age-Based ERA Categorization
+                                "estimatedAge": int(face.age) if hasattr(face, 'age') and face.age is not None else None,
+                                "gender": "M" if hasattr(face, 'sex') and face.sex == "M" else ("F" if hasattr(face, 'sex') and face.sex == "F" else None)
                             })
 
                 except Exception as e:
@@ -1238,6 +1244,113 @@ def handle_command(command):
         except Exception as e:
             logger.error(f"Pose extraction error: {e}")
             response = {"type": "face_pose_result", "success": False, "error": str(e), "faceId": face_id}
+
+    elif cmd_type == 'extract_age':
+        # Age Backfill: Extract age from a face crop using InsightFace genderage module
+        file_path = payload.get('filePath')
+        preview_path = payload.get('previewPath')
+        box = payload.get('box')  # JSON string: {x, y, width, height}
+        face_id = payload.get('faceId')
+        photo_id = payload.get('photoId')
+        
+        logger.info(f"Extracting age for face {face_id}: file={file_path}, box={box}")
+        
+        try:
+            # Parse box if string
+            if isinstance(box, str):
+                box = json.loads(box)
+            
+            # IMPORTANT: Use original file path, NOT preview - box coords are from original scan
+            img = load_image_cv2(file_path)
+            if img is None:
+                logger.warning(f"Failed to load image: {file_path}")
+                response = {"type": "extract_age_result", "success": True, "faceId": face_id, "age": None, "gender": None, "failureReason": "image_load_failed", "reqId": req_id}
+            else:
+                logger.debug(f"Image loaded: {img.shape[1]}x{img.shape[0]}")
+                
+                # Expand box for better detection
+                x = int(box.get('x', 0))
+                y = int(box.get('y', 0))
+                w = int(box.get('width', 100))
+                h = int(box.get('height', 100))
+                
+                logger.debug(f"Face {face_id} box: x={x}, y={y}, w={w}, h={h}")
+                
+                # Add 100% padding for context (same as pose extraction)
+                pad_x = int(w * 1.0)
+                pad_y = int(h * 1.0)
+                x1 = max(0, x - pad_x)
+                y1 = max(0, y - pad_y)
+                x2 = min(img.shape[1], x + w + pad_x)
+                y2 = min(img.shape[0], y + h + pad_y)
+                
+                face_crop = img[y1:y2, x1:x2]
+                
+                logger.debug(f"Face crop size: {face_crop.shape[1]}x{face_crop.shape[0]}")
+                
+                if face_crop.size == 0 or face_crop.shape[0] < 10 or face_crop.shape[1] < 10:
+                    logger.warning(f"Face crop too small/empty for face {face_id}")
+                    response = {"type": "extract_age_result", "success": True, "faceId": face_id, "age": None, "gender": None, "failureReason": "crop_too_small", "reqId": req_id}
+                else:
+                    # Use very low detection threshold for crops - face is already known to exist
+                    # Re-init with low threshold to maximize re-detection on crops
+                    faces.init_insightface(det_thresh=0.2)
+                    
+                    # Run detection on crop
+                    f_results = faces.app.get(face_crop)
+                    logger.debug(f"Face {face_id}: detected {len(f_results)} faces in crop")
+                    
+                    age, gender, failure_reason = None, None, None
+                    
+                    if len(f_results) > 0:
+                        # Take the largest detected face
+                        best_face = max(f_results, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
+                        
+                        # Extract age and gender from genderage module
+                        if hasattr(best_face, 'age') and best_face.age is not None:
+                            age = int(best_face.age)
+                        else:
+                            failure_reason = "no_age_attribute"
+                        
+                        if hasattr(best_face, 'sex') and best_face.sex is not None:
+                            gender = "M" if best_face.sex == "M" else ("F" if best_face.sex == "F" else None)
+                        
+                        # Log success at INFO level so it's visible
+                        if age is not None:
+                            logger.info(f"[OK] Face {face_id}: age={age}, gender={gender}")
+                        else:
+                            logger.warning(f"Face {face_id}: detected but no age attribute")
+                    else:
+                        failure_reason = "no_face_detected"
+                        logger.warning(f"No face detected in crop for face {face_id}")
+                    
+                    # Extract pose data if available (Phase 2.1: Pose Backfill)
+                    pose_yaw, pose_pitch, pose_roll = None, None, None
+                    if len(f_results) > 0 and hasattr(best_face, 'pose') and best_face.pose is not None:
+                        try:
+                            pose = best_face.pose
+                            pose_pitch = float(pose[0]) if len(pose) > 0 else None
+                            pose_yaw = float(pose[1]) if len(pose) > 1 else None
+                            pose_roll = float(pose[2]) if len(pose) > 2 else None
+                        except (TypeError, IndexError):
+                            pass
+                    
+                    response = {
+                        "type": "extract_age_result",
+                        "success": True,
+                        "faceId": face_id,
+                        "age": age,
+                        "gender": gender,
+                        "poseYaw": pose_yaw,
+                        "posePitch": pose_pitch,
+                        "poseRoll": pose_roll,
+                        "failureReason": failure_reason,
+                        "reqId": req_id
+                    }
+                
+        except Exception as e:
+            logger.error(f"Age extraction error for face {face_id}: {e}")
+            response = {"type": "extract_age_result", "success": True, "faceId": face_id, "age": None, "gender": None, "failureReason": f"exception:{str(e)[:50]}", "reqId": req_id}
 
     else:
 

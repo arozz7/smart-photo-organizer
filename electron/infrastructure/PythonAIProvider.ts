@@ -233,6 +233,55 @@ export class PythonAIProvider implements IAIProvider, IService {
     addToIndex(faces: { id: number, descriptor: number[] }[]) {
         this.sendCommand('add_faces_to_vector_index', { faces });
     }
+
+    /**
+     * Extract age and pose from a face crop for age/pose backfill.
+     * Used by BackgroundAgeRescanService.
+     */
+    async extractAgeFromFace(faceData: {
+        faceId: number;
+        photoId: number;
+        filePath: string;
+        previewPath: string | null;
+        box: string;
+    }): Promise<{
+        age: number | null;
+        gender: string | null;
+        poseYaw: number | null;
+        posePitch: number | null;
+        poseRoll: number | null;
+        failureReason: string | null
+    }> {
+        try {
+            const result = await this.sendRequest('extract_age', {
+                faceId: faceData.faceId,
+                photoId: faceData.photoId,
+                filePath: faceData.filePath,
+                previewPath: faceData.previewPath,
+                box: faceData.box
+            }, 30000);
+
+            if (result.error) {
+                throw new Error(result.error);
+            }
+
+            return {
+                age: result.age ?? null,
+                gender: result.gender ?? null,
+                poseYaw: result.poseYaw ?? null,
+                posePitch: result.posePitch ?? null,
+                poseRoll: result.poseRoll ?? null,
+                failureReason: result.failureReason ?? null
+            };
+        } catch (e) {
+            // Don't log error for expected shutdown
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes('Shutdown')) {
+                logger.error(`[PythonAIProvider] extractAgeFromFace failed:`, e);
+            }
+            return { age: null, gender: null, poseYaw: null, posePitch: null, poseRoll: null, failureReason: `exception:${msg.slice(0, 50)}` };
+        }
+    }
 }
 
 export const pythonProvider = new PythonAIProvider();
