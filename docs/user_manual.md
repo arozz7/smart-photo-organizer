@@ -99,6 +99,36 @@ Some people change significantly over time (e.g., from child to adult). A single
 4.  **Benefits:** Future scans will match against **all** era centroids, significantly improving recognition for people with large age gaps in your library.
 5.  **Configuration:** You can fine-tune how eras are created in **Settings > Era Generation** (Min Faces, Merge Threshold).
 
+### 🤖 3.4 How Face Recognition Works
+
+Understanding how the AI identifies faces can help you interpret confidence indicators and improve your workflow.
+
+#### The Technology
+The app uses **InsightFace**, a state-of-the-art face analysis library:
+- **RetinaFace** (Detection): Finds faces in photos, even at angles or partially hidden
+- **ArcFace** (Recognition): Creates a unique 512-dimensional "fingerprint" for each face
+- **FAISS** (Matching): Rapidly searches through thousands of face fingerprints to find matches
+
+#### Why Some Faces Are Harder to Match
+Not all faces are equally easy to recognize:
+
+| Face Type | Recognition Difficulty | What You'll See |
+|-----------|----------------------|-----------------|
+| **Frontal, well-lit** | Easy ✅ | High confidence (green ring) |
+| **Side profile (45°+)** | Moderate ⚠️ | May appear as suggestion (amber) or unknown |
+| **Top-down / back of head** | Very Hard ❌ | Likely unmatched; may need manual assignment |
+| **Blurry / low resolution** | Hard | Lower confidence or flagged as "blurry" |
+| **Occluded (sunglasses, mask)** | Hard | May not detect or low confidence match |
+
+> [!TIP]
+> For people with many side-profile photos, use **Generate Eras** to create multiple reference models. This helps the AI recognize them from different angles.
+
+#### Contextual Clues
+When the AI can't visually match a face (e.g., top-down view), you can use context:
+- Photos taken within minutes of each other likely contain the same people
+- Use **Session Grouping** to see faces from the same photo session together
+- Manually assign hard cases based on your knowledge of the event
+
 ---
 
 ## 🪄 4. AI Enhance Lab: Upgrading Your Memories

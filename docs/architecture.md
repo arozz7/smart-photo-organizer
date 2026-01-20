@@ -45,11 +45,13 @@ graph TD
 ### 3. AI Engine (Python)
 - **Tech Stack:** Python 3.10+, PyTorch, InsightFace, FAISS, Transformers.
 - **Responsibilities:**
-  - **Face Detection:** Uses `Buffalo_L` (InsightFace) to detect faces and landmarks.
-  - **Face Recognition:** Generates 512d embeddings for faces.
-  - **Vector Search:** Uses `FAISS` to store and search face embeddings for clustering.
-  - **Clustering:** Uses `DBSCAN` (scikit-learn) to group unnamed faces by similarity.
+  - **Face Detection:** Uses `RetinaFace` (via `buffalo_l` model) to detect faces with pose invariance.
+  - **Face Recognition:** Uses `ArcFace` to generate 512-D embeddings with angular margin loss.
+  - **Age/Gender Estimation:** Uses InsightFace `genderage` module for life-stage categorization.
+  - **Vector Search:** Uses `FAISS IndexFlatL2` to search face embeddings for identity matching.
+  - **Clustering:** Uses `DBSCAN` (scikit-learn) to group unnamed faces by embedding distance.
   - **Smart Tagging:** Uses `SmolVLM` (Vision-Language Model) to caption images and generate tags.
+- **Technical Deep-Dive:** See [Face Recognition Technology](file:///j:/Projects/smart-photo-organizer/docs/face-recognition-technology.md) for detailed stack analysis.
 
 ## Data Flow: AI Scanning
 
