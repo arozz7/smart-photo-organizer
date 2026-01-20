@@ -624,11 +624,15 @@ export class FaceRepository {
         photo_id: number;
         file_path: string;
         blur_score: number | null;
+        pose_yaw: number | null;
+        pose_pitch: number | null;
+        pose_roll: number | null;
     }> {
         const db = getDB();
         try {
             const rows = db.prepare(`
-                SELECT f.id, f.descriptor, f.box_json, f.photo_id, f.blur_score, p.file_path
+                SELECT f.id, f.descriptor, f.box_json, f.photo_id, f.blur_score,
+                       f.pose_yaw, f.pose_pitch, f.pose_roll, p.file_path
                 FROM faces f
                 JOIN photos p ON f.photo_id = p.id
                 WHERE f.person_id = ?
@@ -642,6 +646,9 @@ export class FaceRepository {
                 photo_id: number;
                 file_path: string;
                 blur_score: number | null;
+                pose_yaw: number | null;
+                pose_pitch: number | null;
+                pose_roll: number | null;
             }>;
 
             return rows.map(r => ({
@@ -650,7 +657,10 @@ export class FaceRepository {
                 box_json: r.box_json,
                 photo_id: r.photo_id,
                 file_path: r.file_path,
-                blur_score: r.blur_score
+                blur_score: r.blur_score,
+                pose_yaw: r.pose_yaw,
+                pose_pitch: r.pose_pitch,
+                pose_roll: r.pose_roll
             }));
         } catch (error) {
             throw new Error(`FaceRepository.getConfirmedFaces failed: ${String(error)}`);
@@ -674,7 +684,8 @@ export class FaceRepository {
         const db = getDB();
         try {
             const faces = db.prepare(`
-                SELECT f.id, f.descriptor, p.created_at, p.metadata_json 
+                SELECT f.id, f.descriptor, f.estimated_age, f.blur_score, f.face_quality,
+                       p.created_at, p.metadata_json 
                 FROM faces f
                 JOIN photos p ON f.photo_id = p.id
                 WHERE f.person_id = ? 
@@ -684,14 +695,18 @@ export class FaceRepository {
             return faces.map((f: any) => ({
                 id: f.id,
                 descriptor: Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)),
+                estimated_age: f.estimated_age,
+                blur_score: f.blur_score,
+                face_quality: f.face_quality,
                 created_at: f.created_at,
-                metadata_json: f.metadata_json // Add metadata
+                metadata_json: f.metadata_json
             }));
         } catch (error) {
             console.error('FaceRepository.getAssignedFacesWithDates failed:', error);
             return [];
         }
     }
+
     static updateFaceEra(faceId: number, eraId: number) {
         const db = getDB();
         db.prepare('UPDATE faces SET era_id = ? WHERE id = ?').run(eraId, faceId);

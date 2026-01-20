@@ -22,20 +22,42 @@ export class PersonService {
             return;
         }
 
+        // Phase 2.2: Quality-Weighted Centroid Calculation
+        // Frontal faces (low yaw) get higher weight
+        const calcPoseWeight = (face: any): number => {
+            // Default weight if no pose data
+            if (face.pose_yaw === null || face.pose_yaw === undefined) return 1.0;
+
+            const absYaw = Math.abs(face.pose_yaw);
+            // 0° yaw = weight 1.0 (frontal), 90° = weight 0.2 (profile)
+            // Linear interpolation: weight = 1 - (yaw/90) * 0.8
+            return Math.max(0.2, 1.0 - (absYaw / 90.0) * 0.8);
+        };
+
+        // Calculate weights for each face
+        const weights = validFaces.map(f => calcPoseWeight(f));
+        const totalWeight = weights.reduce((a, b) => a + b, 0);
+
+        // Log pose statistics
+        const withPose = validFaces.filter(f => f.pose_yaw !== null).length;
+        console.log(`[PersonService] Centroid calc for ${personId}: ${validFaces.length} faces (${withPose} with pose data)`);
+
         let vectors = validFaces.map((f) => f.descriptor as number[]);
 
         // --- Robust Centroid Calculation ---
-        // Helper to calculate normalized mean vector
-        const calcMean = (vecs: number[][]) => {
+        // Helper to calculate WEIGHTED normalized mean vector
+        const calcWeightedMean = (vecs: number[][], w: number[], totalW: number) => {
             const dim = vecs[0].length;
             const mean = new Array(dim).fill(0);
-            for (const vec of vecs) {
-                for (let i = 0; i < dim; i++) mean[i] += vec[i];
+            for (let j = 0; j < vecs.length; j++) {
+                const weight = w[j] / totalW;
+                for (let i = 0; i < dim; i++) {
+                    mean[i] += vecs[j][i] * weight;
+                }
             }
             // Normalize
             let mag = 0;
             for (let i = 0; i < dim; i++) {
-                mean[i] /= vecs.length;
                 mag += mean[i] ** 2;
             }
             mag = Math.sqrt(mag);
@@ -52,8 +74,8 @@ export class PersonService {
             return Math.sqrt(sum);
         };
 
-        // Pass 1: Initial Mean
-        let mean = calcMean(vectors);
+        // Pass 1: Initial Weighted Mean
+        let mean = calcWeightedMean(vectors, weights, totalWeight);
 
         // Pass 2: Outlier Rejection (if enough samples)
         if (vectors.length > 5) {
@@ -72,12 +94,14 @@ export class PersonService {
             const limit = Math.min(dynamicLimit, hardLimit);
 
             const cleanVectors = vectors.filter((_: number[], i: number) => dists[i] <= limit);
+            const cleanWeights = weights.filter((_: number, i: number) => dists[i] <= limit);
 
             if (cleanVectors.length > 0 && cleanVectors.length < vectors.length) {
                 console.log(`[PersonService] Outlier Rejection for Persona ${personId}: Removed ${vectors.length - cleanVectors.length} faces (Limit: ${limit.toFixed(3)})`);
                 vectors = cleanVectors;
-                // Recalculate mean from clean vectors
-                mean = calcMean(vectors);
+                // Recalculate weighted mean from clean vectors
+                const cleanTotalWeight = cleanWeights.reduce((a, b) => a + b, 0);
+                mean = calcWeightedMean(vectors, cleanWeights, cleanTotalWeight);
             }
         }
         // --- End Robust Calculation ---
