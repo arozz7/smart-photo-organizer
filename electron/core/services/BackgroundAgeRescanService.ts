@@ -255,12 +255,18 @@ export class BackgroundAgeRescanService implements IService {
 
                     const db = getDB();
                     // Phase 2.1: Also save pose data during age backfill
+                    // Phase 2.3: Also save descriptor_v2 (re-embedded from padded crop)
+                    const descriptorV2Buffer = result.descriptorV2
+                        ? Buffer.from(new Float32Array(result.descriptorV2).buffer)
+                        : null;
+
                     db.prepare(`
                         UPDATE faces 
                         SET estimated_age = ?, gender = ?, age_failure_reason = ?,
                             pose_yaw = COALESCE(pose_yaw, ?),
                             pose_pitch = COALESCE(pose_pitch, ?),
-                            pose_roll = COALESCE(pose_roll, ?)
+                            pose_roll = COALESCE(pose_roll, ?),
+                            descriptor_v2 = COALESCE(descriptor_v2, ?)
                         WHERE id = ?
                     `).run(
                         ageToSet,
@@ -269,6 +275,7 @@ export class BackgroundAgeRescanService implements IService {
                         result.poseYaw ?? null,
                         result.posePitch ?? null,
                         result.poseRoll ?? null,
+                        descriptorV2Buffer,
                         face.id
                     );
 
@@ -276,7 +283,8 @@ export class BackgroundAgeRescanService implements IService {
                         logger.warn(`[BackgroundAgeRescanService] Face ${face.id}: Age extraction failed (reason: ${failureReason || 'unknown'})`);
                     } else {
                         const poseInfo = result.poseYaw !== null ? `, yaw=${result.poseYaw?.toFixed(1)}°` : '';
-                        logger.debug(`[BackgroundAgeRescanService] Face ${face.id}: age=${result.age}, gender=${result.gender}${poseInfo}`);
+                        const v2Info = result.descriptorV2 ? ', v2=✓' : '';
+                        logger.debug(`[BackgroundAgeRescanService] Face ${face.id}: age=${result.age}, gender=${result.gender}${poseInfo}${v2Info}`);
                     }
                 }
             } catch (err) {

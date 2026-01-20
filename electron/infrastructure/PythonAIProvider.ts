@@ -250,6 +250,7 @@ export class PythonAIProvider implements IAIProvider, IService {
         poseYaw: number | null;
         posePitch: number | null;
         poseRoll: number | null;
+        descriptorV2: number[] | null;
         failureReason: string | null
     }> {
         try {
@@ -271,6 +272,7 @@ export class PythonAIProvider implements IAIProvider, IService {
                 poseYaw: result.poseYaw ?? null,
                 posePitch: result.posePitch ?? null,
                 poseRoll: result.poseRoll ?? null,
+                descriptorV2: result.descriptorV2 ?? null,
                 failureReason: result.failureReason ?? null
             };
         } catch (e) {
@@ -279,7 +281,7 @@ export class PythonAIProvider implements IAIProvider, IService {
             if (!msg.includes('Shutdown')) {
                 logger.error(`[PythonAIProvider] extractAgeFromFace failed:`, e);
             }
-            return { age: null, gender: null, poseYaw: null, posePitch: null, poseRoll: null, failureReason: `exception:${msg.slice(0, 50)}` };
+            return { age: null, gender: null, poseYaw: null, posePitch: null, poseRoll: null, descriptorV2: null, failureReason: `exception:${msg.slice(0, 50)}` };
         }
     }
 }

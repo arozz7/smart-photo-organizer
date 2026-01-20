@@ -1335,6 +1335,19 @@ def handle_command(command):
                         except (TypeError, IndexError):
                             pass
                     
+                    # Extract descriptor_v2 (Phase 2.3: AdaFace/Quality-Aware Embeddings)
+                    # This re-embeds the face from the padded crop for potentially better quality
+                    descriptor_v2 = None
+                    if len(f_results) > 0 and hasattr(best_face, 'embedding') and best_face.embedding is not None:
+                        try:
+                            embedding = best_face.embedding.tolist()
+                            # Normalize the embedding
+                            norm = sum(e**2 for e in embedding) ** 0.5
+                            if norm > 0:
+                                descriptor_v2 = [e / norm for e in embedding]
+                        except Exception as emb_err:
+                            logger.warning(f"[extract_age] Embedding extraction failed: {emb_err}")
+                    
                     response = {
                         "type": "extract_age_result",
                         "success": True,
@@ -1344,6 +1357,7 @@ def handle_command(command):
                         "poseYaw": pose_yaw,
                         "posePitch": pose_pitch,
                         "poseRoll": pose_roll,
+                        "descriptorV2": descriptor_v2,
                         "failureReason": failure_reason,
                         "reqId": req_id
                     }

@@ -251,6 +251,11 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     db.exec('ALTER TABLE faces ADD COLUMN pose_roll REAL');
   } catch (e) { /* Column exists */ }
 
+  // --- MIGRATION: AdaFace Embeddings (Phase 2.3) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN descriptor_v2 BLOB');
+  } catch (e) { /* Column exists */ }
+
   // Backfill is_confirmed=1 for existing faces with a person_id
   // Assumption: Any face already assigned to a person was manually confirmed
   const confirmationMigrationKey = 'migration_confirmation_backfill_v1';
