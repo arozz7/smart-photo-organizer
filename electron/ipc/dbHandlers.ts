@@ -491,6 +491,25 @@ export function registerDBHandlers() {
         }
     });
 
+    // --- FACE DATA HEALTH (Unified Status) ---
+    ipcMain.handle('db:getFaceDataHealth', async () => {
+        try {
+            const health = FaceRepository.getFaceDataHealth();
+            return {
+                success: true,
+                ...health,
+                // Calculate percentages for UI
+                agePercent: health.eligibleTotal > 0 ? Math.round((health.withAge / health.eligibleTotal) * 100) : 100,
+                genderPercent: health.eligibleTotal > 0 ? Math.round((health.withGender / health.eligibleTotal) * 100) : 100,
+                posePercent: health.eligibleTotal > 0 ? Math.round((health.withPose / health.eligibleTotal) * 100) : 100,
+                descriptorV2Percent: health.eligibleTotal > 0 ? Math.round((health.withDescriptorV2 / health.eligibleTotal) * 100) : 100
+            };
+        } catch (error) {
+            console.error('[Main] db:getFaceDataHealth failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
     // --- POSE DATA BACKFILL (Phase 5) ---
     ipcMain.handle('db:getPoseBackfillStatus', async () => {
         try {
@@ -536,11 +555,17 @@ export function registerDBHandlers() {
                     if (result.success) {
                         // Update database with pose data
                         // Update database with pose data - default to 0 if null to mark as processed
+                        // Convert descriptor_v2 array to Buffer if present
+                        const descriptorV2Buffer = result.descriptorV2
+                            ? Buffer.from(new Float32Array(result.descriptorV2).buffer)
+                            : null;
+
                         FaceRepository.updateFacePoseData(face.id, {
                             pose_yaw: result.poseYaw ?? 0,
                             pose_pitch: result.posePitch ?? 0,
                             pose_roll: result.poseRoll ?? 0,
-                            face_quality: result.faceQuality ?? 0.5
+                            face_quality: result.faceQuality ?? 0.5,
+                            descriptor_v2: descriptorV2Buffer
                         });
                         processed++;
                     } else {
@@ -569,6 +594,59 @@ export function registerDBHandlers() {
             };
         } catch (error) {
             console.error('[Main] db:processPoseBackfillBatch failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    // --- FACE DATA UPGRADE SERVICE (Phase 5 + Embeddings) ---
+    let faceUpgradeService: any = null;
+
+    ipcMain.handle('service:face-upgrade:start', async () => {
+        try {
+            const { FaceDataUpgradeService } = await import('../core/services/FaceDataUpgradeService');
+            if (!faceUpgradeService) {
+                faceUpgradeService = new FaceDataUpgradeService(pythonProvider);
+            }
+            faceUpgradeService.start();
+            return { success: true };
+        } catch (error) {
+            console.error('[Main] service:face-upgrade:start failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('service:face-upgrade:stop', async () => {
+        if (faceUpgradeService) {
+            await faceUpgradeService.stop();
+        }
+        return { success: true };
+    });
+
+    ipcMain.handle('service:face-upgrade:pause', async () => {
+        if (faceUpgradeService) {
+            faceUpgradeService.pause();
+        }
+        return { success: true };
+    });
+
+    ipcMain.handle('service:face-upgrade:resume', async () => {
+        if (faceUpgradeService) {
+            faceUpgradeService.resume();
+        }
+        return { success: true };
+    });
+
+    ipcMain.handle('service:face-upgrade:status', async () => {
+        try {
+            const { FaceDataUpgradeService } = await import('../core/services/FaceDataUpgradeService');
+            if (!faceUpgradeService) {
+                faceUpgradeService = new FaceDataUpgradeService(pythonProvider);
+            }
+            return {
+                success: true,
+                status: faceUpgradeService.getProgress()
+            };
+        } catch (error) {
             return { success: false, error: String(error) };
         }
     });

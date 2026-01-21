@@ -22,8 +22,9 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
         det_thresh = DET_THRESH
     
     # OPTIMIZATION: Default to only essential modules to prevent GPU crashes in auxiliary models (3d landmarks)
+    # NOTE: genderage module added for age-based ERA categorization
     if allowed_modules is None:
-        allowed_modules = ['detection', 'recognition']
+        allowed_modules = ['detection', 'recognition', 'genderage']
 
     # [OPTIMIZATION] Avoid re-initializing if already loaded with same config
     global LAST_CONFIG

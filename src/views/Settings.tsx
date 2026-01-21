@@ -3,8 +3,8 @@ import SettingsModal from '../components/SettingsModal';
 import ScanWarningsModal from '../components/ScanWarningsModal';
 import { useAI } from '../context/AIContext';
 import { useAlert } from '../context/AlertContext';
-import { usePoseBackfill } from '../hooks/usePoseBackfill';
 import { usePeople } from '../context/PeopleContext';
+import { FaceDataHealthCard } from '../components/FaceDataHealthCard';
 
 function SettingsToggle({ label, description, value, onChange }: { label: string, description: string, value: boolean, onChange: (val: boolean) => void }) {
     return (
@@ -129,58 +129,7 @@ function PreviewManager() {
     )
 }
 
-function FaceDataUpgradeManager() {
-    const { status, isRunning, isPaused, startBackfill, pauseBackfill, resumeBackfill, stopBackfill } = usePoseBackfill();
-
-    if (!status || status.needsBackfill === 0) {
-        return null;
-    }
-
-    return (
-        <div className="flex justify-between items-center border-t border-gray-700 pt-4 mt-4 flex-wrap gap-4">
-            <div>
-                <h4 className="font-medium text-white">Face Data Upgrade</h4>
-                <p className="text-sm text-gray-400 mt-1 max-w-xs">
-                    Update existing faces with pose and quality data.
-                </p>
-                <div className="text-xs text-gray-500 mt-1 font-mono">
-                    {status.percent}% ({status.completed} / {status.total})
-                </div>
-            </div>
-            <div className="flex items-center gap-3">
-                {isRunning && (
-                    <span className="text-xs text-blue-400 animate-pulse">
-                        {isPaused ? 'PAUSED' : 'PROCESSING...'}
-                    </span>
-                )}
-
-                {!isRunning ? (
-                    <button
-                        onClick={() => startBackfill()}
-                        className="px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
-                    >
-                        Start Upgrade
-                    </button>
-                ) : (
-                    <div className="flex gap-2">
-                        <button
-                            onClick={isPaused ? resumeBackfill : pauseBackfill}
-                            className="px-3 py-2 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white border border-gray-600"
-                        >
-                            {isPaused ? 'Resume' : 'Pause'}
-                        </button>
-                        <button
-                            onClick={stopBackfill}
-                            className="px-3 py-2 rounded-md text-sm font-medium bg-red-900/40 hover:bg-red-900/60 text-red-200 border border-red-800/50"
-                        >
-                            Stop
-                        </button>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
+// FaceDataUpgradeManager removed - replaced by FaceDataHealthCard
 
 export default function Settings() {
     const [clearing, setClearing] = useState(false)
@@ -735,7 +684,10 @@ export default function Settings() {
                                 </div>
                             </div>
 
-                            <FaceDataUpgradeManager />
+                            {/* Unified Face Data Health (replaces FaceDataUpgradeManager + AgeBackfillCard) */}
+                            <div className="border-t border-gray-700 pt-4 mt-4">
+                                <FaceDataHealthCard />
+                            </div>
                         </div>
                     </section>
                 </div>

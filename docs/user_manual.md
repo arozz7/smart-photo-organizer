@@ -99,6 +99,9 @@ Some people change significantly over time (e.g., from child to adult). A single
 4.  **Benefits:** Future scans will match against **all** era centroids, significantly improving recognition for people with large age gaps in your library.
 5.  **Configuration:** You can fine-tune how eras are created in **Settings > Era Generation** (Min Faces, Merge Threshold).
 
+> [!NOTE]
+> **Prerequisite:** Era Generation requires advanced face data (Pose & V2 Embeddings). If this feature is disabled or inaccurate, please go to **Settings > Database Management** and run the **Face Data Upgrade**.
+
 ### 🤖 3.4 How Face Recognition Works
 
 Understanding how the AI identifies faces can help you interpret confidence indicators and improve your workflow.
@@ -194,7 +197,7 @@ Tools for maintaining the health and accuracy of your library:
 - **Clear AI Tags:** Removes all AI-generated tags while preserving your manual ones. Useful if you want to re-scan with a different performance profile.
 - **Cleanup Tags:** Normalizes all tags in the database (lowercase, single-word) and merges duplicates.
 - **Deduplicate Faces:** Scans for and merges potential duplicate face entries in your database.
-- **Face Data Upgrade:** Detects and processes missing pose estimation data for improved recognition of side profiles.
+- **Face Data Upgrade:** Detects and processes missing pose estimation and high-res embedding data. This upgrade is **required** to enable "Age Eras" and significantly improves recognition of side profiles. Check the "Face Data Health" card to track progress.
 - **Calculate Blur Scores:** Missing scores for old scans? Use this to calculate quality scores for existing faces, enabling the "Cleanup Blurry" feature.
 - **Factory Reset:** ⚠️ **Extreme Caution.** Wipes the database and all settings to start fresh.
 

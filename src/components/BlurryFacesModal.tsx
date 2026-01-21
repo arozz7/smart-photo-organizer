@@ -20,6 +20,23 @@ interface BlurryFacesModalProps {
 
 
 
+const BlurryGridList = React.forwardRef<HTMLDivElement, any>(({ style, children, ...props }, ref) => (
+    <div
+        ref={ref}
+        {...props}
+        style={{ ...style }}
+        className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 min-[2000px]:grid-cols-14 gap-2 pb-4 pr-2"
+    >
+        {children}
+    </div>
+));
+
+const BlurryGridItem = ({ children, ...props }: any) => (
+    <div {...props} className="aspect-square w-full">
+        {children}
+    </div>
+);
+
 const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange, personId, onDeleteComplete }) => {
     const { calculateBlurScores, calculatingBlur } = useAI();
     const { people, autoNameFaces } = usePeople();
@@ -39,6 +56,18 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
     // Pagination
     const [offset, setOffset] = useState(0);
     const [hasMore, setHasMore] = useState(true);
+
+    const gridComponents = useMemo(() => ({
+        List: BlurryGridList,
+        Item: BlurryGridItem,
+        Footer: () => (
+            loading && hasMore ? (
+                <div className="col-span-full py-4 flex justify-center text-gray-500">
+                    Loading more...
+                </div>
+            ) : null
+        )
+    }), [loading, hasMore]);
     const [totalCount, setTotalCount] = useState(0);
     const BATCH_SIZE = 1000;
 
@@ -373,31 +402,7 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                                         endReached={() => {
                                             if (hasMore) loadFaces(false);
                                         }}
-                                        components={{
-                                            List: React.forwardRef(({ style, children, ...props }: any, ref) => (
-                                                <div
-                                                    ref={ref}
-                                                    {...props}
-                                                    style={{ ...style }}
-                                                    className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 min-[2000px]:grid-cols-14 gap-2 pb-4 pr-2"
-                                                >
-                                                    {children}
-                                                </div>
-                                            )),
-                                            Item: ({ children, ...props }: any) => (
-                                                <div {...props} className="aspect-square w-full">
-                                                    {children}
-                                                </div>
-                                            ),
-                                            Footer: () => (
-                                                /* Bottom pagination loader remains as footer */
-                                                loading && hasMore ? (
-                                                    <div className="col-span-full py-4 flex justify-center text-gray-500">
-                                                        Loading more...
-                                                    </div>
-                                                ) : null
-                                            )
-                                        }}
+                                        components={gridComponents}
                                         itemContent={itemContent}
                                     />
                                     {/* Main overlay loader for initial fetch or blocking updates */}

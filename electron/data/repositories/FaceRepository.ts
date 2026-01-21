@@ -569,6 +569,75 @@ export class FaceRepository {
     }
 
     /**
+     * Get unified face data health statistics for the Face Data Health UI.
+     * Returns counts of faces with each data type populated.
+     */
+    static getFaceDataHealth(): {
+        total: number;
+        eligibleTotal: number;  // Faces eligible for upgrade (not ignored, not too blurry)
+        withAge: number;
+        withGender: number;
+        withPose: number;
+        withDescriptorV2: number;
+    } {
+        const db = getDB();
+        try {
+            // Total faces in database
+            const total = (db.prepare(`SELECT COUNT(*) as count FROM faces WHERE descriptor IS NOT NULL`).get() as { count: number })?.count || 0;
+
+            // Eligible faces (not ignored, not too blurry) - these are what we upgrade
+            const eligibleFilter = `
+                descriptor IS NOT NULL
+                AND (is_ignored = 0 OR is_ignored IS NULL)
+                AND (blur_score IS NULL OR blur_score >= 10)
+            `;
+
+            const eligibleTotal = (db.prepare(`
+                SELECT COUNT(*) as count FROM faces WHERE ${eligibleFilter}
+            `).get() as { count: number })?.count || 0;
+
+            // Eligible faces with age data
+            const withAge = (db.prepare(`
+                SELECT COUNT(*) as count FROM faces 
+                WHERE ${eligibleFilter}
+                  AND estimated_age IS NOT NULL AND estimated_age > 0
+            `).get() as { count: number })?.count || 0;
+
+            // Eligible faces with gender data
+            const withGender = (db.prepare(`
+                SELECT COUNT(*) as count FROM faces 
+                WHERE ${eligibleFilter}
+                  AND gender IS NOT NULL
+            `).get() as { count: number })?.count || 0;
+
+            // Eligible faces with pose data
+            const withPose = (db.prepare(`
+                SELECT COUNT(*) as count FROM faces 
+                WHERE ${eligibleFilter}
+                  AND pose_yaw IS NOT NULL
+            `).get() as { count: number })?.count || 0;
+
+            // Eligible faces with descriptor_v2
+            const withDescriptorV2 = (db.prepare(`
+                SELECT COUNT(*) as count FROM faces 
+                WHERE ${eligibleFilter}
+                  AND descriptor_v2 IS NOT NULL
+            `).get() as { count: number })?.count || 0;
+
+            return {
+                total,
+                eligibleTotal,
+                withAge,
+                withGender,
+                withPose,
+                withDescriptorV2
+            };
+        } catch (error) {
+            throw new Error(`FaceRepository.getFaceDataHealth failed: ${String(error)}`);
+        }
+    }
+
+    /**
      * Update pose data for a specific face (Phase 5 backfill).
      */
     static updateFacePoseData(
@@ -578,19 +647,23 @@ export class FaceRepository {
             pose_pitch: number | null;
             pose_roll: number | null;
             face_quality: number | null;
+            descriptor_v2?: Buffer | null;
         }
     ): void {
         const db = getDB();
         try {
+            // Use COALESCE to avoid overwriting existing descriptor_v2 with null
             db.prepare(`
                 UPDATE faces 
-                SET pose_yaw = ?, pose_pitch = ?, pose_roll = ?, face_quality = ?
+                SET pose_yaw = ?, pose_pitch = ?, pose_roll = ?, face_quality = ?,
+                    descriptor_v2 = COALESCE(?, descriptor_v2)
                 WHERE id = ?
             `).run(
                 poseData.pose_yaw,
                 poseData.pose_pitch,
                 poseData.pose_roll,
                 poseData.face_quality,
+                poseData.descriptor_v2 ?? null,
                 faceId
             );
         } catch (error) {

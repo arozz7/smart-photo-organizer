@@ -37,8 +37,18 @@ vector_store.init_faiss()
 
 # --- HELPER FUNCTIONS (Specific to Orchestration/API) ---
 
+# Simple single-item cache for batch processing
+_img_cache = {"path": None, "img": None, "timestamp": 0}
+
 def load_image_cv2(file_path):
-    """Loads an image into OpenCV BGR format with robust fallback."""
+    """Loads an image into OpenCV BGR format with robust fallback and caching."""
+    global _img_cache
+    
+    # Check cache
+    if _img_cache["path"] == file_path and _img_cache["img"] is not None:
+        # logger.debug(f"Image cache hit: {file_path}")
+        return _img_cache["img"]
+        
     try:
         from PIL import Image, ImageFile, ImageOps as PILImageOps
         ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -53,12 +63,26 @@ def load_image_cv2(file_path):
             elif rgb_img.shape[2] == 4:
                  rgb_img = cv2.cvtColor(rgb_img, cv2.COLOR_RGBA2RGB)
                  
-            return cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
+            img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
+            
+            # Update cache
+            _img_cache["path"] = file_path
+            _img_cache["img"] = img
+            _img_cache["timestamp"] = time.time()
+            
+            return img
         except Exception as e:
             logger.warning(f"PIL Load failed: {e}. Trying RawPy...")
             with rawpy.imread(file_path) as raw:
                 rgb = raw.postprocess(use_camera_wb=True)
-                return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+                img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+                
+                # Update cache
+                _img_cache["path"] = file_path
+                _img_cache["img"] = img
+                _img_cache["timestamp"] = time.time()
+                
+                return img
     except Exception as e:
         logger.error(f"Failed to load image: {e}")
         return None
@@ -1197,23 +1221,30 @@ def handle_command(command):
                 
                 face_crop = img[y1:y2, x1:x2]
                 
+                t_prep = time.time()
+                # logger.debug(f"Prep time: {t_prep - t_start:.3f}s")
+
                 if face_crop.size == 0 or face_crop.shape[0] < 10 or face_crop.shape[1] < 10:
                     logger.warning(f"Face crop too small/empty for face {face_id}")
                     response = {"type": "face_pose_result", "success": False, "error": "Face crop too small", "faceId": face_id}
                 else:
-                    if not faces.app: 
+                    if not faces.app or (faces.ALLOWED_MODULES and 'recognition' not in faces.ALLOWED_MODULES): 
                         faces.init_insightface()
                     
                     # Run detection on crop
+                    t_det_start = time.time()
                     f_results = faces.app.get(face_crop)
+                    t_det_end = time.time()
+                    logger.debug(f"Face {face_id} detection took {t_det_end - t_det_start:.3f}s")
                     
-                    pose_yaw, pose_pitch, pose_roll, face_quality = None, None, None, None
+                    pose_yaw, pose_pitch, pose_roll, face_quality, descriptor_v2 = None, None, None, None, None
                     
                     if len(f_results) > 0:
                         # Take the largest detected face
                         best_face = max(f_results, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
                         
                         # Extract pose
+                         # ... (rest of logic) ...
                         if hasattr(best_face, 'pose') and best_face.pose is not None:
                             try:
                                 pose = best_face.pose
@@ -1230,6 +1261,23 @@ def handle_command(command):
                         det_score = float(best_face.det_score) if hasattr(best_face, 'det_score') else 0.5
                         size_factor = min(w / 200.0, 1.0)
                         face_quality = (blur_factor * 0.3 + pose_factor * 0.3 + det_score * 0.2 + size_factor * 0.2)
+                        
+                        # Extract descriptor_v2
+                        if hasattr(best_face, 'embedding'):
+                            if best_face.embedding is not None:
+                                try:
+                                    embedding = best_face.embedding.tolist()
+                                    norm = sum(e**2 for e in embedding) ** 0.5
+                                    if norm > 0:
+                                        descriptor_v2 = [e / norm for e in embedding]
+                                    else:
+                                        logger.warning(f"[extract_face_pose] Face {face_id}: embedding norm is 0")
+                                except Exception as emb_err:
+                                    logger.warning(f"[extract_face_pose] Embedding extraction failed: {emb_err}")
+                            else:
+                                logger.warning(f"[extract_face_pose] Face {face_id}: embedding attribute is None. Modules: {faces.ALLOWED_MODULES}")
+                        else:
+                            logger.warning(f"[extract_face_pose] Face {face_id}: no embedding attribute. Modules: {faces.ALLOWED_MODULES}")
                     
                     response = {
                         "type": "face_pose_result",
@@ -1238,7 +1286,8 @@ def handle_command(command):
                         "poseYaw": pose_yaw,
                         "posePitch": pose_pitch,
                         "poseRoll": pose_roll,
-                        "faceQuality": face_quality
+                        "faceQuality": face_quality,
+                        "descriptorV2": descriptor_v2
                     }
                 
         except Exception as e:
