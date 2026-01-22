@@ -1450,7 +1450,7 @@ def main_loop():
                 
                 result = handle_command(command_data)
                 if result:
-                    print(json.dumps(result))
+                    print(json.dumps(result)) # codeql[py/clear-text-logging-sensitive-data] - IPC Output (Standard Communication Channel)
                     sys.stdout.flush()
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON input: {line}")
