@@ -65,6 +65,52 @@
 - **Dependencies:** Phase 2 requires #2 (Home Page Dashboard); Phase 3 requires Corrupt File Recovery Center.
 - **Implementation Plan:** See [Error Export Plan](file:///j:/Projects/smart-photo-organizer/docs/error-export-plan.md)
 
+### 5. Ctrl+Scroll Grid Size Control
+- **Goal:** Allow users to dynamically adjust face thumbnail grid density using Ctrl+scroll wheel.
+- **Core Features:**
+    - **Ctrl+Scroll Zoom:** Increase/decrease grid columns (4-12 range).
+    - **Per-View Persistence:** Each modal/page remembers its own setting (localStorage).
+    - **Visual Feedback:** Brief toast showing "Grid: X columns" on change.
+    - **Performance Optimized:** CSS-only changes, debounced events, VirtuosoGrid-safe.
+- **Affected Components:** AllFacesModal, OutlierReviewModal, BlurryFacesModal, People.tsx (4 sub-views), ClusterRow, PersonDetail, GroupNamingModal, FaceGrid.
+- **Modularization:** All logic in new hooks (`useCtrlScroll`, `useDynamicGrid`, `GridSizeContext`) to avoid bloating existing large files.
+- **Implementation Plan:** See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/ctrl-scroll-grid-size-plan.md)
+
+### 6. Age-Based ERA Categorization
+- **Goal:** Replace visual clustering with actual age estimation for ERA generation, enabling life-stage tracking (Newborn → Child → Teen → Adult).
+- **Problem:** Current ERA system uses K-Means visual clustering, which groups all faces into one bucket instead of meaningful life stages.
+- **Core Features:**
+    - **Age Extraction:** Enable InsightFace `genderage` module to extract `face.age` during all scans.
+    - **Age Buckets:** Newborn (0-1), Infant (1-2), Toddler (2-4), Child (5-12), Teen (13-19), Young Adult (20-35), Adult (36-55), Senior (56-69), Elderly (70+).
+    - **Background Backfill:** Service to rescan existing photos for age data (resumable, graceful shutdown).
+    - **Auto-Generation:** Automatically generate ERAs for all named persons after backfill completes.
+    - **Progress UI:** Status updates during backfill with estimated time remaining.
+- **Implementation Phases:**
+    1. Enable `genderage` module in Python AI + extract age in scan response.
+    2. DB migration: Add `estimated_age` and `gender` columns to faces table.
+    3. Background backfill service following `BackgroundBucketingService` pattern.
+    4. Rewrite `PersonService.generateEras` to use age buckets instead of visual clustering.
+- **Performance:** Genderage adds ~5-10% to face detection time (one-time cost per photo).
+
+### 7. Hard Pose Handling & Context Propagation
+- **Goal:** Improve recognition accuracy for side profiles, top-down views, and other challenging face angles.
+- **Problem:** Standard embeddings from extreme angles (yaw > 45°) produce lower-quality matches, leading to missed identifications or false positives.
+- **Technical Reference:** See [Face Recognition Technology](file:///j:/Projects/smart-photo-organizer/docs/face-recognition-technology.md) for detailed research.
+- **Core Features:**
+    - **Pose Scoring:** Store `face.pose` (yaw/pitch/roll) during scan for pose-aware processing.
+    - **Pose Filtering:** Enable UI filtering by face pose ("Show only frontal faces").
+    - **Centroid Quality Weighting:** Weight frontal, sharp faces higher in centroid calculation.
+    - **Contextual Label Propagation:** Use time/location proximity to assign labels to hard faces.
+    - **Multi-Centroid Matching:** Store separate embeddings for frontal vs. profile views per person.
+- **Implementation Phases:**
+    1. DB migration: Add `pose_yaw`, `pose_pitch`, `pose_roll` columns to faces table.
+    2. Extract and store pose data during scan (InsightFace already provides `face.pose`).
+    3. Modify `PersonService.calculateCentroid` to weight frontal faces higher.
+    4. New `ContextualMatchingService`: Propagate labels via temporal/GPS clustering.
+    5. UI: Add pose filter toggle to Unnamed Faces view.
+- **Performance:** Pose extraction is already included in InsightFace detection (no additional cost).
+- **Dependencies:** Benefits from #6 (Age-Based ERA) for comprehensive person modeling.
+
 ---
 
 ## 🔮 Feature Backlog

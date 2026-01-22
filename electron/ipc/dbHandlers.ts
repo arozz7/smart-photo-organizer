@@ -276,7 +276,11 @@ export function registerDBHandlers() {
         return { success: true };
     });
 
-    // --- PEOPLE ---
+    ipcMain.handle('db:renameEra', async (_, { eraId, newName }) => {
+        PersonRepository.renameEra(eraId, newName);
+        return { success: true };
+    });
+
     ipcMain.handle('db:getPeople', async () => {
         console.log('[IPC] db:getPeople START');
         const start = Date.now();
@@ -487,6 +491,25 @@ export function registerDBHandlers() {
         }
     });
 
+    // --- FACE DATA HEALTH (Unified Status) ---
+    ipcMain.handle('db:getFaceDataHealth', async () => {
+        try {
+            const health = FaceRepository.getFaceDataHealth();
+            return {
+                success: true,
+                ...health,
+                // Calculate percentages for UI
+                agePercent: health.eligibleTotal > 0 ? Math.round((health.withAge / health.eligibleTotal) * 100) : 100,
+                genderPercent: health.eligibleTotal > 0 ? Math.round((health.withGender / health.eligibleTotal) * 100) : 100,
+                posePercent: health.eligibleTotal > 0 ? Math.round((health.withPose / health.eligibleTotal) * 100) : 100,
+                descriptorV2Percent: health.eligibleTotal > 0 ? Math.round((health.withDescriptorV2 / health.eligibleTotal) * 100) : 100
+            };
+        } catch (error) {
+            console.error('[Main] db:getFaceDataHealth failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
     // --- POSE DATA BACKFILL (Phase 5) ---
     ipcMain.handle('db:getPoseBackfillStatus', async () => {
         try {
@@ -532,11 +555,17 @@ export function registerDBHandlers() {
                     if (result.success) {
                         // Update database with pose data
                         // Update database with pose data - default to 0 if null to mark as processed
+                        // Convert descriptor_v2 array to Buffer if present
+                        const descriptorV2Buffer = result.descriptorV2
+                            ? Buffer.from(new Float32Array(result.descriptorV2).buffer)
+                            : null;
+
                         FaceRepository.updateFacePoseData(face.id, {
                             pose_yaw: result.poseYaw ?? 0,
                             pose_pitch: result.posePitch ?? 0,
                             pose_roll: result.poseRoll ?? 0,
-                            face_quality: result.faceQuality ?? 0.5
+                            face_quality: result.faceQuality ?? 0.5,
+                            descriptor_v2: descriptorV2Buffer
                         });
                         processed++;
                     } else {
@@ -565,6 +594,168 @@ export function registerDBHandlers() {
             };
         } catch (error) {
             console.error('[Main] db:processPoseBackfillBatch failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    // --- FACE DATA UPGRADE SERVICE (Phase 5 + Embeddings) ---
+    let faceUpgradeService: any = null;
+
+    ipcMain.handle('service:face-upgrade:start', async () => {
+        try {
+            const { FaceDataUpgradeService } = await import('../core/services/FaceDataUpgradeService');
+            if (!faceUpgradeService) {
+                faceUpgradeService = new FaceDataUpgradeService(pythonProvider);
+            }
+            faceUpgradeService.start();
+            return { success: true };
+        } catch (error) {
+            console.error('[Main] service:face-upgrade:start failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('service:face-upgrade:stop', async () => {
+        if (faceUpgradeService) {
+            await faceUpgradeService.stop();
+        }
+        return { success: true };
+    });
+
+    ipcMain.handle('service:face-upgrade:pause', async () => {
+        if (faceUpgradeService) {
+            faceUpgradeService.pause();
+        }
+        return { success: true };
+    });
+
+    ipcMain.handle('service:face-upgrade:resume', async () => {
+        if (faceUpgradeService) {
+            faceUpgradeService.resume();
+        }
+        return { success: true };
+    });
+
+    ipcMain.handle('service:face-upgrade:status', async () => {
+        try {
+            const { FaceDataUpgradeService } = await import('../core/services/FaceDataUpgradeService');
+            if (!faceUpgradeService) {
+                faceUpgradeService = new FaceDataUpgradeService(pythonProvider);
+            }
+            return {
+                success: true,
+                status: faceUpgradeService.getProgress()
+            };
+        } catch (error) {
+            return { success: false, error: String(error) };
+        }
+    });
+
+    // --- AGE DATA BACKFILL (Phase 42) ---
+    let ageRescanService: any = null;
+
+    ipcMain.handle('db:getAgeBackfillStatus', async () => {
+        try {
+            const db = getDB();
+            // Check if active
+            const activeRes = db.prepare('SELECT value FROM app_state WHERE key = ?').get('age_rescan_active') as { value: string } | undefined;
+            const isActive = activeRes?.value === '1';
+
+            // Get progress
+            const processed = parseInt(
+                (db.prepare('SELECT value FROM app_state WHERE key = ?').get('age_rescan_processed') as { value: string })?.value || '0'
+            );
+            const total = parseInt(
+                (db.prepare('SELECT value FROM app_state WHERE key = ?').get('age_rescan_total') as { value: string })?.value || '0'
+            );
+
+            // Count faces needing age data (for fresh start scenario)
+            const needsAge = db.prepare(`
+                SELECT COUNT(*) as count FROM faces 
+                WHERE estimated_age IS NULL 
+                AND descriptor IS NOT NULL
+            `).get() as { count: number };
+
+            return {
+                success: true,
+                active: isActive,
+                processed,
+                total: isActive ? total : needsAge.count,
+                remaining: isActive ? (total - processed) : needsAge.count,
+                percentage: total > 0 ? Math.round((processed / total) * 100) : 0
+            };
+        } catch (error) {
+            console.error('[Main] db:getAgeBackfillStatus failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('db:startAgeBackfill', async () => {
+        try {
+            // Lazy import to avoid circular dependency
+            const { BackgroundAgeRescanService } = await import('../core/services/BackgroundAgeRescanService');
+
+            if (!ageRescanService) {
+                ageRescanService = new BackgroundAgeRescanService(pythonProvider);
+            }
+
+            if (!ageRescanService.canStart() && !ageRescanService.isActive()) {
+                return { success: false, error: 'No faces need age backfill' };
+            }
+
+            ageRescanService.start();
+            return { success: true, message: 'Age backfill started' };
+        } catch (error) {
+            console.error('[Main] db:startAgeBackfill failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('db:cancelAgeBackfill', async () => {
+        try {
+            console.log('[Main] db:cancelAgeBackfill called');
+
+            // Always clear DB state (even if service instance doesn't exist after restart)
+            const db = getDB();
+            db.prepare('DELETE FROM app_state WHERE key IN (?, ?, ?, ?)').run(
+                'age_rescan_active',
+                'age_rescan_total',
+                'age_rescan_processed',
+                'age_rescan_offset'
+            );
+            console.log('[Main] Age backfill state cleared from DB');
+
+            if (ageRescanService) {
+                ageRescanService.cancel();
+                ageRescanService = null; // Reset so a fresh start works
+                console.log('[Main] Age backfill service cancelled and reset');
+            }
+
+            return { success: true, message: 'Age backfill cancelled' };
+        } catch (error) {
+            console.error('[Main] db:cancelAgeBackfill failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('db:pauseAgeBackfill', async () => {
+        try {
+            if (ageRescanService) {
+                ageRescanService.pause();
+            }
+            return { success: true, message: 'Age backfill paused' };
+        } catch (error) {
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('db:resumeAgeBackfill', async () => {
+        try {
+            if (ageRescanService) {
+                ageRescanService.resume();
+            }
+            return { success: true, message: 'Age backfill resumed' };
+        } catch (error) {
             return { success: false, error: String(error) };
         }
     });
@@ -785,5 +976,20 @@ export function registerDBHandlers() {
             return { success: false, error: String(e) };
         }
     });
+
+    // Auto-resume age backfill if interrupted session exists (after short delay for services to init)
+    setTimeout(async () => {
+        try {
+            const { BackgroundAgeRescanService } = await import('../core/services/BackgroundAgeRescanService');
+            if (!ageRescanService) {
+                ageRescanService = new BackgroundAgeRescanService(pythonProvider);
+            }
+            if (ageRescanService.resumeIfNeeded()) {
+                console.log('[Main] Age backfill auto-resumed from interrupted session');
+            }
+        } catch (e) {
+            console.error('[Main] Failed to check age backfill auto-resume:', e);
+        }
+    }, 10000); // 10 second delay for services to fully initialize
 }
 

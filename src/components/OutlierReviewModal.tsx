@@ -26,6 +26,25 @@ interface OutlierReviewModalProps {
     onIgnoreFaces?: (faceIds: number[]) => Promise<void>;
 }
 
+const GridList = React.forwardRef<HTMLDivElement, any>(({ style, children, ...props }, ref) => (
+    <div
+        ref={ref}
+        {...props}
+        style={style}
+        className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 min-[2000px]:grid-cols-14 gap-2 p-2"
+    >
+        {children}
+    </div>
+));
+
+const GridItem = ({ children, ...props }: any) => (
+    <div {...props} className="aspect-square">
+        {children}
+    </div>
+);
+
+const gridComponents = { List: GridList, Item: GridItem };
+
 export default function OutlierReviewModal({
     isOpen,
     onClose,
@@ -155,6 +174,8 @@ export default function OutlierReviewModal({
         return { label: 'Borderline', color: 'text-gray-400' };
     };
 
+
+
     return (
         <>
             <Dialog.Root open={isOpen} onOpenChange={open => !open && onClose()}>
@@ -247,23 +268,7 @@ export default function OutlierReviewModal({
                                         style={{ height: '100%' }}
                                         totalCount={displayedOutliers.length}
                                         overscan={100}
-                                        components={{
-                                            List: React.forwardRef(({ style, children, ...props }: any, ref) => (
-                                                <div
-                                                    ref={ref}
-                                                    {...props}
-                                                    style={style}
-                                                    className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 min-[2000px]:grid-cols-14 gap-2 p-2"
-                                                >
-                                                    {children}
-                                                </div>
-                                            )),
-                                            Item: ({ children, ...props }: any) => (
-                                                <div {...props} className="aspect-square">
-                                                    {children}
-                                                </div>
-                                            ),
-                                        }}
+                                        components={gridComponents}
                                         itemContent={(index) => {
                                             const outlier = displayedOutliers[index];
                                             if (!outlier) return null;

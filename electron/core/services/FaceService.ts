@@ -480,7 +480,9 @@ export class FaceService {
             session_date = COALESCE(session_date, ?),
             person_id = COALESCE(person_id, ?),
             assignment_source = COALESCE(assignment_source, ?),
-            is_confirmed = COALESCE(is_confirmed, ?)
+            is_confirmed = COALESCE(is_confirmed, ?),
+            estimated_age = COALESCE(estimated_age, ?),
+            gender = COALESCE(gender, ?)
             WHERE id = ?
         `);
 
@@ -490,9 +492,9 @@ export class FaceService {
                 is_reference, confidence_tier, suggested_person_id, match_distance,
                 pose_yaw, pose_pitch, pose_roll, face_quality,
                 session_folder, session_date, needs_bucketing,
-                assignment_source, is_confirmed
+                assignment_source, is_confirmed, estimated_age, gender
             )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
 
         db.transaction(() => {
@@ -596,10 +598,10 @@ export class FaceService {
                         sessionFolder,
                         sessionDateStr,
                         personId ?? null, // Coalesce fallback
-                        // Update source/confirmation ONLY if changed (effectively)
-                        // Actually, we calculated the final desired state above.
                         assignmentSource,
                         isConfirmed,
+                        face.estimatedAge ?? null, // Age-Based ERA Categorization
+                        face.gender ?? null,       // Age-Based ERA Categorization
                         bestMatch.id
                     );
                     finalId = bestMatch.id;
@@ -623,7 +625,9 @@ export class FaceService {
                         sessionDateStr,
                         personId ? 0 : 1, // Needs bucketing if unassigned
                         assignmentSource, // assignment_source
-                        isConfirmed      // is_confirmed
+                        isConfirmed,      // is_confirmed
+                        face.estimatedAge ?? null, // Age-Based ERA Categorization
+                        face.gender ?? null        // Age-Based ERA Categorization
                     ];
 
                     // DEBUG: Log parameter count and types

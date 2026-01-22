@@ -8,6 +8,7 @@ import RenameModal from '../components/modals/RenameModal';
 import EditPersonNameModal from '../components/modals/EditPersonNameModal';
 import OutlierReviewModal from '../components/OutlierReviewModal';
 import ActionDropdown from '../components/ui/ActionDropdown';
+import EraCard from '../components/EraCard';
 import { useAI } from '../context/AIContext';
 import { usePersonDetail } from '../hooks/usePersonDetail';
 
@@ -447,24 +448,12 @@ const PersonDetail = () => {
                     </h3>
                     <div className="flex flex-wrap gap-3">
                         {eras.map((era: any) => (
-                            <div key={era.id} className="bg-gray-900 border border-gray-600 rounded-lg p-3 flex items-center gap-4 min-w-[200px]">
-                                <div>
-                                    <div className="font-bold text-white">{era.era_name}</div>
-                                    <div className="text-xs text-gray-400">
-                                        {era.face_count} faces
-                                        {era.start_year && ` • ${era.start_year}-${era.end_year}`}
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => actions.deleteEra(era.id)}
-                                    className="ml-auto text-gray-500 hover:text-red-400 p-1 rounded hover:bg-gray-800 transition-colors"
-                                    title="Delete Era"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                </button>
-                            </div>
+                            <EraCard
+                                key={era.id}
+                                era={era}
+                                onDelete={() => actions.deleteEra(era.id)}
+                                onRename={actions.renameEra}
+                            />
                         ))}
                     </div>
                 </div>

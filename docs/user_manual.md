@@ -99,6 +99,39 @@ Some people change significantly over time (e.g., from child to adult). A single
 4.  **Benefits:** Future scans will match against **all** era centroids, significantly improving recognition for people with large age gaps in your library.
 5.  **Configuration:** You can fine-tune how eras are created in **Settings > Era Generation** (Min Faces, Merge Threshold).
 
+> [!NOTE]
+> **Prerequisite:** Era Generation requires advanced face data (Pose & V2 Embeddings). If this feature is disabled or inaccurate, please go to **Settings > Database Management** and run the **Face Data Upgrade**.
+
+### 🤖 3.4 How Face Recognition Works
+
+Understanding how the AI identifies faces can help you interpret confidence indicators and improve your workflow.
+
+#### The Technology
+The app uses **InsightFace**, a state-of-the-art face analysis library:
+- **RetinaFace** (Detection): Finds faces in photos, even at angles or partially hidden
+- **ArcFace** (Recognition): Creates a unique 512-dimensional "fingerprint" for each face
+- **FAISS** (Matching): Rapidly searches through thousands of face fingerprints to find matches
+
+#### Why Some Faces Are Harder to Match
+Not all faces are equally easy to recognize:
+
+| Face Type | Recognition Difficulty | What You'll See |
+|-----------|----------------------|-----------------|
+| **Frontal, well-lit** | Easy ✅ | High confidence (green ring) |
+| **Side profile (45°+)** | Moderate ⚠️ | May appear as suggestion (amber) or unknown |
+| **Top-down / back of head** | Very Hard ❌ | Likely unmatched; may need manual assignment |
+| **Blurry / low resolution** | Hard | Lower confidence or flagged as "blurry" |
+| **Occluded (sunglasses, mask)** | Hard | May not detect or low confidence match |
+
+> [!TIP]
+> For people with many side-profile photos, use **Generate Eras** to create multiple reference models. This helps the AI recognize them from different angles.
+
+#### Contextual Clues
+When the AI can't visually match a face (e.g., top-down view), you can use context:
+- Photos taken within minutes of each other likely contain the same people
+- Use **Session Grouping** to see faces from the same photo session together
+- Manually assign hard cases based on your knowledge of the event
+
 ---
 
 ## 🪄 4. AI Enhance Lab: Upgrading Your Memories
@@ -164,7 +197,7 @@ Tools for maintaining the health and accuracy of your library:
 - **Clear AI Tags:** Removes all AI-generated tags while preserving your manual ones. Useful if you want to re-scan with a different performance profile.
 - **Cleanup Tags:** Normalizes all tags in the database (lowercase, single-word) and merges duplicates.
 - **Deduplicate Faces:** Scans for and merges potential duplicate face entries in your database.
-- **Face Data Upgrade:** Detects and processes missing pose estimation data for improved recognition of side profiles.
+- **Face Data Upgrade:** Detects and processes missing pose estimation and high-res embedding data. This upgrade is **required** to enable "Age Eras" and significantly improves recognition of side profiles. Check the "Face Data Health" card to track progress.
 - **Calculate Blur Scores:** Missing scores for old scans? Use this to calculate quality scores for existing faces, enabling the "Cleanup Blurry" feature.
 - **Factory Reset:** ⚠️ **Extreme Caution.** Wipes the database and all settings to start fresh.
 

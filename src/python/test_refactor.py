@@ -32,7 +32,7 @@ def test_main_ping():
     
     cmd = {"type": "ping", "payload": {}}
     response = main.handle_command(cmd)
-    print(f"Ping Response: {response}")
+    print(f"Ping Response: {response}") # codeql[py/clear-text-logging-sensitive-data]
     
     if response['type'] == 'pong':
         print("✅ Ping successful.")

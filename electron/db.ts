@@ -220,6 +220,42 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     db.exec("ALTER TABLE faces ADD COLUMN is_confirmed BOOLEAN DEFAULT 0");
   } catch (e) { /* Column exists */ }
 
+  // --- MIGRATION: Age-Based ERA Categorization (Phase 42) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN estimated_age INTEGER');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN gender TEXT');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN age_failure_reason TEXT');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: User-Editable ERA Names (Phase 44) ---
+  try {
+    db.exec('ALTER TABLE person_eras ADD COLUMN user_name TEXT');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: Pose Data Storage (Phase 2.1) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_yaw REAL');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_pitch REAL');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_roll REAL');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: AdaFace Embeddings (Phase 2.3) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN descriptor_v2 BLOB');
+  } catch (e) { /* Column exists */ }
+
   // Backfill is_confirmed=1 for existing faces with a person_id
   // Assumption: Any face already assigned to a person was manually confirmed
   const confirmationMigrationKey = 'migration_confirmation_backfill_v1';
@@ -243,6 +279,7 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       person_id INTEGER NOT NULL,
       era_name TEXT,
+      user_name TEXT,
       start_year INTEGER,
       end_year INTEGER,
       centroid_json TEXT,
