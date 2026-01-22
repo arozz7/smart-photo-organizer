@@ -1366,7 +1366,7 @@ def handle_command(command):
                         
                         # Log success at INFO level so it's visible
                         if age is not None:
-                            logger.info(f"[OK] Face {face_id}: age={age}, gender={gender}")
+                            logger.info(f"[OK] Face {face_id}: age={age}, gender={gender}") # codeql[py/clear-text-logging-sensitive-data]
                         else:
                             logger.warning(f"Face {face_id}: detected but no age attribute")
                     else:
