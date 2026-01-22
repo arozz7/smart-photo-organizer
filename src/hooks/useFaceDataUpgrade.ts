@@ -30,17 +30,16 @@ export function useFaceDataUpgrade() {
         fetchStatus();
 
         // Listen for real-time updates via IPC events (event-driven like other services)
+        // Listen for real-time updates via IPC events (event-driven like other services)
         // NOTE: preload.ts wrapper strips the 'event' argument!
         // So the signature is (progress) not (event, progress).
 
-        // @ts-ignore
-        const removeProgressListener = window.ipcRenderer.on('face-upgrade-progress', (progress: UpgradeStatus) => {
+        const removeProgressListener = (window.ipcRenderer as any).on('face-upgrade-progress', (progress: UpgradeStatus) => {
             setStatus(progress);
             setIsComplete(false);
         });
 
-        // @ts-ignore
-        const removeCompleteListener = window.ipcRenderer.on('face-upgrade-complete', () => {
+        const removeCompleteListener = (window.ipcRenderer as any).on('face-upgrade-complete', () => {
             setIsComplete(true);
             fetchStatus();
         });
