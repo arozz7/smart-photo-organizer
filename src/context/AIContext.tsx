@@ -681,27 +681,81 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             // Determine default mode based on profile
             const defaultMode = aiProfileRef.current === 'high' ? 'MACRO' : 'FAST';
 
-            // Create a set of composite keys "ID:MODE" for existing items
-            const existingKeys = new Set(prev.map(p => `${p.id}:${p.scanMode || defaultMode}`));
+            // Create a Map for existing items for easier updates
+            // Key: "ID:MODE" -> Item
+            const queueMap = new Map();
+            prev.forEach(p => {
+                const mode = p.scanMode || defaultMode;
+                queueMap.set(`${p.id}:${mode}`, p);
+            });
 
-            const unique = newPhotos.filter(p => {
+            // Process new items:
+            // 1. If key exists, UPGRADE it (e.g. set cleanRescan=true if new item has it)
+            // 2. If key doesn't exist, add it.
+            let addedCount = 0;
+            const reQueueItems: any[] = []; // New array to hold items that need to be re-queued
+
+            newPhotos.forEach(p => {
                 const mode = p.scanMode || defaultMode;
                 const key = `${p.id}:${mode}`;
-                return !existingKeys.has(key);
-            }).map(p => ({ ...p, scanMode: p.scanMode || defaultMode }));
 
-            if (unique.length > 0) {
-                console.log(`[AI] Added ${unique.length} items to queue (Default Mode: ${defaultMode})`);
+                // CRITICAL FIX: If the item we are trying to update is the HEAD of the queue (currently processing),
+                // updating it in-place is futile because the processing function holds a reference to the old object
+                // and will pop it upon completion.
+                // We must ADD A NEW ENTRY to the end of the queue to ensure it runs again with the new settings.
+                const isHead = prev.length > 0 && prev[0].id === p.id && (prev[0].scanMode || defaultMode) === mode;
+
+                if (queueMap.has(key) && !isHead) {
+                    // Upgrade existing item (waiting in queue)
+                    const existing = queueMap.get(key);
+                    if (p.cleanRescan && !existing.cleanRescan) {
+                        console.log(`[AI] Upgrading queued item ${p.id} with cleanRescan=TRUE`);
+                        queueMap.set(key, { ...existing, cleanRescan: true });
+                    }
+                    // Add other property merges here if needed
+                } else {
+                    // Add new (or re-queue if it was head)
+                    if (isHead) {
+                        console.log(`[AI] Re-queueing active item ${p.id} to ensure clean rescan runs after current job.`);
+                        // If it's the head, we don't modify the existing entry in queueMap (which represents the current head).
+                        // Instead, we add it to a separate list to be appended later.
+                        reQueueItems.push({ ...p, scanMode: mode });
+                    } else {
+                        // If it's not the head and not already in the queue, add it.
+                        queueMap.set(key, { ...p, scanMode: mode });
+                        addedCount++; // Only increment addedCount for truly new items or non-head upgrades
+                    }
+                }
+            });
+
+            // Reconstruct from Map
+            const uniqueQueue = Array.from(queueMap.values());
+
+            // Append duplicates that were forced (Head Re-queues)
+            // We need to identify them.
+            // Actually, let's just make a list of "MustRunAgain" items.
+            // The `reQueueItems` array already contains these.
+
+            addedCount = addedCount + reQueueItems.length; // Approximate
+
+            if (addedCount > 0) {
+                console.log(`[AI] Added/Updated ${addedCount} items to queue.`);
             }
 
-            // Auto-Start Logic
-            // FIX: If user requested auto-start, unpause even if items were already in queue (unique.length === 0)
+            // Auto-Start Logic (Trigger if ANY new photos were requested, even if merged)
             if (autoStart && newPhotos.length > 0) {
                 setIsPaused(false);
                 console.log("[AI] Auto-Starting Queue (Action Triggered)");
             }
 
-            return [...prev, ...unique];
+            // Reconstruct queue from Map values
+            // IMPORTANT: maintain FIFO order for existing items?
+            // The Map iteration order is insertion order in modern JS.
+            // But we rebuilt the map from `prev`. So order logic:
+            // 1. Existing items (in order)
+            // 2. New items (appended)
+            // My Map logic above effectively does this because I populated it from `prev` first, then added `new`.
+            return [...uniqueQueue, ...reQueueItems];
         });
     }, []);
 
@@ -770,11 +824,19 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const enableVLM = vlmEnabled && isHighAccuracy && effectiveMode !== 'FAST';
 
             try {
+                // DEBUG: Check if cleanRescan is present
+                if (photo.cleanRescan) {
+                    console.log(`[AIContext] Processing ${photo.id} with cleanRescan=TRUE`);
+                } else {
+                    // console.log(`[AIContext] Processing ${photo.id} with cleanRescan=${photo.cleanRescan}`);
+                }
+
                 // @ts-ignore
                 await window.ipcRenderer.invoke('ai:analyzeImage', {
                     photoId: photo.id,
                     scanMode: effectiveMode,
-                    enableVLM
+                    enableVLM,
+                    cleanRescan: photo.cleanRescan // Pass the cleanup flag if present
                 });
 
             } catch (err) {

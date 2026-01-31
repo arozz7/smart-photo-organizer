@@ -31,7 +31,8 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
       width INTEGER,
       height INTEGER,
       blur_score REAL,
-      metadata_json TEXT
+      metadata_json TEXT,
+      description TEXT
     );
 
     CREATE TABLE IF NOT EXISTS tags (
@@ -51,7 +52,11 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     CREATE TABLE IF NOT EXISTS people (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT UNIQUE NOT NULL COLLATE NOCASE,
-      descriptor_mean_json TEXT
+      descriptor_mean_json TEXT,
+      cover_face_id INTEGER,
+      centroid_snapshot_json TEXT,
+      last_drift_check INTEGER,
+      entity_type TEXT DEFAULT 'human'
     );
 
     CREATE TABLE IF NOT EXISTS faces (
@@ -59,11 +64,30 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
       photo_id INTEGER,
       box_json TEXT,
       descriptor BLOB,
+      descriptor_v2 BLOB,
       person_id INTEGER,
       is_ignored BOOLEAN DEFAULT 0,
       is_reference BOOLEAN DEFAULT 0,
       score REAL,
       blur_score REAL,
+      bucket_id INTEGER,
+      needs_bucketing INTEGER DEFAULT 0,
+      pose_yaw REAL,
+      pose_pitch REAL,
+      pose_roll REAL,
+      face_quality REAL,
+      confidence_tier TEXT DEFAULT 'unknown',
+      assignment_source TEXT DEFAULT 'manual',
+      is_confirmed BOOLEAN DEFAULT 0,
+      session_folder TEXT,
+      session_date TEXT,
+      match_distance REAL,
+      suggested_person_id INTEGER,
+      era_id INTEGER,
+      estimated_age INTEGER,
+      gender TEXT,
+      age_failure_reason TEXT,
+      entity_type TEXT DEFAULT 'human',
       FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
       FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
     );
@@ -93,7 +117,74 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
 
     CREATE INDEX IF NOT EXISTS idx_faces_person_id ON faces(person_id);
     CREATE INDEX IF NOT EXISTS idx_faces_photo_id ON faces(photo_id);
-    CREATE INDEX IF NOT EXISTS idx_faces_bucket_id ON faces(bucket_id);
+
+    -- Phase 2.4: Era-Aware Clustering
+    CREATE TABLE IF NOT EXISTS person_eras (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      era_name TEXT,
+      user_name TEXT,
+      start_year INTEGER,
+      end_year INTEGER,
+      centroid_json TEXT,
+      face_count INTEGER DEFAULT 0,
+      is_auto_generated BOOLEAN DEFAULT 1,
+      created_at INTEGER,
+      descriptor_mean_json TEXT,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_person_eras_person_id ON person_eras(person_id);
+
+    -- Phase D: Centroid Drift Detection
+    CREATE TABLE IF NOT EXISTS person_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      descriptor_json TEXT,
+      face_count INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reason TEXT,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_person_history_person_id ON person_history(person_id);
+
+    -- Person Alerts: Store drift detection and other person-related alerts
+    CREATE TABLE IF NOT EXISTS person_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      alert_type TEXT NOT NULL,
+      message TEXT,
+      drift_distance REAL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      dismissed_at DATETIME,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_person_alerts_person_id ON person_alerts(person_id);
+    CREATE INDEX IF NOT EXISTS idx_person_alerts_dismissed ON person_alerts(dismissed_at);
+
+    -- Phase B1: Background Bucketing Schema
+    CREATE TABLE IF NOT EXISTS face_buckets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bucket_type TEXT NOT NULL DEFAULT 'discovery',
+      suggested_person_id INTEGER,
+      centroid BLOB,
+      status TEXT DEFAULT 'active',
+      session_folder TEXT,
+      session_date TEXT,
+      face_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (suggested_person_id) REFERENCES people(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_face_buckets_status ON face_buckets(status);
+    CREATE INDEX IF NOT EXISTS idx_face_buckets_type ON face_buckets(bucket_type);
+
+    -- App State: Key-value store for service flags and checkpoints
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Migration for existing databases
@@ -273,76 +364,6 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     logger.info('[DB Module] Confirmation backfill complete.');
   }
 
-  // Create person_eras table for era-aware clustering
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS person_eras (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      person_id INTEGER NOT NULL,
-      era_name TEXT,
-      user_name TEXT,
-      start_year INTEGER,
-      end_year INTEGER,
-      centroid_json TEXT,
-      face_count INTEGER DEFAULT 0,
-      is_auto_generated BOOLEAN DEFAULT 1,
-      created_at INTEGER,
-      descriptor_mean_json TEXT,
-      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_person_eras_person_id ON person_eras(person_id);
-
-    -- Phase D: Centroid Drift Detection
-    CREATE TABLE IF NOT EXISTS person_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      person_id INTEGER NOT NULL,
-      descriptor_json TEXT,
-      face_count INTEGER,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      reason TEXT,
-      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_person_history_person_id ON person_history(person_id);
-
-    -- Person Alerts: Store drift detection and other person-related alerts
-    CREATE TABLE IF NOT EXISTS person_alerts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      person_id INTEGER NOT NULL,
-      alert_type TEXT NOT NULL,
-      message TEXT,
-      drift_distance REAL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      dismissed_at DATETIME,
-      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_person_alerts_person_id ON person_alerts(person_id);
-    CREATE INDEX IF NOT EXISTS idx_person_alerts_dismissed ON person_alerts(dismissed_at);
-
-    -- Phase B1: Background Bucketing Schema
-    CREATE TABLE IF NOT EXISTS face_buckets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      bucket_type TEXT NOT NULL DEFAULT 'discovery',
-      suggested_person_id INTEGER,
-      centroid BLOB,
-      status TEXT DEFAULT 'active',
-      session_folder TEXT,
-      session_date TEXT,
-      face_count INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (suggested_person_id) REFERENCES people(id) ON DELETE SET NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_face_buckets_status ON face_buckets(status);
-    CREATE INDEX IF NOT EXISTS idx_face_buckets_type ON face_buckets(bucket_type);
-
-    -- App State: Key-value store for service flags and checkpoints
-    CREATE TABLE IF NOT EXISTS app_state (
-      key TEXT PRIMARY KEY,
-      value TEXT,
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-  `);
-
   // --- MIGRATION: Background Bucketing Columns (Phase B1) ---
   try {
     db.exec('ALTER TABLE faces ADD COLUMN needs_bucketing INTEGER DEFAULT 0');
@@ -351,6 +372,10 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
   try {
     db.exec('ALTER TABLE faces ADD COLUMN bucket_id INTEGER');
   } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_faces_bucket_id ON faces(bucket_id)');
+  } catch (e) { /* Ignore */ }
 
   // Backfill needs_bucketing=1 for existing unassigned/unbucketed faces
   // This ensures old faces get picked up by the background service

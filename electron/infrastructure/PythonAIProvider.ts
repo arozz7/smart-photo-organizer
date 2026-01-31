@@ -7,6 +7,7 @@ import { IService } from '../core/interfaces/IService';
 import { IAIProvider } from '../core/interfaces/IAIProvider';
 import { FaceService } from '../core/services/FaceService';
 import { PhotoRepository } from '../data/repositories/PhotoRepository';
+import { ConfigService } from '../core/services/ConfigService';
 import { getAISettings, getLibraryPath } from '../store'; // ConfigService later
 
 export class PythonAIProvider implements IAIProvider, IService {
@@ -77,8 +78,35 @@ export class PythonAIProvider implements IAIProvider, IService {
         if (this.process.stderr) {
             this.process.stderr.on('data', (data) => {
                 const msg = data.toString();
-                if (msg.toLowerCase().includes('error')) logger.error(`[Python Error] ${msg}`);
-                else logger.info(`[Python Log] ${msg}`);
+                if (msg.toLowerCase().includes('error')) {
+                    logger.error(`[Python Error] ${msg}`);
+                } else {
+                    // Filter noisy logs
+                    if (msg.includes('Applied providers:')) {
+                        logger.debug(`[Python Debug] ${msg}`);
+                        // Extract just the providers list for INFO
+                        const providersMatch = msg.match(/Applied providers: (\[.*?\])/);
+                        if (providersMatch) {
+                            logger.info(`[Python Log] Applied providers: ${providersMatch[1]}`);
+                        } else {
+                            logger.info(`[Python Log] Applied providers (details in debug)`);
+                        }
+                    } else if (msg.includes('model ignore:')) {
+                        logger.debug(`[Python Debug] ${msg}`);
+                        // Summarize
+                        const parts = msg.split('model ignore:');
+                        const details = parts[1] || '';
+                        // Try to get model name/path
+                        logger.info(`[Python Log] Model ignored: ${details.trim().split(' ')[0]}...`);
+                    } else if (msg.includes('find model:')) {
+                        logger.debug(`[Python Debug] ${msg}`);
+                        const parts = msg.split('find model:');
+                        const details = parts[1] || '';
+                        logger.info(`[Python Log] Found model: ${details.trim().split(' ')[0]}...`);
+                    } else {
+                        logger.info(`[Python Log] ${msg}`);
+                    }
+                }
             });
         }
 
@@ -204,7 +232,14 @@ export class PythonAIProvider implements IAIProvider, IService {
 
     // IAIProvider Implementation
     async analyzeImage(filePath: string, options?: any): Promise<any> {
-        return this.sendRequest('analyze_image', { filePath, ...options });
+        const settings = ConfigService.getSettings();
+        // Inject advanced settings
+        const payload = {
+            filePath,
+            config: settings.advancedFace,
+            ...options
+        };
+        return this.sendRequest('analyze_image', payload);
     }
 
     async clusterFaces(faces: { id: number; descriptor: number[]; }[], eps?: number, minSamples?: number, timeoutMs = 900000): Promise<any> {

@@ -25,6 +25,17 @@ interface AISettings {
     reviewThreshold?: number;
 }
 
+interface AdvancedFaceConfig {
+    detThreshStandard: number;
+    detThreshMacro: number;
+    minFaceSize: number;
+    nmsIouThresh: number;
+    nmsIoMinThresh: number;
+    enableAreaBasedNMS: boolean;
+    enableMacroLowRes: boolean;
+    enableTTA: boolean;
+}
+
 const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => {
     const { showAlert, showConfirm } = useAlert();
     const [loading, setLoading] = useState(true);
@@ -37,6 +48,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
         vlmMaxTokens: 100,
         hideUnnamedFacesByDefault: false,
         vlmEnabled: false
+    });
+    const [advancedSettings, setAdvancedSettings] = useState<AdvancedFaceConfig>({
+        detThreshStandard: 0.65,
+        detThreshMacro: 0.25,
+        minFaceSize: 40,
+        nmsIouThresh: 0.3,
+        nmsIoMinThresh: 0.65,
+        enableAreaBasedNMS: true,
+        enableMacroLowRes: true,
+        enableTTA: true
     });
 
     useEffect(() => {
@@ -51,6 +72,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
             // @ts-ignore
             const saved = await window.ipcRenderer.invoke('ai:getSettings');
             if (saved) setSettings(saved);
+            // @ts-ignore
+            const savedAdv = await window.ipcRenderer.invoke('ai:getAdvancedSettings');
+            if (savedAdv) setAdvancedSettings(prevState => ({ ...prevState, ...savedAdv }));
         } catch (e) {
             console.error("Failed to load settings:", e);
         } finally {
@@ -63,6 +87,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
             setLoading(true);
             // @ts-ignore
             await window.ipcRenderer.invoke('ai:saveSettings', settings);
+            // @ts-ignore
+            await window.ipcRenderer.invoke('ai:saveAdvancedSettings', advancedSettings);
             onOpenChange(false);
         } catch (e) {
             console.error("Failed to save settings:", e);
@@ -95,6 +121,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                     hideUnnamedFacesByDefault: false,
                     vlmEnabled: false
                 });
+                setAdvancedSettings({
+                    detThreshStandard: 0.65,
+                    detThreshMacro: 0.25,
+                    minFaceSize: 40,
+                    nmsIouThresh: 0.3,
+                    nmsIoMinThresh: 0.65,
+                    enableAreaBasedNMS: true,
+                    enableMacroLowRes: true,
+                    enableTTA: true
+                });
             }
         });
     };
@@ -119,6 +155,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                         <div className="px-6 border-b border-gray-800 bg-gray-900/50">
                             <Tabs.List className="flex gap-6">
                                 <TabTrigger value="general">General</TabTrigger>
+                                <TabTrigger value="advanced">Advanced Face</TabTrigger>
                                 <TabTrigger value="tagging">Tagging</TabTrigger>
                                 <TabTrigger value="maintenance">Maintenance</TabTrigger>
                             </Tabs.List>
@@ -188,18 +225,94 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                         <SettingSlider
                                             label="Auto-Assign (High Confidence)"
                                             value={settings.autoAssignThreshold || 0.70}
-                                            min={0.4} max={1.0} step={0.05}
+                                            min={0.4} max={1.0} step={0.01}
                                             onChange={(v) => handleChange('autoAssignThreshold', v)}
-                                            tooltip="LOWER = fewer auto-assigns but more accurate. HIGHER = more auto-assigns but may include false matches. Default 0.70 (~75% similarity)."
+                                            tooltip="Confidence threshold (0.40 - 1.00) for auto-assigning faces. Lower values (e.g. 0.6) = stricter matching (fewer assigns, higher accuracy). Higher values = looser matching. Default: 0.70"
                                         />
 
                                         <div className="mt-4">
                                             <SettingSlider
                                                 label="Review Tier Cutoff"
                                                 value={settings.reviewThreshold || 0.90}
-                                                min={0.6} max={1.2} step={0.05}
+                                                min={0.6} max={1.2} step={0.01}
                                                 onChange={(v) => handleChange('reviewThreshold', v)}
-                                                tooltip="LOWER = fewer suggestions shown for review. HIGHER = more suggestions but includes weaker matches. Default 0.90 (~60% similarity)."
+                                                tooltip="Confidence threshold (0.60 - 1.20) for showing 'Review' suggestions. Faces distinct from Auto-Assign but better than this will appear in 'Needs Review'. Default: 0.90"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </Tabs.Content>
+
+                            <Tabs.Content value="advanced" className="space-y-6 focus:outline-none">
+                                <div className="space-y-6">
+                                    <div className="p-3 bg-red-900/20 border border-red-500/20 rounded text-sm text-red-200">
+                                        <strong>Warning:</strong> These settings affect how the AI detects faces. Changing them may cause missed faces or false positives (seeing faces in trees). Valid ONLY for new scans.
+                                    </div>
+
+                                    <h3 className="text-lg font-semibold text-purple-400">Detection Sensitivity</h3>
+
+                                    <SettingSlider
+                                        label="Standard Mode Sensitivity"
+                                        value={advancedSettings.detThreshStandard}
+                                        min={0.1} max={0.99} step={0.01}
+                                        onChange={(v) => setAdvancedSettings(prev => ({ ...prev, detThreshStandard: v }))}
+                                        tooltip="Confidence threshold (0.10 - 0.99). Higher values reduce false positives (seeing faces where there are none) but might miss real faces. Lower values find more faces but risk false positives. Default: 0.65"
+                                    />
+
+                                    <SettingSlider
+                                        label="Macro Mode Sensitivity"
+                                        value={advancedSettings.detThreshMacro}
+                                        min={0.05} max={0.80} step={0.01}
+                                        onChange={(v) => setAdvancedSettings(prev => ({ ...prev, detThreshMacro: v }))}
+                                        tooltip="Confidence threshold for Macro mode (0.05 - 0.80). Lower values (e.g. 0.25) help find sleeping/closed-eye faces, but significantly increase ghost faces (false positives). Default: 0.25"
+                                    />
+
+                                    <div className="pt-4 border-t border-gray-800">
+                                        <h3 className="text-lg font-semibold text-purple-400 mb-4">Filtering & Logic</h3>
+
+                                        <SettingSlider
+                                            label="Minimum Face Size (px)"
+                                            value={advancedSettings.minFaceSize}
+                                            min={10} max={200} step={1}
+                                            onChange={(v) => setAdvancedSettings(prev => ({ ...prev, minFaceSize: v }))}
+                                            tooltip="Minimum Face Size in pixels (10 - 200). Faces smaller than this will be ignored. Increasing this speeds up scanning and reduces noise. Default: 40px"
+                                        />
+
+                                        <SettingSlider
+                                            label="Overlap Threshold (NMS)"
+                                            value={advancedSettings.nmsIouThresh}
+                                            min={0.1} max={0.9} step={0.01}
+                                            onChange={(v) => setAdvancedSettings(prev => ({ ...prev, nmsIouThresh: v }))}
+                                            tooltip="Overlap Threshold (0.10 - 0.90). Determines how much two faces can overlap. Lower values (e.g. 0.3) merge overlapping boxes more aggressively (fewer duplicates). Higher values allow faces to be closer together. Default: 0.30"
+                                        />
+
+                                        <div className="flex items-center justify-between p-3 mt-4 bg-gray-800/50 rounded-lg border border-gray-700/50">
+                                            <div className="flex flex-col gap-1">
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-sm font-medium text-gray-200">Deep Composition Scan</label>
+                                                    <InfoTooltip text="In Macro Mode, adds an extra scan pass at 160px resolution. Essential for detecting very large faces that fill the entire frame, but adds processing time." />
+                                                </div>
+                                            </div>
+                                            <input
+                                                type="checkbox"
+                                                checked={advancedSettings.enableMacroLowRes}
+                                                onChange={(e) => setAdvancedSettings(prev => ({ ...prev, enableMacroLowRes: e.target.checked }))}
+                                                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div className="flex items-center justify-between p-3 mt-2 bg-gray-800/50 rounded-lg border border-gray-700/50">
+                                            <div className="flex flex-col gap-1">
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-sm font-medium text-gray-200">Rotation Augmentation (TTA)</label>
+                                                    <InfoTooltip text="Test Time Augmentation. In Macro Mode, rotates the image 90, 180, and 270 degrees to find sideways or upside-down faces. Significantly increases scan time." />
+                                                </div>
+                                            </div>
+                                            <input
+                                                type="checkbox"
+                                                checked={advancedSettings.enableTTA}
+                                                onChange={(e) => setAdvancedSettings(prev => ({ ...prev, enableTTA: e.target.checked }))}
+                                                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
                                             />
                                         </div>
                                     </div>
@@ -333,7 +446,9 @@ const SettingSlider: React.FC<{
                     <label className="text-sm font-medium text-gray-300">{label}</label>
                     <InfoTooltip text={tooltip} />
                 </div>
-                <span className="text-xs text-blue-400 font-mono bg-blue-900/30 px-2 py-0.5 rounded border border-blue-500/20">{value.toFixed(2)}</span>
+                <span className="text-xs text-blue-400 font-mono bg-blue-900/30 px-2 py-0.5 rounded border border-blue-500/20">
+                    {step % 1 === 0 ? value.toFixed(0) : value.toFixed(2)}
+                </span>
             </div>
 
             <Slider.Root

@@ -13,36 +13,52 @@ ALLOWED_MODULES = None
 LAST_CONFIG = None
 
 # Default Config
-DET_THRESH = 0.5
+DET_THRESH = 0.7 # Increased further to eliminate background noise (windows/patterns)
+NMS_THRESH = 0.65 # High overlap allowed
 
-def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1280, 1280), det_thresh=None):
+def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1280, 1280), det_thresh=None, nms_thresh=None):
     global app, AI_MODE, CURRENT_PROVIDERS, ALLOWED_MODULES
     
     if det_thresh is None:
         det_thresh = DET_THRESH
+        
+    if nms_thresh is None:
+        nms_thresh = NMS_THRESH
     
     # OPTIMIZATION: Default to only essential modules to prevent GPU crashes in auxiliary models (3d landmarks)
     # NOTE: genderage module added for age-based ERA categorization
     if allowed_modules is None:
-        allowed_modules = ['detection', 'recognition', 'genderage']
+        allowed_modules = ['detection', 'recognition', 'landmark_2d_106', 'landmark_3d_68', 'genderage']
 
     # [OPTIMIZATION] Avoid re-initializing if already loaded with same config
     global LAST_CONFIG
-    current_config = (ctx_id, det_size, det_thresh, allowed_modules)
+    current_config = (ctx_id, det_size, det_thresh, nms_thresh, allowed_modules)
     
     if app is not None:
+        # Check if config matches last used config
         # Check if config matches last used config
         if 'LAST_CONFIG' in globals() and LAST_CONFIG == current_config:
             return # Truly no-op
 
-        try:
-             # Only re-prepare if params changed
-             logger.info(f"Re-preparing InsightFace with ctx_id={ctx_id}, modules={allowed_modules}...")
-             app.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=det_thresh)
-             LAST_CONFIG = current_config
-             return
-        except Exception as e:
-             logger.warning(f"Failed to re-prepare existing app (will re-init): {e}")
+        # [Fix] InsightFace's RetinaFace model refuses to update input_size (det_size) after first init.
+        # We must force a fresh instance if det_size changes.
+        last_det_size = LAST_CONFIG[1] if 'LAST_CONFIG' in globals() and LAST_CONFIG else None
+        
+        if last_det_size is not None and last_det_size != det_size:
+            logger.info(f"det_size changed {last_det_size} -> {det_size}. Forcing re-init of FaceAnalysis app to apply new size.")
+            app = None
+            # Fall through to Fresh Init logic below
+        else:
+            try:
+                 # Only re-prepare if params changed (but det_size is same/compatible)
+                 logger.info(f"Re-preparing InsightFace with ctx_id={ctx_id}, modules={allowed_modules}, det_thresh={det_thresh}, nms_thresh={nms_thresh}...")
+                 app.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=det_thresh)
+                 if hasattr(app, 'det_model'):
+                     app.det_model.nms_thresh = nms_thresh
+                 LAST_CONFIG = current_config
+                 return
+            except Exception as e:
+                 logger.warning(f"Failed to re-prepare existing app (will re-init): {e}")
 
     # Fresh Init starts here
     logger.info(f"Initializing InsightFace with ctx_id={ctx_id}, modules={allowed_modules}, det_size={det_size}...")
@@ -78,7 +94,16 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
              app = FaceAnalysis(name='buffalo_l', providers=providers, allowed_modules=allowed_modules)
              
              # Prepare
-             app.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=det_thresh)
+             # [Optimization] Suppress verbose ONNX provider logs
+             import os
+             from contextlib import redirect_stdout, redirect_stderr
+
+             with open(os.devnull, 'w') as fnull:
+                 with redirect_stdout(fnull), redirect_stderr(fnull):
+                     app.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=det_thresh)
+
+             if hasattr(app, 'det_model'):
+                 app.det_model.nms_thresh = nms_thresh
              
              # Update Status Globals
              CURRENT_PROVIDERS = providers
@@ -92,7 +117,7 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
              else:
                  AI_MODE = "CPU"
                  
-             LAST_CONFIG = (ctx_id, det_size, det_thresh, allowed_modules)
+             LAST_CONFIG = current_config
                  
         logger.info(f"InsightFace initialized. Mode: {AI_MODE}")
     except Exception as e:

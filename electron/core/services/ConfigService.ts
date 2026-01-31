@@ -20,6 +20,24 @@ export interface AISettings {
     eraMergeThreshold?: number;    // Default 0.75
 }
 
+export interface AdvancedFaceConfig {
+    // Detection
+    detThreshStandard: number; // Default 0.65
+    detThreshMacro: number;    // Default 0.25 (New default)
+
+    // Filter
+    minFaceSize: number;       // Default 40
+
+    // NMS
+    nmsIouThresh: number;      // Default 0.3 (Standard overlap)
+    nmsIoMinThresh: number;    // Default 0.65 (Containment)
+    enableAreaBasedNMS: boolean; // Default true (for size prioritization)
+
+    // Scan Scales (Simplified for UI)
+    enableMacroLowRes: boolean; // Enable 160px pass?
+    enableTTA: boolean;         // Enable rotation augmentation?
+}
+
 export interface WindowBounds {
     width: number;
     height: number;
@@ -62,6 +80,7 @@ export interface SmartIgnoreSettings {
 
 export interface AppConfig {
     libraryPath: string;
+    advancedFace: AdvancedFaceConfig;
     aiSettings: AISettings;
     windowBounds: WindowBounds;
     firstRun: boolean;
@@ -74,6 +93,16 @@ export interface AppConfig {
 // Default Config
 export const DEFAULT_CONFIG: AppConfig = {
     libraryPath: '',
+    advancedFace: {
+        detThreshStandard: 0.65,
+        detThreshMacro: 0.25,
+        minFaceSize: 40,
+        nmsIouThresh: 0.3,
+        nmsIoMinThresh: 0.65,
+        enableAreaBasedNMS: true,
+        enableMacroLowRes: true,
+        enableTTA: true
+    },
     aiSettings: {
         faceSimilarityThreshold: 0.65,
         faceBlurThreshold: 20,
@@ -117,6 +146,7 @@ export class ConfigService {
                 this.config = { ...DEFAULT_CONFIG, ...parsed };
                 // Deep merge nested objects
                 this.config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...(parsed.aiSettings || {}) };
+                this.config.advancedFace = { ...DEFAULT_CONFIG.advancedFace, ...(parsed.advancedFace || {}) };
                 this.config.queue = { ...DEFAULT_CONFIG.queue, ...(parsed.queue || {}) };
                 this.config.smartIgnore = { ...DEFAULT_CONFIG.smartIgnore, ...(parsed.smartIgnore || {}) };
             } else {
@@ -163,6 +193,16 @@ export class ConfigService {
     static setAISettings(settings: Partial<AISettings>) {
         this.load();
         this.config.aiSettings = { ...this.config.aiSettings, ...settings };
+        this.save();
+    }
+
+    static getAdvancedFaceSettings(): AdvancedFaceConfig {
+        return this.getSettings().advancedFace;
+    }
+
+    static setAdvancedFaceSettings(settings: Partial<AdvancedFaceConfig>) {
+        this.load();
+        this.config.advancedFace = { ...this.config.advancedFace, ...settings };
         this.save();
     }
 

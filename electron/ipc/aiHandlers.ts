@@ -6,6 +6,7 @@ import logger from '../logger';
 import { getDB, getDBLock } from '../db';
 import { FaceRepository } from '../data/repositories/FaceRepository';
 import { FaceService } from '../core/services/FaceService';
+import { ConfigService } from '../core/services/ConfigService';
 
 export function registerAIHandlers() {
     // Generic Proxy 
@@ -13,6 +14,8 @@ export function registerAIHandlers() {
 
     ipcMain.handle('ai:analyzeImage', async (_event, options) => {
         try {
+            console.log(`[IPC] ai:analyzeImage options keys: ${Object.keys(options).join(',')}`);
+            if (options.cleanRescan) console.log(`[IPC] cleanRescan=TRUE received!`);
             let { photoId, filePath, ...rest } = options;
 
             if (!filePath && photoId) {
@@ -45,7 +48,8 @@ export function registerAIHandlers() {
         if (!filePath) return { success: false, error: 'Missing filePath' };
 
         // Use FAST mode for simple blur score calc if not specified
-        return await PhotoService.analyzeImage({ photoId, filePath, scanMode: 'FAST', ...rest });
+        // Logic Update: Manual Rescan should clean up potential duplicate faces
+        return await PhotoService.analyzeImage({ photoId, filePath, scanMode: 'FAST', cleanRescan: true, ...rest });
     });
 
     ipcMain.handle('ai:generateTags', async (_event, { photoId }) => {
@@ -62,6 +66,26 @@ export function registerAIHandlers() {
         setAISettings(settings);
         pythonProvider.syncSettings(); // Use new method
         return true;
+    });
+
+    ipcMain.handle('ai:getAdvancedSettings', () => ConfigService.getAdvancedFaceSettings());
+
+    ipcMain.handle('ai:saveAdvancedSettings', (_event, settings) => {
+        ConfigService.setAdvancedFaceSettings(settings);
+        return true;
+    });
+
+    ipcMain.handle('ai:rotateImage', async (_event, options) => {
+        let { photoId, filePath, rotation } = options;
+        if (!filePath && photoId) {
+            const db = getDB();
+            const row = db.prepare('SELECT file_path FROM photos WHERE id = ?').get(photoId) as any;
+            if (row) filePath = row.file_path;
+        }
+        if (!filePath) return { success: false, error: 'Missing filePath' };
+
+        // Use PhotoService (handles RAW via ExifTool)
+        return await PhotoService.rotatePhoto(photoId, filePath, rotation);
     });
 
     ipcMain.handle('ai:downloadModel', async (_event, { modelName }) => {

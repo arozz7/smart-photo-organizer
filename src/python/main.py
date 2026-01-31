@@ -50,10 +50,17 @@ def load_image_cv2(file_path):
         return _img_cache["img"]
         
     try:
+        ext = os.path.splitext(file_path)[1].lower()
+        is_raw = ext in ['.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.kdc', '.mrw']
         from PIL import Image, ImageFile, ImageOps as PILImageOps
         ImageFile.LOAD_TRUNCATED_IMAGES = True
         
         try:
+            # PIL often loads the embedded JPEG preview for RAWs, which is low res.
+            # Force RawPy for legitimate RAW files.
+            if is_raw:
+                 raise Exception("Force RawPy for RAW file")
+
             pil_img = Image.open(file_path)
             pil_img = PILImageOps.exif_transpose(pil_img)
             rgb_img = np.array(pil_img)
@@ -65,6 +72,12 @@ def load_image_cv2(file_path):
                  
             img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
             
+            # Check if PIL returned a tiny thumbnail (common with some RAW loaders)
+            h, w = img.shape[:2]
+            if is_raw and max(h, w) < 1000:
+                 logger.warning(f"PIL loaded small preview ({w}x{h}) for RAW. Retrying with RawPy.")
+                 raise Exception("PIL thumbnail detected")
+            
             # Update cache
             _img_cache["path"] = file_path
             _img_cache["img"] = img
@@ -72,17 +85,44 @@ def load_image_cv2(file_path):
             
             return img
         except Exception as e:
-            logger.warning(f"PIL Load failed: {e}. Trying RawPy...")
-            with rawpy.imread(file_path) as raw:
-                rgb = raw.postprocess(use_camera_wb=True)
-                img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            # logger.warning(f"PIL Load failed: {e}. Trying RawPy...")
+            try:
+                with rawpy.imread(file_path) as raw:
+                    # RawPy postprocess is high quality
+                    rgb = raw.postprocess(use_camera_wb=True)
+                    img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+                    
+                    # Update cache
+                    _img_cache["path"] = file_path
+                    _img_cache["img"] = img
+                    _img_cache["timestamp"] = time.time()
+                    
+                    return img
+            except Exception as raw_e:
+                logger.warning(f"RawPy failed to load {os.path.basename(file_path)}: {raw_e}. Falling back to standard PIL (Embedded Preview).")
                 
-                # Update cache
-                _img_cache["path"] = file_path
-                _img_cache["img"] = img
-                _img_cache["timestamp"] = time.time()
-                
-                return img
+                # FINAL FALLBACK: Try to load whatever PIL can find (usually embedded JPEG)
+                # We simply repeat the PIL logic but WITHOUT the 'is_raw' check/raise
+                try:
+                    pil_img = Image.open(file_path)
+                    pil_img = PILImageOps.exif_transpose(pil_img)
+                    rgb_img = np.array(pil_img)
+                    
+                    if len(rgb_img.shape) == 2:
+                        rgb_img = cv2.cvtColor(rgb_img, cv2.COLOR_GRAY2RGB)
+                    elif rgb_img.shape[2] == 4:
+                        rgb_img = cv2.cvtColor(rgb_img, cv2.COLOR_RGBA2RGB)
+                        
+                    img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
+                    
+                    # Update cache
+                    _img_cache["path"] = file_path
+                    _img_cache["img"] = img
+                    _img_cache["timestamp"] = time.time()
+                    return img
+                except Exception as final_e:
+                    logger.error(f"Fatal: All loading methods failed for {file_path}: {final_e}")
+                    return None
     except Exception as e:
         logger.error(f"Failed to load image: {e}")
         return None
@@ -273,22 +313,35 @@ def handle_command(command):
                         if thumb and thumb.format == rawpy.ThumbFormat.JPEG:
                              # Use embedded JPEG
                              logger.debug("Using embedded RAW thumbnail")
-                             pil_img = Image.open(BytesIO(thumb.data))
-                             # Recalculate scale if thumb is smaller
-                             if pil_img.width != raw_w or pil_img.height != raw_h:
-                                 # Aspect ratio check? Just naive scale
-                                 raw_scale_x = pil_img.width / raw_w
-                                 raw_scale_y = pil_img.height / raw_h
-                                 logger.debug(f"Applied RAW Scale: {raw_scale_x:.3f}, {raw_scale_y:.3f}")
-                                 
+                             candidate_img = Image.open(BytesIO(thumb.data))
+                             
+                             # [Phase 53] Quality Check: Reject small embedded thumbs
+                             if max(candidate_img.size) < 1200:
+                                 logger.debug(f"Embedded thumbnail too small ({candidate_img.size}), forcing full RAW conversion.")
+                                 pil_img = None # Trigger fallback
+                             else:
+                                 pil_img = candidate_img
+                                 # Recalculate scale if thumb is smaller
+                                 if pil_img.width != raw_w or pil_img.height != raw_h:
+                                     raw_scale_x = pil_img.width / raw_w
+                                     raw_scale_y = pil_img.height / raw_h
+                                     logger.debug(f"Applied RAW Scale: {raw_scale_x:.3f}, {raw_scale_y:.3f}")
+                                     
                         elif thumb and thumb.format == rawpy.ThumbFormat.BITMAP:
                              # Use embedded Bitmap
                              logger.debug("Using embedded RAW bitmap thumbnail")
-                             pil_img = Image.fromarray(thumb.data)
-                             if pil_img.width != raw_w or pil_img.height != raw_h:
-                                 raw_scale_x = pil_img.width / raw_w
-                                 raw_scale_y = pil_img.height / raw_h
+                             candidate_img = Image.fromarray(thumb.data)
+                             if max(candidate_img.size) < 1200:
+                                 pil_img = None
+                             else:
+                                 pil_img = candidate_img
+                                 if pil_img.width != raw_w or pil_img.height != raw_h:
+                                     raw_scale_x = pil_img.width / raw_w
+                                     raw_scale_y = pil_img.height / raw_h
                         else:
+                             pil_img = None
+
+                        if pil_img is None:
                              # Fallback to full conversion (Slow)
                              logger.debug("Full RAW conversion (slow)")
                              rgb = raw.postprocess(use_camera_wb=True, bright=1.0, user_sat=None) # bright=1.0 default
@@ -309,10 +362,12 @@ def handle_command(command):
                 if expects_portrait and is_landscape_dims:
                     # logger.debug(f"Thumb Gen: Orientation {orientation} (Portrait) but Image is {w}x{h}. Rotating.")
                     if orientation == 6:
-                        pil_img = pil_img.rotate(-90, expand=True) # -90 is CW
+                        # Orientation 6 (Right Top) -> Needs 90 CW to be Upright
+                        pil_img = pil_img.rotate(-90, expand=True) 
                         swapped_dims = True
                     elif orientation == 8:
-                        pil_img = pil_img.rotate(90, expand=True) # 90 CCW
+                        # Orientation 8 (Left Bottom) -> Needs 90 CCW (270 CW) to be Upright
+                        pil_img = pil_img.rotate(90, expand=True)
                         swapped_dims = True
                 elif orientation == 3:
                      pil_img = pil_img.rotate(180, expand=True)
@@ -410,10 +465,19 @@ def handle_command(command):
         scan_mode = payload.get('scanMode', 'FAST')
         enable_vlm = payload.get('enableVLM', False)
         orientation = payload.get('orientation', 1) # Default 1 (Normal)
+        config = payload.get('config', {})
+        
+        # [Phase 55] Advanced Settings
+        det_thresh_standard = float(config.get('detThreshStandard', faces.DET_THRESH))
+        det_thresh_macro = float(config.get('detThreshMacro', 0.25))
+        nms_iou_thresh = float(config.get('nmsIouThresh', 0.3))
+        enable_macro_low_res = config.get('enableMacroLowRes', True)
+        enable_tta = config.get('enableTTA', True)
         
         metrics = {'load': 0, 'scan': 0, 'tag': 0, 'total': 0}
         
         logger.debug(f"Analyzing {photo_id} (Mode: {scan_mode}, VLM: {enable_vlm}, Ori: {orientation})...")
+        logger.info(f"[Config] Mode={scan_mode} | Thresh={det_thresh_standard}(Std)/{det_thresh_macro}(Mac) | NMS={nms_iou_thresh} | TTA={enable_tta} | LowRes={enable_macro_low_res}")
         
         # 1. Image Loading
         t_load_start = time.time()
@@ -461,35 +525,165 @@ def handle_command(command):
             
             # Param Selection
             target_size = (1280, 1280)
-            det_thresh = faces.DET_THRESH
+            # Use configured threshold (0.7) for standard scans to reduce false positives
+            det_thresh = det_thresh_standard
+            
             if scan_mode == 'BALANCED':
                 target_size = (640, 640)
-                det_thresh = 0.4
+                det_thresh = 0.5 # Slightly lower for balanced/fast
             elif scan_mode == 'MACRO':
+                # [Phase 54] Tuning: 
+                # Revert to 1280px (1600px caused pareidolia).
+                # Thresh 0.25 (Lowered to catch Sleeping Girl).
+                # *Safety:* Area-Based NMS will suppress inner-noise (eyes/mouths).
                 target_size = (1280, 1280) 
-                # Respect user setting for strictness, but use high-res
-                det_thresh = faces.DET_THRESH
+                det_thresh = det_thresh_macro 
                 
-            faces.init_insightface(providers=faces.CURRENT_PROVIDERS, allowed_modules=faces.ALLOWED_MODULES, det_size=target_size, det_thresh=det_thresh)
+            # [Phase 52] Deep Ensemble Scan Logic
+            # Define scan passes based on mode
             
-            f_results = faces.app.get(img)
+            scan_passes = [target_size]
+            if scan_mode == 'MACRO':
+                # Force check all scales: Standard -> Low Res -> Ultra Low Res (Giant Faces)
+                if target_size[0] > 640: scan_passes.append((640, 640))
+                if target_size[0] > 320: scan_passes.append((320, 320))
+                # Add Ultra-Low Res to catch faces that fill the frame
+                if enable_macro_low_res:
+                    scan_passes.append((160, 160))
             
-            # --- Global Quality (VoL) ---
-            try:
-                 h, w = img.shape[:2]
-                 if max(h, w) > 1024:
-                     s = 1024 / max(h, w)
-                     small = cv2.resize(img, (int(w*s), int(h*s)))
-                 else:
-                     small = img
-                 global_blur = image_ops.estimate_blur(small)
-            except: pass
+            # Track unique faces across passes (deduplicated by NMS at end)
+            pass_idx = 0
+            all_detections = [] # List of (face_obj, scan_scale)
+
+            while pass_idx < len(scan_passes):
+                current_size = scan_passes[pass_idx]
+                pass_idx += 1
+                
+                # Check redundancy (simple check)
+                
+                # Init
+                faces.init_insightface(providers=faces.CURRENT_PROVIDERS, allowed_modules=faces.ALLOWED_MODULES, det_size=current_size, det_thresh=det_thresh)
+                
+                # Inference
+                f_results = faces.app.get(img)
+                logger.info(f"[Face] Scan pass {current_size}: Found {len(f_results)} faces.")
+                
+                # Collect results
+                for f in f_results:
+                    all_detections.append((f, current_size[0]))
+
+                # [Phase 53] Smart Portrait Trigger (Standard Mode Only)
+                # If 0 faces found -> Fallback (existing)
+                # If "Large Face" found (>15% img height) -> Fallback (find profile/hard siblings)
+                if scan_mode != 'MACRO' and pass_idx == 1:
+                     should_fallback = False
+                     
+                     # 1. Zero faces (Original Phase 51 logic)
+                     if len(f_results) == 0: 
+                        should_fallback = True
+                        logger.info("[Face] Standard scan found 0. Triggering Fallback scales...")
+
+                     # 2. Large Face (Phase 53: Portrait Context)
+                     elif len(f_results) > 0:
+                        max_h = 0
+                        for f in f_results:
+                            # bbox is [x1, y1, x2, y2]
+                            box_h = f.bbox[3] - f.bbox[1]
+                            if box_h > max_h: max_h = box_h
+                        
+                        img_h = img.shape[0] if len(img.shape) > 0 else 1000
+                        if max_h > (img_h * 0.15): # >15% of image height
+                             should_fallback = True
+                             logger.info(f"[Face] Large face detected ({int(max_h)}px > {int(img_h*0.15)}px). Triggering Portrait Ensemble...")
+
+                     if should_fallback:
+                         for size in [(640, 640), (320, 320)]:
+                             if size not in scan_passes and current_size[0] > size[0]:
+                                 scan_passes.append(size)
+
+                # --- Global Quality (VoL) - Recalc only on first pass or just once ---
+                if pass_idx == 1:
+                    try:
+                         h, w = img.shape[:2]
+                         if max(h, w) > 1024:
+                             s = 1024 / max(h, w)
+                             small = cv2.resize(img, (int(w*s), int(h*s)))
+                         else:
+                             small = img
+                         global_blur = image_ops.estimate_blur(small)
+                    except: pass
             
-            # Process Faces
-            for face in f_results:
+            # --- NMS ACROSS PASSES ---
+            # Sort by detection score (high to low)
+            all_detections.sort(key=lambda x: x[0].det_score if hasattr(x[0], 'det_score') else 0, reverse=True)
+            
+            final_faces = []
+            while len(all_detections) > 0:
+                best_face_set = all_detections[0]
+                best_face = best_face_set[0]
+                final_faces.append(best_face_set)
+                
+                # Check IoU with rest
+                remaining = []
+                b1 = best_face.bbox
+                area1 = (b1[2] - b1[0]) * (b1[3] - b1[1])
+                
+                for i in range(1, len(all_detections)):
+                    other_face = all_detections[i][0]
+                    b2 = other_face.bbox
+                    
+                    # Intersect
+                    xx1 = max(b1[0], b2[0])
+                    yy1 = max(b1[1], b2[1])
+                    xx2 = min(b1[2], b2[2])
+                    yy2 = min(b1[3], b2[3])
+                    
+                    w = max(0, xx2 - xx1)
+                    h = max(0, yy2 - yy1)
+                    inter = w * h
+                    
+                    area2 = (b2[2] - b2[0]) * (b2[3] - b2[1])
+                    union = area1 + area2 - inter
+                    
+                    iou = inter / union if union > 0 else 0
+                    
+                    # If IoU < 0.3, keep it (not a duplicate)
+                    # Note: faces.NMS_THRESH is for InsightFace internal NMS (same scale).
+                    # Here we are merging multi-scale. A strict threshold is good to avoid duplicates.
+                    if iou < nms_iou_thresh:
+                        remaining.append(all_detections[i])
+                
+                all_detections = remaining
+
+            # Process Unique Faces
+            for item in final_faces:
+                face = item[0]
+                scan_source_size = item[1]
+                
+                # [Phase 54] Hybrid Bounding Box Logic
+                # Extract Pose FIRST to determine crop strategy
+                pose_yaw, pose_pitch, pose_roll = None, None, None
+                if hasattr(face, 'pose') and face.pose is not None:
+                    try:
+                        pose = face.pose
+                        pose_pitch = float(pose[0]) if len(pose) > 0 else None
+                        pose_yaw = float(pose[1]) if len(pose) > 1 else None
+                        pose_roll = float(pose[2]) if len(pose) > 2 else None
+                    except (TypeError, IndexError): pass
+                
                 bbox = face.bbox.astype(int).tolist()
                 kps = face.kps if hasattr(face, 'kps') else None
-                expanded = image_ops.smart_crop_landmarks(bbox, kps, img.shape[1], img.shape[0])
+                
+                # Check for Profile View (Yaw > 30 degrees)
+                # Profile alignment is unstable (stretches box). Use Tight Raw Box for profiles.
+                is_profile = False
+                if pose_yaw is not None and abs(pose_yaw) > 30.0:
+                    is_profile = True
+                    # Use raw box with very slight padding (10%)
+                    expanded = image_ops.expand_box(bbox, img.shape[1], img.shape[0], 0.1)
+                else: 
+                     # Frontal: Use Perfect Alignment
+                     expanded = image_ops.get_aligned_bbox(bbox, kps, img.shape[1], img.shape[0])
                 
                 # Check blur
                 x1, y1, x2, y2 = bbox
@@ -497,17 +691,7 @@ def handle_command(command):
                 f_blur = image_ops.estimate_blur(face_crop, target_size=112)
                 f_ten = image_ops.estimate_sharpness_tenengrad(face_crop, target_size=112)
                 
-                # Extract Pose Data (Phase 5: Challenging Face Recognition)
-                pose_yaw, pose_pitch, pose_roll = None, None, None
-                if hasattr(face, 'pose') and face.pose is not None:
-                    try:
-                        # InsightFace pose is [pitch, yaw, roll] in degrees
-                        pose = face.pose
-                        pose_pitch = float(pose[0]) if len(pose) > 0 else None
-                        pose_yaw = float(pose[1]) if len(pose) > 1 else None
-                        pose_roll = float(pose[2]) if len(pose) > 2 else None
-                    except (TypeError, IndexError):
-                        pass  # Pose data not available, keep as None
+                # ... (Pose extraction was here, now moved up) ...
                 
                 # Calculate Face Quality Score (Phase 5)
                 face_quality = None
@@ -526,13 +710,40 @@ def handle_command(command):
                 
                 # Thresholds
                 vol_th = CONFIG.get('faceBlurThreshold', 20.0)
-                ten_th = 100.0
+                
+                # [Phase 53] Relaxed Sharpness for Standard Mode (Recover soft portraits)
+                # Tenengrad 100 is too high for professional soft-focus portraits. Lowering to 40.
+                ten_th = 40.0 
+                
                 if scan_mode == 'MACRO':
                     vol_th = 5.0
-                    ten_th = 25.0
+                    ten_th = 20.0
                     
                 if (f_blur < vol_th) and (f_ten < ten_th):
+                    logger.info(f"[Filter] Rejecting blurry face: Blur={f_blur:.1f}, Sharpness={f_ten:.1f}")
                     continue # Skip blurry
+
+                # [Phase 53] False Positive Filtering (Shoe/Building/Wall detector)
+                # Heuristic: Small faces needs high confidence. Large faces can be lower.
+                # Face Width in pixels (approx)
+                fw = expanded[2] - expanded[0]
+                det_score = float(face.det_score) if hasattr(face, 'det_score') else 0.0
+                
+                # 1. Very Small Objects (<50px) need HIGH confidence (likely noise/texture/shoes)
+                # Relaxed from 80px back to 50px to fix missed detections
+                if fw < 50 and det_score < 0.75:
+                        logger.info(f"[Filter] Rejecting small low-conf face: Width={fw}, Score={det_score:.3f}")
+                        continue 
+                
+                # 2. General Low Confidence Check
+                # Relax for MACRO mode to catch artistic faces
+                min_score = 0.50
+                if scan_mode == 'MACRO': min_score = 0.25
+                
+                if det_score < min_score:
+                    if fw < 300:
+                        logger.info(f"[Filter] Rejecting low-conf face: Score={det_score:.3f}, Width={fw}")
+                        continue
                 
                 scan_results.append({
                     "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
@@ -545,36 +756,48 @@ def handle_command(command):
                     "faceQuality": face_quality,
                     # Age-Based ERA Categorization: Extract age and gender from genderage module
                     "estimatedAge": int(face.age) if hasattr(face, 'age') and face.age is not None else None,
-                    "gender": "M" if hasattr(face, 'sex') and face.sex == "M" else ("F" if hasattr(face, 'sex') and face.sex == "F" else None)
+                    "gender": "M" if hasattr(face, 'sex') and face.sex == "M" else ("F" if hasattr(face, 'sex') and face.sex == "F" else None),
+                    "scan_source": f"{scan_source_size}px" # Debug info
                 })
 
             
-            logger.info(f"[Face] Initial scan found {len(f_results)} faces.")
+            logger.info(f"[Face] Initial scan found {len(scan_results)} faces (cumulative).")
                 
         except Exception as e:
             logger.error(f"Analysis (Scan) Error: {e}")
 
         # Test Time Augmentation (TTA)
-        if scan_mode == 'MACRO':
+        if scan_mode == 'MACRO' and enable_tta:
             logger.info("[TTA] MACRO mode: Initiating Rotation Augmentation (TTA)...")
             
+            # [Fix] Reduce false positives in TTA (e.g. knees/elbows in rotated views).
+            # Rotated detections must have higher confidence to be accepted.
+            TTA_THRESHOLD_BOOST = 0.10
+            # Ensure at least 0.45 even if user set 0.25
+            safe_thresh = max(det_thresh + TTA_THRESHOLD_BOOST, 0.45) if det_thresh < 0.5 else det_thresh 
+
             for rot_angle in [90, 180, 270]:
                 try:
-                    logger.info(f"[TTA] Trying rotation {rot_angle}...")
+                    logger.info(f"[TTA] Trying rotation {rot_angle}... (Safe Thresh: {safe_thresh:.2f})")
                     rotated_img = None
                     if rot_angle == 90: rotated_img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
                     elif rot_angle == 180: rotated_img = cv2.rotate(img, cv2.ROTATE_180)
                     elif rot_angle == 270: rotated_img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
                     else: continue
 
-                    faces.init_insightface(providers=faces.CURRENT_PROVIDERS, allowed_modules=faces.ALLOWED_MODULES, det_size=target_size, det_thresh=det_thresh) # Re-init params
+                    faces.init_insightface(providers=faces.CURRENT_PROVIDERS, allowed_modules=faces.ALLOWED_MODULES, det_size=target_size, det_thresh=safe_thresh) # Re-init params with SAFE thresh
                     r_faces = faces.app.get(rotated_img)
 
                     if len(r_faces) > 0:
                         orig_h, orig_w = img.shape[:2]
-                        # ... Transformation Logic (kept inline for now as it's TTA specific) ...
-                        # Simplified for brevity in this tool call, but copying Full Logic from original
+                        logger.info(f"[TTA] Found {len(r_faces)} potential faces in rotation {rot_angle}")
+                        
                         for face in r_faces:
+                            # Double check score against safe threshold (though init_insightface should handle it)
+                            if hasattr(face, 'det_score') and face.det_score < safe_thresh:
+                                logger.info(f"[TTA] Rejected face with score {face.det_score:.2f} < {safe_thresh:.2f}")
+                                continue
+
                             bbox = face.bbox.astype(int).tolist()
                             rx1, ry1, rx2, ry2 = bbox
                             nx1, ny1, nx2, ny2 = 0, 0, 0, 0
@@ -640,26 +863,48 @@ def handle_command(command):
                     logger.error(f"[TTA] Rotation {rot_angle} failed: {e}")
         
         # NMS (De-Duplicate)
+        # --- FINAL NMS MERGE (Standard + TTA) ---
         if len(scan_results) > 1:
+            # Sort by AREA (Size) descending.
+            # Rationale: Large faces are "Truer" than small nested faces (e.g. eyes/mouths detected as faces).
+            # If we sort by score, a high-confidence "Eye" suppresses the low-conf "Giant Face".
+            # Sorting by size ensures the Giant Face eats the Eye.
+            scan_results.sort(key=lambda x: x['box']['width'] * x['box']['height'], reverse=True)
             unique_faces = []
-            scan_results.sort(key=lambda x: x['score'], reverse=True)
+            
             for f in scan_results:
                 box_a = f['box']
                 is_dup = False
                 for existing in unique_faces:
                     box_b = existing['box']
+                    
+                    # Intersect
                     x1 = max(box_a['x'], box_b['x'])
                     y1 = max(box_a['y'], box_b['y'])
                     x2 = min(box_a['x'] + box_a['width'], box_b['x'] + box_b['width'])
                     y2 = min(box_a['y'] + box_a['height'], box_b['y'] + box_b['height'])
+                    
                     inter_area = max(0, x2 - x1) * max(0, y2 - y1)
                     area_a = box_a['width'] * box_a['height']
                     area_b = box_b['width'] * box_b['height']
-                    iou = inter_area / float(area_a + area_b - inter_area)
-                    if iou > 0.5: 
+                    
+                    union = area_a + area_b - inter_area
+                    # iou = inter_area / float(union) if union > 0 else 0
+                    
+                    # [Phase 54] Switch to IoMin (Containment)
+                    # If the smaller box is > 65% contained in the larger box, merge it.
+                    # This handles "Ghost" detections (scale duplicates) much better than IoU.
+                    min_area = min(area_a, area_b)
+                    io_min = inter_area / float(min_area) if min_area > 0 else 0
+                    
+                    if io_min > 0.65: 
                         is_dup = True
                         break
-                if not is_dup: unique_faces.append(f)
+                
+                if not is_dup: 
+                    unique_faces.append(f)
+            
+            logger.info(f"[Face] Post-TTA NMS reduced count from {len(scan_results)} to {len(unique_faces)}.")
             scan_results = unique_faces
         
         metrics['scan'] = (time.time() - t_scan_start) * 1000
