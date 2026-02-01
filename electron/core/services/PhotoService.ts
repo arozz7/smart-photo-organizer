@@ -282,53 +282,43 @@ export class PhotoService {
 
             // Call Python Provider
             // Note: pythonProvider.analyzeImage sends 'analyze_image' command
+            // PythonAIProvider will call FaceService.processAnalysisResult internally
             const result = await pythonProvider.analyzeImage(filePath, options);
 
-            // Explicitly process result to ensure DB is updated
-            if (result && result.faces) {
-                await FaceService.processAnalysisResult(
-                    photoId,
-                    result.faces,
-                    result.width || 0,
-                    result.height || 0,
-                    pythonProvider
-                );
+            // Identity Transfer logic (only for cleanRescan)
+            if (cleanRescan === true && oldFaces.length > 0 && result && result.faces) {
+                const newFaces = FaceRepository.getFacesByPhoto(photoId);
+                let recoveredCount = 0;
 
-                // Identity Transfer logic
-                if (cleanRescan === true && oldFaces.length > 0) {
-                    const newFaces = FaceRepository.getFacesByPhoto(photoId);
-                    let recoveredCount = 0;
+                for (const oldFace of oldFaces) {
+                    if (!oldFace.person_id) continue;
+                    if (!oldFace.descriptor || oldFace.descriptor.length === 0) continue;
 
-                    for (const oldFace of oldFaces) {
-                        if (!oldFace.person_id) continue;
-                        if (!oldFace.descriptor || oldFace.descriptor.length === 0) continue;
+                    let bestMatch = null;
+                    let bestDist = 100.0;
 
-                        let bestMatch = null;
-                        let bestDist = 100.0;
+                    for (const newFace of newFaces) {
+                        if (newFace.person_id) continue;
+                        if (!newFace.descriptor || newFace.descriptor.length === 0) continue;
 
-                        for (const newFace of newFaces) {
-                            if (newFace.person_id) continue;
-                            if (!newFace.descriptor || newFace.descriptor.length === 0) continue;
-
-                            const dist = FaceService.calculateL2Distance(oldFace.descriptor, newFace.descriptor);
-                            if (dist < bestDist) {
-                                bestDist = dist;
-                                bestMatch = newFace;
-                            }
-                        }
-
-                        // Threshold: 0.35 (Same as rotate logic)
-                        if (bestMatch && bestDist < 0.35) {
-                            logger.info(`[PhotoService] Recovered identity for Person ${oldFace.person_id} (dist: ${bestDist.toFixed(3)})`);
-                            FaceRepository.assignFacesToPerson([bestMatch.id], oldFace.person_id, {
-                                assignment_source: oldFace.assignment_source || 'manual_recovered',
-                                is_confirmed: !!oldFace.is_confirmed
-                            });
-                            recoveredCount++;
+                        const dist = FaceService.calculateL2Distance(oldFace.descriptor, newFace.descriptor);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            bestMatch = newFace;
                         }
                     }
-                    logger.info(`[PhotoService] Clean Rescan: Identity Transfer recovered ${recoveredCount} faces.`);
+
+                    // Threshold: 0.35 (Same as rotate logic)
+                    if (bestMatch && bestDist < 0.35) {
+                        logger.info(`[PhotoService] Recovered identity for Person ${oldFace.person_id} (dist: ${bestDist.toFixed(3)})`);
+                        FaceRepository.assignFacesToPerson([bestMatch.id], oldFace.person_id, {
+                            assignment_source: oldFace.assignment_source || 'manual_recovered',
+                            is_confirmed: !!oldFace.is_confirmed
+                        });
+                        recoveredCount++;
+                    }
                 }
+                logger.info(`[PhotoService] Clean Rescan: Identity Transfer recovered ${recoveredCount} faces.`);
             }
 
             return result;
