@@ -596,3 +596,118 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
         response['reqId'] = req_id
     
     return response
+
+
+def detect_faces_in_region(payload, load_image_cv2_func, req_id=None):
+    """
+    [Phase 58] Re-run face detection on a cropped region to count/split faces.
+    Used when aspect ratio filter flags a potential multi-face box.
+    
+    Args:
+        payload: {
+            filePath: str,
+            box: {x, y, width, height},
+            orientation: int (optional, default 1),
+            detThreshold: float (optional, default 0.5)
+        }
+        load_image_cv2_func: Function to load images (from main.py)
+        req_id: Request ID for response tracking
+    
+    Returns:
+        {
+            type: "region_faces_result",
+            faceCount: int,
+            faces: [{box, score, embedding}, ...],
+            reqId: str
+        }
+    """
+    file_path = payload.get('filePath')
+    box = payload.get('box')
+    orientation = payload.get('orientation', 1)
+    det_threshold = payload.get('detThreshold', 0.5)
+    
+    logger.info(f"[Phase 58] Detecting faces in region: {box} (threshold: {det_threshold})")
+    
+    try:
+        # Load and orient image
+        img = load_image_cv2_func(file_path)
+        
+        if img is None:
+            return {
+                'type': 'region_faces_result',
+                'error': 'Image load failed',
+                'faceCount': 0,
+                'faces': [],
+                'reqId': req_id
+            }
+        
+        # Apply orientation if needed (same logic as analyze_image)
+        h, w = img.shape[:2]
+        is_landscape_dims = w > h
+        expects_portrait = (orientation == 6 or orientation == 8)
+        
+        if expects_portrait and is_landscape_dims:
+            if orientation == 6:
+                img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+            elif orientation == 8:
+                img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        elif orientation == 3:
+            img = cv2.rotate(img, cv2.ROTATE_180)
+        
+        # Crop to region (with 10% padding for context)
+        x, y, w_box, h_box = box['x'], box['y'], box['width'], box['height']
+        pad = int(min(w_box, h_box) * 0.1)
+        
+        img_h, img_w = img.shape[:2]
+        y1 = max(0, y - pad)
+        y2 = min(img_h, y + h_box + pad)
+        x1 = max(0, x - pad)
+        x2 = min(img_w, x + w_box + pad)
+        
+        crop = img[y1:y2, x1:x2]
+        
+        # Run detection on crop
+        faces.init_insightface(det_thresh=det_threshold)
+        detected = faces.app.get(crop)
+        
+        logger.info(f"[Phase 58] Found {len(detected)} faces in region")
+        
+        # Translate coordinates back to original image space
+        faces_in_region = []
+        for face in detected:
+            bbox = face.bbox
+            
+            # Translate from crop coordinates to original image coordinates
+            orig_x1 = int(bbox[0] + x1)
+            orig_y1 = int(bbox[1] + y1)
+            orig_x2 = int(bbox[2] + x1)
+            orig_y2 = int(bbox[3] + y1)
+            
+            faces_in_region.append({
+                'box': {
+                    'x': orig_x1,
+                    'y': orig_y1,
+                    'width': orig_x2 - orig_x1,
+                    'height': orig_y2 - orig_y1
+                },
+                'score': float(face.det_score) if hasattr(face, 'det_score') else 0.0,
+                'embedding': face.embedding.tolist() if hasattr(face, 'embedding') else None
+            })
+        
+        return {
+            'type': 'region_faces_result',
+            'faceCount': len(faces_in_region),
+            'faces': faces_in_region,
+            'reqId': req_id
+        }
+        
+    except Exception as e:
+        logger.error(f"[Phase 58] detect_faces_in_region error: {e}")
+        return {
+            'type': 'region_faces_result',
+            'error': str(e),
+            'faceCount': 0,
+            'faces': [],
+            'reqId': req_id
+        }
+

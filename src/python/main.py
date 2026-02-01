@@ -462,6 +462,11 @@ def handle_command(command):
         scan.set_config(CONFIG)  # Pass global config
         response = scan.analyze_image(payload, load_image_cv2, req_id)
 
+    elif cmd_type == 'detect_faces_in_region':
+        # [Phase 58] Detector-based multi-face verification
+        from commands import scan
+        response = scan.detect_faces_in_region(payload, load_image_cv2, req_id)
+
 
     elif cmd_type == 'generate_tags':
         photo_id = payload.get('photoId')

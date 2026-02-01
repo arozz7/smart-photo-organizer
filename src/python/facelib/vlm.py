@@ -333,7 +333,7 @@ def verify_is_face(image_path, box):
         
         logger.info(f"VLM Verification Response: {response}")
         
-        # [Phase 57] Parse JSON response
+        # [Phase 58] Parse JSON response (semantic verification only)
         try:
             import json
             # Try to parse as JSON first
@@ -341,13 +341,11 @@ def verify_is_face(image_path, box):
             is_face = parsed.get('is_face', False)
             confidence = float(parsed.get('confidence', 0.5))
             reason = parsed.get('reason', '')
-            face_count = parsed.get('face_count', 'one')
             
             return {
                 "is_face": is_face,
                 "confidence": confidence,
                 "reason": reason,
-                "face_count": face_count,
                 "error": None
             }
         except (json.JSONDecodeError, ValueError):
