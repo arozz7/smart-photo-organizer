@@ -615,7 +615,8 @@ export class FaceService {
                     // Read threshold from settings (default: 0.65)
                     const settings = getAISettings();
                     const vlmThreshold = settings.vlmVerificationThreshold ?? 0.65;
-                    const detectionScore = face.score ?? face.det_score ?? 0.95;
+                    // FIX: Python returns 'score' (lowercase), use it directly
+                    const detectionScore = face.score ?? 0.95;
 
                     // Check box characteristics for multi-face indicators
                     const box = face.box;
@@ -632,7 +633,9 @@ export class FaceService {
                     const isLargeBox = boxArea > 4000000; // 2000x2000 pixels
                     const isUnusualAspect = aspectRatio > 1.4 || aspectRatio < 0.7;
 
-                    const entityType = (isLowScore || isLargeBox || isUnusualAspect) ? 'suspect' : 'human';
+                    // FIX: Trust Python's entityType if provided, otherwise calculate
+                    const entityType = face.entityType ??
+                        ((isLowScore || isLargeBox || isUnusualAspect) ? 'suspect' : 'human');
 
                     if (isLargeBox || isUnusualAspect) {
                         logger.info(`[FaceService] Flagged face as suspect: ${isLargeBox ? `large box (${boxArea.toLocaleString()}px)` : ''} ${isUnusualAspect ? `unusual aspect (${aspectRatio.toFixed(2)})` : ''}`);
