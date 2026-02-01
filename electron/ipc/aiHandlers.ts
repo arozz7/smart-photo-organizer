@@ -608,4 +608,46 @@ export function registerAIHandlers() {
             return { error: String(e) };
         }
     });
+
+    // [Phase 56] VLM Face Verification
+    ipcMain.handle('ai:verifyFace', async (_event, { imagePath, box }) => {
+        try {
+            return await pythonProvider.verifyFace(imagePath, box);
+        } catch (e) {
+            logger.error(`[IPC] ai:verifyFace failed: ${e}`);
+            return { is_face: null, confidence: 0, error: String(e) };
+        }
+    });
+
+    // [Phase 56] Audit Low Confidence Faces
+    ipcMain.handle('face:auditLowConfidence', async () => {
+        try {
+            const updated = FaceRepository.markLowConfidenceAsSuspect();
+            logger.info(`[IPC] face:auditLowConfidence: Marked ${updated} faces as suspect`);
+            return { success: true, updated };
+        } catch (e) {
+            logger.error(`[IPC] face:auditLowConfidence failed: ${e}`);
+            return { success: false, error: String(e) };
+        }
+    });
+
+    // [Phase 56] Get Verification Status
+    ipcMain.handle('face:getVerificationStatus', async () => {
+        try {
+            const pending = FaceRepository.countSuspectFaces();
+            const { ServiceManager } = await import('../core/services/ServiceManager');
+            const { BackgroundVerificationService } = await import('../core/services/BackgroundVerificationService');
+            const service = ServiceManager.getInstance().get('BackgroundVerificationService') as any;
+            const isRunning = service?.isServiceRunning() ?? false;
+
+            return {
+                success: true,
+                pending,
+                isRunning
+            };
+        } catch (e) {
+            logger.error(`[IPC] face:getVerificationStatus failed: ${e}`);
+            return { success: false, error: String(e) };
+        }
+    });
 }

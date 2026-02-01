@@ -319,6 +319,101 @@ export class PythonAIProvider implements IAIProvider, IService {
             return { age: null, gender: null, poseYaw: null, posePitch: null, poseRoll: null, descriptorV2: null, failureReason: `exception:${msg.slice(0, 50)}` };
         }
     }
+
+    /**
+     * Verify if a detected region is actually a human face using VLM.
+     * Used by BackgroundVerificationService (Phase 56).
+     */
+    async verifyFace(imagePath: string, box: { x1: number; y1: number; x2: number; y2: number }): Promise<{
+        is_face: boolean | null;
+        confidence: number;
+        reason?: string;
+        error?: string;
+    }> {
+        try {
+            const result = await this.sendRequest('verify_face', {
+                imagePath,
+                box
+            }, 30000);
+
+            if (result.error) {
+                return {
+                    is_face: null,
+                    confidence: 0,
+                    error: result.error
+                };
+            }
+
+            return {
+                is_face: result.is_face ?? null,
+                confidence: result.confidence ?? 0,
+                reason: result.reason,
+                error: result.error
+            };
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes('Shutdown')) {
+                logger.error(`[PythonAIProvider] verifyFace failed:`, e);
+            }
+            return {
+                is_face: null,
+                confidence: 0,
+                error: `exception:${msg.slice(0, 50)}`
+            };
+        }
+    }
+
+    /**
+     * [Phase 58] Re-run face detection on a specific region to count/split faces.
+     * Used when aspect ratio filter flags a potential multi-face box.
+     */
+    async detectFacesInRegion(
+        filePath: string,
+        box: { x: number; y: number; width: number; height: number },
+        orientation: number = 1,
+        detThreshold: number = 0.5
+    ): Promise<{
+        faceCount: number;
+        faces: Array<{
+            box: { x: number; y: number; width: number; height: number };
+            score: number;
+            embedding: number[] | null;
+        }>;
+        error?: string;
+    }> {
+        try {
+            const result = await this.sendRequest('detect_faces_in_region', {
+                filePath,
+                box,
+                orientation,
+                detThreshold
+            }, 30000);
+
+            if (result.error) {
+                return {
+                    faceCount: 0,
+                    faces: [],
+                    error: result.error
+                };
+            }
+
+            return {
+                faceCount: result.faceCount ?? 0,
+                faces: result.faces ?? [],
+                error: result.error
+            };
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes('Shutdown')) {
+                logger.error(`[PythonAIProvider] detectFacesInRegion failed:`, e);
+            }
+            return {
+                faceCount: 0,
+                faces: [],
+                error: `exception:${msg.slice(0, 50)}`
+            };
+        }
+    }
 }
 
 export const pythonProvider = new PythonAIProvider();

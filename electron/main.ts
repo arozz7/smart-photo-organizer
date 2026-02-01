@@ -16,12 +16,14 @@ import * as fs from 'node:fs/promises';
 import logger from './logger';
 import { WindowManager } from './windows/windowManager';
 import { BackgroundBucketingService } from './core/services/BackgroundBucketingService';
+import { BackgroundVerificationService } from './core/services/BackgroundVerificationService';
 import { AppStateRepository } from './data/repositories/AppStateRepository';
 import { BucketRepository } from './data/repositories/BucketRepository';
 import { ServiceManager } from './core/services/ServiceManager';
 
-// Global service reference for shutdown
+// Global service references for shutdown
 let bucketingService: BackgroundBucketingService | null = null;
+let verificationService: BackgroundVerificationService | null = null;
 let isQuitting = false;
 
 // ES Module __dirname equivalent
@@ -105,10 +107,15 @@ app.whenReady().then(async () => {
   bucketingService = new BackgroundBucketingService(pythonProvider);
   bucketingService.start();
 
+  // Start Background Verification Service (Phase 56)
+  verificationService = new BackgroundVerificationService();
+  verificationService.start();
+
   // Register Services
   const serviceManager = ServiceManager.getInstance();
   serviceManager.register('PythonAIProvider', pythonProvider);
   serviceManager.register('BackgroundBucketingService', bucketingService);
+  serviceManager.register('BackgroundVerificationService', verificationService);
   serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();

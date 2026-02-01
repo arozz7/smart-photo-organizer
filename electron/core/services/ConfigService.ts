@@ -11,6 +11,7 @@ export interface AISettings {
     aiProfile: 'fast' | 'balanced' | 'high';
     useGpu: boolean;
     vlmEnabled: boolean;
+    vlmVerificationThreshold?: number; // Default 0.65 - faces below this score are marked as 'suspect' for VLM verification
     runtimeUrl?: string;
     // L2 distance thresholds for scan-time face classification
     autoAssignThreshold?: number;  // Default 0.7 - faces below this are auto-assigned
@@ -111,6 +112,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         aiProfile: 'balanced',
         useGpu: true,
         vlmEnabled: false, // Default to off for performance
+        vlmVerificationThreshold: 0.65, // Phase 56: VLM Verification threshold
         runtimeUrl: undefined
     },
     windowBounds: { width: 1200, height: 800, x: 0, y: 0 },

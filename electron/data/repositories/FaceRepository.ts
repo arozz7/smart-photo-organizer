@@ -154,6 +154,7 @@ export class FaceRepository {
                 AND f.descriptor IS NOT NULL
                 AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
                 AND (f.blur_score IS NULL OR f.blur_score >= 10)
+                AND (f.entity_type = 'human' OR f.entity_type IS NULL)
             `).get() as { count: number };
 
             return {
@@ -253,6 +254,8 @@ export class FaceRepository {
 
             if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
             if (!query.includes('is_ignored')) query += conditions.length > 0 ? ' AND is_ignored = 0' : ' WHERE is_ignored = 0';
+            // [Phase 56] Exclude suspect faces (pending VLM verification)
+            query += (query.includes('WHERE') ? ' AND' : ' WHERE') + ' (f.entity_type = \'human\' OR f.entity_type IS NULL)';
 
             query += ' ORDER BY p.created_at DESC LIMIT ? OFFSET ?';
             params.push(limit, offset);
@@ -940,5 +943,114 @@ export class FaceRepository {
             console.error('FaceRepository.cleanupDuplicates failed:', error);
             return 0;
         }
+    }
+
+    // ===== PHASE 56: VLM VERIFICATION METHODS =====
+
+    /**
+     * Get suspect faces that need VLM verification.
+     * Returns faces ordered by most recent photos first.
+     */
+    static getSuspectFaces(limit = 10): Array<{
+        id: number;
+        photo_id: number;
+        box_json: string;
+        file_path: string;
+        preview_cache_path: string | null;
+        verification_attempts: number;
+    }> {
+        const db = getDB();
+        return db.prepare(`
+            SELECT f.id, f.photo_id, f.box_json, f.verification_attempts,
+                   p.file_path, p.preview_cache_path
+            FROM faces f
+            JOIN photos p ON f.photo_id = p.id
+            WHERE f.entity_type = 'suspect' 
+              AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
+            ORDER BY p.created_at DESC
+            LIMIT ?
+        `).all(limit) as Array<{
+            id: number;
+            photo_id: number;
+            box_json: string;
+            file_path: string;
+            preview_cache_path: string | null;
+            verification_attempts: number;
+        }>;
+    }
+
+    /**
+     * Count total suspect faces pending verification.
+     */
+    static countSuspectFaces(): number {
+        const db = getDB();
+        const result = db.prepare(`
+            SELECT COUNT(*) as count 
+            FROM faces 
+            WHERE entity_type = 'suspect' 
+              AND (is_ignored = 0 OR is_ignored IS NULL)
+        `).get() as { count: number };
+        return result.count;
+    }
+
+    /**
+     * Update entity_type for a face (e.g., 'suspect' -> 'human').
+     */
+    static updateFaceEntityType(id: number, entityType: string): void {
+        const db = getDB();
+        db.prepare(`
+            UPDATE faces 
+            SET entity_type = ? 
+            WHERE id = ?
+        `).run(entityType, id);
+    }
+
+    /**
+     * Mark a face as rejected (is_ignored = 1) after VLM verification failure.
+     */
+    static markFaceAsRejected(id: number): void {
+        const db = getDB();
+        db.prepare(`
+            UPDATE faces 
+            SET is_ignored = 1 
+            WHERE id = ?
+        `).run(id);
+    }
+
+    /**
+     * Increment verification_attempts counter and return new count.
+     */
+    static incrementVerificationAttempts(id: number): number {
+        const db = getDB();
+        db.prepare(`
+            UPDATE faces 
+            SET verification_attempts = verification_attempts + 1 
+            WHERE id = ?
+        `).run(id);
+
+        const result = db.prepare(`
+            SELECT verification_attempts 
+            FROM faces 
+            WHERE id = ?
+        `).get(id) as { verification_attempts: number } | undefined;
+
+        return result?.verification_attempts ?? 0;
+    }
+
+    /**
+     * Mark existing low-confidence faces as 'suspect' for audit.
+     * Returns count of updated faces.
+     */
+    static markLowConfidenceAsSuspect(): number {
+        const db = getDB();
+        const result = db.prepare(`
+            UPDATE faces 
+            SET entity_type = 'suspect' 
+            WHERE score < 0.45 
+              AND (entity_type IS NULL OR entity_type = 'human')
+              AND (is_ignored = 0 OR is_ignored IS NULL)
+        `).run();
+
+        return result.changes;
     }
 }

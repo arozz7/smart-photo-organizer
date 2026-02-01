@@ -324,6 +324,11 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     db.exec('ALTER TABLE faces ADD COLUMN age_failure_reason TEXT');
   } catch (e) { /* Column exists */ }
 
+  // --- MIGRATION: Background VLM Verification (Phase 56) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN verification_attempts INTEGER DEFAULT 0');
+  } catch (e) { /* Column exists */ }
+
   // --- MIGRATION: User-Editable ERA Names (Phase 44) ---
   try {
     db.exec('ALTER TABLE person_eras ADD COLUMN user_name TEXT');
