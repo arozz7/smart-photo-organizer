@@ -482,7 +482,9 @@ export class FaceService {
             assignment_source = COALESCE(assignment_source, ?),
             is_confirmed = COALESCE(is_confirmed, ?),
             estimated_age = COALESCE(estimated_age, ?),
-            gender = COALESCE(gender, ?)
+            gender = COALESCE(gender, ?),
+            entity_type = COALESCE(entity_type, ?),
+            score = COALESCE(score, ?)
             WHERE id = ?
         `);
 
@@ -492,9 +494,10 @@ export class FaceService {
                 is_reference, confidence_tier, suggested_person_id, match_distance,
                 pose_yaw, pose_pitch, pose_roll, face_quality,
                 session_folder, session_date, needs_bucketing,
-                assignment_source, is_confirmed, estimated_age, gender
+                assignment_source, is_confirmed, estimated_age, gender,
+                entity_type, score, verification_attempts
             )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
 
         db.transaction(() => {
@@ -602,11 +605,39 @@ export class FaceService {
                         isConfirmed,
                         face.estimatedAge ?? null, // Age-Based ERA Categorization
                         face.gender ?? null,       // Age-Based ERA Categorization
+                        face.entityType ?? 'human', // Phase 56: VLM Verification
+                        face.score ?? null,         // Phase 56: Detection score
                         bestMatch.id
                     );
                     finalId = bestMatch.id;
                 } else {
-                    // Insert
+                    // [Phase 57] Determine entity_type based on detection score AND box characteristics
+                    // Read threshold from settings (default: 0.65)
+                    const settings = getAISettings();
+                    const vlmThreshold = settings.vlmVerificationThreshold ?? 0.65;
+                    const detectionScore = face.score ?? face.det_score ?? 0.95;
+
+                    // Check box characteristics for multi-face indicators
+                    const box = face.box;
+                    const boxWidth = box.width || 0;
+                    const boxHeight = box.height || 0;
+                    const aspectRatio = boxHeight > 0 ? boxWidth / boxHeight : 1.0;
+                    const boxArea = boxWidth * boxHeight;
+
+                    // Flag as suspect if:
+                    // 1. Low detection score (< threshold)
+                    // 2. Unusually large box (>4M pixels - likely contains multiple faces)
+                    // 3. Unusual aspect ratio (>1.4 or <0.7 - may contain multiple faces)
+                    const isLowScore = detectionScore < vlmThreshold;
+                    const isLargeBox = boxArea > 4000000; // 2000x2000 pixels
+                    const isUnusualAspect = aspectRatio > 1.4 || aspectRatio < 0.7;
+
+                    const entityType = (isLowScore || isLargeBox || isUnusualAspect) ? 'suspect' : 'human';
+
+                    if (isLargeBox || isUnusualAspect) {
+                        logger.info(`[FaceService] Flagged face as suspect: ${isLargeBox ? `large box (${boxArea.toLocaleString()}px)` : ''} ${isUnusualAspect ? `unusual aspect (${aspectRatio.toFixed(2)})` : ''}`);
+                    }
+
                     const insertParams = [
                         photoId,
                         personId ?? null,
@@ -627,7 +658,10 @@ export class FaceService {
                         assignmentSource, // assignment_source
                         isConfirmed,      // is_confirmed
                         face.estimatedAge ?? null, // Age-Based ERA Categorization
-                        face.gender ?? null        // Age-Based ERA Categorization
+                        face.gender ?? null,       // Age-Based ERA Categorization
+                        entityType,                // Phase 56: VLM Verification
+                        detectionScore,            // Phase 56: Detection score
+                        0                          // Phase 56: verification_attempts
                     ];
 
                     // DEBUG: Log parameter count and types

@@ -745,6 +745,10 @@ def handle_command(command):
                         logger.info(f"[Filter] Rejecting low-conf face: Score={det_score:.3f}, Width={fw}")
                         continue
                 
+                # [Phase 56] Entity Type for VLM Verification
+                from config import VERIFICATION_THRESHOLD, SUSPECT_ENTITY_TYPE
+                entity_type = SUSPECT_ENTITY_TYPE if det_score < VERIFICATION_THRESHOLD else 'human'
+                
                 scan_results.append({
                     "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
                     "descriptor": face.embedding.tolist() if hasattr(face, 'embedding') else [],
@@ -757,7 +761,8 @@ def handle_command(command):
                     # Age-Based ERA Categorization: Extract age and gender from genderage module
                     "estimatedAge": int(face.age) if hasattr(face, 'age') and face.age is not None else None,
                     "gender": "M" if hasattr(face, 'sex') and face.sex == "M" else ("F" if hasattr(face, 'sex') and face.sex == "F" else None),
-                    "scan_source": f"{scan_source_size}px" # Debug info
+                    "scan_source": f"{scan_source_size}px", # Debug info
+                    "entityType": entity_type  # Phase 56: Suspect faces for VLM verification
                 })
 
             
@@ -862,6 +867,22 @@ def handle_command(command):
                 except Exception as e:
                     logger.error(f"[TTA] Rotation {rot_angle} failed: {e}")
         
+        # [Phase 57] Filter out multi-face boxes by aspect ratio
+        # Faces are roughly square. If a box is too wide (>1.5:1) or too tall (<1:1.5), it likely contains multiple faces.
+        # Threshold tuned based on observed data: normal faces 1.0-1.4, multi-face boxes >1.5
+        filtered_results = []
+        for f in scan_results:
+            box = f['box']
+            aspect_ratio = box['width'] / box['height'] if box['height'] > 0 else 1.0
+            if aspect_ratio > 1.5 or aspect_ratio < 0.67:  # Tightened from 1.8/0.55
+                logger.info(f"[Filter] Rejected multi-face box: aspect ratio {aspect_ratio:.2f} (box: {box['width']}x{box['height']})")
+            else:
+                filtered_results.append(f)
+        
+        if len(filtered_results) < len(scan_results):
+            logger.info(f"[Filter] Aspect ratio filter removed {len(scan_results) - len(filtered_results)} multi-face boxes")
+            scan_results = filtered_results
+        
         # NMS (De-Duplicate)
         # --- FINAL NMS MERGE (Standard + TTA) ---
         if len(scan_results) > 1:
@@ -874,9 +895,12 @@ def handle_command(command):
             
             for f in scan_results:
                 box_a = f['box']
+                embedding_a = f.get('descriptor')  # Face embedding
                 is_dup = False
+                
                 for existing in unique_faces:
                     box_b = existing['box']
+                    embedding_b = existing.get('descriptor')
                     
                     # Intersect
                     x1 = max(box_a['x'], box_b['x'])
@@ -897,9 +921,58 @@ def handle_command(command):
                     min_area = min(area_a, area_b)
                     io_min = inter_area / float(min_area) if min_area > 0 else 0
                     
-                    if io_min > 0.65: 
-                        is_dup = True
-                        break
+                    # [Phase 57] Multi-Face Box Prevention
+                    if io_min > 0.65:
+                        # Additional checks before merging
+                        should_merge = True
+                        
+                        # Check 1: Embedding Distance (if available)
+                        # [Phase 57] Only compare embeddings if boxes are from the SAME rotation
+                        # Different rotations of same face have distance >1.2, so we skip the check
+                        rotation_a = f.get('rotation_fix', 0)
+                        rotation_b = existing.get('rotation_fix', 0)
+                        
+                        if rotation_a == rotation_b and embedding_a is not None and embedding_b is not None and len(embedding_a) > 0 and len(embedding_b) > 0:
+                            import numpy as np
+                            emb_a = np.array(embedding_a)
+                            emb_b = np.array(embedding_b)
+                            
+                            # Normalize embeddings (InsightFace embeddings should already be normalized, but ensure it)
+                            norm_a = np.linalg.norm(emb_a)
+                            norm_b = np.linalg.norm(emb_b)
+                            if norm_a > 0:
+                                emb_a = emb_a / norm_a
+                            if norm_b > 0:
+                                emb_b = emb_b / norm_b
+                            
+                            dist = np.linalg.norm(emb_a - emb_b)
+                            # [Phase 57] Threshold tuned for rotations:
+                            # Same face, same rotation: ~0.0-0.3
+                            # Same face, different rotation: ~0.8-1.0
+                            # Different faces: >1.3
+                            if dist > 1.2:  # Different faces (L2 distance > 1.2 on normalized vectors)
+                                should_merge = False
+                                logger.info(f"[NMS] Prevented merge: embedding distance {dist:.3f} > 1.2 (different faces)")
+                        
+                        # Check 2: Aspect Ratio (combined box)
+                        if should_merge:
+                            combined_x = min(box_a['x'], box_b['x'])
+                            combined_y = min(box_a['y'], box_b['y'])
+                            combined_x2 = max(box_a['x'] + box_a['width'], box_b['x'] + box_b['width'])
+                            combined_y2 = max(box_a['y'] + box_a['height'], box_b['y'] + box_b['height'])
+                            combined_width = combined_x2 - combined_x
+                            combined_height = combined_y2 - combined_y
+                            aspect_ratio = combined_width / combined_height if combined_height > 0 else 1.0
+                            
+                            # Faces are roughly square (aspect ratio ~1.0)
+                            # If combined box is too wide (>2:1) or too tall (<1:2), it's likely 2 faces
+                            if aspect_ratio > 2.0 or aspect_ratio < 0.5:
+                                should_merge = False
+                                logger.info(f"[NMS] Prevented merge: aspect ratio {aspect_ratio:.2f} out of range [0.5, 2.0] (likely 2 faces)")
+                        
+                        if should_merge:
+                            is_dup = True
+                            break
                 
                 if not is_dup: 
                     unique_faces.append(f)
@@ -1319,6 +1392,7 @@ def handle_command(command):
                 debug_info = None
             
             # Use normalized descriptors for splitting
+            import numpy as np
             X = np.array(descriptors)
             norm = np.linalg.norm(X, axis=1, keepdims=True)
             norm[norm == 0] = 1e-10
@@ -1659,6 +1733,32 @@ def handle_command(command):
         except Exception as e:
             logger.error(f"Age extraction error for face {face_id}: {e}")
             response = {"type": "extract_age_result", "success": True, "faceId": face_id, "age": None, "gender": None, "failureReason": f"exception:{str(e)[:50]}", "reqId": req_id}
+
+    elif cmd_type == 'verify_face':
+        # [Phase 56] VLM Face Verification
+        image_path = payload.get('imagePath')
+        box = payload.get('box')
+        
+        logger.info(f"[VLM] Verifying face region in {os.path.basename(image_path)}")
+        
+        try:
+            result = vlm.verify_is_face(image_path, box)
+            response = {
+                "type": "verify_face_result",
+                "success": True,
+                **result,
+                "reqId": req_id
+            }
+        except Exception as e:
+            logger.error(f"VLM verification error: {e}")
+            response = {
+                "type": "verify_face_result",
+                "success": False,
+                "is_face": None,
+                "confidence": 0,
+                "error": str(e),
+                "reqId": req_id
+            }
 
     else:
 

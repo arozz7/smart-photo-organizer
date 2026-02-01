@@ -237,4 +237,139 @@ def generate_captions(image_path):
 
     return description, tags
 
-    return description, tags
+def verify_is_face(image_path, box):
+    """
+    Use VLM to verify if a cropped region is a human face.
+    
+    Args:
+        image_path: Path to the source image
+        box: Dict with x1, y1, x2, y2 coordinates
+    
+    Returns:
+        {
+            "is_face": bool | None,  # None if VLM error
+            "confidence": float,
+            "reason": str | None,
+            "error": str | None
+        }
+    """
+    # Lazy Init
+    if not vlm_model:
+        init_vlm()
+    
+    if not vlm_model:
+        logger.error("VLM not initialized, cannot verify face")
+        return {
+            "is_face": None,
+            "confidence": 0.0,
+            "reason": None,
+            "error": "VLM not initialized"
+        }
+    
+    import torch
+    from config import VLM_VERIFICATION_PROMPT
+    
+    logger.debug(f"Verifying face region in {image_path}: {box}")
+    
+    try:
+        # Load and crop image
+        try:
+            pil_img = Image.open(image_path)
+            pil_img = ImageOps.exif_transpose(pil_img)
+            if pil_img.mode != 'RGB':
+                pil_img = pil_img.convert('RGB')
+        except Exception as e:
+            # Fallback for RAW files
+            try:
+                logger.debug("PIL failed, attempting to read as RAW...")
+                with rawpy.imread(image_path) as raw:
+                    rgb = raw.postprocess(user_flip=None)
+                    pil_img = Image.fromarray(rgb)
+            except Exception as raw_e:
+                logger.error(f"Failed to load image: {e} | {raw_e}")
+                return {
+                    "is_face": None,
+                    "confidence": 0.0,
+                    "reason": None,
+                    "error": f"Image load failed: {e}"
+                }
+        
+        # Crop to face region
+        x1, y1, x2, y2 = box['x1'], box['y1'], box['x2'], box['y2']
+        face_crop = pil_img.crop((x1, y1, x2, y2))
+        
+        # Prepare VLM prompt
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": VLM_VERIFICATION_PROMPT}
+                ]
+            }
+        ]
+        
+        text_prompt = vlm_processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        inputs = vlm_processor(text=text_prompt, images=[face_crop], return_tensors="pt")
+        inputs = inputs.to(vlm_model.device)
+        
+        # Generate response
+        with torch.no_grad():
+            generated_ids = vlm_model.generate(**inputs, max_new_tokens=100, temperature=0.1, do_sample=False)
+        
+        # Decode
+        if hasattr(inputs, 'input_ids'):
+            input_len = inputs.input_ids.shape[1]
+        else:
+            input_len = 0
+        
+        new_ids = generated_ids[:, input_len:]
+        generated_text = vlm_processor.batch_decode(new_ids, skip_special_tokens=True)
+        response = generated_text[0].strip()
+        
+        logger.info(f"VLM Verification Response: {response}")
+        
+        # [Phase 57] Parse JSON response
+        try:
+            import json
+            # Try to parse as JSON first
+            parsed = json.loads(response)
+            is_face = parsed.get('is_face', False)
+            confidence = float(parsed.get('confidence', 0.5))
+            reason = parsed.get('reason', '')
+            face_count = parsed.get('face_count', 'one')
+            
+            return {
+                "is_face": is_face,
+                "confidence": confidence,
+                "reason": reason,
+                "face_count": face_count,
+                "error": None
+            }
+        except (json.JSONDecodeError, ValueError):
+            # Fallback to old YES/NO parsing
+            response_lower = response.lower()
+            is_face = "yes" in response_lower[:10]  # Check first 10 chars for YES/NO
+            confidence = 0.9 if is_face else 0.1
+            reason = response[10:].strip() if len(response) > 10 else response
+            
+            return {
+                "is_face": is_face,
+                "confidence": confidence,
+                "reason": reason,
+                "error": None
+            }
+        
+    except Exception as e:
+        logger.error(f"VLM verification failed: {e}")
+        return {
+            "is_face": None,
+            "confidence": 0.0,
+            "reason": None,
+            "error": str(e)
+        }
+
