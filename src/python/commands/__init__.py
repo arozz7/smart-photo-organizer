@@ -9,5 +9,6 @@ from . import scan
 from . import face_analysis
 from . import clustering
 from . import index
+from . import utilities
 
-__all__ = ['scan', 'face_analysis', 'clustering', 'index']
+__all__ = ['scan', 'face_analysis', 'clustering', 'index', 'utilities']
