@@ -14,6 +14,8 @@ import { PhotoRepository } from '../../data/repositories/PhotoRepository';
 export class PhotoService {
     private static _exiftool: ExifTool | null = null;
     private static _exiftoolInitPromise: Promise<ExifTool | null> | null = null;
+    private static _scanningPhotos: Set<number> = new Set(); // Guard against concurrent scans
+
 
     static async getExifTool(): Promise<ExifTool | null> {
         if (this._exiftool) return this._exiftool;
@@ -245,80 +247,95 @@ export class PhotoService {
     static async analyzeImage(options: any) {
         const { photoId, filePath, cleanRescan } = options;
 
-        let oldFaces: any[] = [];
-        if (cleanRescan === true) {
-            logger.info(`[PhotoService] cleanRescan=TRUE for Photo ${photoId}. Fetching old faces...`);
-            oldFaces = FaceRepository.getFacesByPhoto(photoId);
-            logger.info(`[PhotoService] Found ${oldFaces.length} existing faces.`);
+        // Guard: Prevent concurrent scans of the same photo
+        if (this._scanningPhotos.has(photoId)) {
+            logger.warn(`[PhotoService] Photo ${photoId} is already being scanned. Skipping duplicate request.`);
+            return { success: false, error: 'Scan already in progress' };
+        }
 
-            if (oldFaces.length > 0) {
-                const oldIds = oldFaces.map(f => f.id);
-                logger.info(`[PhotoService] Clean Rescan: Removing ${oldIds.length} existing faces before scan: [${oldIds.join(', ')}]`);
-                try {
-                    FaceRepository.deleteFaces(oldIds);
-                    logger.info(`[PhotoService] Deletion completed.`);
-                } catch (e) {
-                    logger.error(`[PhotoService] FAILED to delete faces: ${e}`);
+        this._scanningPhotos.add(photoId);
+        logger.info(`[PhotoService] Starting scan for Photo ${photoId} (cleanRescan=${cleanRescan})`);
+
+        try {
+            let oldFaces: any[] = [];
+            if (cleanRescan === true) {
+                logger.info(`[PhotoService] cleanRescan=TRUE for Photo ${photoId}. Fetching old faces...`);
+                oldFaces = FaceRepository.getFacesByPhoto(photoId);
+                logger.info(`[PhotoService] Found ${oldFaces.length} existing faces.`);
+
+                if (oldFaces.length > 0) {
+                    const oldIds = oldFaces.map(f => f.id);
+                    logger.info(`[PhotoService] Clean Rescan: Removing ${oldIds.length} existing faces before scan: [${oldIds.join(', ')}]`);
+                    try {
+                        FaceRepository.deleteFaces(oldIds);
+                        logger.info(`[PhotoService] Deletion completed.`);
+                    } catch (e) {
+                        logger.error(`[PhotoService] FAILED to delete faces: ${e}`);
+                    }
+                } else {
+                    logger.info(`[PhotoService] No existing faces to delete.`);
                 }
             } else {
-                logger.info(`[PhotoService] No existing faces to delete.`);
+                logger.info(`[PhotoService] cleanRescan=FALSE (or undefined) for Photo ${photoId}. Caller Trace:`);
+                console.trace(`[PhotoService] Analyze Trigger Trace`);
             }
-        } else {
-            logger.info(`[PhotoService] cleanRescan=FALSE (or undefined) for Photo ${photoId}. Caller Trace:`);
-            console.trace(`[PhotoService] Analyze Trigger Trace`);
-        }
 
-        // Call Python Provider
-        // Note: pythonProvider.analyzeImage sends 'analyze_image' command
-        const result = await pythonProvider.analyzeImage(filePath, options);
+            // Call Python Provider
+            // Note: pythonProvider.analyzeImage sends 'analyze_image' command
+            const result = await pythonProvider.analyzeImage(filePath, options);
 
-        // Explicitly process result to ensure DB is updated
-        if (result && result.faces) {
-            await FaceService.processAnalysisResult(
-                photoId,
-                result.faces,
-                result.width || 0,
-                result.height || 0,
-                pythonProvider
-            );
+            // Explicitly process result to ensure DB is updated
+            if (result && result.faces) {
+                await FaceService.processAnalysisResult(
+                    photoId,
+                    result.faces,
+                    result.width || 0,
+                    result.height || 0,
+                    pythonProvider
+                );
 
-            // Identity Transfer logic
-            if (cleanRescan === true && oldFaces.length > 0) {
-                const newFaces = FaceRepository.getFacesByPhoto(photoId);
-                let recoveredCount = 0;
+                // Identity Transfer logic
+                if (cleanRescan === true && oldFaces.length > 0) {
+                    const newFaces = FaceRepository.getFacesByPhoto(photoId);
+                    let recoveredCount = 0;
 
-                for (const oldFace of oldFaces) {
-                    if (!oldFace.person_id) continue;
-                    if (!oldFace.descriptor || oldFace.descriptor.length === 0) continue;
+                    for (const oldFace of oldFaces) {
+                        if (!oldFace.person_id) continue;
+                        if (!oldFace.descriptor || oldFace.descriptor.length === 0) continue;
 
-                    let bestMatch = null;
-                    let bestDist = 100.0;
+                        let bestMatch = null;
+                        let bestDist = 100.0;
 
-                    for (const newFace of newFaces) {
-                        if (newFace.person_id) continue;
-                        if (!newFace.descriptor || newFace.descriptor.length === 0) continue;
+                        for (const newFace of newFaces) {
+                            if (newFace.person_id) continue;
+                            if (!newFace.descriptor || newFace.descriptor.length === 0) continue;
 
-                        const dist = FaceService.calculateL2Distance(oldFace.descriptor, newFace.descriptor);
-                        if (dist < bestDist) {
-                            bestDist = dist;
-                            bestMatch = newFace;
+                            const dist = FaceService.calculateL2Distance(oldFace.descriptor, newFace.descriptor);
+                            if (dist < bestDist) {
+                                bestDist = dist;
+                                bestMatch = newFace;
+                            }
+                        }
+
+                        // Threshold: 0.35 (Same as rotate logic)
+                        if (bestMatch && bestDist < 0.35) {
+                            logger.info(`[PhotoService] Recovered identity for Person ${oldFace.person_id} (dist: ${bestDist.toFixed(3)})`);
+                            FaceRepository.assignFacesToPerson([bestMatch.id], oldFace.person_id, {
+                                assignment_source: oldFace.assignment_source || 'manual_recovered',
+                                is_confirmed: !!oldFace.is_confirmed
+                            });
+                            recoveredCount++;
                         }
                     }
-
-                    // Threshold: 0.35 (Same as rotate logic)
-                    if (bestMatch && bestDist < 0.35) {
-                        logger.info(`[PhotoService] Recovered identity for Person ${oldFace.person_id} (dist: ${bestDist.toFixed(3)})`);
-                        FaceRepository.assignFacesToPerson([bestMatch.id], oldFace.person_id, {
-                            assignment_source: oldFace.assignment_source || 'manual_recovered',
-                            is_confirmed: !!oldFace.is_confirmed
-                        });
-                        recoveredCount++;
-                    }
+                    logger.info(`[PhotoService] Clean Rescan: Identity Transfer recovered ${recoveredCount} faces.`);
                 }
-                logger.info(`[PhotoService] Clean Rescan: Identity Transfer recovered ${recoveredCount} faces.`);
             }
-        }
 
-        return result;
+            return result;
+        } finally {
+            // Always remove from scanning set, even if error occurs
+            this._scanningPhotos.delete(photoId);
+            logger.info(`[PhotoService] Scan completed for Photo ${photoId}`);
+        }
     }
 }
