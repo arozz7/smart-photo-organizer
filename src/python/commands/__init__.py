@@ -6,5 +6,8 @@ to comply with file size limits and improve maintainability.
 """
 
 from . import scan
+from . import face_analysis
+from . import clustering
+from . import index
 
-__all__ = ['scan']
+__all__ = ['scan', 'face_analysis', 'clustering', 'index']
