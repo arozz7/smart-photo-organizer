@@ -127,17 +127,29 @@ export class BackgroundVerificationService implements IService {
                             logger.info(`[BackgroundVerificationService] Successfully split face ${face.id} into ${regionResult.faceCount} individual faces`);
                         } else if (regionResult.error) {
                             logger.warn(`[BackgroundVerificationService] Detector error for face ${face.id}: ${regionResult.error}`);
-                            // Promote to 'human' anyway since VLM confirmed it's a face
-                            FaceRepository.updateFaceEntityType(face.id, 'human');
+                            // Check score before promoting
+                            if (face.score && face.score < 0.65) {
+                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified but keeping as suspect (low score: ${face.score.toFixed(3)})`);
+                            } else {
+                                FaceRepository.updateFaceEntityType(face.id, 'human');
+                            }
                         } else {
-                            // Only 1 face detected, just wide box - promote to 'human'
-                            FaceRepository.updateFaceEntityType(face.id, 'human');
-                            logger.info(`[BackgroundVerificationService] Face ${face.id} verified as single face (wide box, confidence: ${result.confidence})`);
+                            // Only 1 face detected, just wide box - check score before promoting
+                            if (face.score && face.score < 0.65) {
+                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified but keeping as suspect (low score: ${face.score.toFixed(3)})`);
+                            } else {
+                                FaceRepository.updateFaceEntityType(face.id, 'human');
+                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified as single face (wide box, confidence: ${result.confidence})`);
+                            }
                         }
                     } else {
-                        // Normal aspect ratio, promote to 'human'
-                        FaceRepository.updateFaceEntityType(face.id, 'human');
-                        logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
+                        // Normal aspect ratio - check score before promoting
+                        if (face.score && face.score < 0.65) {
+                            logger.info(`[BackgroundVerificationService] Face ${face.id} verified but keeping as suspect (low score: ${face.score.toFixed(3)})`);
+                        } else {
+                            FaceRepository.updateFaceEntityType(face.id, 'human');
+                            logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
+                        }
                     }
                 } else if (result.is_face === false) {
                     // Reject as false positive

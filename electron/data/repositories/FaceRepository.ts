@@ -620,11 +620,11 @@ export class FaceRepository {
                   AND pose_yaw IS NOT NULL
             `).get() as { count: number })?.count || 0;
 
-            // Eligible faces with descriptor_v2
+            // Eligible faces with descriptor (embeddings)
             const withDescriptorV2 = (db.prepare(`
                 SELECT COUNT(*) as count FROM faces 
                 WHERE ${eligibleFilter}
-                  AND descriptor_v2 IS NOT NULL
+                  AND descriptor IS NOT NULL
             `).get() as { count: number })?.count || 0;
 
             return {
@@ -958,10 +958,11 @@ export class FaceRepository {
         file_path: string;
         preview_cache_path: string | null;
         verification_attempts: number;
+        score: number | null;
     }> {
         const db = getDB();
         return db.prepare(`
-            SELECT f.id, f.photo_id, f.box_json, f.verification_attempts,
+            SELECT f.id, f.photo_id, f.box_json, f.verification_attempts, f.score,
                    p.file_path, p.preview_cache_path
             FROM faces f
             JOIN photos p ON f.photo_id = p.id
@@ -976,6 +977,7 @@ export class FaceRepository {
             file_path: string;
             preview_cache_path: string | null;
             verification_attempts: number;
+            score: number | null;
         }>;
     }
 
