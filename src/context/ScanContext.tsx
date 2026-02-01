@@ -179,6 +179,12 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             const scanResults: any[] = await window.ipcRenderer.invoke('scan-directory', path, options)
             console.log(`[ScanContext] Scan complete. Found ${scanResults.length} photos.`);
 
+            // DEBUG: Log isNew status for first few photos
+            if (scanResults.length > 0) {
+                const sample = scanResults.slice(0, 3);
+                console.log(`[ScanContext] Sample photos:`, sample.map(p => ({ id: p.id, isNew: p.isNew, needsUpdate: p.needsUpdate })));
+            }
+
             // Queue Logic:
             // If forceRescan: Queue ALL returned photos
             // Else: Queue ONLY photos marked as isNew
@@ -186,10 +192,12 @@ export function ScanProvider({ children }: { children: ReactNode }) {
                 ? scanResults
                 : scanResults.filter(p => p.isNew);
 
+            console.log(`[ScanContext] forceRescan=${options.forceRescan}, scanResults.length=${scanResults.length}, photosToQueue.length=${photosToQueue.length}`);
+
             if (photosToQueue.length > 0) {
                 console.log(`[ScanContext] Queueing ${photosToQueue.length} photos for AI (Total Scanned: ${scanResults.length})`);
                 const queueItems = photosToQueue.map(p => ({ ...p, cleanRescan: options.forceRescan }));
-                addToQueue(queueItems, true)
+                await addToQueue(queueItems, true)
             } else {
                 console.log(`[ScanContext] No new photos to queue for AI.`);
             }
