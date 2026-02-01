@@ -21,6 +21,7 @@ import facelib.vlm as vlm
 import facelib.utils as utils
 import facelib.vector_store as vector_store
 import facelib.image_ops as image_ops
+import facelib.adaface as adaface  # [Phase 59] AdaFace for low-quality faces
 import enhance # Local module
 
 # Configure logging
@@ -34,6 +35,14 @@ utils.inject_runtime()
 torch_lib = utils.get_torch()
 # faces.init_insightface() # Lazy init in command
 vector_store.init_faiss()
+
+# [Phase 59] Initialize AdaFace (optional, graceful fallback if model missing)
+logger.info("[Startup] Initializing AdaFace model...")
+adaface_loaded = adaface.init_adaface()
+if adaface_loaded:
+    logger.info("[Startup] AdaFace model loaded successfully")
+else:
+    logger.warning("[Startup] AdaFace model not available, using ArcFace only")
 
 # --- HELPER FUNCTIONS (Specific to Orchestration/API) ---
 

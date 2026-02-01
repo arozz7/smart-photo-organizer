@@ -14,6 +14,7 @@ import numpy as np
 import facelib.faces as faces
 import facelib.vlm as vlm
 import facelib.image_ops as image_ops
+import facelib.adaface as adaface  # [Phase 59] AdaFace for low-quality faces
 
 logger = logging.getLogger('ai_engine.scan')
 
@@ -24,6 +25,40 @@ def set_config(config):
     """Set global configuration from main.py"""
     global CONFIG
     CONFIG = config
+
+def get_adaptive_embedding(face_obj, face_crop, blur_score):
+    """
+    Select embedding model based on face quality.
+    
+    [Phase 59] Adaptive Embedding Selection:
+    - Low quality (blur < 50): Use AdaFace (better for blurry/profile faces)
+    - High quality (blur >= 50): Use ArcFace (InsightFace default)
+    
+    Args:
+        face_obj: InsightFace face object (has .embedding from ArcFace)
+        face_crop: Cropped face image (BGR, uint8) for AdaFace
+        blur_score: Face blur score (0-100, higher = sharper)
+    
+    Returns:
+        list: 512-dim embedding vector
+    """
+    from config import ADAFACE_ENABLED, ADAFACE_BLUR_THRESHOLD
+    
+    # Check if AdaFace is enabled and available
+    if ADAFACE_ENABLED and adaface.is_available() and blur_score < ADAFACE_BLUR_THRESHOLD:
+        # Use AdaFace for low-quality faces
+        logger.debug(f"[AdaFace] Using AdaFace for low-quality face (blur={blur_score:.1f})")
+        embedding = adaface.get_embedding(face_crop)
+        
+        if embedding is not None:
+            return embedding.tolist()
+        else:
+            # Fallback to ArcFace if AdaFace fails
+            logger.warning("[AdaFace] Extraction failed, falling back to ArcFace")
+            return face_obj.embedding.tolist() if hasattr(face_obj, 'embedding') else []
+    else:
+        # Use ArcFace (InsightFace default) for high-quality faces
+        return face_obj.embedding.tolist() if hasattr(face_obj, 'embedding') else []
 
 def analyze_image(payload, load_image_cv2_func, req_id=None):
     """
@@ -330,9 +365,13 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
             from config import VERIFICATION_THRESHOLD, SUSPECT_ENTITY_TYPE
             entity_type = SUSPECT_ENTITY_TYPE if det_score < VERIFICATION_THRESHOLD else 'human'
             
+            # [Phase 59] Adaptive Embedding Selection
+            # Use AdaFace for low-quality faces (blur < 50), ArcFace for high-quality
+            descriptor = get_adaptive_embedding(face, face_crop, f_blur)
+            
             scan_results.append({
                 "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
-                "descriptor": face.embedding.tolist() if hasattr(face, 'embedding') else [],
+                "descriptor": descriptor,
                 "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
                 "blurScore": float(f_blur),
                 "poseYaw": pose_yaw,
@@ -430,9 +469,12 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
                             size_factor = min(face_size / 200.0, 1.0)
                             face_quality = (blur_factor * 0.3 + pose_factor * 0.3 + det_score * 0.2 + size_factor * 0.2)
 
+                        # [Phase 59] Adaptive Embedding Selection (TTA faces)
+                        descriptor = get_adaptive_embedding(face, face_crop, f_blur)
+
                         scan_results.append({
                             "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
-                            "descriptor": face.embedding.tolist() if hasattr(face, 'embedding') else [],
+                            "descriptor": descriptor,
                             "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
                             "blurScore": float(f_blur),
                             "poseYaw": pose_yaw,

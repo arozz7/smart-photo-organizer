@@ -22,4 +22,11 @@ Respond in JSON format:
   "reason": "brief explanation"
 }
 
+
 Note: Focus on semantic classification only. Do NOT attempt to count faces."""
+
+# [Phase 59] AdaFace Configuration
+# AdaFace is used for improved recognition on low-quality (blurry) faces
+ADAFACE_ENABLED = True  # Enable/disable AdaFace hybrid embedding
+ADAFACE_BLUR_THRESHOLD = 50  # Use AdaFace if blur_score < this value (0-100 scale)
+ADAFACE_MODEL_PATH = "models/adaface_ir50_webface4m.onnx"  # Path to ONNX model
