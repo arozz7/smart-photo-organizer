@@ -398,8 +398,12 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
         # [Fix] Reduce false positives in TTA (e.g. knees/elbows in rotated views).
         # Rotated detections must have higher confidence to be accepted.
         TTA_THRESHOLD_BOOST = 0.10
-        # Ensure at least 0.45 even if user set 0.25
-        safe_thresh = max(det_thresh + TTA_THRESHOLD_BOOST, 0.45) if det_thresh < 0.5 else det_thresh 
+        # [Phase 56.6] Macro Sensitivity: Lower floor for TTA in Macro mode
+        # Photo 49 needs ~0.30 to catch the tilted face.
+        if scan_mode == 'MACRO':
+            safe_thresh = max(det_thresh + TTA_THRESHOLD_BOOST, 0.30)
+        else:
+            safe_thresh = max(det_thresh + TTA_THRESHOLD_BOOST, 0.45) if det_thresh < 0.5 else det_thresh 
 
         for rot_angle in [90, 180, 270]:
             try:
