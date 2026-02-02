@@ -1,3 +1,4 @@
+import { BrowserWindow } from 'electron';
 import logger from '../../logger';
 import { IService } from '../interfaces/IService';
 import { FaceRepository } from '../../data/repositories/FaceRepository';
@@ -124,6 +125,7 @@ export class BackgroundVerificationService implements IService {
                             // Create new face records for each detected face
                             await this.createSplitFaces(face, regionResult.faces);
 
+                            this.notifyPhotoChanged(face.photo_id);
                             logger.info(`[BackgroundVerificationService] Successfully split face ${face.id} into ${regionResult.faceCount} individual faces`);
                         } else if (regionResult.error) {
                             logger.warn(`[BackgroundVerificationService] Detector error for face ${face.id}: ${regionResult.error}`);
@@ -135,6 +137,7 @@ export class BackgroundVerificationService implements IService {
                                 logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as likely false positive (score: ${face.score.toFixed(3)})`);
                             } else {
                                 FaceRepository.updateFaceEntityType(face.id, 'human');
+                                this.notifyPhotoChanged(face.photo_id);
                             }
                         } else {
                             // Only 1 face detected, just wide box - check score before promoting
@@ -144,6 +147,7 @@ export class BackgroundVerificationService implements IService {
                                 logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as likely false positive (score: ${face.score.toFixed(3)})`);
                             } else {
                                 FaceRepository.updateFaceEntityType(face.id, 'human');
+                                this.notifyPhotoChanged(face.photo_id);
                                 logger.info(`[BackgroundVerificationService] Face ${face.id} verified as single face (wide box, confidence: ${result.confidence})`);
                             }
                         }
@@ -155,12 +159,14 @@ export class BackgroundVerificationService implements IService {
                             logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as likely false positive (score: ${face.score.toFixed(3)})`);
                         } else {
                             FaceRepository.updateFaceEntityType(face.id, 'human');
+                            this.notifyPhotoChanged(face.photo_id);
                             logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
                         }
                     }
                 } else if (result.is_face === false) {
                     // Reject as false positive - DELETE from DB to remove box from UI
                     FaceRepository.deleteFaces([face.id]);
+                    this.notifyPhotoChanged(face.photo_id);
                     logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as non-face (reason: ${result.reason})`);
                 } else {
                     // VLM error (is_face = null)
@@ -254,6 +260,18 @@ export class BackgroundVerificationService implements IService {
                 logger.error(`[BackgroundVerificationService] Failed to create split face:`, e);
             }
         }
+    }
+
+    /**
+     * Notify frontend that a photo's face data has changed.
+     * Triggers UI refresh in PhotoDetail view.
+     */
+    private notifyPhotoChanged(photoId: number) {
+        BrowserWindow.getAllWindows().forEach(win => {
+            if (!win.isDestroyed()) {
+                win.webContents.send('background-verification-result', { photoId });
+            }
+        });
     }
 
     private sleep(ms: number): Promise<void> {

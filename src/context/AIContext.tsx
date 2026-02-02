@@ -357,9 +357,21 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             handleScanResult(payload);
         });
 
+        // Listen for background verification results (Phase 56.5 UI Sync)
+        // @ts-ignore
+        const cleanupVerify = window.ipcRenderer.on('background-verification-result', (payload: any) => {
+            if (payload && payload.photoId) {
+                console.log(`[AIContext] Background verification finished for photo ${payload.photoId}, notifying listeners...`);
+                processedCallbacks.current.forEach(cb => cb(payload.photoId));
+            }
+        });
+
         return () => {
             if (typeof cleanup === 'function') {
                 (cleanup as unknown as () => void)();
+            }
+            if (typeof cleanupVerify === 'function') {
+                (cleanupVerify as unknown as () => void)();
             }
         };
     }, []);
