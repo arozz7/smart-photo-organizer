@@ -13,6 +13,7 @@ VLM_VERIFICATION_PROMPT = """Analyze the object in the absolute CENTER of this i
 
 To verify if this is a HUMAN FACE, follow these steps:
 1. Identify physical landmarks: Do you see an eye, a nose, OR a mouth?
+   (Landmarks can be partial or obscured by glasses, hair, or profile view)
 2. Distinguish from body parts: Is it a hand, shoulder, elbow, or just hair?
 3. Final Decision: Is it a face?
 
@@ -24,16 +25,8 @@ RESPOND IN JSON:
   "reason": "brief explanation"
 }
 
-CRITICAL: If you ONLY see hair, skin with no features, or a hand, "is_face" must be FALSE."""
-
-Respond in JSON format:
-{
-  "is_face": true|false,
-  "confidence": 0.0-1.0,
-  "reason": "brief explanation"
-}
-
-Note: Focus on semantic classification only. Do NOT attempt to count faces."""
+CRITICAL: If you ONLY see hair, skin with no features, or a hand, "is_face" must be FALSE.
+Note: If you recognize a smile or expression, identify the mouth as visible."""
 
 # [Phase 59] AdaFace Configuration
 # AdaFace is used for improved recognition on low-quality (blurry) faces
