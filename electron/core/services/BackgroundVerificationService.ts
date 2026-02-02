@@ -129,14 +129,20 @@ export class BackgroundVerificationService implements IService {
                             logger.warn(`[BackgroundVerificationService] Detector error for face ${face.id}: ${regionResult.error}`);
                             // Check score before promoting
                             if (face.score && face.score < 0.65) {
-                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified but keeping as suspect (low score: ${face.score.toFixed(3)})`);
+                                // VLM confirmed it's a face, but score is too low
+                                // Mark as ignored to prevent re-verification
+                                FaceRepository.markFaceAsRejected(face.id);
+                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified but rejected (low score: ${face.score.toFixed(3)})`);
                             } else {
                                 FaceRepository.updateFaceEntityType(face.id, 'human');
                             }
                         } else {
                             // Only 1 face detected, just wide box - check score before promoting
                             if (face.score && face.score < 0.65) {
-                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified but keeping as suspect (low score: ${face.score.toFixed(3)})`);
+                                // VLM confirmed it's a face, but score is too low
+                                // Mark as ignored to prevent re-verification
+                                FaceRepository.markFaceAsRejected(face.id);
+                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified but rejected (low score: ${face.score.toFixed(3)})`);
                             } else {
                                 FaceRepository.updateFaceEntityType(face.id, 'human');
                                 logger.info(`[BackgroundVerificationService] Face ${face.id} verified as single face (wide box, confidence: ${result.confidence})`);
@@ -145,7 +151,10 @@ export class BackgroundVerificationService implements IService {
                     } else {
                         // Normal aspect ratio - check score before promoting
                         if (face.score && face.score < 0.65) {
-                            logger.info(`[BackgroundVerificationService] Face ${face.id} verified but keeping as suspect (low score: ${face.score.toFixed(3)})`);
+                            // VLM confirmed it's a face, but score is too low
+                            // Mark as ignored to prevent re-verification
+                            FaceRepository.markFaceAsRejected(face.id);
+                            logger.info(`[BackgroundVerificationService] Face ${face.id} verified but rejected (low score: ${face.score.toFixed(3)})`);
                         } else {
                             FaceRepository.updateFaceEntityType(face.id, 'human');
                             logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
