@@ -364,7 +364,7 @@ def verify_is_face(image_path, box):
             # If VLM says it's a face but the reason mentions common false positives, override.
             # Example: {"is_face": true, "reason": "human hand"} -> False
             if is_face is True:
-                non_face_keywords = ["hand", "finger", "shoulder", "knee", "elbow", "arm", "leg", "foot", "pattern", "object", "landscape"]
+                non_face_keywords = ["hand", "finger", "shoulder", "knee", "elbow", "arm", "leg", "foot", "pattern", "object", "landscape", "body part", "body-part", "appendage"]
                 if any(kw in reason for kw in non_face_keywords):
                     logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face: '{reason}'")
                     is_face = False
