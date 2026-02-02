@@ -1,5 +1,6 @@
 import sys
 import logging
+from PIL import Image, ImageOps
 import rawpy
 import os
 import json
