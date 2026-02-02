@@ -1,7 +1,9 @@
 import sys
 import logging
-from PIL import Image, ImageOps
 import rawpy
+import os
+import json
+import re
 
 logger = logging.getLogger('ai_engine.vlm')
 
@@ -377,14 +379,22 @@ def verify_is_face(image_path, box):
                 if match:
                     clean_response = match.group(0)
             
-            # Try to parse as JSON first
+            # 3. Parse as JSON
             parsed = json.loads(clean_response)
             is_face = parsed.get('is_face', False)
             confidence = float(parsed.get('confidence', 0.5))
-            landmarks = parsed.get('landmarks_visible', 'unknown')
-            reason = parsed.get('reason', '')
+            landmarks = str(parsed.get('landmarks_visible', '')).lower()
+            reason = str(parsed.get('reason', '')).lower()
             
             logger.info(f"[VLM] Parsed Result: is_face={is_face}, landmarks={landmarks}, reason='{reason}'")
+            
+            # [Phase 56.5] LANDMARK VALIDATION
+            # CRITICAL: If VLM admits there are no landmarks, it's NOT a face, regardless of what it thinks as a whole.
+            # This catches hallucinations where it says "Yes, it's a person smiling" but then says landmarks: "none".
+            if is_face is True and (landmarks == 'none' or not landmarks or 'none' in landmarks or 'unknown' in landmarks):
+                logger.warning(f"[VLM] Overriding is_face=True -> False because NO landmarks were visible ('{landmarks}')")
+                is_face = False
+                reason = f"No landmarks visible ({reason})"
             
             # [Phase 58] Secondary Safeguards (Logic-based) Protection:
             # If VLM says it's a face but the reason mentions common false positives, override.
