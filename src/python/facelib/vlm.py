@@ -336,11 +336,38 @@ def verify_is_face(image_path, box):
         # [Phase 58] Parse JSON response (semantic verification only)
         try:
             import json
-            # Try to parse as JSON first
-            parsed = json.loads(response)
+            import re
+            
+            # 1. Clean response: remove markdown code blocks or "Answer:" prefixes
+            clean_response = response.strip()
+            if clean_response.startswith("```json"):
+                clean_response = clean_response[7:-3].strip()
+            elif clean_response.startswith("```"):
+                clean_response = clean_response[3:-3].strip()
+            elif "Answer:" in clean_response:
+                # Extract everything after "Answer:"
+                clean_response = clean_response.split("Answer:", 1)[1].strip()
+                
+            # 2. Try to find JSON block {...} if not a direct match
+            if not (clean_response.startswith("{") and clean_response.endswith("}")):
+                match = re.search(r"\{.*\}", clean_response, re.DOTALL)
+                if match:
+                    clean_response = match.group(0)
+            
+            # 3. Parse as JSON
+            parsed = json.loads(clean_response)
             is_face = parsed.get('is_face', False)
             confidence = float(parsed.get('confidence', 0.5))
-            reason = parsed.get('reason', '')
+            reason = parsed.get('reason', '').lower()
+            
+            # [Phase 56 FIX] Contradictory Logic Protection:
+            # If VLM says it's a face but the reason mentions common false positives, override.
+            # Example: {"is_face": true, "reason": "human hand"} -> False
+            if is_face is True:
+                non_face_keywords = ["hand", "finger", "shoulder", "knee", "elbow", "arm", "leg", "foot", "pattern", "object", "landscape"]
+                if any(kw in reason for kw in non_face_keywords):
+                    logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face: '{reason}'")
+                    is_face = False
             
             return {
                 "is_face": is_face,
@@ -348,12 +375,13 @@ def verify_is_face(image_path, box):
                 "reason": reason,
                 "error": None
             }
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, Exception) as e:
             # Fallback to old YES/NO parsing
+            logger.debug(f"JSON parse failed for VLM response, falling back to heuristic: {e}")
             response_lower = response.lower()
-            is_face = "yes" in response_lower[:10]  # Check first 10 chars for YES/NO
+            is_face = "yes" in response_lower[:10] or '"is_face": true' in response_lower
             confidence = 0.9 if is_face else 0.1
-            reason = response[10:].strip() if len(response) > 10 else response
+            reason = response.strip()
             
             return {
                 "is_face": is_face,

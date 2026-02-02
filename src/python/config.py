@@ -11,9 +11,11 @@ MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifica
 # [Phase 58] Simplified prompt - semantic verification only (detector handles face counting)
 VLM_VERIFICATION_PROMPT = """Analyze this cropped image region and determine if it shows a human face.
 
+CRITICAL: Body parts (hand, elbow, knee, shoulder, back of head) or objects are NOT human faces. If the image shows a body part but not a face, you MUST respond with "is_face": false.
+
 Answer these questions:
 1. Is this a human face? (yes/no)
-2. If not a face, what is it? (e.g., shoulder, knee, elbow, hand, pattern, object, body part)
+2. If not a face, what specifically is it? (e.g., shoulder, knee, elbow, hand, pattern, object, body part, hair)
 
 Respond in JSON format:
 {
@@ -21,7 +23,6 @@ Respond in JSON format:
   "confidence": 0.0-1.0,
   "reason": "brief explanation"
 }
-
 
 Note: Focus on semantic classification only. Do NOT attempt to count faces."""
 
