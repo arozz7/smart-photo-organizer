@@ -398,24 +398,30 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
         # [Fix] Reduce false positives in TTA (e.g. knees/elbows in rotated views).
         # Rotated detections must have higher confidence to be accepted.
         TTA_THRESHOLD_BOOST = 0.10
-        # [Phase 56.6] Macro Sensitivity: Lower floor for TTA in Macro mode
-        # Photo 49 needs ~0.30 to catch the tilted face.
+        # [Phase 56.7] Macro Accuracy: No boost for Macro mode. Use full sensitivity (0.25).
         if scan_mode == 'MACRO':
-            safe_thresh = max(det_thresh + TTA_THRESHOLD_BOOST, 0.30)
+            safe_thresh = det_thresh  # Use the user's base threshold (usually 0.25)
         else:
             safe_thresh = max(det_thresh + TTA_THRESHOLD_BOOST, 0.45) if det_thresh < 0.5 else det_thresh 
 
-        for rot_angle in [90, 180, 270]:
-            try:
-                logger.info(f"[TTA] Trying rotation {rot_angle}... (Safe Thresh: {safe_thresh:.2f})")
-                rotated_img = None
-                if rot_angle == 90: rotated_img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-                elif rot_angle == 180: rotated_img = cv2.rotate(img, cv2.ROTATE_180)
-                elif rot_angle == 270: rotated_img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-                else: continue
+        # [Phase 56.7] Multi-Scale TTA for Macro Mode
+        # If faces are very large (close-ups), they might be missed at 1280px but caught at 640px.
+        tta_scales = [target_size]
+        if scan_mode == 'MACRO':
+            tta_scales.append((640, 640))
 
-                faces.init_insightface(providers=faces.CURRENT_PROVIDERS, allowed_modules=faces.ALLOWED_MODULES, det_size=target_size, det_thresh=safe_thresh)  # Re-init params with SAFE thresh
-                r_faces = faces.app.get(rotated_img)
+        for rot_angle in [90, 180, 270]:
+            rotated_img = None
+            if rot_angle == 90: rotated_img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+            elif rot_angle == 180: rotated_img = cv2.rotate(img, cv2.ROTATE_180)
+            elif rot_angle == 270: rotated_img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            else: continue
+
+            for current_tta_size in tta_scales:
+                try:
+                    logger.info(f"[TTA] Trying rotation {rot_angle} at {current_tta_size}... (Safe Thresh: {safe_thresh:.2f})")
+                    faces.init_insightface(providers=faces.CURRENT_PROVIDERS, allowed_modules=faces.ALLOWED_MODULES, det_size=current_tta_size, det_thresh=safe_thresh)
+                    r_faces = faces.app.get(rotated_img)
 
                 if len(r_faces) > 0:
                     orig_h, orig_w = img.shape[:2]
