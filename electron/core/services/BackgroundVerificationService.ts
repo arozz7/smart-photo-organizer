@@ -131,8 +131,8 @@ export class BackgroundVerificationService implements IService {
                             if (face.score && face.score < 0.35) {
                                 // VLM confirmed it's a face, but detector score is extremely low
                                 // Likely a high-confidence VLM hallucination (e.g. a hand)
-                                FaceRepository.markFaceAsRejected(face.id);
-                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified but rejected as likely false positive (score: ${face.score.toFixed(3)})`);
+                                FaceRepository.deleteFaces([face.id]);
+                                logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as likely false positive (score: ${face.score.toFixed(3)})`);
                             } else {
                                 FaceRepository.updateFaceEntityType(face.id, 'human');
                             }
@@ -140,8 +140,8 @@ export class BackgroundVerificationService implements IService {
                             // Only 1 face detected, just wide box - check score before promoting
                             if (face.score && face.score < 0.35) {
                                 // VLM confirmed it's a face, but score is too low
-                                FaceRepository.markFaceAsRejected(face.id);
-                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified but rejected as likely false positive (score: ${face.score.toFixed(3)})`);
+                                FaceRepository.deleteFaces([face.id]);
+                                logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as likely false positive (score: ${face.score.toFixed(3)})`);
                             } else {
                                 FaceRepository.updateFaceEntityType(face.id, 'human');
                                 logger.info(`[BackgroundVerificationService] Face ${face.id} verified as single face (wide box, confidence: ${result.confidence})`);
@@ -151,17 +151,17 @@ export class BackgroundVerificationService implements IService {
                         // Normal aspect ratio - check score before promoting
                         if (face.score && face.score < 0.35) {
                             // VLM confirmed it's a face, but score is too low
-                            FaceRepository.markFaceAsRejected(face.id);
-                            logger.info(`[BackgroundVerificationService] Face ${face.id} verified but rejected as likely false positive (score: ${face.score.toFixed(3)})`);
+                            FaceRepository.deleteFaces([face.id]);
+                            logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as likely false positive (score: ${face.score.toFixed(3)})`);
                         } else {
                             FaceRepository.updateFaceEntityType(face.id, 'human');
                             logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
                         }
                     }
                 } else if (result.is_face === false) {
-                    // Reject as false positive
-                    FaceRepository.markFaceAsRejected(face.id);
-                    logger.info(`[BackgroundVerificationService] Face ${face.id} rejected as non-face (reason: ${result.reason})`);
+                    // Reject as false positive - DELETE from DB to remove box from UI
+                    FaceRepository.deleteFaces([face.id]);
+                    logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as non-face (reason: ${result.reason})`);
                 } else {
                     // VLM error (is_face = null)
                     const attempts = FaceRepository.incrementVerificationAttempts(face.id);

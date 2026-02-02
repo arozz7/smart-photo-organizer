@@ -11,10 +11,11 @@ MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifica
 # [Phase 58] Simplified prompt - semantic verification only (detector handles face counting)
 VLM_VERIFICATION_PROMPT = """Analyze this cropped image region and determine if it shows a human face.
 
-CRITICAL: In this context, a "human face" is a specific category. Appendages (hand, elbow, knee, shoulder, back of head) are "body parts" but are NOT faces. 
+CRITICAL: In this context, a "human face" must show clear facial features (one or both eyes, nose, OR mouth). 
+Appendages (hand, elbow, knee, shoulder) or blurry background shapes are NOT human faces.
 
-If the image shows a face, even partially, you MUST respond with "is_face": true and "reason": "human face".
-If the image shows a hand, knee, or other appendage but NO face, you MUST respond with "is_face": false and "reason": "body part".
+If the image clearly shows a face (even a profile view), respond with "is_face": true and "reason": "human face".
+If the image shows a hand, knee, or other appendage with NO clear face, respond with "is_face": false and "reason": "body part".
 
 Answer these questions:
 1. Is this a human face? (yes/no)

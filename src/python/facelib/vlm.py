@@ -294,9 +294,20 @@ def verify_is_face(image_path, box):
                     "error": f"Image load failed: {e}"
                 }
         
-        # Crop to face region
+        # Crop to face region with padding (Phase 56 Accuracy Fix)
+        # 30% padding helps VLM distinguish between 'face' and 'body part' (elbow/hand)
         x1, y1, x2, y2 = box['x1'], box['y1'], box['x2'], box['y2']
-        face_crop = pil_img.crop((x1, y1, x2, y2))
+        bw, bh = x2 - x1, y2 - y1
+        pad_w, pad_h = bw * 0.3, bh * 0.3
+        
+        # Apply padding and clamp to image boundaries
+        img_w, img_h = pil_img.size
+        cx1 = max(0, x1 - pad_w)
+        cy1 = max(0, y1 - pad_h)
+        cx2 = min(img_w, x2 + pad_w)
+        cy2 = min(img_h, y2 + pad_h)
+        
+        face_crop = pil_img.crop((cx1, cy1, cx2, cy2))
         
         # Prepare VLM prompt
         messages = [
