@@ -9,17 +9,20 @@ MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifica
 
 # VLM Settings
 # [Phase 58] Simplified prompt - semantic verification only (detector handles face counting)
-VLM_VERIFICATION_PROMPT = """Analyze this cropped image region and determine if it shows a human face.
+VLM_VERIFICATION_PROMPT = """Analyze the object in the CENTER of this cropped image.
 
-CRITICAL: In this context, a "human face" must show clear facial features (one or both eyes, nose, OR mouth). 
-Appendages (hand, elbow, knee, shoulder) or blurry background shapes are NOT human faces.
+CRITICAL: Is the object exactly in the center of this image a human face? 
+A "human face" must show clear eyes, nose, or mouth. 
 
-If the image clearly shows a face (even a profile view), respond with "is_face": true and "reason": "human face".
-If the image shows a hand, knee, or other appendage with NO clear face, respond with "is_face": false and "reason": "body part".
+DO NOT classify hair, headpieces, shoulders, or hands as a face. 
+Ignore any other faces that might appear on the edges of this crop; focus ONLY on the center.
+
+If the center object is a face, respond with "is_face": true and "reason": "human face".
+If the center object is hair, a headpiece, or a blank area, respond with "is_face": false and "reason": "hair" or "object".
 
 Answer these questions:
-1. Is this a human face? (yes/no)
-2. If not a face, what specifically is it? (e.g., shoulder, knee, elbow, hand, pattern, object, body part, hair)
+1. Is the object in the center a human face? (yes/no)
+2. If not a face, what specifically is it? (e.g., hair, headpiece, shoulder, hand, empty space)
 
 Respond in JSON format:
 {

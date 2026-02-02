@@ -295,10 +295,10 @@ def verify_is_face(image_path, box):
                 }
         
         # Crop to face region with padding (Phase 56 Accuracy Fix)
-        # 30% padding helps VLM distinguish between 'face' and 'body part' (elbow/hand)
+        # 15% padding provides context without contaminating the crop with nearby real faces.
         x1, y1, x2, y2 = box['x1'], box['y1'], box['x2'], box['y2']
         bw, bh = x2 - x1, y2 - y1
-        pad_w, pad_h = bw * 0.3, bh * 0.3
+        pad_w, pad_h = bw * 0.15, bh * 0.15
         
         # Apply padding and clamp to image boundaries
         img_w, img_h = pil_img.size
@@ -375,10 +375,13 @@ def verify_is_face(image_path, box):
             # If VLM says it's a face but the reason mentions common false positives, override.
             # Example: {"is_face": true, "reason": "human hand"} -> False
             if is_face is True:
-                non_face_keywords = ["hand", "finger", "shoulder", "knee", "elbow", "arm", "leg", "foot", "pattern", "object", "landscape", "body part", "body-part", "appendage"]
+                non_face_keywords = ["hand", "finger", "shoulder", "knee", "elbow", "arm", "leg", "foot", "pattern", "object", "landscape", "body part", "body-part", "appendage", "hair", "headpiece", "fabric", "cloth", "veil"]
                 if any(kw in reason for kw in non_face_keywords):
-                    logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face: '{reason}'")
-                    is_face = False
+                    # Special check: If reason contains "face" AND "hair", it might be a real face with hair.
+                    # Only override if "face" is NOT in the reason part describing the object.
+                    if "face" not in reason:
+                        logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face: '{reason}'")
+                        is_face = False
             
             return {
                 "is_face": is_face,
