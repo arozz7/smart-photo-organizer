@@ -309,6 +309,18 @@ def verify_is_face(image_path, box):
         
         face_crop = pil_img.crop((cx1, cy1, cx2, cy2))
         
+        # [Phase 56.5 Debug] Save VLM crops for visual verification
+        try:
+            import uuid
+            import tempfile
+            debug_dir = os.path.join(tempfile.gettempdir(), "vlm_debug")
+            os.makedirs(debug_dir, exist_ok=True)
+            debug_path = os.path.join(debug_dir, f"vlm_{uuid.uuid4().hex[:8]}.jpg")
+            face_crop.save(debug_path)
+            logger.info(f"[VLM] Debug crop saved to: {debug_path}")
+        except Exception as de:
+            logger.warning(f"[VLM] Failed to save debug crop: {de}")
+        
         # Prepare VLM prompt
         messages = [
             {
@@ -365,13 +377,16 @@ def verify_is_face(image_path, box):
                 if match:
                     clean_response = match.group(0)
             
-            # 3. Parse as JSON
+            # Try to parse as JSON first
             parsed = json.loads(clean_response)
             is_face = parsed.get('is_face', False)
             confidence = float(parsed.get('confidence', 0.5))
-            reason = parsed.get('reason', '').lower()
+            landmarks = parsed.get('landmarks_visible', 'unknown')
+            reason = parsed.get('reason', '')
             
-            # [Phase 56 FIX] Contradictory Logic Protection:
+            logger.info(f"[VLM] Parsed Result: is_face={is_face}, landmarks={landmarks}, reason='{reason}'")
+            
+            # [Phase 58] Secondary Safeguards (Logic-based) Protection:
             # If VLM says it's a face but the reason mentions common false positives, override.
             # Example: {"is_face": true, "reason": "human hand"} -> False
             if is_face is True:
