@@ -636,7 +636,6 @@ export function registerAIHandlers() {
         try {
             const pending = FaceRepository.countSuspectFaces();
             const { ServiceManager } = await import('../core/services/ServiceManager');
-            const { BackgroundVerificationService } = await import('../core/services/BackgroundVerificationService');
             const service = ServiceManager.getInstance().get('BackgroundVerificationService') as any;
             const isRunning = service?.isServiceRunning() ?? false;
 

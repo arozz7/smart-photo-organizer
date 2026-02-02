@@ -75,18 +75,14 @@ export class PhotoService {
             // ExifTool often extracts small/embedded thumbnails which user reported as "bad quality".
             if (isRaw && !['.tif', '.tiff'].includes(ext) && false) {
                 try {
-                    const tool = await this.getExifTool();
-                    if (tool) {
-                        const tempPreviewPath = `${previewPath}.tmp`;
-                        await tool.extractPreview(filePath, tempPreviewPath);
-                        if (await fs.stat(tempPreviewPath).catch(() => null)) {
-                            // Validate Size ...
-                            // ...
-                        }
+                    const toolResult = await this.getExifTool();
+                    if (!toolResult) throw new Error("ExifTool unavailable");
+                    const exiftool: ExifTool = toolResult!;
 
-                        // Validate Size - Don't accept tiny thumbnails
+                    const tempPreviewPath = `${previewPath}.tmp`;
+                    await exiftool.extractPreview(filePath, tempPreviewPath);
+                    if (await fs.stat(tempPreviewPath).catch(() => null)) {
                         const meta = await sharp(tempPreviewPath).metadata();
-                        // < 1000px is suspicious for a full preview. Usually RAW embeds are either 160px (tiny) or Full/Half (2000+)
                         if (meta.width && meta.width > 800) {
                             const pipeline = sharp(tempPreviewPath);
                             if (shouldRotate) pipeline.rotate(rotationDegrees);
@@ -95,9 +91,8 @@ export class PhotoService {
                         } else {
                             logger.warn(`[PhotoService] ExifTool extracted small preview (${meta.width}x${meta.height}) for ${path.basename(filePath)}. Ignoring.`);
                         }
-
-                        try { await fs.unlink(tempPreviewPath); } catch { }
                     }
+                    try { await fs.unlink(tempPreviewPath); } catch { }
                 } catch (e) { /* Fallback */ }
             }
 
