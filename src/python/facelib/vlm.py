@@ -297,11 +297,11 @@ def verify_is_face(image_path, box):
                     "error": f"Image load failed: {e}"
                 }
         
-        # Crop to face region with padding (Phase 56 Accuracy Fix)
-        # 15% padding provides context without contaminating the crop with nearby real faces.
+        # Crop to face region with padding (Phase 56.8 Accuracy Fix)
+        # 25% padding provides more context to distinguish features from skin patches (e.g. knees).
         x1, y1, x2, y2 = box['x1'], box['y1'], box['x2'], box['y2']
         bw, bh = x2 - x1, y2 - y1
-        pad_w, pad_h = bw * 0.15, bh * 0.15
+        pad_w, pad_h = bw * 0.25, bh * 0.25
         
         # Apply padding and clamp to image boundaries
         img_w, img_h = pil_img.size
@@ -387,6 +387,11 @@ def verify_is_face(image_path, box):
             landmarks = str(parsed.get('landmarks_visible', '')).lower()
             reason = str(parsed.get('reason', '')).lower()
             
+            # [Phase 56.8] Strip prompt echoing from landmarks
+            if "list specific" in landmarks or "seen or" in landmarks:
+                logger.debug(f"[VLM] Strip landmark prompt echo: {landmarks}")
+                landmarks = "unknown"
+            
             logger.info(f"[VLM] Parsed Result: is_face={is_face}, landmarks={landmarks}, reason='{reason}'")
             
             # [Phase 56.5] LANDMARK VALIDATION
@@ -395,7 +400,6 @@ def verify_is_face(image_path, box):
             if is_face is True and (landmarks == 'none' or not landmarks or 'none' in landmarks or 'unknown' in landmarks):
                 # [Phase 56.8] STRONG CONFIDENCE EXCEPTION (SKEPTICAL)
                 # If the model is nearly certain (>0.995), trust it even without standard landmarks.
-                # Threshold raised from 0.98 to 0.995 because 0.99 was hallucinating on knees.
                 if confidence >= 0.995:
                     logger.info(f"[VLM] Trusting face despite 'none' landmarks due to extreme confidence ({confidence:.3f})")
                 else:
@@ -403,7 +407,8 @@ def verify_is_face(image_path, box):
                     face_confirmation_keywords = [
                         "smiling", "smile", "expression", "glasses", "beard", "mustache", 
                         "human face", "person's face", "tilted head", "head angle", "profile view", 
-                        "side-view", "side view", "partial face", "hairline", "forehead", "cheekbone"
+                        "side-view", "side view", "partial face", "hairline", "forehead", "cheekbone",
+                        "clearly visible features", "specific features", "face features"
                     ]
                     if any(kw in reason for kw in face_confirmation_keywords):
                         logger.info(f"[VLM] Trusting face despite 'none' landmarks because reason is strong: '{reason}'")
