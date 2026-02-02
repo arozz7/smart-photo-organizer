@@ -334,7 +334,7 @@ export class PythonAIProvider implements IAIProvider, IService {
             const result = await this.sendRequest('verify_face', {
                 imagePath,
                 box
-            }, 30000);
+            }, 120000);
 
             if (result.error) {
                 return {

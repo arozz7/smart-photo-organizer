@@ -13,7 +13,8 @@ VLM_VERIFICATION_PROMPT = """Analyze the object in the absolute CENTER of this i
 
 To verify if this is a HUMAN FACE, follow these steps:
 1. Identify physical landmarks: Do you see an eye, a nose, OR a mouth?
-   (Landmarks can be partial or obscured by glasses, hair, or profile view)
+   (Landmarks can be partial or obscured by glasses, hair, or profile view. 
+   IMPORTANT: Faces may be TILTED or at UNUSUAL ANGLES in artistic macro shots.)
 2. Distinguish from body parts: Is it a hand, shoulder, elbow, or just hair?
 3. Final Decision: Is it a face?
 

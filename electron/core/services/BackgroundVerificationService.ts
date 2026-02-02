@@ -129,39 +129,17 @@ export class BackgroundVerificationService implements IService {
                             logger.info(`[BackgroundVerificationService] Successfully split face ${face.id} into ${regionResult.faceCount} individual faces`);
                         } else if (regionResult.error) {
                             logger.warn(`[BackgroundVerificationService] Detector error for face ${face.id}: ${regionResult.error}`);
-                            // Check score before promoting
-                            if (face.score && face.score < 0.35) {
-                                // VLM confirmed it's a face, but detector score is extremely low
-                                // Likely a high-confidence VLM hallucination (e.g. a hand)
-                                FaceRepository.deleteFaces([face.id]);
-                                logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as likely false positive (score: ${face.score.toFixed(3)})`);
-                            } else {
-                                FaceRepository.updateFaceEntityType(face.id, 'human');
-                                this.notifyPhotoChanged(face.photo_id);
-                            }
                         } else {
-                            // Only 1 face detected, just wide box - check score before promoting
-                            if (face.score && face.score < 0.35) {
-                                // VLM confirmed it's a face, but score is too low
-                                FaceRepository.deleteFaces([face.id]);
-                                logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as likely false positive (score: ${face.score.toFixed(3)})`);
-                            } else {
-                                FaceRepository.updateFaceEntityType(face.id, 'human');
-                                this.notifyPhotoChanged(face.photo_id);
-                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified as single face (wide box, confidence: ${result.confidence})`);
-                            }
-                        }
-                    } else {
-                        // Normal aspect ratio - check score before promoting
-                        if (face.score && face.score < 0.35) {
-                            // VLM confirmed it's a face, but score is too low
-                            FaceRepository.deleteFaces([face.id]);
-                            logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as likely false positive (score: ${face.score.toFixed(3)})`);
-                        } else {
+                            // Normal aspect ratio
                             FaceRepository.updateFaceEntityType(face.id, 'human');
                             this.notifyPhotoChanged(face.photo_id);
                             logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
                         }
+                    } else {
+                        // Normal aspect ratio - VLM confirmed face
+                        FaceRepository.updateFaceEntityType(face.id, 'human');
+                        this.notifyPhotoChanged(face.photo_id);
+                        logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
                     }
                 } else if (result.is_face === false) {
                     // Reject as false positive - DELETE from DB to remove box from UI
