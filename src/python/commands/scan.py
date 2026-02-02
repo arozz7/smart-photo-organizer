@@ -352,9 +352,8 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
                     continue 
             
             # 2. General Low Confidence Check
-            # Relax for MACRO mode to catch artistic faces
-            min_score = 0.50
-            if scan_mode == 'MACRO': min_score = 0.25
+            # Use dynamic threshold from config
+            min_score = det_thresh
             
             if det_score < min_score:
                 if fw < 300:
@@ -398,9 +397,9 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
         # [Fix] Reduce false positives in TTA (e.g. knees/elbows in rotated views).
         # Rotated detections must have higher confidence to be accepted.
         TTA_THRESHOLD_BOOST = 0.10
-        # [Phase 56.7] Macro Accuracy: No boost for Macro mode. Use full sensitivity (0.25).
+        # [Phase 56.7] Macro Accuracy: No boost for Macro mode. Use the configured base sensitivity.
         if scan_mode == 'MACRO':
-            safe_thresh = det_thresh  # Use the user's base threshold (usually 0.25)
+            safe_thresh = det_thresh
         else:
             safe_thresh = max(det_thresh + TTA_THRESHOLD_BOOST, 0.45) if det_thresh < 0.5 else det_thresh 
 
@@ -423,82 +422,81 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
                     faces.init_insightface(providers=faces.CURRENT_PROVIDERS, allowed_modules=faces.ALLOWED_MODULES, det_size=current_tta_size, det_thresh=safe_thresh)
                     r_faces = faces.app.get(rotated_img)
 
-                if len(r_faces) > 0:
-                    orig_h, orig_w = img.shape[:2]
-                    logger.info(f"[TTA] Found {len(r_faces)} potential faces in rotation {rot_angle}")
-                    
-                    for face in r_faces:
-                        # Double check score against safe threshold (though init_insightface should handle it)
-                        if hasattr(face, 'det_score') and face.det_score < safe_thresh:
-                            logger.info(f"[TTA] Rejected face with score {face.det_score:.2f} < {safe_thresh:.2f}")
-                            continue
-
-                        bbox = face.bbox.astype(int).tolist()
-                        rx1, ry1, rx2, ry2 = bbox
-                        nx1, ny1, nx2, ny2 = 0, 0, 0, 0
+                    if len(r_faces) > 0:
+                        orig_h, orig_w = img.shape[:2]
+                        logger.info(f"[TTA] Found {len(r_faces)} potential faces in rotation {rot_angle}")
                         
-                        if rot_angle == 90:  # 90 CW
-                            pts = [(rx1, ry1), (rx2, ry2), (rx1, ry2), (rx2, ry1)]
-                            orig_pts = [(py, orig_h - px) for px, py in pts]
-                        elif rot_angle == 180:
-                            pts = [(rx1, ry1), (rx2, ry2)]
-                            orig_pts = [(orig_w - px, orig_h - py) for px, py in pts]
-                        elif rot_angle == 270:  # 90 CCW
-                            pts = [(rx1, ry1), (rx2, ry2), (rx1, ry2), (rx2, ry1)]
-                            orig_pts = [(orig_w - py, px) for px, py in pts]
-                        
-                        oxs = [p[0] for p in orig_pts]
-                        oys = [p[1] for p in orig_pts]
-                        nx1, nx2 = min(oxs), max(oxs)
-                        ny1, ny2 = min(oys), max(oys)
-                        nx1, nx2 = max(0, nx1), min(orig_w, nx2)
-                        ny1, ny2 = max(0, ny1), min(orig_h, ny2)
+                        for face in r_faces:
+                            # Double check score against safe threshold (though init_insightface should handle it)
+                            if hasattr(face, 'det_score') and face.det_score < safe_thresh:
+                                logger.info(f"[TTA] Rejected face with score {face.det_score:.2f} < {safe_thresh:.2f}")
+                                continue
 
-                        expanded = image_ops.smart_crop_landmarks([nx1, ny1, nx2, ny2], None, orig_w, orig_h)
-                        face_crop = img[int(ny1):int(ny2), int(nx1):int(nx2)]
-                        f_blur = image_ops.estimate_blur(face_crop, target_size=112)
-                        
+                            bbox = face.bbox.astype(int).tolist()
+                            rx1, ry1, rx2, ry2 = bbox
+                            nx1, ny1, nx2, ny2 = 0, 0, 0, 0
+                            
+                            if rot_angle == 90:  # 90 CW
+                                pts = [(rx1, ry1), (rx2, ry2), (rx1, ry2), (rx2, ry1)]
+                                orig_pts = [(py, orig_h - px) for px, py in pts]
+                            elif rot_angle == 180:
+                                pts = [(rx1, ry1), (rx2, ry2)]
+                                orig_pts = [(orig_w - px, orig_h - py) for px, py in pts]
+                            elif rot_angle == 270:  # 90 CCW
+                                pts = [(rx1, ry1), (rx2, ry2), (rx1, ry2), (rx2, ry1)]
+                                orig_pts = [(orig_w - py, px) for px, py in pts]
+                            
+                            oxs = [p[0] for p in orig_pts]
+                            oys = [p[1] for p in orig_pts]
+                            nx1, nx2 = min(oxs), max(oxs)
+                            ny1, ny2 = min(oys), max(oys)
+                            nx1, nx2 = max(0, nx1), min(orig_w, nx2)
+                            ny1, ny2 = max(0, ny1), min(orig_h, ny2)
 
-                        pose_yaw, pose_pitch, pose_roll = None, None, None
-                        if hasattr(face, 'pose') and face.pose is not None:
-                            try:
-                                pose = face.pose
-                                pose_pitch = float(pose[0]) if len(pose) > 0 else None
-                                pose_yaw = float(pose[1]) if len(pose) > 1 else None
-                                pose_roll = float(pose[2]) if len(pose) > 2 else None
-                            except (TypeError, IndexError): pass
+                            expanded = image_ops.smart_crop_landmarks([nx1, ny1, nx2, ny2], None, orig_w, orig_h)
+                            face_crop = img[int(ny1):int(ny2), int(nx1):int(nx2)]
+                            f_blur = image_ops.estimate_blur(face_crop, target_size=112)
+                            
 
-                        face_quality = None
-                        if f_blur is not None:
-                            blur_factor = min(f_blur / 100.0, 1.0)
-                            pose_factor = 0.5 
-                            if pose_yaw is not None:
-                                pose_factor = max(0, 1.0 - (abs(pose_yaw) / 90.0))
-                            det_score = float(face.det_score) if hasattr(face, 'det_score') else 0.5
-                            face_size = nx2 - nx1 
-                            size_factor = min(face_size / 200.0, 1.0)
-                            face_quality = (blur_factor * 0.3 + pose_factor * 0.3 + det_score * 0.2 + size_factor * 0.2)
+                            pose_yaw, pose_pitch, pose_roll = None, None, None
+                            if hasattr(face, 'pose') and face.pose is not None:
+                                try:
+                                    pose = face.pose
+                                    pose_pitch = float(pose[0]) if len(pose) > 0 else None
+                                    pose_yaw = float(pose[1]) if len(pose) > 1 else None
+                                    pose_roll = float(pose[2]) if len(pose) > 2 else None
+                                except (TypeError, IndexError): pass
 
-                        # [Phase 59] Adaptive Embedding Selection (TTA faces)
-                        descriptor = get_adaptive_embedding(face, face_crop, f_blur)
+                            face_quality = None
+                            if f_blur is not None:
+                                blur_factor = min(f_blur / 100.0, 1.0)
+                                pose_factor = 0.5 
+                                if pose_yaw is not None:
+                                    pose_factor = max(0, 1.0 - (abs(pose_yaw) / 90.0))
+                                det_score = float(face.det_score) if hasattr(face, 'det_score') else 0.5
+                                face_size = nx2 - nx1 
+                                size_factor = min(face_size / 200.0, 1.0)
+                                face_quality = (blur_factor * 0.3 + pose_factor * 0.3 + det_score * 0.2 + size_factor * 0.2)
 
-                        scan_results.append({
-                            "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
-                            "descriptor": descriptor,
-                            "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
-                            "blurScore": float(f_blur),
-                            "poseYaw": pose_yaw,
-                            "posePitch": pose_pitch,
-                            "poseRoll": pose_roll,
-                            "faceQuality": face_quality,
-                            "rotation_fix": rot_angle,
-                            # Age-Based ERA Categorization
-                            "estimatedAge": int(face.age) if hasattr(face, 'age') and face.age is not None else None,
-                            "gender": "M" if hasattr(face, 'sex') and face.sex == "M" else ("F" if hasattr(face, 'sex') and face.sex == "F" else None)
-                        })
+                            # [Phase 59] Adaptive Embedding Selection (TTA faces)
+                            descriptor = get_adaptive_embedding(face, face_crop, f_blur)
 
-            except Exception as e:
-                logger.error(f"[TTA] Rotation {rot_angle} failed: {e}")
+                            scan_results.append({
+                                "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
+                                "descriptor": descriptor,
+                                "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
+                                "blurScore": float(f_blur),
+                                "poseYaw": pose_yaw,
+                                "posePitch": pose_pitch,
+                                "poseRoll": pose_roll,
+                                "faceQuality": face_quality,
+                                "rotation_fix": rot_angle,
+                                # Age-Based ERA Categorization
+                                "estimatedAge": int(face.age) if hasattr(face, 'age') and face.age is not None else None,
+                                "gender": "M" if hasattr(face, 'sex') and face.sex == "M" else ("F" if hasattr(face, 'sex') and face.sex == "F" else None)
+                            })
+                except Exception as e:
+                    logger.error(f"[TTA] Rotation {rot_angle} at {current_tta_size} failed: {e}")
     
     # [Phase 57] Filter out multi-face boxes by aspect ratio
     # Faces are roughly square. If a box is too wide (>1.5:1) or too tall (<1:1.5), it likely contains multiple faces.
