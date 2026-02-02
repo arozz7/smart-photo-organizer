@@ -631,7 +631,7 @@ export class FaceService {
                     // 3. Unusual aspect ratio (>1.4 or <0.7 - may contain multiple faces)
                     const isLowScore = detectionScore < vlmThreshold;
                     const isLargeBox = boxArea > 4000000; // 2000x2000 pixels
-                    const isUnusualAspect = aspectRatio > 1.4 || aspectRatio < 0.7;
+                    const isUnusualAspect = aspectRatio > 1.6 || aspectRatio < 0.6;
 
                     // FIX: Trust Python's entityType if provided, otherwise calculate
                     const entityType = face.entityType ??

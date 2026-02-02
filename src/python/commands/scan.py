@@ -497,7 +497,7 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
     for f in scan_results:
         box = f['box']
         aspect_ratio = box['width'] / box['height'] if box['height'] > 0 else 1.0
-        if aspect_ratio > 1.5 or aspect_ratio < 0.67:  # Tightened from 1.8/0.55
+        if aspect_ratio > 2.2 or aspect_ratio < 0.45:  # Loosened from 1.5/0.67 to improve recall
             logger.info(f"[Filter] Rejected multi-face box: aspect ratio {aspect_ratio:.2f} (box: {box['width']}x{box['height']})")
         else:
             filtered_results.append(f)
