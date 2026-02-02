@@ -12,22 +12,23 @@ MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifica
 VLM_VERIFICATION_PROMPT = """Analyze the object in the absolute CENTER of this image.
 
 To verify if this is a HUMAN FACE, follow these steps:
-1. Identify physical landmarks: Do you see any facial features? Look for an eye, nose, mouth, OR even partial features like a chin, ear, cheek, or hairline.
-   (Landmarks can be partial or obscured by glasses, hair, or profile view. 
-   IMPORTANT: Faces may be TILTED or at UNUSUAL ANGLES in artistic macro shots; if you see any facial skin or structure, identify the most likely landmarks.)
-2. Distinguish from body parts: Is it a hand, shoulder, elbow, or just hair?
+1. Identify physical landmarks: Do you see any facial features? You MUST find specific parts like an eye, nose, mouth, chin, or ear.
+   (Faces may be TILTED or at UNUSUAL ANGLES in macro shots. If you see a face, name the most likely features.)
+2. Distinguish from body parts: Is it a hand, shoulder, knee, or just a patch of skin?
+   CRITICAL: A smooth patch of well-lit skin with no features is NOT a face.
 3. Final Decision: Is it a face?
 
 RESPOND IN JSON:
 {
-  "landmarks_visible": "list what you see (e.g. eye, ear, chin, profile) or 'none'",
+  "landmarks_visible": "list specific parts seen or 'none'",
   "is_face": true|false,
   "confidence": 0.0-1.0,
-  "reason": "brief explanation"
+  "reason": "brief explanation (avoid generic phrases like 'clear and well-lit')"
 }
 
 CRITICAL: If you ONLY see hair, skin with no features, or a hand, "is_face" must be FALSE.
-Note: If you recognize a smile or expression, identify the mouth as visible."""
+Note: If you recognize a smile or expression, identify the mouth as visible.
+"""
 
 # [Phase 59] AdaFace Configuration
 # AdaFace is used for improved recognition on low-quality (blurry) faces

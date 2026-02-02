@@ -393,17 +393,17 @@ def verify_is_face(image_path, box):
             # CRITICAL: If VLM admits there are no landmarks, it's NOT a face, regardless of what it thinks as a whole.
             # This catches hallucinations where it says "Yes, it's a person smiling" but then says landmarks: "none".
             if is_face is True and (landmarks == 'none' or not landmarks or 'none' in landmarks or 'unknown' in landmarks):
-                # [Phase 56.7] STRONG CONFIDENCE EXCEPTION
-                # If the model is extremely certain (>0.98), trust it even without standard landmarks.
-                if confidence >= 0.98:
-                    logger.info(f"[VLM] Trusting face despite 'none' landmarks due to extreme confidence ({confidence:.2f})")
+                # [Phase 56.8] STRONG CONFIDENCE EXCEPTION (SKEPTICAL)
+                # If the model is nearly certain (>0.995), trust it even without standard landmarks.
+                # Threshold raised from 0.98 to 0.995 because 0.99 was hallucinating on knees.
+                if confidence >= 0.995:
+                    logger.info(f"[VLM] Trusting face despite 'none' landmarks due to extreme confidence ({confidence:.3f})")
                 else:
-                    # [Phase 56.6/7] SPECIAL EXCEPTION: If the reason is strongly face-related, trust it.
-                    # This prevents "smiling man with glasses" being rejected due to "none" landmarks.
+                    # [Phase 56.6/7/8] SPECIAL EXCEPTION: If the reason is strongly face-related, trust it.
                     face_confirmation_keywords = [
-                        "smiling", "smile", "expression", "glasses", "profile", "beard", "mustache", 
-                        "human face", "person's face", "tilted", "angle", "unusual", "side-view", "side view",
-                        "clear face", "visible face", "strongly", "definitely", "chin", "ear", "cheek", "forehead", "hairline"
+                        "smiling", "smile", "expression", "glasses", "beard", "mustache", 
+                        "human face", "person's face", "tilted head", "head angle", "profile view", 
+                        "side-view", "side view", "partial face", "hairline", "forehead", "cheekbone"
                     ]
                     if any(kw in reason for kw in face_confirmation_keywords):
                         logger.info(f"[VLM] Trusting face despite 'none' landmarks because reason is strong: '{reason}'")
@@ -412,13 +412,15 @@ def verify_is_face(image_path, box):
                         is_face = False
                         reason = f"No landmarks visible ({reason})"
             
-            # [Phase 58] Secondary Safeguards (Logic-based) Protection:
+            # [Phase 56.8] Secondary Safeguards (Logic-based) Protection:
             # If VLM says it's a face but the reason mentions common false positives, override.
-            # Example: {"is_face": true, "reason": "human hand"} -> False
             if is_face is True:
-                non_face_keywords = ["hand", "finger", "shoulder", "knee", "elbow", "arm", "leg", "foot", "pattern", "object", "landscape", "body part", "body-part", "appendage", "hair", "headpiece", "fabric", "cloth", "veil"]
+                non_face_keywords = [
+                    "hand", "finger", "shoulder", "knee", "elbow", "arm", "leg", "foot", 
+                    "pattern", "object", "landscape", "body part", "body-part", "appendage", 
+                    "hair", "fabric", "cloth", "skin patch", "skin-patch", "surface"
+                ]
                 if any(kw in reason for kw in non_face_keywords):
-                    # Special check: If reason contains "face" AND "hair", it might be a real face with hair.
                     # Only override if "face" is NOT in the reason part describing the object.
                     if "face" not in reason:
                         logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face: '{reason}'")
