@@ -12,15 +12,15 @@ MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifica
 VLM_VERIFICATION_PROMPT = """Analyze the object in the absolute CENTER of this image.
 
 To verify if this is a HUMAN FACE, follow these steps:
-1. Identify physical landmarks: Do you see an eye, a nose, OR a mouth?
+1. Identify physical landmarks: Do you see any facial features? Look for an eye, nose, mouth, OR even partial features like a chin, ear, cheek, or hairline.
    (Landmarks can be partial or obscured by glasses, hair, or profile view. 
-   IMPORTANT: Faces may be TILTED or at UNUSUAL ANGLES in artistic macro shots.)
+   IMPORTANT: Faces may be TILTED or at UNUSUAL ANGLES in artistic macro shots; if you see any facial skin or structure, identify the most likely landmarks.)
 2. Distinguish from body parts: Is it a hand, shoulder, elbow, or just hair?
 3. Final Decision: Is it a face?
 
 RESPOND IN JSON:
 {
-  "landmarks_visible": "list what you see (e.g. eye, nose, mouth) or 'none'",
+  "landmarks_visible": "list what you see (e.g. eye, ear, chin, profile) or 'none'",
   "is_face": true|false,
   "confidence": 0.0-1.0,
   "reason": "brief explanation"

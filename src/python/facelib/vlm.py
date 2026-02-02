@@ -393,15 +393,24 @@ def verify_is_face(image_path, box):
             # CRITICAL: If VLM admits there are no landmarks, it's NOT a face, regardless of what it thinks as a whole.
             # This catches hallucinations where it says "Yes, it's a person smiling" but then says landmarks: "none".
             if is_face is True and (landmarks == 'none' or not landmarks or 'none' in landmarks or 'unknown' in landmarks):
-                # [Phase 56.6] SPECIAL EXCEPTION: If the reason is strongly face-related, trust it.
-                # This prevents "smiling man with glasses" being rejected due to "none" landmarks.
-                face_confirmation_keywords = ["smiling", "smile", "expression", "glasses", "profile", "beard", "mustache", "human face", "person's face"]
-                if any(kw in reason for kw in face_confirmation_keywords):
-                    logger.info(f"[VLM] Trusting face despite 'none' landmarks because reason is strong: '{reason}'")
+                # [Phase 56.7] STRONG CONFIDENCE EXCEPTION
+                # If the model is extremely certain (>0.98), trust it even without standard landmarks.
+                if confidence >= 0.98:
+                    logger.info(f"[VLM] Trusting face despite 'none' landmarks due to extreme confidence ({confidence:.2f})")
                 else:
-                    logger.warning(f"[VLM] Overriding is_face=True -> False because NO landmarks were visible ('{landmarks}')")
-                    is_face = False
-                    reason = f"No landmarks visible ({reason})"
+                    # [Phase 56.6/7] SPECIAL EXCEPTION: If the reason is strongly face-related, trust it.
+                    # This prevents "smiling man with glasses" being rejected due to "none" landmarks.
+                    face_confirmation_keywords = [
+                        "smiling", "smile", "expression", "glasses", "profile", "beard", "mustache", 
+                        "human face", "person's face", "tilted", "angle", "unusual", "side-view", "side view",
+                        "clear face", "visible face", "strongly", "definitely", "chin", "ear", "cheek", "forehead", "hairline"
+                    ]
+                    if any(kw in reason for kw in face_confirmation_keywords):
+                        logger.info(f"[VLM] Trusting face despite 'none' landmarks because reason is strong: '{reason}'")
+                    else:
+                        logger.warning(f"[VLM] Overriding is_face=True -> False because NO landmarks were visible ('{landmarks}')")
+                        is_face = False
+                        reason = f"No landmarks visible ({reason})"
             
             # [Phase 58] Secondary Safeguards (Logic-based) Protection:
             # If VLM says it's a face but the reason mentions common false positives, override.
