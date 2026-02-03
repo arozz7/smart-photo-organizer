@@ -142,10 +142,11 @@ export class BackgroundVerificationService implements IService {
                         logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
                     }
                 } else if (result.is_face === false) {
-                    // Reject as false positive - DELETE from DB to remove box from UI
-                    FaceRepository.deleteFaces([face.id]);
+                    // [Phase 64] Safety Net: Soft Delete (Ignore) instead of Hard Delete
+                    // If VLM makes a mistake (e.g. valid face rejected as "generic"), we want to be able to restore it.
+                    FaceRepository.ignoreFaces([face.id]);
                     this.notifyPhotoChanged(face.photo_id);
-                    logger.info(`[BackgroundVerificationService] Face ${face.id} deleted as non-face (reason: ${result.reason})`);
+                    logger.info(`[BackgroundVerificationService] Face ${face.id} soft-deleted/ignored as non-face (reason: ${result.reason})`);
                 } else {
                     // VLM error (is_face = null)
                     const attempts = FaceRepository.incrementVerificationAttempts(face.id);
