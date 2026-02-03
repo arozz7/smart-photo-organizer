@@ -12,12 +12,28 @@ CURRENT_PROVIDERS = None
 ALLOWED_MODULES = None
 LAST_CONFIG = None
 
+# [Phase 61] Model Caching
+# Cache up to 4 model instances (enough for Standard + Macro + TTA variants)
+# Key: (ctx_id, det_size, det_thresh, nms_thresh, tuple(allowed_modules))
+# Value: FaceAnalysis instance
+APP_CACHE = {}
+MAX_CACHE_SIZE = 4
+
 # Default Config
 DET_THRESH = 0.7 # Increased further to eliminate background noise (windows/patterns)
 NMS_THRESH = 0.65 # High overlap allowed
 
+def clear_model_cache():
+    """Clear the model cache to free VRAM"""
+    global APP_CACHE, app
+    logger.info(f"Clearing model cache ({len(APP_CACHE)} items)...")
+    APP_CACHE.clear()
+    app = None
+    import gc
+    gc.collect()
+
 def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1280, 1280), det_thresh=None, nms_thresh=None):
-    global app, AI_MODE, CURRENT_PROVIDERS, ALLOWED_MODULES
+    global app, AI_MODE, CURRENT_PROVIDERS, ALLOWED_MODULES, APP_CACHE
     
     if det_thresh is None:
         det_thresh = DET_THRESH
@@ -30,39 +46,24 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
     if allowed_modules is None:
         allowed_modules = ['detection', 'recognition', 'landmark_2d_106', 'landmark_3d_68', 'genderage']
 
-    # [OPTIMIZATION] Avoid re-initializing if already loaded with same config
-    global LAST_CONFIG
-    current_config = (ctx_id, det_size, det_thresh, nms_thresh, allowed_modules)
+    # [OPTIMIZATION] Check Cache
+    # Use tuple for specific config including thresh (as it's baked into model params)
+    config_key = (ctx_id, det_size[0], det_size[1], det_thresh, nms_thresh, tuple(sorted(allowed_modules)))
     
-    if app is not None:
-        # Check if config matches last used config
-        # Check if config matches last used config
-        if 'LAST_CONFIG' in globals() and LAST_CONFIG == current_config:
-            return # Truly no-op
+    if config_key in APP_CACHE:
+        # Cache Hit
+        if app != APP_CACHE[config_key]:
+            logger.debug(f"Model Cache HIT for size {det_size} / thresh {det_thresh}. Switching instance.")
+            app = APP_CACHE[config_key]
+        return
 
-        # [Fix] InsightFace's RetinaFace model refuses to update input_size (det_size) after first init.
-        # We must force a fresh instance if det_size changes.
-        last_det_size = LAST_CONFIG[1] if 'LAST_CONFIG' in globals() and LAST_CONFIG else None
-        
-        if last_det_size is not None and last_det_size != det_size:
-            logger.info(f"det_size changed {last_det_size} -> {det_size}. Forcing re-init of FaceAnalysis app to apply new size.")
-            app = None
-            # Fall through to Fresh Init logic below
-        else:
-            try:
-                 # Only re-prepare if params changed (but det_size is same/compatible)
-                 logger.info(f"Re-preparing InsightFace with ctx_id={ctx_id}, modules={allowed_modules}, det_thresh={det_thresh}, nms_thresh={nms_thresh}...")
-                 app.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=det_thresh)
-                 if hasattr(app, 'det_model'):
-                     app.det_model.nms_thresh = nms_thresh
-                 LAST_CONFIG = current_config
-                 return
-            except Exception as e:
-                 logger.warning(f"Failed to re-prepare existing app (will re-init): {e}")
+    logger.info(f"Model Cache MISS. Initializing for size {det_size}...")
 
+    # [Fix] InsightFace's RetinaFace model refuses to update input_size (det_size) after first init.
+    # We must force a fresh instance if det_size changes (which is handled by cache miss logic now).
+    
     # Fresh Init starts here
-    logger.info(f"Initializing InsightFace with ctx_id={ctx_id}, modules={allowed_modules}, det_size={det_size}...")
-
+    # ----------------------
     try:
         from contextlib import redirect_stdout
         from insightface.app import FaceAnalysis
@@ -91,38 +92,38 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
                  providers.append('CPUExecutionProvider')
 
              logger.info(f"Initializing FaceAnalysis with Providers: {providers}")
-             app = FaceAnalysis(name='buffalo_l', providers=providers, allowed_modules=allowed_modules)
+             new_app = FaceAnalysis(name='buffalo_l', providers=providers, allowed_modules=allowed_modules)
              
              # Prepare
-             # [Optimization] Suppress verbose ONNX provider logs
-             import os
-             from contextlib import redirect_stdout, redirect_stderr
-
-             with open(os.devnull, 'w') as fnull:
-                 with redirect_stdout(fnull), redirect_stderr(fnull):
-                     app.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=det_thresh)
-
-             if hasattr(app, 'det_model'):
-                 app.det_model.nms_thresh = nms_thresh
+             new_app.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=det_thresh)
+             if hasattr(new_app, 'det_model'):
+                 new_app.det_model.nms_thresh = nms_thresh
              
-             # Update Status Globals
+             # Store in Cache
+             if len(APP_CACHE) >= MAX_CACHE_SIZE:
+                 # Simple LRU-ish: Remove first key
+                 first_key = next(iter(APP_CACHE))
+                 del APP_CACHE[first_key]
+                 
+             APP_CACHE[config_key] = new_app
+             app = new_app
+             
              CURRENT_PROVIDERS = providers
              ALLOWED_MODULES = allowed_modules
              
-             # Determine Mode String
              if 'CUDAExecutionProvider' in providers and ctx_id >= 0:
                  AI_MODE = "GPU"
              elif allowed_modules is not None:
                  AI_MODE = "SAFE_MODE"
              else:
                  AI_MODE = "CPU"
-                 
-             LAST_CONFIG = current_config
-                 
-        logger.info(f"InsightFace initialized. Mode: {AI_MODE}")
+             
+             logger.info(f"InsightFace initialized. Mode: {AI_MODE}")
+             
     except Exception as e:
         logger.error(f"Failed to init InsightFace: {e}")
-        raise e
+        import traceback
+        traceback.print_exc()
 
 def calculate_mean_embedding(descriptors):
     """
