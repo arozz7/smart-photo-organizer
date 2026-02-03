@@ -12,22 +12,20 @@ MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifica
 VLM_VERIFICATION_PROMPT = """Analyze the object in the absolute CENTER of this image.
 
 To verify if this is a HUMAN FACE, follow these steps:
-1. Identify physical landmarks: You MUST find specific facial features like eyes, nose, mouth, chin, or ears.
-   (If it is a tilted face in a macro shot, name the features you see.)
-2. Distinguish from body parts: Is it a hand, shoulder, knee, or a patch of skin/hair?
-   CRITICAL: A smooth patch of skin or just hair is NOT a face.
-3. Final Decision: Is it a face?
+1. Categorize: Is the object in the absolute center a HUMAN FACE, or is it a BODY PART (knee, shoulder, elbow, arm, leg, foot, or just a patch of skin)?
+2. Evidence: What specific anatomical features are visible? If it's a skin patch, describe the texture (smooth, skin grain, fabric).
+3. Decision: Assign "is_face": true ONLY if it is a clear human face.
 
 RESPOND IN JSON:
 {
-  "is_face": true,
+  "object_type": "face | knee | shoulder | skin_patch | other",
+  "is_face": boolean,
   "confidence": 0.99,
-  "landmarks_visible": "list 2+ specific facial parts seen",
-  "reason": "short explanation (be specific)"
+  "landmarks": "list 2+ parts if face, or 'none'",
+  "reason": "be specific and honest"
 }
 
-CRITICAL: If you ONLY see hair, skin with no features, or a hand, "is_face" must be FALSE.
-Note: If you recognize a smile or expression, identify the mouth as visible.
+CRITICAL: If it is a smooth patch of skin or just hair, is_face MUST be false. Do not hallucinate features that are not clearly visible.
 """
 
 # [Phase 59] AdaFace Configuration

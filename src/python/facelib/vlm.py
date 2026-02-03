@@ -382,48 +382,66 @@ def verify_is_face(image_path, box):
             
             # 3. Parse as JSON
             parsed = json.loads(clean_response)
+            
+            # [Phase 56.9.1] Support new Categorize-First fields
+            # Handle both old and new field names for robustness
+            object_type = str(parsed.get('object_type', 'face')).lower()
             is_face = parsed.get('is_face', False)
             confidence = float(parsed.get('confidence', 0.5))
-            landmarks = str(parsed.get('landmarks_visible', '')).lower()
+            landmarks = str(parsed.get('landmarks', parsed.get('landmarks_visible', ''))).lower()
             reason = str(parsed.get('reason', '')).lower()
             
-            # [Phase 56.8] Strip prompt echoing from landmarks
-            if "list specific" in landmarks or "seen or" in landmarks:
-                logger.debug(f"[VLM] Strip landmark prompt echo: {landmarks}")
+            # [Phase 56.9.1] HARD CATEGORY OVERRIDE
+            # If the VLM specifically identified this as a body part, BELIEVE IT.
+            non_face_types = ["knee", "shoulder", "skin_patch", "skin-patch", "arm", "leg", "elbow", "foot", "body_part", "body-part"]
+            if any(nt in object_type for nt in non_face_types):
+                logger.warning(f"[VLM] Categorized as {object_type}. Forcing is_face=False.")
+                is_face = False
+                reason = f"Categorized as {object_type} ({reason})"
+
+            # [Phase 56.9] AGGRESSIVE ECHO STRIPPING
+            # Remove any landmark text that echoes the prompt instructions.
+            echo_terms = ["list 2+", "specific anatomical", "parts seen", "seen or", "specific facial", "facial parts"]
+            if any(term in landmarks for term in echo_terms):
+                logger.debug(f"[VLM] Stripping prompt echo from landmarks: {landmarks}")
                 landmarks = "unknown"
             
-            logger.info(f"[VLM] Parsed Result: is_face={is_face}, landmarks={landmarks}, reason='{reason}'")
+            logger.info(f"[VLM] Parsed Result: is_face={is_face}, obj={object_type}, landmarks={landmarks}, reason='{reason}'")
+            
+            # [Phase 56.9] MANDATORY ANATOMICAL CHECK
+            anatomical_terms = [
+                "eye", "nose", "mouth", "lip", "chin", "ear", "eyebrow", "cheek", 
+                "forehead", "hairline", "profile", "smile", "nostril", "eyelid"
+            ]
+            has_anatomical = any(term in landmarks or term in reason for term in anatomical_terms)
             
             # [Phase 56.5] LANDMARK VALIDATION
-            # CRITICAL: If VLM admits there are no landmarks, it's NOT a face, regardless of what it thinks as a whole.
-            # This catches hallucinations where it says "Yes, it's a person smiling" but then says landmarks: "none".
             if is_face is True and (landmarks == 'none' or not landmarks or 'none' in landmarks or 'unknown' in landmarks):
-                # [Phase 56.8] STRONG CONFIDENCE EXCEPTION (SKEPTICAL)
-                # If the model is nearly certain (>0.995), trust it even without standard landmarks.
-                if confidence >= 0.995:
+                # [Phase 56.9] Nuclear Confidence Bypass (0.998+)
+                if confidence >= 0.998:
                     logger.info(f"[VLM] Trusting face despite 'none' landmarks due to extreme confidence ({confidence:.3f})")
                 else:
-                    # [Phase 56.6/7/8] SPECIAL EXCEPTION: If the reason is strongly face-related, trust it.
+                    # [Phase 56.6/7/8/9] SPECIAL EXCEPTION: Only trust specific, non-generic descriptions.
                     face_confirmation_keywords = [
                         "smiling", "smile", "expression", "glasses", "beard", "mustache", 
                         "human face", "person's face", "tilted head", "head angle", "profile view", 
-                        "side-view", "side view", "partial face", "hairline", "forehead", "cheekbone",
-                        "clearly visible features", "specific features", "face features"
+                        "side-view", "side view", "partial face", "hairline", "forehead", "cheekbone"
                     ]
-                    if any(kw in reason for kw in face_confirmation_keywords):
-                        logger.info(f"[VLM] Trusting face despite 'none' landmarks because reason is strong: '{reason}'")
+                    
+                    if has_anatomical or any(kw in reason for kw in face_confirmation_keywords):
+                        logger.info(f"[VLM] Trusting face despite 'none' landmarks because reason/anatomical is strong.")
                     else:
-                        logger.warning(f"[VLM] Overriding is_face=True -> False because NO landmarks were visible ('{landmarks}')")
+                        logger.warning(f"[VLM] Overriding is_face=True -> False because NO convincing landmarks were seen.")
                         is_face = False
-                        reason = f"No landmarks visible ({reason})"
+                        reason = f"No anatomical landmarks or face proof (reason: {reason})"
             
-            # [Phase 56.8] Secondary Safeguards (Logic-based) Protection:
-            # If VLM says it's a face but the reason mentions common false positives, override.
+            # [Phase 56.9] Secondary Safeguards (Hard Rejections)
             if is_face is True:
                 non_face_keywords = [
                     "hand", "finger", "shoulder", "knee", "elbow", "arm", "leg", "foot", 
                     "pattern", "object", "landscape", "body part", "body-part", "appendage", 
-                    "hair", "fabric", "cloth", "skin patch", "skin-patch", "surface"
+                    "hair", "fabric", "cloth", "skin patch", "skin-patch", "surface",
+                    "skin surface", "skin area"
                 ]
                 if any(kw in reason for kw in non_face_keywords):
                     # Only override if "face" is NOT in the reason part describing the object.
