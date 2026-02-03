@@ -489,6 +489,28 @@ def verify_is_face(image_path, box):
                         logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face: '{reason}'")
                         is_face = False
             
+            # [Phase 63] Clothing/Hair Hallucination Check
+            # VLM sees "dress" and says "woman in dress", but no face parts are visible.
+            # Rule: If Clothing/Hair is mentioned, we MUST have specific Face Proof.
+            if is_face is True:
+                clothing_hair_keywords = ["hair", "dress", "shirt", "clothing", "wearing", "hat", "coat", "jacket", "fabric"]
+                has_clothing_or_hair = has_word(reason, clothing_hair_keywords)
+                
+                if has_clothing_or_hair:
+                    # If we see clothes, we demand to see a face part too.
+                    # reusing 'face_proof' list from above + anatomical terms
+                    # But we want Strict Face Parts: eyes, nose, mouth, smile, looking, head, chin
+                    strict_face_proof = [
+                        "eye", "eyes", "nose", "mouth", "lip", "lips", "chin", "cheek", "cheeks", 
+                        "forehead", "smile", "smiling", "look", "looking", "gaze", "gazing", 
+                        "head", "face", "profile"
+                    ]
+                    
+                    if not has_word(reason, strict_face_proof):
+                         logger.warning(f"[VLM] Overriding is_face=True -> False. Clothing/Hair detected ('{reason}') but NO specific face parts mentioned.")
+                         is_face = False
+                         reason = f"Clothing/Hair detected without Face Parts (reason: {reason})"
+            
             return {
                 "is_face": is_face,
                 "confidence": confidence,
