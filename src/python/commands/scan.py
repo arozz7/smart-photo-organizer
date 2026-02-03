@@ -557,48 +557,57 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
                     # Additional checks before merging
                     should_merge = True
                     
-                    # Check 1: Embedding Distance (if available)
-                    # [Phase 57] Only compare embeddings if boxes are from the SAME rotation
-                    # Different rotations of same face have distance >1.2, so we skip the check
-                    rotation_a = f.get('rotation_fix', 0)
-                    rotation_b = existing.get('rotation_fix', 0)
+                    # [Phase 57.2] High Overlap Bypass (Ghost Detection)
+                    # If boxes overlap > 85%, they are the same physical object.
+                    # Embedding distance is likely noise from TTA/Rotation.
+                    if io_min > 0.85:
+                        should_merge = True
+                        # Skip embedding/aspect checks for near-perfect overlaps
+                    else:
+                        # Moderate Overlap (0.65 - 0.85): Careful checks required
                     
-                    if rotation_a == rotation_b and embedding_a is not None and embedding_b is not None and len(embedding_a) > 0 and len(embedding_b) > 0:
-                        emb_a = np.array(embedding_a)
-                        emb_b = np.array(embedding_b)
+                        # Check 1: Embedding Distance (if available)
+                        # [Phase 57] Only compare embeddings if boxes are from the SAME rotation
+                        # Different rotations of same face have distance >1.2, so we skip the check
+                        rotation_a = f.get('rotation_fix', 0)
+                        rotation_b = existing.get('rotation_fix', 0)
                         
-                        # Normalize embeddings (InsightFace embeddings should already be normalized, but ensure it)
-                        norm_a = np.linalg.norm(emb_a)
-                        norm_b = np.linalg.norm(emb_b)
-                        if norm_a > 0:
-                            emb_a = emb_a / norm_a
-                        if norm_b > 0:
-                            emb_b = emb_b / norm_b
+                        if rotation_a == rotation_b and embedding_a is not None and embedding_b is not None and len(embedding_a) > 0 and len(embedding_b) > 0:
+                            emb_a = np.array(embedding_a)
+                            emb_b = np.array(embedding_b)
+                            
+                            # Normalize embeddings (InsightFace embeddings should already be normalized, but ensure it)
+                            norm_a = np.linalg.norm(emb_a)
+                            norm_b = np.linalg.norm(emb_b)
+                            if norm_a > 0:
+                                emb_a = emb_a / norm_a
+                            if norm_b > 0:
+                                emb_b = emb_b / norm_b
+                            
+                            dist = np.linalg.norm(emb_a - emb_b)
+                            # [Phase 57] Threshold tuned for rotations:
+                            # Same face, same rotation: ~0.0-0.3
+                            # Same face, different rotation: ~0.8-1.0
+                            # Different faces: >1.3
+                            if dist > 1.2:  # Different faces (L2 distance > 1.2 on normalized vectors)
+                                should_merge = False
+                                logger.info(f"[NMS] Prevented merge: embedding distance {dist:.3f} > 1.2 (different faces)")
                         
-                        dist = np.linalg.norm(emb_a - emb_b)
-                        # [Phase 57] Threshold tuned for rotations:
-                        # Same face, same rotation: ~0.0-0.3
-                        # Same face, different rotation: ~0.8-1.0
-                        # Different faces: >1.3
-                        if dist > 1.2:  # Different faces (L2 distance > 1.2 on normalized vectors)
-                            should_merge = False
-                            logger.info(f"[NMS] Prevented merge: embedding distance {dist:.3f} > 1.2 (different faces)")
-                    
-                    # Check 2: Aspect Ratio (combined box)
-                    if should_merge:
-                        combined_x = min(box_a['x'], box_b['x'])
-                        combined_y = min(box_a['y'], box_b['y'])
-                        combined_x2 = max(box_a['x'] + box_a['width'], box_b['x'] + box_b['width'])
-                        combined_y2 = max(box_a['y'] + box_a['height'], box_b['y'] + box_b['height'])
-                        combined_width = combined_x2 - combined_x
-                        combined_height = combined_y2 - combined_y
-                        aspect_ratio = combined_width / combined_height if combined_height > 0 else 1.0
-                        
-                        # Faces are roughly square (aspect ratio ~1.0)
-                        # If combined box is too wide (>2:1) or too tall (<1:2), it's likely 2 faces
-                        if aspect_ratio > 2.0 or aspect_ratio < 0.5:
-                            should_merge = False
-                            logger.info(f"[NMS] Prevented merge: aspect ratio {aspect_ratio:.2f} out of range [0.5, 2.0] (likely 2 faces)")
+                        # Check 2: Aspect Ratio (combined box)
+                        if should_merge:
+                            combined_x = min(box_a['x'], box_b['x'])
+                            combined_y = min(box_a['y'], box_b['y'])
+                            combined_x2 = max(box_a['x'] + box_a['width'], box_b['x'] + box_b['width'])
+                            combined_y2 = max(box_a['y'] + box_a['height'], box_b['y'] + box_b['height'])
+                            combined_width = combined_x2 - combined_x
+                            combined_height = combined_y2 - combined_y
+                            aspect_ratio = combined_width / combined_height if combined_height > 0 else 1.0
+                            
+                            # Faces are roughly square (aspect ratio ~1.0)
+                            # If combined box is too wide (>2:1) or too tall (<1:2), it's likely 2 faces
+                            if aspect_ratio > 2.0 or aspect_ratio < 0.5:
+                                should_merge = False
+                                logger.info(f"[NMS] Prevented merge: aspect ratio {aspect_ratio:.2f} out of range [0.5, 2.0] (likely 2 faces)")
                     
                     if should_merge:
                         is_dup = True
