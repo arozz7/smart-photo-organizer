@@ -300,6 +300,11 @@ def verify_is_face(image_path, box):
         # Crop to face region with padding (Phase 56.8 Accuracy Fix)
         # 25% padding provides more context to distinguish features from skin patches (e.g. knees).
         x1, y1, x2, y2 = box['x1'], box['y1'], box['x2'], box['y2']
+        
+        # [Fix] Robust Normalization (Handle rare inverted coordinates)
+        x1, x2 = min(x1, x2), max(x1, x2)
+        y1, y2 = min(y1, y2), max(y1, y2)
+        
         bw, bh = x2 - x1, y2 - y1
         pad_w, pad_h = bw * 0.25, bh * 0.25
         
