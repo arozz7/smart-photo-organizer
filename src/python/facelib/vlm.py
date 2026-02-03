@@ -472,18 +472,18 @@ def verify_is_face(image_path, box):
             
             # [Phase 56.9] Secondary Safeguards (Hard Rejections)
             if is_face is True:
-                # [Fix] Removed "hair", "fabric", "cloth" - too common in valid descriptions
+                # [Fix] Removed "hair", "fabric", "cloth", "shoulder" - too common in valid descriptions
                 non_face_keywords = [
-                    "hand", "finger", "shoulder", "knee", "elbow", "arm", "leg", "foot", 
+                    "hand", "finger", "knee", "elbow", "arm", "leg", "foot", 
                     "pattern", "object", "landscape", "body part", "body-part", "appendage", 
                     "skin patch", "skin-patch", "surface", "skin surface", "skin area"
                 ]
                 
-                # [Fix] Context Safeguard: If it mentions a person, don't ban it just because it mentions a body part
-                person_keywords = ["man", "woman", "girl", "boy", "child", "baby", "person", "human"]
-                is_person = any(pk in reason for pk in person_keywords)
+                # [Refinement] Removed is_person bypass. 
+                # It was too risky ("woman's hand" would pass).
+                # Instead, we rely on the strictly reduced blacklist above.
                 
-                if not is_person and any(kw in reason for kw in non_face_keywords):
+                if any(kw in reason for kw in non_face_keywords):
                     # Only override if "face" is NOT in the reason part describing the object.
                     if "face" not in reason:
                         logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face: '{reason}'")
