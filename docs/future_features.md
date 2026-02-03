@@ -111,6 +111,47 @@
 - **Performance:** Pose extraction is already included in InsightFace detection (no additional cost).
 - **Dependencies:** Benefits from #6 (Age-Based ERA) for comprehensive person modeling.
 
+### 8. VLM Multi-Face Fix (Phase 58)
+- **Goal:** Fix SmolVLM's inability to count faces in cropped regions.
+- **Problem:** VLM reports `face_count: "one"` even for boxes containing 2+ faces.
+- **Solution:** Use face detector re-run instead of VLM for face counting.
+- **Core Features:**
+    - `detect_region_faces` command to re-run detection on cropped region
+    - VLM limited to semantic verification only ("Is this a face or a knee?")
+    - If `face_count > 1`, split box into separate face records
+- **Implementation Plan:** See [VLM Accuracy Research Review](file:///j:/Projects/smart-photo-organizer/docs/vlm-accuracy-research-review.md)
+
+### 9. AdaFace Integration (Phase 59)
+- **Goal:** Improve recognition accuracy on low-quality (blurry) faces.
+- **Problem:** ArcFace produces weak embeddings for blurry/motion-blur faces, causing mismatches.
+- **Solution:** Use AdaFace adaptively for faces with `blur_score < 50`.
+- **Core Features:**
+    - Hybrid embedding selection based on face quality
+    - `HybridEmbedder` class with automatic model switching
+    - Config option: `useAdaFaceForLowQuality: true`
+- **Performance:** AdaFace adds ~5-10ms overhead per face (one-time cost).
+
+### 10. Vector Database Scaling (Phase 60)
+- **Goal:** Prepare FAISS for 500K+ face libraries spanning decades of photos.
+- **Problem:** Current `IndexFlatL2` is O(n) brute-force search — won't scale.
+- **Solution:** Migrate to `IndexIVFFlat` with training step.
+- **Core Features:**
+    - Automatic migration from FlatL2 to IVF on first use
+    - Training step during index rebuild
+    - ~10x faster search at 500K+ scale
+- **Alternatives Evaluated:** Milvus Lite, ScaNN (deferred — IVF sufficient for now).
+
+### 11. Scan Performance Optimization (Phase 61)
+- **Goal:** Reduce 7s/photo to 3-4s/photo in MACRO mode.
+- **Problem:** 7 inference passes per image (4 scales + 3 TTA rotations).
+- **Solution:** Adaptive early-exit detection, TensorRT priority, batch embedding.
+- **Core Features:**
+    - Early-exit when high-confidence faces found at standard resolution
+    - Force TensorRT as first provider (20-40% faster on NVIDIA GPUs)
+    - Batch embedding extraction for multi-face photos
+    - Image pyramid caching to avoid repeated resizing
+- **Target:** 30-50% reduction in average scan time.
+
 ---
 
 ## 🔮 Feature Backlog
@@ -120,6 +161,10 @@
 - **Face Restoration Config:** Expose GFPGAN blending weight, Restoration Strength slider.
 - **Custom AI Models:** Load user-provided `.pth` models from a `models/` directory.
 - **Batch Enhancement:** Background queue for upscaling multiple photos.
+- **YOLO-World Object Detection:**
+    - **Goal:** Add open-vocabulary object detection for semantic tagging ("3 dogs", "beach scene").
+    - **Model:** YOLO-World (~4GB VRAM) with text prompts.
+    - **Features:** Custom tag detection without re-training.
 
 ### Organization & Metadata
 - **Blurry Photo List Export:**

@@ -11,22 +11,23 @@ MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifica
 # [Phase 58] Simplified prompt - semantic verification only (detector handles face counting)
 VLM_VERIFICATION_PROMPT = """Analyze the object in the absolute CENTER of this image.
 
-Analyze the image and determine if the object in the absolute CENTER is a human face.
+Analyze the image. You are a quality control agent catching ERRORS from an automated face detector.
+The detector often makes mistakes and detects hands, knees, shoulders, and skin patches as faces.
 
-INSTRUCTIONS:
-- Identify if it is a HUMAN FACE or a BODY PART (knee, elbow, arm, skin patch, etc).
-- List the specific facial landmarks you see (eyes, nose, mouth, ears, profile, etc).
-- If it is a smooth patch of skin or a knee, assign is_face: false.
+YOUR TASK:
+Determine if the object in the absolute CENTER is a REAL HUMAN FACE or a FALSE POSITIVE (skin, body part, clothing, or hair).
 
-Output valid JSON with these fields:
+1. Categorize: "face" or "false_positive"
+2. Describe: What exactly do you see? If it's skin, describe texture/grain. If it's a face, list specific visible parts.
+
+Output ONLY JSON:
 {
-  "object_type": "",
+  "category": "face | false_positive",
+  "specific_object": "e.g. skin_patch, knee, arm, human_face",
   "is_face": false,
   "confidence": 0.0,
-  "landmarks": "",
-  "reason": ""
+  "description": "be honest and skeptical"
 }
-(object_type should be "face", "knee", "elbow", "skin_patch", etc.)
 """
 
 # [Phase 59] AdaFace Configuration
