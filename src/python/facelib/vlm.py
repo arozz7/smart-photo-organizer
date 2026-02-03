@@ -401,10 +401,18 @@ def verify_is_face(image_path, box):
 
             # [Phase 56.9] AGGRESSIVE ECHO STRIPPING
             # Remove any landmark text that echoes the prompt instructions.
-            echo_terms = ["list 2+", "specific anatomical", "parts seen", "seen or", "specific facial", "facial parts"]
+            echo_terms = [
+                "list 2+", "specific anatomical", "parts seen", "seen or", 
+                "specific facial", "facial parts", "be specific and honest",
+                "json with these fields", "valid json"
+            ]
             if any(term in landmarks for term in echo_terms):
                 logger.debug(f"[VLM] Stripping prompt echo from landmarks: {landmarks}")
                 landmarks = "unknown"
+            
+            if any(term in reason for term in echo_terms):
+                logger.debug(f"[VLM] Stripping prompt echo from reason: {reason}")
+                reason = "unknown"
             
             logger.info(f"[VLM] Parsed Result: is_face={is_face}, obj={object_type}, landmarks={landmarks}, reason='{reason}'")
             
