@@ -426,8 +426,18 @@ def verify_is_face(image_path, box):
                 "eye", "nose", "mouth", "lip", "chin", "ear", "eyebrow", "cheek", 
                 "forehead", "hairline", "profile", "smile", "nostril", "eyelid"
             ]
-            # Search strictly in the natural language text
-            has_anatomical = any(term in reason for term in anatomical_terms)
+            
+            # [Phase 57.1] STRICT WORD BOUNDARY MATCHING
+            # Fixes bug where "perfectly clear" matched "ear".
+            import re
+            def has_word(text, terms):
+                for term in terms:
+                    # Match whole words only, case insensitive
+                    if re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE):
+                        return True
+                return False
+
+            has_anatomical = has_word(reason, anatomical_terms)
             
             # [Phase 56.5] LANDMARK VALIDATION
             # If the model says it's a face but provides NO anatomical proof in text.
@@ -438,13 +448,17 @@ def verify_is_face(image_path, box):
                 # Proof must exist in the description.
 
                 # Specific proof keywords
+                # [Phase 57.1] EXPANDED VOCABULARY
+                # "the girl is sleeping" must pass.
                 face_proof = [
                     "smiling", "smile", "expression", "glasses", "beard", "mustache", 
                     "human face", "person's face", "tilted head", "head angle", "profile view", 
-                    "side-view", "side view", "partial face", "human being", "person's head"
+                    "side-view", "side view", "partial face", "human being", "person's head",
+                    "girl", "boy", "man", "woman", "child", "baby", "person", "lady", "gentleman",
+                    "face"
                 ]
                 
-                if has_anatomical or any(kw in reason for kw in face_proof):
+                if has_anatomical or has_word(reason, face_proof):
                     logger.info(f"[VLM] Trusting face: Evidence found in description.")
                 else:
                     logger.warning(f"[VLM] Overriding is_face=True -> False because NO anatomical proof was found in text (Confidence: {confidence:.4f}).")
