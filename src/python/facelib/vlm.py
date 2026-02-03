@@ -383,65 +383,73 @@ def verify_is_face(image_path, box):
             # 3. Parse as JSON
             parsed = json.loads(clean_response)
             
-            # [Phase 56.9.1] Support new Categorize-First fields
-            # Handle both old and new field names for robustness
-            object_type = str(parsed.get('object_type', 'face')).lower()
+            # [Phase 56.9.1] Round 6 Adrien-Skeptical Fields
+            category = str(parsed.get('category', 'face')).lower()
+            obj_type = str(parsed.get('specific_object', parsed.get('object_type', 'face'))).lower()
             is_face = parsed.get('is_face', False)
             confidence = float(parsed.get('confidence', 0.5))
+            
+            # landmarks and reason may drift names in adversarial mode
             landmarks = str(parsed.get('landmarks', parsed.get('landmarks_visible', ''))).lower()
-            reason = str(parsed.get('reason', '')).lower()
+            reason = str(parsed.get('description', parsed.get('reason', ''))).lower()
             
             # [Phase 56.9.1] HARD CATEGORY OVERRIDE
-            # If the VLM specifically identified this as a body part, BELIEVE IT.
-            non_face_types = ["knee", "shoulder", "skin_patch", "skin-patch", "arm", "leg", "elbow", "foot", "body_part", "body-part"]
-            if any(nt in object_type for nt in non_face_types):
-                logger.warning(f"[VLM] Categorized as {object_type}. Forcing is_face=False.")
+            non_face_categories = ["false_positive", "false-positive", "skin", "body", "fabric", "background"]
+            non_face_objs = ["knee", "shoulder", "skin_patch", "arm", "leg", "elbow", "foot", "body_part", "hand", "finger"]
+            
+            is_categorized_non_face = any(c in category for c in non_face_categories) or any(o in obj_type for o in non_face_objs)
+            
+            if is_face is True and is_categorized_non_face:
+                logger.warning(f"[VLM] Categorized as {category}/{obj_type}. Forcing is_face=False.")
                 is_face = False
-                reason = f"Categorized as {object_type} ({reason})"
+                reason = f"Categorized as {category}/{obj_type} ({reason})"
 
             # [Phase 56.9] AGGRESSIVE ECHO STRIPPING
-            # Remove any landmark text that echoes the prompt instructions.
+            # Remove any text that echoes the prompt instructions.
             echo_terms = [
                 "list 2+", "specific anatomical", "parts seen", "seen or", 
                 "specific facial", "facial parts", "be specific and honest",
-                "json with these fields", "valid json"
+                "json with these fields", "valid json", "characterize exactly",
+                "catching errors", "automated face detector"
             ]
             if any(term in landmarks for term in echo_terms):
-                logger.debug(f"[VLM] Stripping prompt echo from landmarks: {landmarks}")
                 landmarks = "unknown"
-            
             if any(term in reason for term in echo_terms):
-                logger.debug(f"[VLM] Stripping prompt echo from reason: {reason}")
                 reason = "unknown"
             
-            logger.info(f"[VLM] Parsed Result: is_face={is_face}, obj={object_type}, landmarks={landmarks}, reason='{reason}'")
+            logger.info(f"[VLM] Parsed Result: is_face={is_face}, cat={category}, obj={obj_type}, landmarks={landmarks}")
             
             # [Phase 56.9] MANDATORY ANATOMICAL CHECK
+            # CRITICAL: Only trust the natural language description/reason for anatomical parts.
+            # JSON keys and coordinates are too easy for models to hallucinate/parrot.
             anatomical_terms = [
                 "eye", "nose", "mouth", "lip", "chin", "ear", "eyebrow", "cheek", 
                 "forehead", "hairline", "profile", "smile", "nostril", "eyelid"
             ]
-            has_anatomical = any(term in landmarks or term in reason for term in anatomical_terms)
+            # Search strictly in the natural language text
+            has_anatomical = any(term in reason for term in anatomical_terms)
             
             # [Phase 56.5] LANDMARK VALIDATION
-            if is_face is True and (landmarks == 'none' or not landmarks or 'none' in landmarks or 'unknown' in landmarks):
-                # [Phase 56.9] Nuclear Confidence Bypass (0.998+)
-                if confidence >= 0.998:
-                    logger.info(f"[VLM] Trusting face despite 'none' landmarks due to extreme confidence ({confidence:.3f})")
+            # If the model says it's a face but provides NO anatomical proof in text.
+            if is_face is True:
+                # [Phase 57.0] REMOVED CONFIDENCE BYPASS
+                # The VLM hallucinated 0.99999+ confidence for knees. 
+                # We can no longer trust confidence alone. 
+                # Proof must exist in the description.
+
+                # Specific proof keywords
+                face_proof = [
+                    "smiling", "smile", "expression", "glasses", "beard", "mustache", 
+                    "human face", "person's face", "tilted head", "head angle", "profile view", 
+                    "side-view", "side view", "partial face", "human being", "person's head"
+                ]
+                
+                if has_anatomical or any(kw in reason for kw in face_proof):
+                    logger.info(f"[VLM] Trusting face: Evidence found in description.")
                 else:
-                    # [Phase 56.6/7/8/9] SPECIAL EXCEPTION: Only trust specific, non-generic descriptions.
-                    face_confirmation_keywords = [
-                        "smiling", "smile", "expression", "glasses", "beard", "mustache", 
-                        "human face", "person's face", "tilted head", "head angle", "profile view", 
-                        "side-view", "side view", "partial face", "hairline", "forehead", "cheekbone"
-                    ]
-                    
-                    if has_anatomical or any(kw in reason for kw in face_confirmation_keywords):
-                        logger.info(f"[VLM] Trusting face despite 'none' landmarks because reason/anatomical is strong.")
-                    else:
-                        logger.warning(f"[VLM] Overriding is_face=True -> False because NO convincing landmarks were seen.")
-                        is_face = False
-                        reason = f"No anatomical landmarks or face proof (reason: {reason})"
+                    logger.warning(f"[VLM] Overriding is_face=True -> False because NO anatomical proof was found in text (Confidence: {confidence:.4f}).")
+                    is_face = False
+                    reason = f"No anatomical proof in description (reason: {reason})"
             
             # [Phase 56.9] Secondary Safeguards (Hard Rejections)
             if is_face is True:
