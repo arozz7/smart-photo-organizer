@@ -489,27 +489,44 @@ def verify_is_face(image_path, box):
                         logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face: '{reason}'")
                         is_face = False
             
-            # [Phase 63] Clothing/Hair Hallucination Check
-            # VLM sees "dress" and says "woman in dress", but no face parts are visible.
-            # Rule: If Clothing/Hair is mentioned, we MUST have specific Face Proof.
+            # [Phase 63.5] Generic Hallucination Filter (Replaces Phase 63)
+            # Problem: "Hand" box gets generic description "the woman's face is visible".
+            # Problem: "Dress" box gets detailed description "pink sparkly dress".
+            # Fix: Reject GENERIC descriptions. Keep DETAILED ones (even if they talk about clothes).
             if is_face is True:
-                clothing_hair_keywords = ["hair", "dress", "shirt", "clothing", "wearing", "hat", "coat", "jacket", "fabric"]
-                has_clothing_or_hair = has_word(reason, clothing_hair_keywords)
+                # Terms that indicate the VLM is just stating "it's a face" without seeing details.
+                # These are common hallucinations for non-face objects.
+                generic_phrases = [
+                    "human face", "face is visible", "the object is a face", 
+                    "facial features are visible", "person's face", "a face",
+                    "visible face", "human head", "the image contains a face",
+                    "close-up of a face"
+                ]
                 
-                if has_clothing_or_hair:
-                    # If we see clothes, we demand to see a face part too.
-                    # reusing 'face_proof' list from above + anatomical terms
-                    # But we want Strict Face Parts: eyes, nose, mouth, smile, looking, head, chin
-                    strict_face_proof = [
-                        "eye", "eyes", "nose", "mouth", "lip", "lips", "chin", "cheek", "cheeks", 
-                        "forehead", "smile", "smiling", "look", "looking", "gaze", "gazing", 
-                        "head", "face", "profile"
-                    ]
+                # Check if the reason is TOO SHORT or TOO GENERIC.
+                # 1. Clean up reason (lowercase, remove punctuation)
+                clean_reason = reason.lower().strip().strip(".").strip()
+                
+                # 2. Exact match on generic phrases (or extremely close)
+                is_generic = any(clean_reason == gp or clean_reason == f"a {gp}" or clean_reason == f"the {gp}" for gp in generic_phrases)
+                
+                # 3. Contains generic phrase AND is short (< 30 chars)
+                if not is_generic:
+                     for gp in generic_phrases:
+                         if gp in clean_reason and len(clean_reason) < 35:
+                             is_generic = True
+                             break
+                
+                if is_generic:
+                    # BUT wait! Does it have specific details?
+                    # If it mentions color (pink, blue, etc) or specific hair/clothing, it might be real.
+                    details = ["pink", "blue", "red", "green", "hair", " dress", "shirt", "eyes", "nose", "mouth", "smile", "looking"]
+                    has_detail = any(d in clean_reason for d in details)
                     
-                    if not has_word(reason, strict_face_proof):
-                         logger.warning(f"[VLM] Overriding is_face=True -> False. Clothing/Hair detected ('{reason}') but NO specific face parts mentioned.")
-                         is_face = False
-                         reason = f"Clothing/Hair detected without Face Parts (reason: {reason})"
+                    if not has_detail:
+                        logger.warning(f"[VLM] Overriding is_face=True -> False. Reason is too generic ('{reason}') and lacks specific details.")
+                        is_face = False
+                        reason = f"Generic Hallucination Detected (reason: {reason})"
             
             return {
                 "is_face": is_face,
