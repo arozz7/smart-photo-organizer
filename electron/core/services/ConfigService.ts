@@ -112,7 +112,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         aiProfile: 'balanced',
         useGpu: true,
         vlmEnabled: false, // Default to off for performance
-        vlmVerificationThreshold: 0.65, // Phase 56: VLM Verification threshold
+        vlmVerificationThreshold: 0.85, // Phase 56: VLM Verification threshold
         runtimeUrl: undefined
     },
     windowBounds: { width: 1200, height: 800, x: 0, y: 0 },
@@ -142,17 +142,56 @@ export class ConfigService {
     private static load() {
         if (this.config) return;
         try {
+            // [Phase 66] Load Enterprise Defaults from ai-config.json
+            let enterpriseDefaults = {};
+            const aiConfigPath = path.join(process.cwd(), 'ai-config.json');
+
+            try {
+                if (fs.existsSync(aiConfigPath)) {
+                    const aiRaw = fs.readFileSync(aiConfigPath, 'utf8');
+                    const aiJson = JSON.parse(aiRaw);
+
+                    // Map ai-config.json to AppConfig structure
+                    enterpriseDefaults = {
+                        advancedFace: {
+                            detThreshStandard: aiJson.face_detection?.score_threshold_strict ?? 0.60, // Map strict floor
+                            minFaceSize: aiJson.face_detection?.min_face_size_standard ?? 40,
+                            nmsIouThresh: aiJson.face_detection?.nms_iou_threshold ?? 0.3,
+                            enableTTA: aiJson.face_detection?.enable_tta ?? false // [Phase 67] Disable TTA to fix alignment drift
+                        },
+                        aiSettings: {
+                            vlmVerificationThreshold: aiJson.vlm?.verification_threshold ?? 0.85,
+                            faceSimilarityThreshold: aiJson.face_detection?.score_threshold_confident ?? 0.85, // Use confident threshold as similarity baseline
+                            faceBlurThreshold: aiJson.face_detection?.face_blur_threshold ?? 15,
+                            vlmEnabled: aiJson.vlm?.enabled ?? false
+                        }
+                    };
+                    console.log('[ConfigService] Loaded Enterprise Defaults from ai-config.json');
+                }
+            } catch (aiErr) {
+                console.warn('[ConfigService] Failed to load ai-config.json, using hardcoded defaults:', aiErr);
+            }
+
+            // Merge: Hardcoded Defaults -> Enterprise Defaults -> User Config
+            const baseConfig = { ...DEFAULT_CONFIG };
+
+            // Apply Enterprise Overrides to Base
+            if (enterpriseDefaults) {
+                baseConfig.advancedFace = { ...baseConfig.advancedFace, ...((enterpriseDefaults as any).advancedFace || {}) };
+                baseConfig.aiSettings = { ...baseConfig.aiSettings, ...((enterpriseDefaults as any).aiSettings || {}) };
+            }
+
             if (fs.existsSync(this.configPath)) {
                 const raw = fs.readFileSync(this.configPath, 'utf8');
                 const parsed = JSON.parse(raw);
-                this.config = { ...DEFAULT_CONFIG, ...parsed };
+                this.config = { ...baseConfig, ...parsed };
                 // Deep merge nested objects
-                this.config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...(parsed.aiSettings || {}) };
-                this.config.advancedFace = { ...DEFAULT_CONFIG.advancedFace, ...(parsed.advancedFace || {}) };
-                this.config.queue = { ...DEFAULT_CONFIG.queue, ...(parsed.queue || {}) };
-                this.config.smartIgnore = { ...DEFAULT_CONFIG.smartIgnore, ...(parsed.smartIgnore || {}) };
+                this.config.aiSettings = { ...baseConfig.aiSettings, ...(parsed.aiSettings || {}) };
+                this.config.advancedFace = { ...baseConfig.advancedFace, ...(parsed.advancedFace || {}) };
+                this.config.queue = { ...baseConfig.queue, ...(parsed.queue || {}) };
+                this.config.smartIgnore = { ...baseConfig.smartIgnore, ...(parsed.smartIgnore || {}) };
             } else {
-                this.config = { ...DEFAULT_CONFIG };
+                this.config = { ...baseConfig };
                 this.save();
             }
         } catch (e) {

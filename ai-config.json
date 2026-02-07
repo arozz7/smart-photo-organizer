@@ -1,0 +1,47 @@
+{
+    "face_detection": {
+        "score_threshold_strict": 0.60,
+        "score_threshold_vlm_verification": 0.85,
+        "score_threshold_confident": 0.85,
+        "min_face_size_macro": 50,
+        "min_face_size_standard": 40,
+        "nms_iou_threshold": 0.3,
+        "face_blur_threshold": 15.0,
+        "enable_tta": false
+    },
+    "vlm": {
+        "enabled": true,
+        "prompt_version": "v3_hardened",
+        "verification_threshold": 0.85,
+        "confidence_boost_for_vlm_verified": 0.1,
+        "forbidden_keywords": [
+            "rock",
+            "stone",
+            "foliage",
+            "leaves",
+            "ground",
+            "fabric",
+            "trash",
+            "knee",
+            "elbow",
+            "hat",
+            "cap",
+            "camera",
+            "microphone",
+            "hand",
+            "glove",
+            "clothing"
+        ],
+        "forbidden_objects": [
+            "knee",
+            "hand",
+            "glove",
+            "hat",
+            "cap",
+            "camera",
+            "microphone",
+            "stone",
+            "rock"
+        ]
+    }
+}

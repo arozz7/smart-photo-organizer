@@ -315,6 +315,15 @@ def verify_is_face(image_path, box):
         cx2 = min(img_w, x2 + pad_w)
         cy2 = min(img_h, y2 + pad_h)
         
+        # [Fix] Coordinate 'right' is less than 'left' safety check
+        if cx2 <= cx1 or cy2 <= cy1:
+             logger.warning(f"[VLM] Invalid crop coordinates calculated: ({cx1},{cy1},{cx2},{cy2}). Fallback to original box.")
+             # Fallback to original tight box, clamped
+             cx1 = max(0, min(x1, img_w - 1))
+             cy1 = max(0, min(y1, img_h - 1))
+             cx2 = max(cx1 + 1, min(x2, img_w))
+             cy2 = max(cy1 + 1, min(y2, img_h))
+
         face_crop = pil_img.crop((cx1, cy1, cx2, cy2))
         
         # [Phase 56.5 Debug] Save VLM crops for visual verification
@@ -398,9 +407,23 @@ def verify_is_face(image_path, box):
             landmarks = str(parsed.get('landmarks', parsed.get('landmarks_visible', ''))).lower()
             reason = str(parsed.get('description', parsed.get('reason', ''))).lower()
             
+            # [Phase 58.1] Append specific_object to reason
+            # If description is "beautiful" but specific_object is "human face", we want to count that as proof.
+            if obj_type and obj_type not in reason:
+                reason += f" (object: {obj_type})"
+            
             # [Phase 56.9.1] HARD CATEGORY OVERRIDE
-            non_face_categories = ["false_positive", "false-positive", "skin", "body", "fabric", "background"]
-            non_face_objs = ["knee", "shoulder", "skin_patch", "arm", "leg", "elbow", "foot", "body_part", "hand", "finger"]
+            from config import AI_CONFIG
+            
+            # Use centralized config for rejection lists
+            non_face_categories = ["false_positive", "false-positive", "skin", "body", "fabric", "background", "clothing"]
+            
+            # Objects that are definitely NOT faces (even if VLM is confused)
+            # Default to hardcoded safe list if config missing
+            non_face_objs = AI_CONFIG.get('vlm', {}).get('forbidden_objects', [
+                "knee", "shoulder", "skin_patch", "arm", "leg", "elbow", "foot", "body_part", "hand", "finger", 
+                "hat", "cap", "camera", "microphone" # Added from Phase 67 analysis
+            ])
             
             is_categorized_non_face = any(c in category for c in non_face_categories) or any(o in obj_type for o in non_face_objs)
             
@@ -439,6 +462,8 @@ def verify_is_face(image_path, box):
                 for term in terms:
                     # Match whole words only, case insensitive
                     if re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE):
+                        # [Debug] Log what matched
+                        logger.info(f"[VLM Debug] Matched keyword: '{term}' in '{text}'")
                         return True
                 return False
 
@@ -453,14 +478,16 @@ def verify_is_face(image_path, box):
                 # Proof must exist in the description.
 
                 # Specific proof keywords
-                # [Phase 57.1] EXPANDED VOCABULARY
-                # "the girl is sleeping" must pass.
+                # [Phase 66] HARDENED VOCABULARY
+                # Removed "face", "person", "human being" to force anatomical/demographic specificity.
+                # A box must be described as a specific GENDER (man/woman) or have FEATURES (smile/glasses)
+                # to be trusted. "It is a face" is no longer enough.
                 face_proof = [
                     "smiling", "smile", "expression", "glasses", "beard", "mustache", 
-                    "human face", "person's face", "tilted head", "head angle", "profile view", 
-                    "side-view", "side view", "partial face", "human being", "person's head",
-                    "girl", "boy", "man", "woman", "child", "baby", "person", "lady", "gentleman",
-                    "face"
+                    "tilted head", "head angle", "profile view", 
+                    "side-view", "side view", 
+                    "girl", "boy", "man", "woman", "child", "baby", "lady", "gentleman",
+                    "bride", "groom", "infant", "toddler", "couple"
                 ]
                 
                 if has_anatomical or has_word(reason, face_proof):
@@ -473,21 +500,31 @@ def verify_is_face(image_path, box):
             # [Phase 56.9] Secondary Safeguards (Hard Rejections)
             if is_face is True:
                 # [Fix] Removed "hair", "fabric", "cloth", "shoulder" - too common in valid descriptions
-                non_face_keywords = [
-                    "hand", "finger", "knee", "elbow", "arm", "leg", "foot", 
-                    "pattern", "object", "landscape", "body part", "body-part", "appendage", 
-                    "skin patch", "skin-patch", "surface", "skin surface", "skin area"
-                ]
+                # [Refinement] Removed abstract terms like "object", "pattern", "surface" which cause false positives.
+                # [Phase 66] Expanded Blacklist based on User Feedback ("Chair legs", "Pants", "Floor")
+                # Loaded from Central Config
+                non_face_keywords = AI_CONFIG.get('vlm', {}).get('forbidden_keywords', [
+                    "knee", "elbow", "arm", "leg", "foot",
+                    "chair", "furniture", "wood", "floor", "ground", "pants", "jeans", "shirt", "clothing", "fabric",
+                    "rock", "stone", "concrete", "pavement", "foliage", "leaf", "plant", "grass", "tree"
+                ])
                 
                 # [Refinement] Removed is_person bypass. 
                 # It was too risky ("woman's hand" would pass).
                 # Instead, we rely on the strictly reduced blacklist above.
                 
-                if any(kw in reason for kw in non_face_keywords):
-                    # Only override if "face" is NOT in the reason part describing the object.
-                    if "face" not in reason:
-                        logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face: '{reason}'")
-                        is_face = False
+                # [Phase 66.5] Safety: Allow clothing/furniture terms IF a Person is clearly identified.
+                # "happy man in a blue shirt" -> KEEP (has 'man')
+                # "blue shirt on the floor"   -> REJECT (no 'man')
+                person_indicators = ["face", "man", "woman", "boy", "girl", "baby", "person", "child"]
+                
+                for kw in non_face_keywords:
+                    if kw in reason:
+                        # Only override if NO person-indicators are present.
+                        if not any(p in reason for p in person_indicators):
+                            logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face keyword '{kw}': '{reason}'")
+                            is_face = False
+                            break
             
             # [Phase 63.5] Generic Hallucination Filter (Replaces Phase 63)
             # Problem: "Hand" box gets generic description "the woman's face is visible".
@@ -496,42 +533,84 @@ def verify_is_face(image_path, box):
             if is_face is True:
                 # Terms that indicate the VLM is just stating "it's a face" without seeing details.
                 # These are common hallucinations for non-face objects.
+                # [Phase 66] Removed "human face" from generic list.
                 generic_phrases = [
-                    "human face", "face is visible", "the object is a face", 
+                    "face is visible", "the object is a face", 
                     "facial features are visible", "person's face", "a face",
                     "visible face", "human head", "the image contains a face",
                     "close-up of a face"
                 ]
                 
-                # Check if the reason is TOO SHORT or TOO GENERIC.
+                # [Debug] Check if the reason is TOO SHORT or TOO GENERIC.
                 # 1. Clean up reason (lowercase, remove punctuation)
                 clean_reason = reason.lower().strip().strip(".").strip()
                 
                 # 2. Exact match on generic phrases (or extremely close)
                 is_generic = any(clean_reason == gp or clean_reason == f"a {gp}" or clean_reason == f"the {gp}" for gp in generic_phrases)
                 
-                # 3. Contains generic phrase AND is short (< 30 chars)
+                # 3. Contains generic phrase AND is short
                 if not is_generic:
                      for gp in generic_phrases:
-                         if gp in clean_reason and len(clean_reason) < 35:
+                         if gp in clean_reason and len(clean_reason) < 45: 
                              is_generic = True
+                             logger.info(f"[VLM Debug] Generic Match Found: '{gp}' in '{clean_reason}'")
                              break
                 
                 if is_generic:
                     # BUT wait! Does it have specific details?
-                    # If it mentions color (pink, blue, etc) or specific hair/clothing, it might be real.
-                    details = ["pink", "blue", "red", "green", "hair", " dress", "shirt", "eyes", "nose", "mouth", "smile", "looking"]
-                    has_detail = any(d in clean_reason for d in details)
+                    # If it mentions color or specific hair/clothing/type, it might be real.
+                    details = [
+                        "pink", "blue", "red", "green", "hair", " dress", "shirt", "eyes", "nose", "mouth", "smile", "looking",
+                        "woman", "man", "boy", "girl", "baby", "child", "person", "lady", "gentleman",
+                        "bride", "groom", "infant", "toddler", "couple", "people", "portrait",
+                        "beautiful", "pretty", "human", "mask", "costume", "makeup" # [Phase 66] Added human/mask/costume
+                    ]
+                    # [Fix] Use strict word matching to prevent "human" -> "man" substring match
+                    has_detail = has_word(clean_reason, details)
+                    if has_detail:
+                         logger.info(f"[VLM] Generic description ('{clean_reason}') SAVED by specific detail.")
+                         is_generic = False # Override
+                    else:
+                         logger.warning(f"[VLM] Generic description ('{clean_reason}') REJECTED (No details).")
+                    
+                    logger.info(f"[VLM Debug] Filter Check: '{clean_reason}' | Valid? {has_detail} | Generic? {is_generic}")
+
                     
                     if not has_detail:
                         logger.warning(f"[VLM] Overriding is_face=True -> False. Reason is too generic ('{reason}') and lacks specific details.")
                         is_face = False
                         reason = f"Generic Hallucination Detected (reason: {reason})"
             
+            # [Phase 68] Extract Suggested Metadata (Gender/Age)
+            # Use VLM's semantic understanding to correct InsightFace's statistical guesses.
+            suggested_metadata = {}
+            
+            # Combine reason and specific object for mining
+            mining_text = (str(reason) + " " + str(obj_type)).lower()
+            
+            # Gender Extraction
+            if any(w in mining_text for w in ["woman", "girl", "lady", "bride", "mother", "female"]):
+                suggested_metadata['gender'] = "F"
+            elif any(w in mining_text for w in ["man", "boy", "gentleman", "groom", "father", "male"]):
+                suggested_metadata['gender'] = "M"
+                
+            # Age Extraction (Rough Approximation)
+            if any(w in mining_text for w in ["baby", "infant", "toddler"]):
+                suggested_metadata['age'] = 2
+            elif any(w in mining_text for w in ["child", "kid", "boy", "girl"]):
+                # Only override if we don't think it's an adult
+                if "woman" not in mining_text and "man" not in mining_text:
+                    suggested_metadata['age'] = 10
+            elif any(w in mining_text for w in ["adult", "woman", "man", "elderly", "senior"]):
+                suggested_metadata['age'] = 30 # Generic adult
+            
+            
+            logger.info(f"[VLM] Returning result with metadata: {suggested_metadata}")
             return {
                 "is_face": is_face,
                 "confidence": confidence,
                 "reason": reason,
+                "suggested_metadata": suggested_metadata,
                 "error": None
             }
         except (json.JSONDecodeError, ValueError, Exception) as e:
@@ -542,10 +621,15 @@ def verify_is_face(image_path, box):
             confidence = 0.9 if is_face else 0.1
             reason = response.strip()
             
+            # Use Fallback Metadata extraction?
+            suggested_metadata = {} 
+            # (We could duplicate logic here but for now just empty)
+
             return {
                 "is_face": is_face,
                 "confidence": confidence,
                 "reason": reason,
+                "suggested_metadata": suggested_metadata,
                 "error": None
             }
         

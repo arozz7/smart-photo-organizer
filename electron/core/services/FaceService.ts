@@ -3,7 +3,7 @@ import { PersonRepository } from '../../data/repositories/PersonRepository';
 import { PersonService } from './PersonService';
 import logger from '../../logger';
 import { getDB } from '../../db';
-import { getAISettings } from '../../store';
+import { getAISettings, ConfigService } from '../../store';
 import { FaceAnalysisService } from './FaceAnalysisService';
 
 /**
@@ -432,7 +432,67 @@ export class FaceService {
     ) {
         logger.info(`[FaceService] Processing ${faces.length} faces for photo ${photoId}`);
         const db = getDB();
-        const existingFaces = FaceRepository.getFacesByPhoto(photoId);
+        // [Refactor] Use let to allow filtering after pre-pass cleanup
+        let existingFaces = FaceRepository.getFacesByPhoto(photoId) as any[];
+
+        // [Phase 68.5] Pre-Pass: Clean existing DB overlaps (Garbage Collection)
+        try {
+            const idsToDelete = new Set<number>();
+
+            // [Cleanup] Remove 'Ignored' faces (Hidden Ghosts) so we don't accumulate junk
+            // These are faces cleanRescan missed because getFacesByPhoto excludes them.
+            // Only delete if UNCONFIRMED to be safe (though ignored+confirmed is weird)
+            const ignoredFaces = db.prepare('SELECT id FROM faces WHERE photo_id = ? AND is_ignored = 1').all(photoId) as any[];
+            for (const f of ignoredFaces) {
+                idsToDelete.add(f.id);
+            }
+            if (ignoredFaces.length > 0) {
+                logger.info(`[FaceService] Pre-Pass: Deleting ${ignoredFaces.length} hidden/ignored garbage faces.`);
+            }
+
+            const sortedExisting = [...existingFaces].sort((a: any, b: any) => (b.score || 0) - (a.score || 0)); // High score first
+
+            for (let i = 0; i < sortedExisting.length; i++) {
+                if (idsToDelete.has(sortedExisting[i].id)) continue;
+                for (let j = i + 1; j < sortedExisting.length; j++) {
+                    if (idsToDelete.has(sortedExisting[j].id)) continue;
+
+                    const f1: any = sortedExisting[i];
+                    const f2: any = sortedExisting[j];
+
+                    // Simple IOU Check
+                    const interX1 = Math.max(f1.box.x, f2.box.x);
+                    const interY1 = Math.max(f1.box.y, f2.box.y);
+                    const interX2 = Math.min(f1.box.x + f1.box.width, f2.box.x + f2.box.width);
+                    const interY2 = Math.min(f1.box.y + f1.box.height, f2.box.y + f2.box.height);
+                    const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
+                    const unionArea = (f1.box.width * f1.box.height) + (f2.box.width * f2.box.height) - interArea;
+                    const iou = unionArea > 0 ? interArea / unionArea : 0;
+
+                    if (iou > 0.3) {
+                        const f1Protected = f1.is_confirmed;
+                        const f2Protected = f2.is_confirmed;
+
+                        if (f2Protected && !f1Protected) {
+                            idsToDelete.add(f1.id);
+                        } else if (!f2Protected) {
+                            idsToDelete.add(f2.id);
+                        }
+                    }
+                }
+            }
+            if (idsToDelete.size > 0) {
+                const idArray = Array.from(idsToDelete);
+                const placeholders = idArray.map(() => '?').join(',');
+                // We are not in a transaction yet, so we can run this directly.
+                // Actually, verify if getFacesByPhoto starts one? No.
+                db.prepare(`DELETE FROM faces WHERE id IN (${placeholders})`).run(...idArray);
+                existingFaces = existingFaces.filter((f: any) => !idsToDelete.has(f.id));
+                logger.info(`[FaceService] Pre-Pass: Deleted ${idsToDelete.size} overlapping garbage faces.`);
+            }
+        } catch (e) {
+            logger.error(`[FaceService] Pre-Pass failed: ${e}`);
+        }
 
         if (width && height) {
             try { db.prepare('UPDATE photos SET width = ?, height = ? WHERE id = ?').run(width, height, photoId); } catch (e) { }
@@ -501,6 +561,48 @@ export class FaceService {
             `);
 
         db.transaction(() => {
+            // [Phase 68.5] Pre-Pass: Clean existing DB overlaps (Garbage Collection)
+            const idsToDelete = new Set<number>();
+            const sortedExisting = [...existingFaces].sort((a, b) => (b.score || 0) - (a.score || 0)); // High score first
+
+            for (let i = 0; i < sortedExisting.length; i++) {
+                if (idsToDelete.has(sortedExisting[i].id)) continue;
+                for (let j = i + 1; j < sortedExisting.length; j++) {
+                    if (idsToDelete.has(sortedExisting[j].id)) continue;
+
+                    const f1 = sortedExisting[i];
+                    const f2 = sortedExisting[j];
+
+                    // Simple IOU Check
+                    const interX1 = Math.max(f1.box.x, f2.box.x);
+                    const interY1 = Math.max(f1.box.y, f2.box.y);
+                    const interX2 = Math.min(f1.box.x + f1.box.width, f2.box.x + f2.box.width);
+                    const interY2 = Math.min(f1.box.y + f1.box.height, f2.box.y + f2.box.height);
+                    const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
+                    const unionArea = (f1.box.width * f1.box.height) + (f2.box.width * f2.box.height) - interArea;
+                    const iou = unionArea > 0 ? interArea / unionArea : 0;
+
+                    if (iou > 0.3) {
+                        const f1Protected = f1.is_confirmed;
+                        const f2Protected = f2.is_confirmed;
+
+                        if (f2Protected && !f1Protected) {
+                            idsToDelete.add(f1.id);
+                        } else if (!f2Protected) {
+                            idsToDelete.add(f2.id);
+                        }
+                    }
+                }
+            }
+            if (idsToDelete.size > 0) {
+                const idArray = Array.from(idsToDelete);
+                const placeholders = idArray.map(() => '?').join(',');
+                db.prepare(`DELETE FROM faces WHERE id IN (${placeholders})`).run(...idArray);
+                existingFaces = existingFaces.filter(f => !idsToDelete.has(f.id));
+            }
+
+            const matchedFaceIds = new Set<number>();
+
             for (const face of faces) {
                 // Deduplication Logic
                 let bestMatch: any = null;
@@ -516,10 +618,29 @@ export class FaceService {
                     const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
                     const unionArea = (newBox.width * newBox.height) + (oldBox.width * oldBox.height) - interArea;
                     const iou = unionArea > 0 ? interArea / unionArea : 0;
-                    if (iou > 0.5 && iou > maxIoU) {
+
+                    // [Tuning] Relaxed from 0.5 to 0.4 to capture slightly shifted faces and prevent duplication
+                    if (iou > 0.4 && iou > maxIoU) {
                         maxIoU = iou;
                         bestMatch = oldFace;
                     }
+                }
+
+                // [Phase 68] Retroactive Hysteresis (Cleanup Existing Trash)
+                if (bestMatch) {
+                    const isProtected = bestMatch.is_confirmed;
+                    const newScore = face.score ?? 0;
+                    const newQuality = face.faceQuality ?? 0;
+                    const isWeak = newScore < 0.72 && newQuality < 0.6;
+
+                    if (!isProtected && isWeak) {
+                        logger.info(`[FaceService] Rejecting weak match (Score: ${newScore.toFixed(2)}) for unconfirmed face ${bestMatch.id}. Force Prune.`);
+                        bestMatch = null;
+                    }
+                }
+
+                if (bestMatch) {
+                    matchedFaceIds.add(bestMatch.id);
                 }
 
                 // Prepare Data
@@ -543,7 +664,9 @@ export class FaceService {
                 let matchDistance = bestMatch ? bestMatch.match_distance : null;
 
                 // Track Source & Confirmation (Phase 3)
-                let assignmentSource = bestMatch ? bestMatch.assignment_source : 'manual';
+                // [BUG FIX] Default source should be 'ai_scan', NOT 'manual'. 
+                // Only inherit if updating existing.
+                let assignmentSource = bestMatch ? bestMatch.assignment_source : 'ai_scan';
                 let isConfirmed = bestMatch ? bestMatch.is_confirmed : 0;
 
                 if (matchData) {
@@ -612,9 +735,11 @@ export class FaceService {
                     finalId = bestMatch.id;
                 } else {
                     // [Phase 57] Determine entity_type based on detection score AND box characteristics
-                    // Read threshold from settings (default: 0.65)
+                    // Read threshold from settings (Centralized Config)
                     const settings = getAISettings();
-                    const vlmThreshold = settings.vlmVerificationThreshold ?? 0.65;
+                    const advancedSettings = ConfigService.getAdvancedFaceSettings(); // Contains strict floor
+
+                    const vlmThreshold = settings.vlmVerificationThreshold ?? 0.85;
                     // FIX: Python returns 'score' (lowercase), use it directly
                     const detectionScore = face.score ?? 0.95;
 
@@ -640,6 +765,23 @@ export class FaceService {
                     if (isLargeBox || isUnusualAspect) {
                         logger.info(`[FaceService] Flagged face as suspect: ${isLargeBox ? `large box (${boxArea.toLocaleString()}px)` : ''} ${isUnusualAspect ? `unusual aspect (${aspectRatio.toFixed(2)})` : ''}`);
                     }
+
+                    // [Safe Filter]: Strict Hysteresis
+                    // 1. REJECT if score < STRICT_FLOOR (Loaded from ai-config.json via ConfigService)
+                    // 2. QUEUE as 'suspect' if score floor - 0.85 (VLM Verification)
+                    // 3. ACCEPT as 'human' if score > 0.85
+
+                    // Default to 0.60 if config missing, but ConfigService should load from ai-config.json
+                    const STRICT_FLOOR = advancedSettings.detThreshStandard ?? 0.60;
+
+                    if (detectionScore < STRICT_FLOOR) {
+                        logger.debug(`[FaceService] Skipped low-score face (Score: ${detectionScore.toFixed(2)} < ${STRICT_FLOOR})`);
+                        continue;
+                    }
+
+                    // Note: Faces between 0.65 and 0.85 will have entityType='suspect' (from VLM threshold)
+                    // and will proceed to insertion below.
+
 
                     const insertParams = [
                         photoId,
@@ -694,30 +836,38 @@ export class FaceService {
                     facesForFaiss.push({ id: finalId, descriptor: face.descriptor });
                 }
             }
-        })();
 
-        if (facesForFaiss.length > 0 && aiProvider) {
-            aiProvider.addToIndex(facesForFaiss);
-        }
+            // [Phase 67] Cleanup: Prune orphans (Faces in DB but not in this Scan)
+            // Safety: Only delete if NOT confirmed. (Manual is NOT protected if unconfirmed)
+            const orphanFaces = existingFaces.filter((f: any) => !matchedFaceIds.has(f.id));
+            if (orphanFaces.length > 0) {
+                const pruneCandidates = orphanFaces.filter((f: any) => !f.is_confirmed);
+
+                if (pruneCandidates.length > 0) {
+                    const pruneIds = pruneCandidates.map((f: any) => f.id);
+                    logger.info(`[FaceService] Pruning ${pruneIds.length} orphan faces (Ghost/Trash) involved in rescan.`);
+
+                    const placeholders = pruneIds.map(() => '?').join(',');
+                    try {
+                        db.prepare(`DELETE FROM faces WHERE id IN (${placeholders})`).run(...pruneIds);
+                    } catch (e) {
+                        logger.error(`[FaceService] Pruning failed: ${e}`);
+                    }
+                }
+
+                // Log kept orphans (Manual/Confirmed)
+                const keptCount = orphanFaces.length - pruneCandidates.length;
+                if (keptCount > 0) {
+                    logger.info(`[FaceService] Kept ${keptCount} orphan faces (Protected: Confirmed/High-Score Manual).`);
+                }
+            }
+        })();
 
         // We replaced step `this.autoAssignFaces` with the inline logic above.
         // However, we might want to run re-calcs if we assigned anything.
-        // Or we can leave autoAssignFaces for cleanup?
-        // Note: autoAssignFaces does ITERATIVE assignment (multi-pass).
-        // Our inline logic is SINGLE PASS.
-        // For scan time, single pass against existing library is usually enough.
-        // The iterative pass helps when uploading a huge batch of new people at once.
-        // But for steady state, single pass is fine.
-
-        // If we assigned faces, we should probably update person means eventually.
-        // For simplicity/performance, we might skip rigorous recalc on every single photo scan.
-        // Triggering it periodically or relying on user action is safer.
-        // BUT `autoAssignFaces` did it.
-        // Let's log success.
-        // Logic complete.
-        if (assignedCount > 0) logger.info(`[FaceService] Auto - assigned ${assignedCount} faces via scan - time logic.`);
-
-        // Logic complete.
+        if (assignedCount > 0) {
+            logger.info(`[FaceService] Auto-assigned ${assignedCount} faces via scan-time logic.`);
+        }
     }
 }
 
