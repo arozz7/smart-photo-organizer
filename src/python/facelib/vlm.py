@@ -306,7 +306,7 @@ def verify_is_face(image_path, box):
         y1, y2 = min(y1, y2), max(y1, y2)
         
         bw, bh = x2 - x1, y2 - y1
-        pad_w, pad_h = bw * 0.25, bh * 0.25
+        pad_w, pad_h = bw * 1.0, bh * 1.0
         
         # Apply padding and clamp to image boundaries
         img_w, img_h = pil_img.size
@@ -601,6 +601,20 @@ def verify_is_face(image_path, box):
                 # Only override if we don't think it's an adult
                 if "woman" not in mining_text and "man" not in mining_text:
                     suggested_metadata['age'] = 10
+            # [Phase 68] Multi-Face Detection (Split Logic)
+            # If the description mentions multiple people, flag it so FaceService can split the box.
+            multi_face_terms = ["two", "couple", "group", "multiple", "heads together", "three", "pair", "men", "women"]
+            
+            # Helper for parent/child detection
+            parents = ["woman", "man", "mother", "father", "lady", "gentleman"]
+            children = ["baby", "child", "infant", "toddler", "kid", "boy", "girl"]
+            has_parent = has_word(mining_text, parents)
+            has_child = has_word(mining_text, children)
+
+            if has_word(mining_text, multi_face_terms) or (has_parent and has_child):
+                 suggested_metadata['is_multi_face'] = True
+                 logger.info(f"[VLM] Multi-Face Detected: '{reason}'. Flagging for split.")
+
             elif any(w in mining_text for w in ["adult", "woman", "man", "elderly", "senior"]):
                 suggested_metadata['age'] = 30 # Generic adult
             
@@ -614,6 +628,8 @@ def verify_is_face(image_path, box):
                 "error": None
             }
         except (json.JSONDecodeError, ValueError, Exception) as e:
+            import traceback
+            traceback.print_exc()
             # Fallback to old YES/NO parsing
             logger.debug(f"JSON parse failed for VLM response, falling back to heuristic: {e}")
             response_lower = response.lower()

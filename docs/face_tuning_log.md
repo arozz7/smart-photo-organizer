@@ -11,6 +11,23 @@
 
 ## Tuning History
 
+### Phase 70: VLM Multi-Face Merge Fix (2026-02-07)
+**Problem:**
+- Distinct faces (e.g. Mother + Baby) were merged into a single bounding box.
+- VLM failed to flag `is_multi_face` because:
+    1. Prompt focused on "absolute CENTER", missing the second person.
+    2. Crop margin (25%) was too tight, cutting off context.
+- Result: Split logic never triggered.
+
+**Change:**
+- **Prompt:** Broadened to "Analyze this image" (removed center bias) and explicitly request multi-face check.
+- **Crop Logic:** Increased VLM verification crop padding from 25% to **100%** (double size) in `vlm.py`.
+
+**Outcome:**
+- VLM now sees the context (e.g. "Woman holding baby").
+- Correctly flags `is_multi_face=True`.
+- Background Service splits the box into individual faces.
+
 ### Phase 67: Centralization & Hardening (2026-02-07)
 **Problem:**
 - "Ghost Faces" persisted (e.g. "Woman in hat") because VLM descriptions were technically accurate but misleading for non-faces.

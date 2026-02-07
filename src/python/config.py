@@ -50,19 +50,21 @@ MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifica
 
 # VLM Settings
 # [Phase 58] Simplified prompt - semantic verification only (detector handles face counting)
-VLM_VERIFICATION_PROMPT = """Analyze the object in the absolute CENTER of this image.
+VLM_VERIFICATION_PROMPT = """Analyze this image.
 
 Analyze the image. You are a quality control agent catching ERRORS from an automated face detector.
 The detector often makes mistakes and detects hands, knees, shoulders, skin patches, ROCKS, LEAVES, and GROUND TEXTURES as faces.
 
 YOUR TASK:
-Determine if the object in the absolute CENTER is a REAL HUMAN FACE or a FALSE POSITIVE (skin, body part, clothing, hair, or inanimate object).
+Determine if this image crop contains a REAL HUMAN FACE or a FALSE POSITIVE.
+Also check for MULTIPLE PEOPLE merged into this single crop.
 
 1. Categorize: "face" or "false_positive"
-2. Describe: What exactly do you see? If it's a face, list SPECIFIC visible parts (eyes, nose, mouth). If it's a rock/stone/leaf, describe its texture.
+2. Describe: What exactly do you see? If it's a face, list visible parts. If it is MULTIPLE PEOPLE, describe them (e.g. "Woman holding a baby").
 3. BE SPECIFIC: Do NOT just say "human face". Specify gender (man/woman) and age (child/adult).
 4. FALSE POSITIVE CHECK: If you see fabric, clothing (pants, shirt texture), furniture (chair legs), ground/floor patterns, rocks, stones, or foliage, mark as "false_positive".
-5. IMPORTANT: Faces with medical masks, costumes, or heavy makeup ARE VALID FACES. Do not mark them as false_positive just because they are covered.
+6. MULTI-FACE CHECK: If the center object is actually TWO OR MORE PEOPLE (e.g. a couple, a group, a woman holding a baby), explicitlly mention "multiple people" or "two faces" in the description.
+7. IMPORTANT: Faces with medical masks, costumes, or heavy makeup ARE VALID FACES. Do not mark them as false_positive just because they are covered.
 
 Output ONLY JSON:
 {
