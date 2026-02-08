@@ -1,15 +1,47 @@
-## Summary of Current Best Settings (as of 2026-02-06 v2)
+## Summary of Current Best Settings (as of 2026-02-08)
 
-| Setting | Value | logic |
+| Setting | Value | Logic |
 | :--- | :--- | :--- |
 | **Strict Floor** | `0.65` | Faces < 0.65 are REJECTED (restore profiles). |
 | **VLM Threshold** | `0.85` | Faces < 0.85 are 'suspect' (Queue profiles + ghosts for verifying). |
 | **High Confidence** | `> 0.85` | Faces > 0.85 are ACCEPTED immediately. |
+| **High Quality Threshold** | `0.65` | Faces with quality > 0.65 bypass low detection score filter. |
 | **VLM Prompt** | `Hardened` | Includes explicit warnings for rocks/foliage. |
 
 ---
 
 ## Tuning History
+
+### Phase 74: Container Rejection & Quality Threshold (2026-02-08)
+**Problem:**
+- Mother+Baby photo showed incorrect bounding boxes despite NMS quality exception
+- **Root Cause 1:** InsightFace outputting a 781px "merged" box covering both faces
+- **Root Cause 2:** Quality threshold (0.70) was too high for mother's face (0.68)
+
+**Change:**
+- **Container Rejection Rule:** Added pre-pass in `nms.py` that rejects large boxes which fully contain smaller high-quality distinct faces (multi-face detector artifacts)
+- **Quality Threshold:** Lowered from **0.70 → 0.65** across all configs
+
+**Outcome:**
+- Photo 58 now correctly shows 2 individual face boxes (mother + baby)
+- Container boxes rejected: `[NMS] Container Rejection: Large box (781x780) contains smaller high-quality face`
+
+### Phase 71: Face Logic Persistence Fix (2026-02-07)
+**Problem:**
+- "Disappearing Faces" and "Aggressive Merging" issues persisted despite code changes.
+- **Root Cause:** `ConfigService.ts` was loading stale user configuration (likely cached in `AppData`) **after** loading `ai-config.json`, causing the new tuning values (NMS 0.45, Dedup 0.55) to be overwritten by old defaults (0.3).
+
+**Change:**
+- **Config Precedence:** Updated `ConfigService.load()` to apply `ai-config.json` settings **after** user configuration. This enforces the "Enterprise Policy" for critical AI parameters.
+- **Enforced Settings:**
+    - `nms_iou_threshold`: **0.45** (was 0.3) -> Separates close faces like Mother + Baby.
+    - `deduplication_iou_threshold`: **0.55** (was 0.3) -> Prevents aggressive garbage collection of overlapping faces.
+    - `enable_tta`: **false** (was true) -> Fixes alignment drift.
+
+**Outcome:**
+- The application now correctly respects the tuned `ai-config.json`.
+- Logs should now show `NMS=0.45` and `TTA=False`.
+- "Mother + Baby" case should now be correctly separated (or at least not aggressively merged/deleted).
 
 ### Phase 70: VLM Multi-Face Merge Fix (2026-02-07)
 **Problem:**

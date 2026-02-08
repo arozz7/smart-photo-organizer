@@ -32,11 +32,16 @@ export interface AdvancedFaceConfig {
     // NMS
     nmsIouThresh: number;      // Default 0.3 (Standard overlap)
     nmsIoMinThresh: number;    // Default 0.65 (Containment)
+    dedupIoUThresh?: number;   // Default 0.55 (Deduplication overlap)
     enableAreaBasedNMS: boolean; // Default true (for size prioritization)
 
     // Scan Scales (Simplified for UI)
     enableMacroLowRes: boolean; // Enable 160px pass?
     enableTTA: boolean;         // Enable rotation augmentation?
+
+    // [Phase 74] High-Quality Face Threshold
+    // Faces with faceQuality > this are kept even if detection score is low
+    highQualityFaceThreshold?: number; // Default 0.70
 }
 
 export interface WindowBounds {
@@ -102,7 +107,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         nmsIoMinThresh: 0.65,
         enableAreaBasedNMS: true,
         enableMacroLowRes: true,
-        enableTTA: true
+        enableTTA: true,
+        highQualityFaceThreshold: 0.65  // [Phase 74] Faces with quality > this bypass low detection score filter (lowered from 0.70 to keep 0.68 quality faces)
     },
     aiSettings: {
         faceSimilarityThreshold: 0.65,
@@ -157,6 +163,7 @@ export class ConfigService {
                             detThreshStandard: aiJson.face_detection?.score_threshold_strict ?? 0.60, // Map strict floor
                             minFaceSize: aiJson.face_detection?.min_face_size_standard ?? 40,
                             nmsIouThresh: aiJson.face_detection?.nms_iou_threshold ?? 0.3,
+                            dedupIoUThresh: aiJson.face_detection?.deduplication_iou_threshold ?? 0.55, // [Phase 68] Centralized Deduplication Threshold
                             enableTTA: aiJson.face_detection?.enable_tta ?? false // [Phase 67] Disable TTA to fix alignment drift
                         },
                         aiSettings: {
@@ -172,28 +179,46 @@ export class ConfigService {
                 console.warn('[ConfigService] Failed to load ai-config.json, using hardcoded defaults:', aiErr);
             }
 
-            // Merge: Hardcoded Defaults -> Enterprise Defaults -> User Config
+            // Merge: Hardcoded Defaults -> User Config -> Enterprise Defaults (Policy Enforcement)
             const baseConfig = { ...DEFAULT_CONFIG };
-
-            // Apply Enterprise Overrides to Base
-            if (enterpriseDefaults) {
-                baseConfig.advancedFace = { ...baseConfig.advancedFace, ...((enterpriseDefaults as any).advancedFace || {}) };
-                baseConfig.aiSettings = { ...baseConfig.aiSettings, ...((enterpriseDefaults as any).aiSettings || {}) };
-            }
+            let userConfig = {};
 
             if (fs.existsSync(this.configPath)) {
-                const raw = fs.readFileSync(this.configPath, 'utf8');
-                const parsed = JSON.parse(raw);
-                this.config = { ...baseConfig, ...parsed };
-                // Deep merge nested objects
-                this.config.aiSettings = { ...baseConfig.aiSettings, ...(parsed.aiSettings || {}) };
-                this.config.advancedFace = { ...baseConfig.advancedFace, ...(parsed.advancedFace || {}) };
-                this.config.queue = { ...baseConfig.queue, ...(parsed.queue || {}) };
-                this.config.smartIgnore = { ...baseConfig.smartIgnore, ...(parsed.smartIgnore || {}) };
+                try {
+                    const raw = fs.readFileSync(this.configPath, 'utf8');
+                    userConfig = JSON.parse(raw);
+                } catch (e) {
+                    console.error('Failed to parse user config:', e);
+                }
             } else {
+                // Save defaults if no config exists
                 this.config = { ...baseConfig };
                 this.save();
+                // But we still want to apply enterprise defaults below
             }
+
+            // 1. Apply User Config on top of Base
+            let intermediateConfig = { ...baseConfig, ...userConfig };
+            // Deep merge nested objects
+            intermediateConfig.aiSettings = { ...baseConfig.aiSettings, ...(userConfig as any).aiSettings || {} };
+            intermediateConfig.advancedFace = { ...baseConfig.advancedFace, ...(userConfig as any).advancedFace || {} };
+            intermediateConfig.queue = { ...baseConfig.queue, ...(userConfig as any).queue || {} };
+            intermediateConfig.smartIgnore = { ...baseConfig.smartIgnore, ...(userConfig as any).smartIgnore || {} };
+
+            // 2. Apply Enterprise Defaults (ai-config.json) as FINAL OVERRIDE for specific tuned keys
+            if (enterpriseDefaults) {
+                // Deep merge specific sections
+                intermediateConfig.advancedFace = {
+                    ...intermediateConfig.advancedFace,
+                    ...((enterpriseDefaults as any).advancedFace || {})
+                };
+                intermediateConfig.aiSettings = {
+                    ...intermediateConfig.aiSettings,
+                    ...((enterpriseDefaults as any).aiSettings || {})
+                };
+            }
+
+            this.config = intermediateConfig as AppConfig;
         } catch (e) {
             console.error('Failed to load config, resetting:', e);
             this.config = { ...DEFAULT_CONFIG };

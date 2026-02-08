@@ -15,7 +15,9 @@ def load_ai_config():
              'box_margin_percent': 0.10,
              'min_face_size_macro': 50,
              'min_face_size_standard': 40,
-             'face_blur_threshold': 15.0
+             'face_blur_threshold': 15.0,
+             'nms_iou_threshold': 0.45,
+             'high_quality_face_threshold': 0.65
          },
          'vlm': {
              'enabled': False,

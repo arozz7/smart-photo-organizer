@@ -469,7 +469,11 @@ export class FaceService {
                     const unionArea = (f1.box.width * f1.box.height) + (f2.box.width * f2.box.height) - interArea;
                     const iou = unionArea > 0 ? interArea / unionArea : 0;
 
-                    if (iou > 0.3) {
+                    // [Phase 68] Centralized Config for Deduplication
+                    const advancedSettings = ConfigService.getAdvancedFaceSettings();
+                    const DEDUP_THRESHOLD = advancedSettings.dedupIoUThresh ?? 0.55;
+
+                    if (iou > DEDUP_THRESHOLD) {
                         const f1Protected = f1.is_confirmed;
                         const f2Protected = f2.is_confirmed;
 
@@ -561,49 +565,18 @@ export class FaceService {
             `);
 
         db.transaction(() => {
-            // [Phase 68.5] Pre-Pass: Clean existing DB overlaps (Garbage Collection)
-            const idsToDelete = new Set<number>();
-            const sortedExisting = [...existingFaces].sort((a, b) => (b.score || 0) - (a.score || 0)); // High score first
-
-            for (let i = 0; i < sortedExisting.length; i++) {
-                if (idsToDelete.has(sortedExisting[i].id)) continue;
-                for (let j = i + 1; j < sortedExisting.length; j++) {
-                    if (idsToDelete.has(sortedExisting[j].id)) continue;
-
-                    const f1 = sortedExisting[i];
-                    const f2 = sortedExisting[j];
-
-                    // Simple IOU Check
-                    const interX1 = Math.max(f1.box.x, f2.box.x);
-                    const interY1 = Math.max(f1.box.y, f2.box.y);
-                    const interX2 = Math.min(f1.box.x + f1.box.width, f2.box.x + f2.box.width);
-                    const interY2 = Math.min(f1.box.y + f1.box.height, f2.box.y + f2.box.height);
-                    const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
-                    const unionArea = (f1.box.width * f1.box.height) + (f2.box.width * f2.box.height) - interArea;
-                    const iou = unionArea > 0 ? interArea / unionArea : 0;
-
-                    if (iou > 0.3) {
-                        const f1Protected = f1.is_confirmed;
-                        const f2Protected = f2.is_confirmed;
-
-                        if (f2Protected && !f1Protected) {
-                            idsToDelete.add(f1.id);
-                        } else if (!f2Protected) {
-                            idsToDelete.add(f2.id);
-                        }
-                    }
-                }
-            }
-            if (idsToDelete.size > 0) {
-                const idArray = Array.from(idsToDelete);
-                const placeholders = idArray.map(() => '?').join(',');
-                db.prepare(`DELETE FROM faces WHERE id IN (${placeholders})`).run(...idArray);
-                existingFaces = existingFaces.filter(f => !idsToDelete.has(f.id));
-            }
+            // [Phase 74] Removed duplicate deduplication - already handled in pre-pass above
+            // The duplicate code was using hardcoded iou > 0.3 threshold which was too aggressive
+            // and was re-merging faces that Python NMS had correctly kept separate
 
             const matchedFaceIds = new Set<number>();
+            const claimedExistingIds = new Set<number>(); // [Phase 68] Track claimed matches
 
+            let faceIdx = 0;
             for (const face of faces) {
+                faceIdx++;
+                logger.info(`[FaceService] Processing face ${faceIdx}/${faces.length} - Box: x=${face.box.x.toFixed(0)}, y=${face.box.y.toFixed(0)}, w=${face.box.width.toFixed(0)}, h=${face.box.height.toFixed(0)}, score=${face.score?.toFixed(2) ?? 'N/A'}`);
+
                 // Deduplication Logic
                 let bestMatch: any = null;
                 let maxIoU = 0;
@@ -619,28 +592,29 @@ export class FaceService {
                     const unionArea = (newBox.width * newBox.height) + (oldBox.width * oldBox.height) - interArea;
                     const iou = unionArea > 0 ? interArea / unionArea : 0;
 
-                    // [Tuning] Relaxed from 0.5 to 0.4 to capture slightly shifted faces and prevent duplication
-                    if (iou > 0.4 && iou > maxIoU) {
+                    // [Phase 68] Retroactive Hysteresis (Cleanup Existing Trash)
+                    // Use Centralized Deduplication Threshold
+                    const advancedSettings = ConfigService.getAdvancedFaceSettings();
+                    const DEDUP_THRESHOLD = advancedSettings.dedupIoUThresh ?? 0.55;
+
+                    if (iou > DEDUP_THRESHOLD && iou > maxIoU) {
                         maxIoU = iou;
                         bestMatch = oldFace;
                     }
                 }
 
-                // [Phase 68] Retroactive Hysteresis (Cleanup Existing Trash)
+                // [Phase 68] Claim Check
                 if (bestMatch) {
-                    const isProtected = bestMatch.is_confirmed;
-                    const newScore = face.score ?? 0;
-                    const newQuality = face.faceQuality ?? 0;
-                    const isWeak = newScore < 0.72 && newQuality < 0.6;
-
-                    if (!isProtected && isWeak) {
-                        logger.info(`[FaceService] Rejecting weak match (Score: ${newScore.toFixed(2)}) for unconfirmed face ${bestMatch.id}. Force Prune.`);
-                        bestMatch = null;
+                    if (claimedExistingIds.has(bestMatch.id)) {
+                        logger.info(`[FaceService] Face clash! Face ${bestMatch.id} already claimed by another detection. Treating new face as distinct.`);
+                        bestMatch = null; // Force insert as new
+                    } else {
+                        claimedExistingIds.add(bestMatch.id);
+                        matchedFaceIds.add(bestMatch.id);
+                        logger.info(`[FaceService] Face ${faceIdx} matched existing face ID ${bestMatch.id} (IoU=${maxIoU.toFixed(2)}). Will UPDATE.`);
                     }
-                }
-
-                if (bestMatch) {
-                    matchedFaceIds.add(bestMatch.id);
+                } else {
+                    logger.info(`[FaceService] Face ${faceIdx} has no match. Will INSERT as new.`);
                 }
 
                 // Prepare Data
@@ -758,9 +732,8 @@ export class FaceService {
                     const isLargeBox = boxArea > 4000000; // 2000x2000 pixels
                     const isUnusualAspect = aspectRatio > 1.6 || aspectRatio < 0.6;
 
-                    // FIX: Trust Python's entityType if provided, otherwise calculate
-                    const entityType = face.entityType ??
-                        ((isLowScore || isLargeBox || isUnusualAspect) ? 'suspect' : 'human');
+                    // FIX: Ignore Python's entityType. Enforce local centralized thresholds.
+                    const entityType = (isLowScore || isLargeBox || isUnusualAspect) ? 'suspect' : 'human';
 
                     if (isLargeBox || isUnusualAspect) {
                         logger.info(`[FaceService] Flagged face as suspect: ${isLargeBox ? `large box (${boxArea.toLocaleString()}px)` : ''} ${isUnusualAspect ? `unusual aspect (${aspectRatio.toFixed(2)})` : ''}`);
@@ -774,9 +747,21 @@ export class FaceService {
                     // Default to 0.60 if config missing, but ConfigService should load from ai-config.json
                     const STRICT_FLOOR = advancedSettings.detThreshStandard ?? 0.60;
 
-                    if (detectionScore < STRICT_FLOOR) {
-                        logger.debug(`[FaceService] Skipped low-score face (Score: ${detectionScore.toFixed(2)} < ${STRICT_FLOOR})`);
+                    // [Phase 74 Fix] High-Quality Exception
+                    // The detection score (from InsightFace) may be low for contained/occluded faces
+                    // BUT the faceQuality (from AdaFace) may still be high, indicating a valid face.
+                    // Example: Baby face in Mother+Baby photo has score=0.34 but quality=0.82
+                    const faceQuality = face.faceQuality ?? 0;
+                    const HIGH_QUALITY_THRESHOLD = advancedSettings.highQualityFaceThreshold ?? 0.70;
+                    const isHighQuality = faceQuality > HIGH_QUALITY_THRESHOLD;
+
+                    if (detectionScore < STRICT_FLOOR && !isHighQuality) {
+                        logger.info(`[FaceService] SKIPPING face ${faceIdx} - low score (Score: ${detectionScore.toFixed(2)} < ${STRICT_FLOOR}) and low quality (${faceQuality.toFixed(2)})`);
                         continue;
+                    }
+
+                    if (detectionScore < STRICT_FLOOR && isHighQuality) {
+                        logger.info(`[FaceService] HIGH QUALITY OVERRIDE for face ${faceIdx}: Score=${detectionScore.toFixed(2)} < ${STRICT_FLOOR} BUT Quality=${faceQuality.toFixed(2)} > ${HIGH_QUALITY_THRESHOLD}. Keeping.`);
                     }
 
                     // Note: Faces between 0.65 and 0.85 will have entityType='suspect' (from VLM threshold)
