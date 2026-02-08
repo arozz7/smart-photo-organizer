@@ -327,16 +327,16 @@ def verify_is_face(image_path, box):
         face_crop = pil_img.crop((cx1, cy1, cx2, cy2))
         
         # [Phase 56.5 Debug] Save VLM crops for visual verification
-        try:
-            import uuid
-            import tempfile
-            debug_dir = os.path.join(tempfile.gettempdir(), "vlm_debug")
-            os.makedirs(debug_dir, exist_ok=True)
-            debug_path = os.path.join(debug_dir, f"vlm_{uuid.uuid4().hex[:8]}.jpg")
-            face_crop.save(debug_path)
-            logger.info(f"[VLM] Debug crop saved to: {debug_path}")
-        except Exception as de:
-            logger.warning(f"[VLM] Failed to save debug crop: {de}")
+        #try:
+            #import uuid
+            #import tempfile
+            #debug_dir = os.path.join(tempfile.gettempdir(), "vlm_debug")
+            #os.makedirs(debug_dir, exist_ok=True)
+            #debug_path = os.path.join(debug_dir, f"vlm_{uuid.uuid4().hex[:8]}.jpg")
+            #face_crop.save(debug_path)
+            #logger.info(f"[VLM] Debug crop saved to: {debug_path}")
+        #except Exception as de:
+            #logger.warning(f"[VLM] Failed to save debug crop: {de}")
         
         # Prepare VLM prompt
         messages = [
