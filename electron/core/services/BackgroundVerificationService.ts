@@ -104,16 +104,42 @@ export class BackgroundVerificationService implements IService {
                 const result = await pythonProvider.verifyFace(face.file_path, boxCoords);
 
                 if (result.is_face === true) {
-                    // [Phase 58 Part 3] If VLM confirms face AND aspect ratio is suspicious, check for multi-face
-                    if (isSuspiciousAspectRatio && aspectRatio > 1.5) {
-                        logger.info(`[BackgroundVerificationService] Face ${face.id} has suspicious aspect ratio ${aspectRatio.toFixed(2)}, checking for multiple faces...`);
+                    // [Phase 58 Part 3] If VLM confirms face AND (aspect ratio is suspicious OR multi-face detected), check for split
+                    // Cast to any to access is_multi_face which might not be in interface yet
+                    const isMultiFace = (result.suggested_metadata as any)?.is_multi_face === true;
 
-                        const regionResult = await pythonProvider.detectFacesInRegion(
+                    if ((isSuspiciousAspectRatio && aspectRatio > 1.5) || isMultiFace) {
+                        logger.info(`[BackgroundVerificationService] Face ${face.id} flagged for split check. Aspect: ${aspectRatio.toFixed(2)}, Multi-Face Trigger: ${isMultiFace}`);
+
+                        let regionResult = await pythonProvider.detectFacesInRegion(
                             face.file_path,
                             box,
-                            1, // orientation (default to normal, face records don't store orientation)
-                            0.5 // detection threshold
+                            {
+                                orientation: 1,
+                                detThreshold: 0.5
+                            }
                         );
+
+                        // [Phase 58 Fix] Multi-Scale Split Strategy
+                        // If VLM says multi-face but detector found <= 1 face at default (1280) scale,
+                        // allow retrying with a smaller scale (640) which handles large/close faces better.
+                        if (isMultiFace && (!regionResult.faceCount || regionResult.faceCount <= 1)) {
+                            logger.info(`[BackgroundVerificationService] Face ${face.id} multi-face check failed at default scale. Retrying with low-res scale (640)...`);
+                            const lowResResult = await pythonProvider.detectFacesInRegion(
+                                face.file_path,
+                                box,
+                                {
+                                    orientation: 1,
+                                    detThreshold: 0.5,
+                                    detSize: [640, 640]
+                                }
+                            );
+
+                            if (lowResResult.faceCount > (regionResult.faceCount || 0)) {
+                                regionResult = lowResResult;
+                                logger.info(`[BackgroundVerificationService] Low-res scale successful: Found ${regionResult.faceCount} faces.`);
+                            }
+                        }
 
                         if (!regionResult.error && regionResult.faceCount > 1) {
                             // Multi-face box detected! Split it
@@ -129,15 +155,44 @@ export class BackgroundVerificationService implements IService {
                             logger.info(`[BackgroundVerificationService] Successfully split face ${face.id} into ${regionResult.faceCount} individual faces`);
                         } else if (regionResult.error) {
                             logger.warn(`[BackgroundVerificationService] Detector error for face ${face.id}: ${regionResult.error}`);
+                            // Fallback: If VLM says "Multi-Face" but Detector says "Error" or "1 Face", what to do?
+                            // For now, treat as human if detector fails to split? Or reject?
+                            // If VLM is very confident about "Two Men", keeping 1 box is bad.
+                            if (isMultiFace) {
+                                FaceRepository.markFaceAsRejected(face.id); // Reject the blob
+                                logger.info(`[BackgroundVerificationService] Rejected face ${face.id} because VLM detected multiple people but detector failed to split.`);
+                            }
                         } else {
-                            // Normal aspect ratio
-                            FaceRepository.updateFaceEntityType(face.id, 'human');
-                            this.notifyPhotoChanged(face.photo_id);
-                            logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
+                            // Region detector found 0 or 1 face.
+                            if (isMultiFace) {
+                                // VLM sees 2, Detector sees 1.
+                                // FALLBACK: Keep the blob as 'human' (merged face is better than NO face).
+                                // We trust VLM that it IS a face, even if it's multiple people.
+                                FaceRepository.updateFaceEntityType(face.id, 'human');
+                                if (result.suggested_metadata) {
+                                    FaceRepository.updateFaceDemographics(face.id, result.suggested_metadata);
+                                }
+                                this.notifyPhotoChanged(face.photo_id);
+                                logger.info(`[BackgroundVerificationService] Split Failed for Face ${face.id}: VLM detected multiple people but detector found only ${regionResult.faceCount}. Keeping original face.`);
+                            } else {
+                                // Normal aspect ratio case or VLM matched single face
+                                FaceRepository.updateFaceEntityType(face.id, 'human');
+                                if (result.suggested_metadata) {
+                                    FaceRepository.updateFaceDemographics(face.id, result.suggested_metadata);
+                                }
+                                this.notifyPhotoChanged(face.photo_id);
+                                logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
+                            }
                         }
                     } else {
                         // Normal aspect ratio - VLM confirmed face
                         FaceRepository.updateFaceEntityType(face.id, 'human');
+
+                        if (result.suggested_metadata) {
+                            FaceRepository.updateFaceDemographics(face.id, result.suggested_metadata);
+                            logger.info(`[BackgroundVerificationService] Applied VLM demographics for Face ${face.id}: ${JSON.stringify(result.suggested_metadata)}`);
+                        }
+
                         this.notifyPhotoChanged(face.photo_id);
                         logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
                     }
@@ -176,6 +231,7 @@ export class BackgroundVerificationService implements IService {
     /**
      * [Phase 58 Part 3] Create new face records from split multi-face box.
      * Inserts individual faces detected within a multi-face region.
+     * [Phase 75 Fix] Now checks for overlap with existing faces to prevent duplicates.
      */
     private async createSplitFaces(
         originalFace: any,
@@ -186,6 +242,20 @@ export class BackgroundVerificationService implements IService {
         }>
     ): Promise<void> {
         const db = (await import('../../db')).getDB();
+
+        // [Phase 75] Get existing faces in this photo to check for duplicates
+        const existingFaces = FaceRepository.getFacesByPhoto(originalFace.photo_id);
+        type BoxType = { x: number; y: number; width: number; height: number };
+        const existingBoxes = existingFaces
+            .filter((f: { id: number; is_ignored?: number; box_json: string }) => f.id !== originalFace.id && !f.is_ignored) // Exclude original and ignored faces
+            .map((f: { box_json: string }) => {
+                try {
+                    return JSON.parse(f.box_json) as BoxType;
+                } catch {
+                    return null;
+                }
+            })
+            .filter((b): b is BoxType => b !== null);
 
         const insertStmt = db.prepare(`
             INSERT INTO faces(
@@ -199,8 +269,42 @@ export class BackgroundVerificationService implements IService {
             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
+        let insertedCount = 0;
+        let skippedCount = 0;
+
         for (const detectedFace of detectedFaces) {
             try {
+                // [Phase 75] Check if this face overlaps significantly with an existing face
+                const newBox = detectedFace.box;
+                let isDuplicate = false;
+
+                for (const existingBox of existingBoxes) {
+                    // Calculate IoMin (containment metric)
+                    const x1 = Math.max(newBox.x, existingBox.x);
+                    const y1 = Math.max(newBox.y, existingBox.y);
+                    const x2 = Math.min(newBox.x + newBox.width, existingBox.x + existingBox.width);
+                    const y2 = Math.min(newBox.y + newBox.height, existingBox.y + existingBox.height);
+
+                    const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+                    const newArea = newBox.width * newBox.height;
+                    const existingArea = existingBox.width * existingBox.height;
+                    const minArea = Math.min(newArea, existingArea);
+
+                    const ioMin = minArea > 0 ? interArea / minArea : 0;
+
+                    // If >50% overlap, it's likely a duplicate of an existing face
+                    if (ioMin > 0.5) {
+                        logger.info(`[BackgroundVerificationService] Skipping duplicate split face: IoMin=${ioMin.toFixed(2)} with existing face`);
+                        isDuplicate = true;
+                        break;
+                    }
+                }
+
+                if (isDuplicate) {
+                    skippedCount++;
+                    continue;
+                }
+
                 // Convert embedding to Buffer if present
                 let descriptorBuffer = null;
                 if (detectedFace.embedding && detectedFace.embedding.length > 0) {
@@ -234,10 +338,15 @@ export class BackgroundVerificationService implements IService {
                 ];
 
                 insertStmt.run(...insertParams);
+                insertedCount++;
                 logger.debug(`[BackgroundVerificationService] Created split face from original face ${originalFace.id}`);
             } catch (e) {
                 logger.error(`[BackgroundVerificationService] Failed to create split face:`, e);
             }
+        }
+
+        if (skippedCount > 0) {
+            logger.info(`[BackgroundVerificationService] Split complete: ${insertedCount} new faces created, ${skippedCount} duplicates skipped`);
         }
     }
 

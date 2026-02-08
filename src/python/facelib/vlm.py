@@ -486,8 +486,11 @@ def verify_is_face(image_path, box):
                     "smiling", "smile", "expression", "glasses", "beard", "mustache", 
                     "tilted head", "head angle", "profile view", 
                     "side-view", "side view", 
+                    # Singular forms
                     "girl", "boy", "man", "woman", "child", "baby", "lady", "gentleman",
-                    "bride", "groom", "infant", "toddler", "couple"
+                    "bride", "groom", "infant", "toddler", "couple",
+                    # [Phase 75 Fix] Plural forms - VLM often says "two men", "women", etc.
+                    "men", "women", "children", "people", "adults", "faces"
                 ]
                 
                 if has_anatomical or has_word(reason, face_proof):
@@ -516,7 +519,7 @@ def verify_is_face(image_path, box):
                 # [Phase 66.5] Safety: Allow clothing/furniture terms IF a Person is clearly identified.
                 # "happy man in a blue shirt" -> KEEP (has 'man')
                 # "blue shirt on the floor"   -> REJECT (no 'man')
-                person_indicators = ["face", "man", "woman", "boy", "girl", "baby", "person", "child"]
+                person_indicators = ["face", "man", "woman", "boy", "girl", "baby", "person", "child", "men", "women", "people"]
                 
                 for kw in non_face_keywords:
                     if kw in reason:
@@ -563,7 +566,8 @@ def verify_is_face(image_path, box):
                         "pink", "blue", "red", "green", "hair", " dress", "shirt", "eyes", "nose", "mouth", "smile", "looking",
                         "woman", "man", "boy", "girl", "baby", "child", "person", "lady", "gentleman",
                         "bride", "groom", "infant", "toddler", "couple", "people", "portrait",
-                        "beautiful", "pretty", "human", "mask", "costume", "makeup" # [Phase 66] Added human/mask/costume
+                        "beautiful", "pretty", "human", "mask", "costume", "makeup", # [Phase 66] Added human/mask/costume
+                        "men", "women", "adults", "faces" # [Phase 75 Fix] Plural forms
                     ]
                     # [Fix] Use strict word matching to prevent "human" -> "man" substring match
                     has_detail = has_word(clean_reason, details)

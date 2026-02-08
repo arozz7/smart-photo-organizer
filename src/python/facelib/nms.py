@@ -76,7 +76,6 @@ def resolve_conflicts(detections, config):
                 # Check embedding distance - are they different people?
                 dist = 2.0
                 if emb_large and emb_small and len(emb_large) > 0 and len(emb_small) > 0:
-                    import numpy as np
                     v_a = np.array(emb_large)
                     v_b = np.array(emb_small)
                     n_a = np.linalg.norm(v_a)

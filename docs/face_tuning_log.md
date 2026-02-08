@@ -12,6 +12,59 @@
 
 ## Tuning History
 
+### Phase 75: VLM Plural Forms Fix + Split Duplicate Prevention (2026-02-08)
+**Problem 1: VLM rejecting valid multi-face descriptions**
+- Photo `pexels-filiamariss-14994487.jpg` (two men with faces pressed together) showed "No people detected"
+- NMS was working correctly (detected 2 unique faces with High Quality Exception)
+- VLM verified faces but then rejected them both
+
+**Root Cause 1:**
+- VLM described the crop as "two men" but the `face_proof` list only contained "man" (singular)
+- Word-boundary matching (`\bman\b`) does not match "men"
+- Both faces were rejected with: `"Overriding is_face=True -> False because NO anatomical proof was found"`
+
+**Fix 1 (vlm.py):**
+- **face_proof list:** Added plural forms: `"men", "women", "children", "people", "adults", "faces"`
+- **person_indicators list:** Added: `"men", "women", "people"`
+- **details list:** Added: `"men", "women", "adults", "faces"`
+
+---
+
+**Problem 2: Extra duplicate box inside face**
+- After fixing Problem 1, the photo showed 3 boxes instead of 2
+- NMS correctly returned 2 unique faces
+- BUT the split logic in `BackgroundVerificationService` created duplicate faces
+
+**Root Cause 2:**
+- VLM flagged faces as `is_multi_face=True` (because it saw "two men")
+- Split logic triggered and detected NEW faces in the region
+- These new faces overlapped heavily with existing NMS faces
+- Duplicates were inserted, creating extra boxes
+
+**Fix 2 (BackgroundVerificationService.ts):**
+- Added IoMin overlap check in `createSplitFaces()` before inserting
+- If new split face overlaps >50% with an existing face, skip creating it
+- Logs: `[BackgroundVerificationService] Skipping duplicate split face: IoMin=X.XX with existing face`
+
+---
+
+**Problem 3: Python scoping error**
+- `cannot access local variable 'np' where it is not associated with a value`
+
+**Root Cause 3:**
+- `nms.py` had a redundant `import numpy as np` inside a conditional block (line 79)
+- Python treated `np` as a local variable due to the import statement
+- This caused scoping errors when `np` was used before that import executed
+
+**Fix 3 (nms.py):**
+- Removed redundant `import numpy as np` from inside the function
+- File already had `import numpy as np` at top (line 1)
+
+**Outcome:**
+- Multi-face photos are no longer rejected due to plural descriptions
+- Split logic no longer creates duplicate boxes for faces NMS already separated
+- Python scoping error resolved
+
 ### Phase 74: Container Rejection & Quality Threshold (2026-02-08)
 **Problem:**
 - Mother+Baby photo showed incorrect bounding boxes despite NMS quality exception
