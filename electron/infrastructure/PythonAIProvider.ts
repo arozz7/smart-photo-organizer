@@ -16,6 +16,11 @@ export class PythonAIProvider implements IAIProvider, IService {
     private scanPromises = new Map<number, { resolve: (v: any) => void, reject: (err: any) => void }>();
     private isShuttingDown = false;
 
+    // [Phase 65] HTTP fallback for standalone backend mode
+    private httpFallbackEnabled = false;
+    private apiBaseUrl = 'http://localhost:3001';
+    private standaloneCheckDone = false;
+
     constructor() { }
 
     setMainWindow(win: BrowserWindow) {
@@ -216,7 +221,87 @@ export class PythonAIProvider implements IAIProvider, IService {
         }
     }
 
+    // [Phase 65] Check if standalone backend is running (HTTP mode)
+    async checkStandaloneBackend(): Promise<boolean> {
+        if (this.standaloneCheckDone) return this.httpFallbackEnabled;
+
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 2000);
+
+            const response = await fetch(`${this.apiBaseUrl}/api/v1/health`, {
+                method: 'GET',
+                signal: controller.signal
+            });
+            clearTimeout(timeout);
+
+            if (response.ok) {
+                logger.info('[PythonAIProvider] Standalone backend detected at ' + this.apiBaseUrl);
+                this.httpFallbackEnabled = true;
+            }
+        } catch {
+            // Standalone not available - use IPC mode
+            this.httpFallbackEnabled = false;
+        }
+
+        this.standaloneCheckDone = true;
+        return this.httpFallbackEnabled;
+    }
+
+    // [Phase 65] Send HTTP request to standalone backend
+    private async sendHttpRequest(type: string, payload: any, timeoutMs: number): Promise<any> {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            // Map command types to API endpoints
+            let endpoint = '/api/v1/command';
+            let method = 'POST';
+            let body: string | undefined = JSON.stringify({ type, ...payload });
+
+            // Debug-specific endpoints
+            if (type === 'analyze_image') {
+                endpoint = '/api/v1/debug/detect-faces';
+                body = JSON.stringify({ imagePath: payload.filePath, ...payload });
+            } else if (type === 'get_system_status') {
+                endpoint = '/api/v1/status';
+                method = 'GET';
+                body = undefined;
+            } else if (type === 'health_check') {
+                endpoint = '/api/v1/health';
+                method = 'GET';
+                body = undefined;
+            } else if (type === 'update_config') {
+                endpoint = '/api/v1/debug/config';
+                body = JSON.stringify(payload.config || payload);
+            }
+
+            const response = await fetch(`${this.apiBaseUrl}${endpoint}`, {
+                method,
+                headers: body ? { 'Content-Type': 'application/json' } : undefined,
+                body,
+                signal: controller.signal
+            });
+
+            clearTimeout(timeout);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            return await response.json();
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     sendRequest(type: string, payload: any, timeoutMs = 120000): Promise<any> {
+        // [Phase 65] Use HTTP if standalone backend is running
+        if (this.httpFallbackEnabled) {
+            return this.sendHttpRequest(type, payload, timeoutMs);
+        }
+
+        // Default: IPC mode
         return new Promise((resolve, reject) => {
             const requestId = Math.floor(Math.random() * 1000000);
             this.scanPromises.set(requestId, { resolve, reject });
@@ -328,6 +413,7 @@ export class PythonAIProvider implements IAIProvider, IService {
         is_face: boolean | null;
         confidence: number;
         reason?: string;
+        suggested_metadata?: { gender?: string; age?: number };
         error?: string;
     }> {
         try {
@@ -348,6 +434,7 @@ export class PythonAIProvider implements IAIProvider, IService {
                 is_face: result.is_face ?? null,
                 confidence: result.confidence ?? 0,
                 reason: result.reason,
+                suggested_metadata: result.suggested_metadata,
                 error: result.error
             };
         } catch (e) {
@@ -370,8 +457,11 @@ export class PythonAIProvider implements IAIProvider, IService {
     async detectFacesInRegion(
         filePath: string,
         box: { x: number; y: number; width: number; height: number },
-        orientation: number = 1,
-        detThreshold: number = 0.5
+        options: {
+            orientation?: number;
+            detThreshold?: number;
+            detSize?: [number, number];
+        } = {}
     ): Promise<{
         faceCount: number;
         faces: Array<{
@@ -382,11 +472,14 @@ export class PythonAIProvider implements IAIProvider, IService {
         error?: string;
     }> {
         try {
+            const { orientation = 1, detThreshold = 0.5, detSize } = options;
+
             const result = await this.sendRequest('detect_faces_in_region', {
                 filePath,
                 box,
                 orientation,
-                detThreshold
+                detThreshold,
+                detSize
             }, 30000);
 
             if (result.error) {

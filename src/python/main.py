@@ -748,10 +748,24 @@ def main_loop():
             except: pass
 
 if __name__ == '__main__':
-    try:
-        main_loop()
-    except Exception as e:
-        logger.critical(f"FATAL ERROR in Python Backend: {e}")
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        sys.exit(1)
+    # [Debug API] Dual-mode startup: HTTP server or stdin IPC
+    import os
+    if os.environ.get('API_MODE') == 'http':
+        logger.info("[Startup] API_MODE=http detected, starting HTTP server...")
+        try:
+            from api.server import start_http_server
+            start_http_server()
+        except Exception as e:
+            logger.critical(f"FATAL ERROR starting HTTP server: {e}")
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
+    else:
+        # Default: stdin/stdout IPC mode
+        try:
+            main_loop()
+        except Exception as e:
+            logger.critical(f"FATAL ERROR in Python Backend: {e}")
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
