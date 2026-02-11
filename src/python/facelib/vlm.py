@@ -357,21 +357,79 @@ def verify_is_face(image_path, box):
         inputs = vlm_processor(text=text_prompt, images=[face_crop], return_tensors="pt")
         inputs = inputs.to(vlm_model.device)
         
-        # Generate response
-        with torch.no_grad():
-            generated_ids = vlm_model.generate(**inputs, max_new_tokens=100, temperature=0.1, do_sample=False)
+        # [Phase 79] Robust Generation Loop with Retry
+        # Sometimes the VLM hallucinates HTML/Code/Garbage for occluded faces (e.g. heart glasses)
+        # We try up to 3 times, increasing temperature to break loops.
+        max_retries = 3
+        current_try = 0
+        response = ""
         
-        # Decode
-        if hasattr(inputs, 'input_ids'):
-            input_len = inputs.input_ids.shape[1]
-        else:
-            input_len = 0
-        
-        new_ids = generated_ids[:, input_len:]
-        generated_text = vlm_processor.batch_decode(new_ids, skip_special_tokens=True)
-        response = generated_text[0].strip()
-        
+        while current_try < max_retries:
+            current_try += 1
+            temp = 0.1 + (current_try - 1) * 0.2 # 0.1, 0.3, 0.5
+            
+            with torch.no_grad():
+                # [Fix] Increased max_new_tokens to 300 (was 100) to prevent JSON truncation
+                # [Fix] Added repetition_penalty=1.35 to stop "ear, ear, ear" loops (Phase 77)
+                generated_ids = vlm_model.generate(
+                    **inputs, 
+                    max_new_tokens=300, 
+                    temperature=temp, 
+                    do_sample=False if temp < 0.2 else True, # Need sampling for temp > 0
+                    repetition_penalty=1.35
+                )
+            
+            # Decode
+            if hasattr(inputs, 'input_ids'):
+                input_len = inputs.input_ids.shape[1]
+            else:
+                input_len = 0
+            
+            new_ids = generated_ids[:, input_len:]
+            generated_text = vlm_processor.batch_decode(new_ids, skip_special_tokens=True)
+            response = generated_text[0].strip()
+            
+            # [Phase 79] Garbage Detection
+            # Check for common hallucination patterns (HTML, Code, Cloudflare)
+            is_garbage = False
+            lower_resp = response.lower()
+            garbage_patterns = ['<html>', '<body', 'cloudflare', 'function()', 'var ', 'const ', 'jquery', '// ', '/*']
+            if any(x in lower_resp for x in garbage_patterns):
+                is_garbage = True
+                logger.warning(f"[VLM] Garbage/Hallucination detected (pattern match) (Try {current_try}/{max_retries}): {response[:50]}...")
+            
+            # [Phase 79] Structural Validation
+            # Even if it looks like JSON, does it have our keys?
+            # Hallucinations often return random JSON (e.g. suggested_metadata, postery_name)
+            if not is_garbage:
+                try:
+                    # Quick pre-parse check to see if it's even close to our schema
+                    # [Fix] Strictly require "is_face" (quoted or unquoted) to avoid matching "imageDescription"
+                    if '"is_face"' not in lower_resp and "'is_face'" not in lower_resp and "is_face" not in lower_resp:
+                         # It *might* be valid JSON but missing the key, or hallucinated JSON.
+                         # Check if it looks like JSON
+                         if response.strip().startswith('{') or response.strip().startswith('```'):
+                             is_garbage = True
+                             logger.warning(f"[VLM] Hallucinated JSON detected (missing 'is_face') (Try {current_try}/{max_retries})")
+                except:
+                    pass
+
+            if not is_garbage:
+                break # Valid response, exit loop
+                
         logger.info(f"VLM Verification Response: {response}")
+        
+        # [Phase 79] Fail Open if still garbage
+        # If we exhausted retries and it's still garbage, we accept the face (fail open)
+        # to avoid rejecting valid faces just because the model is confused.
+        if is_garbage:
+            logger.warning("[VLM] Max retries reached with garbage output. FAILING OPEN (Accepting Face).")
+            return {
+                "is_face": True,
+                "confidence": 0.5, # Low confidence but accepted
+                "reason": "VLM Generation Failure (Fail Open)",
+                "error": None
+            }
         
         # [Phase 58] Parse JSON response (semantic verification only)
         try:
@@ -394,24 +452,83 @@ def verify_is_face(image_path, box):
                 if match:
                     clean_response = match.group(0)
             
-            # 3. Parse as JSON
-            parsed = json.loads(clean_response)
+            # 3. Parse as JSON with fallback for truncated strings
+            try:
+                parsed = json.loads(clean_response)
+            except json.JSONDecodeError as jde:
+                # Heuristic: If it's an unterminated string (likely truncated), try to close it
+                if "Unterminated string" in str(jde):
+                    logger.warning(f"[VLM] JSON truncated. Attempting repair on: {clean_response[-20:]}...")
+                    # Naively try to close the string and object
+                    # If it ends with ", remove the comma
+                    repaired = clean_response.strip()
+                    if repaired.endswith(","):
+                        repaired = repaired[:-1]
+                    # If it ends with a quote, check if previous was key or value... difficult.
+                    # Simplest: Cut off the last partial line/field
+                    last_quote = repaired.rfind('"')
+                    if last_quote > -1:
+                        repaired = repaired[:last_quote] + '"}' 
+                        try:
+                            parsed = json.loads(repaired)
+                            logger.info("[VLM] JSON repair successful.")
+                        except:
+                            # If repair fails, re-raise original to fall back to regex/heuristic
+                             raise jde
+                    else:
+                        raise jde
+                else:
+                    raise jde
             
-            # [Phase 56.9.1] Round 6 Adrien-Skeptical Fields
+            # [Phase 56.9.1] ROUND 6 Adrien-Skeptical Fields
             category = str(parsed.get('category', 'face')).lower()
             obj_type = str(parsed.get('specific_object', parsed.get('object_type', 'face'))).lower()
-            is_face = parsed.get('is_face', False)
-            confidence = float(parsed.get('confidence', 0.5))
+            
+            # [Phase 79] Fail Open if 'is_face' key is missing
+            # This handles cases where VLM returns valid JSON but with hallucinated schema
+            if 'is_face' not in parsed:
+                logger.warning(f"[VLM] 'is_face' key missing from parsed JSON: {list(parsed.keys())}. FAILING OPEN.")
+                is_face = True
+                confidence = 0.5
+            else:
+                is_face = parsed.get('is_face', False)
+                confidence = float(parsed.get('confidence', 0.5))
             
             # landmarks and reason may drift names in adversarial mode
             landmarks = str(parsed.get('landmarks', parsed.get('landmarks_visible', ''))).lower()
             reason = str(parsed.get('description', parsed.get('reason', ''))).lower()
             
             # [Phase 58.1] Append specific_object to reason
-            # If description is "beautiful" but specific_object is "human face", we want to count that as proof.
             if obj_type and obj_type not in reason:
                 reason += f" (object: {obj_type})"
-            
+
+            # [Phase 57.1] STRICT WORD BOUNDARY MATCHING (Moved Up)
+            import re
+            def has_word(text, terms):
+                for term in terms:
+                    # Match whole words only, case insensitive
+                    if re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE):
+                        return True
+                return False
+
+            # [Phase 56.9] MANDATORY ANATOMICAL CHECK (Moved Up)
+            anatomical_terms = [
+                "eye", "nose", "mouth", "lip", "chin", "ear", "eyebrow", "cheek", 
+                "forehead", "hairline", "profile", "smile", "nostril", "eyelid", "head" # [Fix] Added 'head' for occlusion cases
+            ]
+            has_anatomical = has_word(reason, anatomical_terms)
+
+            # Define face_proof terms early (needed for exception)
+            face_proof = [
+                "smiling", "smile", "expression", "glasses", "beard", "mustache", 
+                "tilted head", "head angle", "profile view", 
+                "side-view", "side view", 
+                "girl", "boy", "man", "woman", "child", "baby", "lady", "gentleman",
+                "bride", "groom", "infant", "toddler", "couple",
+                "men", "women", "children", "people", "adults", "faces"
+            ]
+            has_face_proof = has_word(reason, face_proof)
+
             # [Phase 56.9.1] HARD CATEGORY OVERRIDE
             from config import AI_CONFIG
             
@@ -419,18 +536,32 @@ def verify_is_face(image_path, box):
             non_face_categories = ["false_positive", "false-positive", "skin", "body", "fabric", "background", "clothing"]
             
             # Objects that are definitely NOT faces (even if VLM is confused)
-            # Default to hardcoded safe list if config missing
             non_face_objs = AI_CONFIG.get('vlm', {}).get('forbidden_objects', [
                 "knee", "shoulder", "skin_patch", "arm", "leg", "elbow", "foot", "body_part", "hand", "finger", 
-                "hat", "cap", "camera", "microphone" # Added from Phase 67 analysis
+                "hat", "cap", "camera", "microphone" 
             ])
             
             is_categorized_non_face = any(c in category for c in non_face_categories) or any(o in obj_type for o in non_face_objs)
             
             if is_face is True and is_categorized_non_face:
-                logger.warning(f"[VLM] Categorized as {category}/{obj_type}. Forcing is_face=False.")
-                is_face = False
-                reason = f"Categorized as {category}/{obj_type} ({reason})"
+                # [Fix] Exception for HANDS/ARMS if facial features are clearly described.
+                # Common case: "Woman with hand on chin" -> cat="body", obj="hand" -> Rejected!
+                
+                # Identify exactly WHICH forbidden object triggered the block
+                hit_objs = [o for o in non_face_objs if o in obj_type]
+                
+                # If only hand-related objects are the problem, AND we have anatomical proof...
+                hand_related = ["hand", "finger", "arm", "elbow", "shoulder"]
+                is_only_hand = len(hit_objs) > 0 and all(h in hand_related for h in hit_objs)
+                
+                # [Fix] Use has_face_proof OR has_anatomical
+                if is_only_hand and (has_anatomical or has_face_proof):
+                    logger.info(f"[VLM] Hand/Arm detected ('{obj_type}') but IGNORED rejection because anatomical/subject features found: {reason}")
+                    # Do NOT set is_face=False
+                else:
+                    logger.warning(f"[VLM] Categorized as {category}/{obj_type}. Forcing is_face=False.")
+                    is_face = False
+                    reason = f"Categorized as {category}/{obj_type} ({reason})"
 
             # [Phase 56.9] AGGRESSIVE ECHO STRIPPING
             # Remove any text that echoes the prompt instructions.
@@ -446,28 +577,6 @@ def verify_is_face(image_path, box):
                 reason = "unknown"
             
             logger.info(f"[VLM] Parsed Result: is_face={is_face}, cat={category}, obj={obj_type}, landmarks={landmarks}")
-            
-            # [Phase 56.9] MANDATORY ANATOMICAL CHECK
-            # CRITICAL: Only trust the natural language description/reason for anatomical parts.
-            # JSON keys and coordinates are too easy for models to hallucinate/parrot.
-            anatomical_terms = [
-                "eye", "nose", "mouth", "lip", "chin", "ear", "eyebrow", "cheek", 
-                "forehead", "hairline", "profile", "smile", "nostril", "eyelid"
-            ]
-            
-            # [Phase 57.1] STRICT WORD BOUNDARY MATCHING
-            # Fixes bug where "perfectly clear" matched "ear".
-            import re
-            def has_word(text, terms):
-                for term in terms:
-                    # Match whole words only, case insensitive
-                    if re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE):
-                        # [Debug] Log what matched
-                        logger.info(f"[VLM Debug] Matched keyword: '{term}' in '{text}'")
-                        return True
-                return False
-
-            has_anatomical = has_word(reason, anatomical_terms)
             
             # [Phase 56.5] LANDMARK VALIDATION
             # If the model says it's a face but provides NO anatomical proof in text.
@@ -493,8 +602,16 @@ def verify_is_face(image_path, box):
                     "men", "women", "children", "people", "adults", "faces"
                 ]
                 
-                if has_anatomical or has_word(reason, face_proof):
-                    logger.info(f"[VLM] Trusting face: Evidence found in description.")
+                # [Phase 79 Fix] Trust the VLM's category field
+                # If VLM explicitly categorizes it as "face", that's sufficient proof
+                # This handles cases where the description is empty but category is correct
+                has_category_proof = category and category.lower() == "face"
+                
+                if has_anatomical or has_word(reason, face_proof) or has_category_proof:
+                    if has_category_proof and not (has_anatomical or has_word(reason, face_proof)):
+                        logger.info(f"[VLM] Trusting face: Category='face' (description empty)")
+                    else:
+                        logger.info(f"[VLM] Trusting face: Evidence found in description.")
                 else:
                     logger.warning(f"[VLM] Overriding is_face=True -> False because NO anatomical proof was found in text (Confidence: {confidence:.4f}).")
                     is_face = False
@@ -507,7 +624,7 @@ def verify_is_face(image_path, box):
                 # [Phase 66] Expanded Blacklist based on User Feedback ("Chair legs", "Pants", "Floor")
                 # Loaded from Central Config
                 non_face_keywords = AI_CONFIG.get('vlm', {}).get('forbidden_keywords', [
-                    "knee", "elbow", "arm", "leg", "foot",
+                    "knee", "elbow", "arm", "leg", "foot", "hand", "finger",
                     "chair", "furniture", "wood", "floor", "ground", "pants", "jeans", "shirt", "clothing", "fabric",
                     "rock", "stone", "concrete", "pavement", "foliage", "leaf", "plant", "grass", "tree"
                 ])
@@ -519,15 +636,22 @@ def verify_is_face(image_path, box):
                 # [Phase 66.5] Safety: Allow clothing/furniture terms IF a Person is clearly identified.
                 # "happy man in a blue shirt" -> KEEP (has 'man')
                 # "blue shirt on the floor"   -> REJECT (no 'man')
-                person_indicators = ["face", "man", "woman", "boy", "girl", "baby", "person", "child", "men", "women", "people"]
+                # [Phase 76 Fix] Added 'male', 'female', 'human' to indicators.
+                person_indicators = ["face", "man", "woman", "boy", "girl", "baby", "person", "child", "men", "women", "people", "male", "female", "human"]
                 
                 for kw in non_face_keywords:
                     if kw in reason:
-                        # Only override if NO person-indicators are present.
-                        if not any(p in reason for p in person_indicators):
+                        # Only override if NO person-indicators are present AND NO anatomical/face proof is present.
+                        # [Phase 76 Fix] If we have strong proof (anatomical terms), we ignore the keyword.
+                        # (e.g. "Woman with hand on chin" -> 'hand' keyword should not reject)
+                        
+                        has_person = any(p in reason for p in person_indicators)
+                        if not has_person and not has_anatomical and not has_face_proof:
                             logger.warning(f"[VLM] Overriding is_face=True -> False because reason mentioned non-face keyword '{kw}': '{reason}'")
                             is_face = False
                             break
+                        elif has_anatomical or has_face_proof:
+                             logger.info(f"[VLM] Keyword '{kw}' found but ignored due to valid face proof: {reason}")
             
             # [Phase 63.5] Generic Hallucination Filter (Replaces Phase 63)
             # Problem: "Hand" box gets generic description "the woman's face is visible".
@@ -632,12 +756,67 @@ def verify_is_face(image_path, box):
                 "error": None
             }
         except (json.JSONDecodeError, ValueError, Exception) as e:
-            import traceback
-            traceback.print_exc()
-            # Fallback to old YES/NO parsing
-            logger.debug(f"JSON parse failed for VLM response, falling back to heuristic: {e}")
-            response_lower = response.lower()
-            is_face = "yes" in response_lower[:10] or '"is_face": true' in response_lower
+            # [Phase 77] Suppress full traceback for JSON errors to avoid frightening users
+            if isinstance(e, json.JSONDecodeError):
+                 logger.warning(f"[VLM] JSON Decode Error (Truncated/Malformed): {e}. Proceeding with heuristic fallback.")
+            else:
+                 import traceback
+                 traceback.print_exc()
+                 
+            logger.debug(f"Parsing failed, falling back to heuristic. Error: {e}")
+            
+            # [Phase 79 Fix] Strip JSON comments before analysis
+            # VLM often includes explanatory comments that mention facial features
+            # Example: "is_face": false, // There's no real person here so we don't need an eye nose mouth label
+            # We need to remove these comments to avoid false positive matches
+            import re
+            
+            # Remove single-line comments (// ...)
+            response_cleaned = re.sub(r'//.*?(?=\n|$)', '', response, flags=re.MULTILINE)
+            response_lower = response_cleaned.lower()
+            
+            # Check for facial features FIRST (eyes, nose, mouth, smile)
+            # If facial features present, accept even if hands/clothing mentioned
+            # If NO facial features AND forbidden keywords present, reject
+            
+            # CRITICAL: Use word boundaries to avoid matching JSON field names like "is_face"
+            # Also check for actual anatomical features, not just the word "face"
+            facial_features = [
+                r'\beyes?\b', r'\bnose\b', r'\bmouth\b', r'\bsmile\b', r'\bsmiling\b',
+                r'\blips?\b', r'\bcheeks?\b', r'\bchin\b', r'\bforehead\b', r'\beyebrows?\b',
+                r'\beyelash', r'\bpupil', r'\biris\b'
+            ]
+            has_facial_features = any(re.search(pattern, response_lower) for pattern in facial_features)
+            
+            # Forbidden keywords that indicate non-face objects
+            # BUT only reject if NO facial features are mentioned
+            forbidden_keywords = [
+                'sand', 'beach', 'ocean', 'water', 'wave',
+                'rock', 'stone', 'ground', 'floor',
+                'leaf', 'leaves', 'tree', 'plant', 'foliage'
+            ]
+            
+            has_forbidden = any(keyword in response_lower for keyword in forbidden_keywords)
+            
+            # Check if response explicitly says it's a face
+            has_is_face_true = '"is_face": true' in response_lower or '"is_face":true' in response_lower
+            has_yes_prefix = "yes" in response_lower[:10]
+            
+            # Logic: 
+            # 1. If facial features mentioned → it's a face (even if hands/clothing also mentioned)
+            # 2. If NO facial features AND forbidden keywords → NOT a face
+            # 3. Otherwise, check for positive indicators
+            if has_facial_features:
+                is_face = True
+                logger.info(f"[VLM] Heuristic: Facial features detected, accepting as face")
+            elif has_forbidden:
+                is_face = False
+                logger.info(f"[VLM] Heuristic: Forbidden keywords without facial features, rejecting as non-face")
+            elif has_is_face_true or has_yes_prefix:
+                is_face = True
+            else:
+                is_face = False
+            
             confidence = 0.9 if is_face else 0.1
             reason = response.strip()
             

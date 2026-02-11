@@ -432,23 +432,21 @@ export class FaceService {
     ) {
         logger.info(`[FaceService] Processing ${faces.length} faces for photo ${photoId}`);
         const db = getDB();
-        // [Refactor] Use let to allow filtering after pre-pass cleanup
-        let existingFaces = FaceRepository.getFacesByPhoto(photoId) as any[];
+        // [Phase 79 Fix] Load ALL faces including ignored ones for proper cleanup
+        // Without this, ignored faces are invisible to deduplication and get re-inserted as new faces
+        let existingFaces = FaceRepository.getFacesByPhotoIncludingIgnored(photoId) as any[];
+
+        // [Phase 79 Fix] Extract ignored faces for rejection memory filtering
+        // These faces were VLM-rejected (hands, sand, etc.) and should NOT be deleted.
+        // We'll use them to filter out new detections that overlap with them.
+        const ignoredFaces = existingFaces.filter((f: any) => f.is_ignored === 1);
+        if (ignoredFaces.length > 0) {
+            logger.info(`[FaceService] Found ${ignoredFaces.length} ignored faces (rejection memory). Will use to filter new detections.`);
+        }
 
         // [Phase 68.5] Pre-Pass: Clean existing DB overlaps (Garbage Collection)
         try {
             const idsToDelete = new Set<number>();
-
-            // [Cleanup] Remove 'Ignored' faces (Hidden Ghosts) so we don't accumulate junk
-            // These are faces cleanRescan missed because getFacesByPhoto excludes them.
-            // Only delete if UNCONFIRMED to be safe (though ignored+confirmed is weird)
-            const ignoredFaces = db.prepare('SELECT id FROM faces WHERE photo_id = ? AND is_ignored = 1').all(photoId) as any[];
-            for (const f of ignoredFaces) {
-                idsToDelete.add(f.id);
-            }
-            if (ignoredFaces.length > 0) {
-                logger.info(`[FaceService] Pre-Pass: Deleting ${ignoredFaces.length} hidden/ignored garbage faces.`);
-            }
 
             const sortedExisting = [...existingFaces].sort((a: any, b: any) => (b.score || 0) - (a.score || 0)); // High score first
 
@@ -617,6 +615,37 @@ export class FaceService {
                     logger.info(`[FaceService] Face ${faceIdx} has no match. Will INSERT as new.`);
                 }
 
+                // [Phase 79 Fix] Rejection Memory Filter
+                // Skip new detections that overlap with ignored faces (VLM-rejected non-face boxes)
+                // This prevents re-detection of hands, sand, body parts, etc. on rescans
+                if (!bestMatch) { // Only check for new faces, not updates
+                    let overlapsWithIgnored = false;
+                    for (const ignoredFace of ignoredFaces) {
+                        const ignoredBox = ignoredFace.box;
+                        const newBox = face.box;
+                        const interX1 = Math.max(newBox.x, ignoredBox.x);
+                        const interY1 = Math.max(newBox.y, ignoredBox.y);
+                        const interX2 = Math.min(newBox.x + newBox.width, ignoredBox.x + ignoredBox.width);
+                        const interY2 = Math.min(newBox.y + newBox.height, ignoredBox.y + ignoredBox.height);
+                        const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
+                        const newArea = newBox.width * newBox.height;
+                        const ignoredArea = ignoredBox.width * ignoredBox.height;
+                        const minArea = Math.min(newArea, ignoredArea);
+                        const ioMin = minArea > 0 ? interArea / minArea : 0;
+
+                        // If >50% overlap with ignored face, skip this detection
+                        if (ioMin > 0.5) {
+                            logger.info(`[FaceService] SKIPPING face ${faceIdx} - overlaps with ignored face ${ignoredFace.id} (IoMin=${ioMin.toFixed(2)}). Rejection memory working.`);
+                            overlapsWithIgnored = true;
+                            break;
+                        }
+                    }
+
+                    if (overlapsWithIgnored) {
+                        continue; // Skip this face entirely
+                    }
+                }
+
                 // Prepare Data
                 let descriptorBuffer = null;
                 let matchData: FaceMatch | null = null;
@@ -748,16 +777,23 @@ export class FaceService {
                     const STRICT_FLOOR = advancedSettings.detThreshStandard ?? 0.60;
 
                     // [Phase 74 Fix] High-Quality Exception
-                    // The detection score (from InsightFace) may be low for contained/occluded faces
-                    // BUT the faceQuality (from AdaFace) may still be high, indicating a valid face.
-                    // Example: Baby face in Mother+Baby photo has score=0.34 but quality=0.82
                     const faceQuality = face.faceQuality ?? 0;
                     const HIGH_QUALITY_THRESHOLD = advancedSettings.highQualityFaceThreshold ?? 0.70;
                     const isHighQuality = faceQuality > HIGH_QUALITY_THRESHOLD;
 
-                    if (detectionScore < STRICT_FLOOR && !isHighQuality) {
-                        logger.info(`[FaceService] SKIPPING face ${faceIdx} - low score (Score: ${detectionScore.toFixed(2)} < ${STRICT_FLOOR}) and low quality (${faceQuality.toFixed(2)})`);
+                    // [Phase 79 Fix] Large Face Exception
+                    // Python detector allows very large faces (>300px) even with low score.
+                    // Electron must match this policy or we lose valid faces.
+                    const LARGE_FACE_SIZE = advancedSettings.largeFaceThreshold ?? 300;
+                    const isLargeWebSize = boxWidth > LARGE_FACE_SIZE || boxHeight > LARGE_FACE_SIZE;
+
+                    if (detectionScore < STRICT_FLOOR && !isHighQuality && !isLargeWebSize) {
+                        logger.info(`[FaceService] SKIPPING face ${faceIdx} - low score (Score: ${detectionScore.toFixed(2)} < ${STRICT_FLOOR}), low quality (${faceQuality.toFixed(2)}), and not large size.`);
                         continue;
+                    }
+
+                    if (detectionScore < STRICT_FLOOR && isLargeWebSize) {
+                        logger.info(`[FaceService] LARGE FACE OVERRIDE for face ${faceIdx}: Score=${detectionScore.toFixed(2)} < ${STRICT_FLOOR} BUT Size > ${LARGE_FACE_SIZE}px. Keeping.`);
                     }
 
                     if (detectionScore < STRICT_FLOOR && isHighQuality) {

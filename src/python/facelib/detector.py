@@ -16,8 +16,13 @@ class FaceDetector:
         # Default Configs
         from config import AI_CONFIG
         self.det_thresh_standard = float(self.config.get('detThreshStandard', faces.DET_THRESH))
-        self.det_thresh_macro = float(self.config.get('detThreshMacro', 0.25))
-        self.nms_iou_thresh = float(self.config.get('nmsIouThresh', 0.3))
+        # [Phase 70] Prefer AI_CONFIG for Macro Threshold
+        self.det_thresh_macro = float(AI_CONFIG.get('face_detection', {}).get('det_thresh_macro', self.config.get('detThreshMacro', 0.25)))
+        
+        # [Phase 68] Centralized NMS
+        # Prefer AI_CONFIG, fallback to passed config
+        self.nms_iou_thresh = float(AI_CONFIG.get('face_detection', {}).get('nms_iou_threshold', self.config.get('nmsIouThresh', 0.3)))
+        
         self.enable_macro_low_res = self.config.get('enableMacroLowRes', True)
         
         # [Phase 67] Centralized TTA Control

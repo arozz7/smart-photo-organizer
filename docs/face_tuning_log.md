@@ -12,6 +12,143 @@
 
 ## Tuning History
 
+### Phase 79 Part 2: Rescan Rejection Memory (2026-02-09)
+**Problem:**
+- Non-face boxes (hands, sand, body parts) were being re-detected on every rescan despite VLM correctly rejecting them
+- Created infinite loop: detection → VLM rejection → rescan → re-detection → VLM rejection (repeat)
+- Database showed only valid faces, but logs revealed 6+ VLM verifications for the same photo
+- **Root Cause:** Ignored faces were being **deleted** during rescans instead of preserved as "rejection memory"
+
+**Fix (FaceService.ts):**
+```typescript
+// OLD CODE (lines 443-452): Deleted ignored faces
+const ignoredFaces = existingFaces.filter((f: any) => f.is_ignored === 1);
+for (const f of ignoredFaces) {
+    idsToDelete.add(f.id); // ❌ DELETED
+}
+
+// NEW CODE: Preserve ignored faces as rejection memory
+const ignoredFaces = existingFaces.filter((f: any) => f.is_ignored === 1);
+// ✅ KEEP them in database
+
+// NEW CODE: Filter new detections against ignored faces (lines 624-654)
+if (!bestMatch) { // Only for new faces
+    for (const ignoredFace of ignoredFaces) {
+        const ioMin = calculateOverlap(newBox, ignoredFace.box);
+        if (ioMin > 0.5) {
+            logger.info(`SKIPPING - overlaps with ignored face (rejection memory)`);
+            continue; // Skip this detection
+        }
+    }
+}
+```
+
+**Outcome:**
+- Ignored faces now serve as "rejection memory" to prevent re-detection
+- Rescans filter out boxes overlapping >50% with ignored faces
+- VLM no longer called repeatedly on the same non-face boxes
+- Logs show: "SKIPPING face X - overlaps with ignored face Y (rejection memory working)"
+
+**Key Learning:**
+- Soft-delete (is_ignored=1) must be **persistent** across rescans
+- Deletion of ignored faces defeats the purpose of the ignore flag
+- Overlap filtering (IoMin >50%) prevents detector from re-finding rejected boxes
+
+### Phase 79 Part 3: VLM Hallucination Fix (2026-02-10)
+**Problem:**
+- "Girl duo.jfif" (woman on left) was not detected.
+- Detection score (0.801) was < threshold (0.85), so sent to VLM.
+- VLM hallucinated garbage (HTML, Cloudflare pages, or random JSON) due to occlusion (heart glasses).
+- Heuristic fallback rejected it because "eyes/nose" checks failed against garbage text.
+
+**Fix (vlm.py):**
+1. **Garbage Detection:** Added check for HTML tags, code comments (`//`), and random text.
+2. **Retry Logic:** Retries up to 3 times with increasing temperature (0.1 -> 0.3 -> 0.5) to break loops.
+3. **Strict JSON Validation:** Requires `"is_face"` key in JSON response.
+4. **FAIL OPEN:** If all retries produce garbage or missing keys, default to **`is_face=True`**.
+
+**Outcome:**
+- VLM now accepts faces when the model is confused/hallucinating (Fail Open)
+- Prevents valid faces from being rejected due to model failure
+- "Girl duo" face (score 0.801) is now accepted despite VLM hallucination
+- **Update (Part 4):** Added score filter (> 0.6) for Fail Open results in `BackgroundVerificationService.ts` to reject low-confidence noise (e.g. hair box with score 0.24) that also caused VLM hallucinations.
+
+---
+
+### Phase 79: VLM Verification Refinements (2026-02-09)
+**Problem 1: Rescan False Positive Loop**
+- Non-face boxes (sand, hands, body parts) were reappearing after VLM rejection during rescans
+- Created infinite loop: detection → VLM rejection → rescan → re-detection
+- **Root Cause:** Rescan logic not properly filtering `is_ignored=1` faces from subsequent scans
+
+**Fix 1 (detector.py, FaceService.ts):**
+- Enhanced rescan filtering to respect VLM rejections
+- Properly exclude ignored faces from new scan passes
+- Added cleanup of rejected detections before rescan
+
+---
+
+**Problem 2: VLM Heuristic Fallback Accepting Non-Faces**
+- When VLM returned malformed JSON, heuristic fallback incorrectly accepted sand/hands as faces
+- **Evolution through 3 stages:**
+
+**Stage 1: Forbidden Keywords (Initial Attempt)**
+- Simple keyword matching against forbidden terms
+- **Issue:** Too aggressive - rejected "hand on face" (valid)
+
+**Stage 2: Word Boundaries (Refinement)**
+- Used `\b` regex boundaries to match whole words only
+- **Issue:** Still caught valid descriptions like "woman's hand near her face"
+
+**Stage 3: Comment Stripping + Category Proof (Final Solution)**
+- Strip VLM comments (parenthetical text) before analysis: `re.sub(r'\([^)]*\)', '', description)`
+- Require **category proof** (face/person indicators) to accept detection
+- Only reject based on forbidden keywords if NO facial features mentioned
+
+**Fix 2 (vlm.py lines 320-360):**
+```python
+# Strip comments before analysis
+desc_no_comments = re.sub(r'\([^)]*\)', '', description.lower())
+
+# Check for category proof
+category_proof = any(re.search(rf'\b{word}\b', desc_no_comments) 
+                     for word in face_proof + person_indicators)
+
+# Decision logic
+if category_proof:
+    return True, "Category proof found"
+elif forbidden_present:
+    return False, "Forbidden keywords without face proof"
+else:
+    return True, "Neutral description, allow"
+```
+
+---
+
+**Problem 3: VLM False Negatives (Empty Descriptions)**
+- Valid faces with minimal VLM descriptions rejected due to lack of "anatomical proof"
+- Example: VLM returns "woman" without mentioning eyes/nose/mouth
+- **Root Cause:** Verification required explicit facial features, but category labels ("woman", "person") are sufficient proof
+
+**Fix 3 (vlm.py lines 280-310):**
+- Modified main VLM verification to accept **category proof** even without anatomical details
+- Aligns with heuristic fallback logic for consistency
+- Category proof includes: face/person indicators (woman, man, child, person, etc.)
+
+**Outcome:**
+- ✅ Non-face boxes no longer reappear after VLM rejection
+- ✅ Heuristic fallback correctly rejects sand/hands while accepting "hand on face" scenarios
+- ✅ Valid faces with simple category labels ("woman", "person") now accepted
+- ✅ VLM comment noise (parenthetical explanations) stripped before analysis
+
+**Key Learnings:**
+- Context matters more than exact word matching
+- Category proof ("woman") more reliable than requiring anatomical details
+- VLM comments must be stripped to avoid false positives
+- Heuristic fallback must mirror main VLM logic for consistency
+
+---
+
 ### Phase 75: VLM Plural Forms Fix + Split Duplicate Prevention (2026-02-08)
 **Problem 1: VLM rejecting valid multi-face descriptions**
 - Photo `pexels-filiamariss-14994487.jpg` (two men with faces pressed together) showed "No people detected"

@@ -103,6 +103,17 @@ export class BackgroundVerificationService implements IService {
                 // Call VLM verification
                 const result = await pythonProvider.verifyFace(face.file_path, boxCoords);
 
+                // [Phase 79 Part 4] Fail Open Filtering
+                // If VLM failed open (confusion), we only accept if detector was confident (>0.6)
+                // PREVENTS: Low-confidence false positives (like hair/shoulders, score 0.24) from being accepted
+                // ALLOWS: High-confidence occluded faces (like Girl duo left, score 0.80) to pass
+                const score = face.score || 0;
+                if (result.is_face === true && result.reason?.includes('Fail Open') && score < 0.6) {
+                    logger.warn(`[BackgroundVerificationService] Face ${face.id} Fail Open REJECTED due to low score (${score.toFixed(2)} < 0.6).`);
+                    result.is_face = false;
+                    result.reason = 'Fail Open + Low Score';
+                }
+
                 if (result.is_face === true) {
                     // [Phase 58 Part 3] If VLM confirms face AND (aspect ratio is suspicious OR multi-face detected), check for split
                     // Cast to any to access is_multi_face which might not be in interface yet
@@ -255,7 +266,7 @@ export class BackgroundVerificationService implements IService {
                     return null;
                 }
             })
-            .filter((b): b is BoxType => b !== null);
+            .filter((b: BoxType | null): b is BoxType => b !== null);
 
         const insertStmt = db.prepare(`
             INSERT INTO faces(
