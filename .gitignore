@@ -28,8 +28,9 @@ dbs/
 scan_results.json
 test-exif.js
 
-# Gemini Agent
+# AI Agent Memory
 .gemini/
+.claude/
 
 # Generated Files
 vectors.index
