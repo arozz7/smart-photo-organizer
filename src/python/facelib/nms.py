@@ -121,7 +121,12 @@ def resolve_conflicts(detections, config):
                         # 1. Centers are distinct (NormDist > 0.25) OR
                         # 2. Scale is distinct (Ratio > 3.0) AND Very Distinct Identity (Dist > 1.1)
                         
-                        if norm_c_dist > 0.25 or (scale_ratio > 3.0 and dist > 1.1):
+                        # [Phase 89.1] Score floor for preservation:
+                        # Macro close-up artifacts have very low detection scores (0.10-0.16).
+                        # Real sub-faces (babies) score 0.34+. Require score > 0.25 to qualify
+                        # for ANY preservation (center distance OR scale exception).
+                        score_small = small.get('score', 1.0)
+                        if score_small > 0.25 and (norm_c_dist > 0.25 or (scale_ratio > 3.0 and dist > 1.1)):
                              logger.info(f"[NMS] Container Preservation PREVENTED: High Quality Distinct Faces. NormDist={norm_c_dist:.2f}, ScaleRatio={scale_ratio:.1f}, Dist={dist:.2f}. Keeping both (Mother+Baby).")
                              container_ids_to_remove.discard(j) # Ensure we don't remove it
                              # Do nothing, let main loop handle it
@@ -225,13 +230,20 @@ def resolve_conflicts(detections, config):
                         scale_ratio = max(area_a, area_b) / min(area_a, area_b) if min(area_a, area_b) > 0 else 1.0
 
                         is_geometric_duplicate = iou > 0.75 or norm_center_dist < 0.25
-                        is_likely_subface = scale_ratio > 3.0 and dist > 1.1
-                        
+                        # [Phase 89.1] Score floor: low-score artifacts (macro close-ups) should always merge
+                        score_candidate = f.get('score', 1.0)
+                        is_likely_subface = scale_ratio > 3.0 and dist > 1.1 and score_candidate > 0.25
+
+                        if score_candidate < 0.25:
+                            should_merge = True
+                            logger.info(f"[NMS] Physics Rule Force Merge: Low score artifact (Score={score_candidate:.2f}). Merging.")
+                            break
+
                         if is_geometric_duplicate and not is_likely_subface:
                             should_merge = True
                             logger.info(f"[NMS] Physics Rule Force Merge: High Quality but Geometric Duplicate. IoU={iou:.2f}, NormCenterDist={norm_center_dist:.2f}. Merging.")
                             break
-                        
+
                         # Both high quality & distinct space - keep both (Mother+Baby scenario)
                         should_merge = False
                         logger.info(f"[NMS] Physics Rule Exception: High Overlap (IoMin={io_min:.2f}) but Distinct Identity (Dist={dist:.2f}) and Both High Quality (QA={q_a:.2f}, QB={q_b:.2f}). Keeping Separate.")
@@ -316,7 +328,14 @@ def resolve_conflicts(detections, config):
                             scale_ratio = max(area_a, area_b) / min(area_a, area_b) if min(area_a, area_b) > 0 else 1.0
 
                             is_geometric_duplicate = iou > 0.75 or norm_center_dist < 0.25
-                            is_likely_subface = scale_ratio > 3.0 and dist > 1.1
+                            # [Phase 89.1] Score floor: low-score artifacts (macro close-ups) should always merge
+                            score_candidate = f.get('score', 1.0)
+                            is_likely_subface = scale_ratio > 3.0 and dist > 1.1 and score_candidate > 0.25
+
+                            if score_candidate < 0.25:
+                                should_merge = True
+                                logger.info(f"[NMS] High Quality Exception Force Merge: Low score artifact (Score={score_candidate:.2f}). Merging.")
+                                break
 
                             if is_geometric_duplicate and not is_likely_subface:
                                 should_merge = True

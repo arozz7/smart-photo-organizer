@@ -12,6 +12,34 @@
 
 ## Tuning History
 
+### Phase 89.1: Macro Close-Up Sub-Face Artifact Fix (2026-02-13)
+**Problem:**
+- Extreme macro close-up photos (e.g. `CLOSEUP.jfif`) produced 4 face boxes instead of 1.
+- The detector found sub-regions (eyes, partial face) as separate face candidates with very low scores (0.10-0.16).
+- NMS's "Scale Exception" (designed for Mother+Baby) incorrectly preserved these artifacts because they had huge scale ratios (5x-68x) and high embedding distance (>1.1) — the exact criteria meant for keeping a baby's face inside a mother's bounding box.
+
+**Root Cause:**
+- The Scale Exception had no minimum detection score requirement. It treated low-confidence feature artifacts the same as real sub-faces.
+
+**Fix (nms.py):**
+- Added a **detection score floor of 0.25** to the Scale Exception at all three locations where `is_likely_subface` is evaluated:
+  1. Container pre-pass (line ~124)
+  2. Physics Rule (line ~228)
+  3. Rule B High Quality Exception (line ~319)
+- Uses `f.get('score', 1.0)` — default 1.0 when score field is missing, preserving backward compatibility.
+
+**Threshold Rationale:**
+- Real sub-faces (babies): score 0.34+ (well above 0.25)
+- Macro artifacts: score 0.10-0.16 (well below 0.25)
+- Gap: 0.09 below lowest real face, 0.09 above highest artifact
+
+**Outcome:**
+- Macro close-up photos now correctly produce 1 face box instead of 4. ✅
+- Mother+Baby photos still correctly produce 2 face boxes. ✅
+- All existing NMS tests pass unchanged (no `score` field = default 1.0). ✅
+
+---
+
 ### Phase 88: NMS Strict Tuning (Duplicate Removal & Preservation) (2026-02-12)
 **Problem 1: Duplicate Faces in TTA (`hugs.jfif`)**
 - "Test Time Augmentation" (TTA) created multiple crops of the same face with slightly different embeddings.

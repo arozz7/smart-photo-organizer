@@ -125,5 +125,48 @@ class TestNMSStrict(unittest.TestCase):
         result = nms.resolve_conflicts([face_a, face_b], {'nmsIouThresh': 0.3})
         self.assertEqual(len(result), 1, "Should MERGE Stacked Face Duplicate")
 
+    def test_macro_closeup_artifacts(self):
+        """
+        Case 6: Macro Close-Up Artifacts.
+        A large high-quality face with small low-score sub-face detections (eyes, partial face).
+        The Scale Exception should NOT preserve these because their detection scores are very low.
+        Expected: MERGE into 1.
+        """
+        # Main face: large, high quality, high score
+        emb_main = [1.0, 0.0]
+        face_main = {
+            'box': {'x': 50, 'y': 50, 'width': 400, 'height': 400},
+            'faceQuality': 0.92,
+            'descriptor': emb_main,
+            'score': 0.95,
+            'id': 'face_closeup_main'
+        }
+
+        # Artifact 1: sub-region, OFF-CENTER (NormDist > 0.25), low score
+        # Main center: (250, 250). Art1 center: (130, 120). NormDist ≈ 0.53.
+        # Previously preserved by norm_c_dist > 0.25, now blocked by score floor.
+        emb_art1 = [0.0, 1.0]
+        face_art1 = {
+            'box': {'x': 50, 'y': 50, 'width': 160, 'height': 140},
+            'faceQuality': 0.79,
+            'descriptor': emb_art1,
+            'score': 0.16,
+            'id': 'face_closeup_eye'
+        }
+
+        # Artifact 2: sub-region, OFF-CENTER (NormDist > 0.25), low score
+        emb_art2 = [-1.0, 0.0]
+        face_art2 = {
+            'box': {'x': 300, 'y': 250, 'width': 80, 'height': 80},
+            'faceQuality': 0.71,
+            'descriptor': emb_art2,
+            'score': 0.10,
+            'id': 'face_closeup_partial'
+        }
+
+        result = nms.resolve_conflicts([face_main, face_art1, face_art2], {'nmsIouThresh': 0.3})
+        self.assertEqual(len(result), 1, "Should MERGE macro close-up artifacts (low score sub-faces) into 1")
+
+
 if __name__ == '__main__':
     unittest.main()

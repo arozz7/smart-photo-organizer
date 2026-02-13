@@ -477,7 +477,8 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
         clean_response = clean_response.replace("```json", "").replace("```", "").strip()
 
         # [Phase 82] Robust Text Parsing
-        lines = clean_response.split('\\n')
+        # [Phase 89 Fix] Split on actual newlines, not literal '\\n'
+        lines = clean_response.replace('\\n', '\n').split('\n')
         parsed = {}
         
         for line in lines:
@@ -526,7 +527,7 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
         # [Phase 57.1] STRICT WORD BOUNDARY MATCHING
         def has_word(text, terms):
             for term in terms:
-                if re.search(r'\\b' + re.escape(term) + r'\\b', text, re.IGNORECASE):
+                if re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE):
                     return True
             return False
 
@@ -601,7 +602,7 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
                     logger.info(f"[VLM] Trusting face: Category='face' (description empty)")
                 else:
                     logger.info(f"[VLM] Trusting face: Evidence found in description.")
-            elif clean_response.upper().startswith('YES') or clean_response.upper() == 'YES':
+            elif re.match(r'^(OUTPUT:\s*)?YES\b', clean_response.strip(), re.IGNORECASE):
                 logger.info(f"[VLM] Trusting face: Explicit 'YES' response (description empty/missing).")
                 if reason == "No description provided":
                     reason = "Explicit 'YES' confirmed by VLM"
