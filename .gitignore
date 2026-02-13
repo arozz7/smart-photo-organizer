@@ -43,6 +43,16 @@ lint_*.txt
 verify_*.py
 verify_*.js
 
+# Debug output files
+debug_*.txt
+full_debug_output.txt
+output_vlm.txt
+inspect_schema.py
+nul
+
+# AI Models (binary)
+models/
+
 # App Build Artifacts
 dist/
 dist-electron/
