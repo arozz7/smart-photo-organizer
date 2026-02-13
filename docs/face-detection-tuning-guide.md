@@ -31,7 +31,7 @@ This guide helps you optimize face detection settings for your photo library. Th
 
 **Location**: Settings → Advanced Face → VLM Verification Threshold
 
-**Range**: 0.30 - 0.80 (Default: 0.65)
+**Range**: 0.30 - 0.90 (Default: 0.85)
 
 **What it controls**: Faces with detection scores **below** this threshold are marked as 'suspect' and verified by VLM.
 
@@ -39,9 +39,9 @@ This guide helps you optimize face detection settings for your photo library. Th
 
 | Threshold | Use Case | Pros | Cons |
 |-----------|----------|------|------|
-| **0.50-0.60** | Strict Mode | Fewer false positives (shoulders, knees) | Slower scans, more VLM work |
-| **0.65** | Balanced (Default) | Good accuracy/speed balance | Some false positives may slip through |
-| **0.70-0.80** | Fast Mode | Faster scans, less VLM work | More false positives |
+| **0.65** | Fast Mode | Faster scans, less VLM work | More false positives (ghosts) |
+| **0.85** | Balanced (Default) | Catches ghosts & verifies profiles | Slower scans (more verification) |
+| **0.90+** | Strict Mode | Verifies almost everything | Slowest |
 
 #### When to Adjust
 
@@ -115,6 +115,21 @@ This guide helps you optimize face detection settings for your photo library. Th
 - More faces flagged as 'suspect'
 - VLM automatically rejects false positives
 - Cleaner face library
+
+---
+
+### Scenario 1.5: "Ghost Faces" (Rocks, Foliage with High Score)
+
+**Symptoms**:
+- Inanimate objects (rocks, leaves, ground) detected as faces with high scores (0.75-0.80).
+- VLM fails to kick in because score > old threshold (0.65).
+
+**Solution**:
+1. **Raise VLM threshold** to **0.85** (Default in v0.5.5+).
+   - This checks everything below 0.85, catching the 0.80 ghosts.
+2. **Ensure VLM Prompt is hardened** (Automatic in v0.5.5+).
+   - Prompt now explicitly rejects "rocks, stones, foliage".
+3. **Rescan** affected photos.
 
 ---
 

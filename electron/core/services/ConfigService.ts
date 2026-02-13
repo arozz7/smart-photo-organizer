@@ -42,6 +42,10 @@ export interface AdvancedFaceConfig {
     // [Phase 74] High-Quality Face Threshold
     // Faces with faceQuality > this are kept even if detection score is low
     highQualityFaceThreshold?: number; // Default 0.70
+
+    // [Phase 79] Large Face Threshold (Web Size)
+    // Faces larger than this (width or height) are kept even if detection score is low
+    largeFaceThreshold?: number; // Default 300
 }
 
 export interface WindowBounds {
@@ -108,7 +112,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         enableAreaBasedNMS: true,
         enableMacroLowRes: true,
         enableTTA: true,
-        highQualityFaceThreshold: 0.65  // [Phase 74] Faces with quality > this bypass low detection score filter (lowered from 0.70 to keep 0.68 quality faces)
+        highQualityFaceThreshold: 0.65, // [Phase 74] Faces with quality > this bypass low detection score filter
+        largeFaceThreshold: 300         // [Phase 79] Default
     },
     aiSettings: {
         faceSimilarityThreshold: 0.65,
@@ -164,7 +169,8 @@ export class ConfigService {
                             minFaceSize: aiJson.face_detection?.min_face_size_standard ?? 40,
                             nmsIouThresh: aiJson.face_detection?.nms_iou_threshold ?? 0.3,
                             dedupIoUThresh: aiJson.face_detection?.deduplication_iou_threshold ?? 0.55, // [Phase 68] Centralized Deduplication Threshold
-                            enableTTA: aiJson.face_detection?.enable_tta ?? false // [Phase 67] Disable TTA to fix alignment drift
+                            enableTTA: aiJson.face_detection?.enable_tta ?? false, // [Phase 67] Disable TTA to fix alignment drift
+                            largeFaceThreshold: aiJson.face_detection?.large_face_threshold ?? 300 // [Phase 79]
                         },
                         aiSettings: {
                             vlmVerificationThreshold: aiJson.vlm?.verification_threshold ?? 0.85,

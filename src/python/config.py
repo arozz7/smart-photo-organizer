@@ -14,6 +14,7 @@ def load_ai_config():
              'score_threshold_vlm_verification': 0.85, 
              'box_margin_percent': 0.10,
              'min_face_size_macro': 50,
+             'det_thresh_macro': 0.15, # [Phase 78] Lowered to 0.15 for difficult/profile faces
              'min_face_size_standard': 40,
              'face_blur_threshold': 15.0,
              'nms_iou_threshold': 0.45,
@@ -52,30 +53,21 @@ MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifica
 
 # VLM Settings
 # [Phase 58] Simplified prompt - semantic verification only (detector handles face counting)
-VLM_VERIFICATION_PROMPT = """Analyze this image.
+# [Phase 82] Simplified Non-JSON Prompt (Robustness)
+VLM_VERIFICATION_PROMPT = """Analyze this image crop.
+Determine if it contains a REAL HUMAN FACE.
 
-Analyze the image. You are a quality control agent catching ERRORS from an automated face detector.
-The detector often makes mistakes and detects hands, knees, shoulders, skin patches, ROCKS, LEAVES, and GROUND TEXTURES as faces.
+OUTPUT STRICTLY IN THIS FORMAT:
+IS_FACE: YES or NO
+CONFIDENCE: 0.0 to 1.0
+OBJECT: face, hand, rock, etc.
+DESCRIPTION: Short visual description.
 
-YOUR TASK:
-Determine if this image crop contains a REAL HUMAN FACE or a FALSE POSITIVE.
-Also check for MULTIPLE PEOPLE merged into this single crop.
-
-1. Categorize: "face" or "false_positive"
-2. Describe: What exactly do you see? If it's a face, list visible parts. If it is MULTIPLE PEOPLE, describe them (e.g. "Woman holding a baby").
-3. BE SPECIFIC: Do NOT just say "human face". Specify gender (man/woman) and age (child/adult).
-4. FALSE POSITIVE CHECK: If you see fabric, clothing (pants, shirt texture), furniture (chair legs), ground/floor patterns, rocks, stones, or foliage, mark as "false_positive".
-6. MULTI-FACE CHECK: If the center object is actually TWO OR MORE PEOPLE (e.g. a couple, a group, a woman holding a baby), explicitlly mention "multiple people" or "two faces" in the description.
-7. IMPORTANT: Faces with medical masks, costumes, or heavy makeup ARE VALID FACES. Do not mark them as false_positive just because they are covered.
-
-Output ONLY JSON:
-{
-  "category": "face",
-  "specific_object": "object_name",
-  "is_face": false,
-  "confidence": 0.0,
-  "description": "visual description"
-}
+RULES:
+1. If you see a HUMAN FACE (even if blurry, side view, or partially covered), output IS_FACE: YES.
+2. If you see HANDS, KNEES, CLOTHING, ROCKS, or BACKGROUND TEXTURE, output IS_FACE: NO.
+3. If you see MULTIPLE PEOPLE, output IS_FACE: YES.
+4. Do NOT output markdown, JSON, or extra text.
 """
 
 # [Phase 59] AdaFace Configuration

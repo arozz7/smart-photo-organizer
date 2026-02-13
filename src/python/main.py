@@ -12,6 +12,20 @@ from io import BytesIO
 import base64
 import requests
 
+# [Fix] Force UTF-8 for IPC on Windows (handles special chars like '☆')
+if sys.platform == 'win32':
+    if sys.stdin.encoding != 'utf-8':
+        try:
+            sys.stdin.reconfigure(encoding='utf-8')
+        except AttributeError:
+            # Python < 3.7 fallback or non-text stream
+            pass
+    if sys.stdout.encoding != 'utf-8':
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except AttributeError:
+            pass
+
 # Configure PyTorch Allocator for Windows to prevent expandable_segments warning
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:False"
 

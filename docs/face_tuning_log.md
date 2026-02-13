@@ -12,6 +12,83 @@
 
 ## Tuning History
 
+### Phase 88: NMS Strict Tuning (Duplicate Removal & Preservation) (2026-02-12)
+**Problem 1: Duplicate Faces in TTA (`hugs.jfif`)**
+- "Test Time Augmentation" (TTA) created multiple crops of the same face with slightly different embeddings.
+- Existing NMS "High Quality Exception" allowed them to coexist as "different people" because their embedding distance was slightly high (`> 1.0`).
+- Result: Concentric "stacks" of red boxes on the same face.
+
+**Problem 2: Mother+Baby merged into one box**
+- "Mother holding Baby" scenarios often have the baby's face physically *inside* the mother's bounding box.
+- NMS rules (especially "Containment" and "Physics Rule") aggressively merged them, deleting the baby.
+- Sometimes the "VLM Split" logic would find the baby later, but NMS would kill the original detection first.
+
+**Fix (nms.py):**
+1.  **Geometric Veto:** Added a rule to **FORCE MERGE** faces if they are "Geometric Duplicates" even if they look different (Dist > 1.0).
+    - Condition: `IoU > 0.75` OR `NormCenterDist < 0.25` (Centers very close).
+    - This cleans up the TTA duplicates in `hugs.jfif`.
+2.  **Scale Exception:** Added a safety check to **PRESERVE** faces if they are "Geometric Duplicates" but have a huge size difference.
+    - Condition: `ScaleRatio > 3.0` AND `Dist > 1.1` (Look different).
+    - This allows the "Big Box" (Mother) and "Small Box" (Baby) to coexist, even if they are concentric.
+
+**Outcome:**
+- `hugs.jfif`: Concentric duplicates (similar size) are merged. Clean single box. ✅
+- `Mother+Baby`: Concentric faces (different size) are preserved. Two valid boxes. ✅
+- The "Big Box" for the mother naturally encompasses the baby due to proximity, but they are tracked as separate identities.
+
+---
+
+### Phase 87: VLM TTA for Rotated Faces (2026-02-11)
+**Problem:**
+- Upside-down faces (e.g. "stacked heads" or "laying down") were rejected by VLM.
+- VLM is trained on upright images and fails to recognize inverted faces as "human".
+- It typically returns "No" or describes them as "hair" or "clothing".
+
+**Fix (vlm.py):**
+- **Test Time Augmentation (TTA):** If the initial upright crop is rejected (`is_face=False`), the system now:
+    1. Rotates the crop 180 degrees.
+    2. Retries verification.
+    3. If the rotated version is accepted, the face is marked as Valid.
+- **Refactor:** Extracted VLM analysis logic into `analyze_face_crop` helper to support the retry loop.
+
+**Outcome:**
+- Upside-down faces are now correctly identified.
+- No impact on normal face processing speed (only triggered on rejection).
+
+---
+
+### Phase 86: NMS Container Arbitration (2026-02-11)
+**Problem:**
+- "Mother+Baby" photos sometimes resulted in 3 boxes: 1 Large (Head), 2 Small (Face + Artifact).
+- Previous "Container Rejection" rule (Phase 74) blindly rejected the Large Box because it contained smaller distinct boxes.
+- **Real World:** The Large Box was actually the *better* detection (Quality 0.90) compared to the partial inner box (Quality 0.77).
+
+**Fix (nms.py):**
+- **Quality Check:** Before rejecting a "Container" (Large Box), check if it is **Lower Quality** than the "Content" (Small Box).
+    - If `Quality(Large) < Quality(Small)` -> Reject Large (It's likely a frame/background).
+    - If `Quality(Large) >= Quality(Small)` -> **Keep Large**.
+- **Artifact Cleanup:** If properly keeping the Large Box, explicitly **Remove the Small Box** to prevent them from co-existing as "Stacked Faces".
+- **Tuning:** Relaxed Area Ratio from 1.5x to **1.15x** to catch "Tight Containers" (Head just slightly larger than Face).
+
+**Outcome:**
+- Fixed "3 Box" issue. Now correctly returns the single best high-quality box.
+
+---
+
+### Phase 85: VLM "Yes" Override (2026-02-11)
+**Problem:**
+- Valid faces were rejected because VLM said "Yes" but provided a sparse description (e.g. "Yes, it is a face").
+- The "Anatomical Check" (Phase 56.9) rejected it because it didn't find "eyes", "nose", etc. in the text.
+
+**Fix (vlm.py):**
+- **Explicit Override:** If VLM response starts with "Yes" (and no forbidden keywords found), **Bypass Anatomical Check**.
+- Trust the model's direct classification when the description is lazy/sparse.
+
+**Outcome:**
+- Prevents rejection of clear faces where VLM gives a short answer.
+
+---
+
 ### Phase 79 Part 2: Rescan Rejection Memory (2026-02-09)
 **Problem:**
 - Non-face boxes (hands, sand, body parts) were being re-detected on every rescan despite VLM correctly rejecting them

@@ -21,6 +21,7 @@ interface AISettings {
     vlmMaxTokens: number;
     hideUnnamedFacesByDefault: boolean;
     vlmEnabled: boolean;
+    vlmVerificationThreshold?: number;
     autoAssignThreshold?: number;
     reviewThreshold?: number;
 }
@@ -59,10 +60,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
         enableMacroLowRes: true,
         enableTTA: true
     });
+    const [pendingVerifications, setPendingVerifications] = useState<number>(0);
 
     useEffect(() => {
         if (open) {
             loadSettings();
+            loadPendingVerifications();
+
+            // Auto-refresh pending count every 5 seconds
+            const interval = setInterval(loadPendingVerifications, 5000);
+            return () => clearInterval(interval);
         }
     }, [open]);
 
@@ -104,6 +111,44 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
 
     const handleChange = (key: keyof AISettings, value: number) => {
         setSettings(prev => ({ ...prev, [key]: value }));
+    };
+
+    const loadPendingVerifications = async () => {
+        try {
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('db:query', {
+                sql: "SELECT COUNT(*) as count FROM faces WHERE entity_type = 'suspect' AND (is_ignored = 0 OR is_ignored IS NULL)",
+                params: []
+            });
+            if (result && result.length > 0) {
+                setPendingVerifications(result[0].count);
+            }
+        } catch (e) {
+            console.error("Failed to load pending verifications:", e);
+        }
+    };
+
+    const handleAuditLowConfidence = async () => {
+        try {
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('face:auditLowConfidence');
+            if (result.success) {
+                showAlert({
+                    title: 'Audit Started',
+                    description: `Marked ${result.updated} low-confidence faces for background verification.`,
+                    variant: 'primary'
+                });
+                loadPendingVerifications(); // Refresh count
+            } else {
+                throw new Error(result.error || 'Unknown error');
+            }
+        } catch (e) {
+            showAlert({
+                title: 'Audit Failed',
+                description: `Failed to start audit: ${e}`,
+                variant: 'danger'
+            });
+        }
     };
 
     const handleReset = () => {
@@ -315,6 +360,22 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                                 className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
                                             />
                                         </div>
+
+                                        {/* [Phase 57] VLM Verification Threshold */}
+                                        <div className="pt-4 border-t border-gray-800">
+                                            <h3 className="text-lg font-semibold text-green-400 mb-2">VLM Verification</h3>
+                                            <p className="text-xs text-gray-500 mb-4">
+                                                Faces with detection scores below this threshold are marked as 'suspect' and verified by the Vision Language Model to filter out false positives (shoulders, knees, objects).
+                                            </p>
+
+                                            <SettingSlider
+                                                label="VLM Verification Threshold"
+                                                value={settings.vlmVerificationThreshold || 0.65}
+                                                min={0.3} max={0.8} step={0.01}
+                                                onChange={(v) => handleChange('vlmVerificationThreshold', v)}
+                                                tooltip="Detection score threshold (0.30 - 0.80). Faces below this score are verified by VLM. Lower values = more verification (slower but more accurate). Higher values = faster scans but may miss false positives. Default: 0.65"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </Tabs.Content>
@@ -383,6 +444,35 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                             <span className="text-sm font-semibold text-gray-300 group-hover:text-white">Open App Data</span>
                                             <span className="text-xs text-gray-500">Database & Assets</span>
                                         </button>
+                                    </div>
+
+                                    {/* [Phase 56] VLM Verification Status */}
+                                    <div className="border-t border-gray-800 pt-6 mt-2">
+                                        <h3 className="text-lg font-semibold text-purple-400 mb-3">Face Verification</h3>
+
+                                        <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700/50 space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-sm font-medium text-gray-200">Pending Verifications</span>
+                                                    <span className="text-xs text-gray-500">Low-confidence faces awaiting VLM verification</span>
+                                                </div>
+                                                <span className={`text-lg font-bold ${pendingVerifications > 0 ? 'text-amber-400' : 'text-green-400'}`}>
+                                                    {pendingVerifications}
+                                                </span>
+                                            </div>
+
+                                            <button
+                                                onClick={handleAuditLowConfidence}
+                                                className="w-full px-4 py-2 bg-purple-600/20 border border-purple-500/30 hover:bg-purple-600/30 hover:border-purple-500/50 rounded text-sm transition-all text-purple-300 font-medium"
+                                            >
+                                                Audit Low Confidence Faces
+                                            </button>
+
+                                            <p className="text-xs text-gray-500 leading-relaxed">
+                                                This will mark all existing faces with detection score &lt; 0.45 as "suspect" for background VLM verification.
+                                                The background service will automatically verify them and filter out false positives (knees, flowers, etc).
+                                            </p>
+                                        </div>
                                     </div>
 
                                     <div className="border-t border-gray-800 pt-6 mt-2">

@@ -51,6 +51,7 @@ export class PythonAIProvider implements IAIProvider, IService {
             stdio: ['pipe', 'pipe', 'pipe'],
             env: {
                 ...process.env,
+                API_MODE: undefined, // [Phase 65] Ensure IPC mode, not HTTP
                 IS_DEV: app.isPackaged ? 'false' : 'true',
                 HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
                 LIBRARY_PATH: LIBRARY_PATH,

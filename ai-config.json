@@ -4,6 +4,7 @@
         "score_threshold_vlm_verification": 0.85,
         "score_threshold_confident": 0.85,
         "min_face_size_macro": 50,
+        "det_thresh_macro": 0.1,
         "min_face_size_standard": 40,
         "nms_iou_threshold": 0.45,
         "face_blur_threshold": 15.0,

@@ -37,6 +37,23 @@ export function registerAIHandlers() {
         }
     });
 
+    // [Phase 84] Force Rescan
+    ipcMain.handle('ai:forceRescan', async (_event, { photoId, filePath }) => {
+        try {
+            if (!filePath && photoId) {
+                const db = getDB();
+                const row = db.prepare('SELECT file_path FROM photos WHERE id = ?').get(photoId) as any;
+                if (row) filePath = row.file_path;
+            }
+            if (!filePath) return { success: false, error: 'Missing filePath' };
+
+            return await PhotoService.forceRescan(photoId, filePath);
+        } catch (e) {
+            logger.error(`[IPC] ai:forceRescan failed: ${e}`);
+            return { success: false, error: String(e) };
+        }
+    });
+
     // Alias for analyzeImage used by Blur Calculation and older contexts
     ipcMain.handle('ai:scanImage', async (_event, options) => {
         let { photoId, filePath, ...rest } = options;

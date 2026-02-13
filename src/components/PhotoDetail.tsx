@@ -635,9 +635,9 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                 onClick={async () => {
                                     try {
                                         setIsScanning(true);
-                                        console.log("[UI] User clicked Force Face Scan (No Faces)");
+                                        console.log("[UI] User clicked Force Rescan (No Faces)");
                                         // @ts-ignore
-                                        await window.ipcRenderer.invoke('ai:analyzeImage', { photoId: photo.id, scanMode: 'MACRO', enableVLM: false, debug: true, cleanRescan: true })
+                                        await window.ipcRenderer.invoke('ai:forceRescan', { photoId: photo.id, filePath: photo.file_path })
                                         await refreshPhoto(photo.id);
                                     } catch (e) {
                                         console.error(e)
@@ -774,9 +774,9 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                     onClick={async () => {
                                         try {
                                             setIsScanning(true);
-                                            console.log("[UI] User clicked Force Face Scan (Magnifying Glass)");
+                                            console.log("[UI] User clicked Force Rescan (Magnifying Glass)");
                                             // @ts-ignore
-                                            await window.ipcRenderer.invoke('ai:analyzeImage', { photoId: photo.id, scanMode: 'MACRO', enableVLM: false, debug: true, cleanRescan: true })
+                                            await window.ipcRenderer.invoke('ai:forceRescan', { photoId: photo.id, filePath: photo.file_path })
                                             await refreshPhoto(photo.id);
                                         } catch (e) {
                                             console.error(e)

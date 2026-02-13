@@ -495,4 +495,183 @@ describe('FaceRepository', () => {
             expect(result).toHaveLength(1);
         });
     });
+
+    // ==========================================
+    // Phase 56: VLM Verification Methods
+    // ==========================================
+    describe('getSuspectFaces', () => {
+        it('should return suspect faces ordered by most recent photos', () => {
+            // Arrange
+            const photoId1 = seedPhoto(db, { created_at: '2024-01-01 10:00:00' });
+            const photoId2 = seedPhoto(db, { created_at: '2024-01-02 10:00:00' }); // More recent
+            const faceId1 = seedFace(db, photoId1, { entity_type: 'suspect', is_ignored: 0 });
+            const faceId2 = seedFace(db, photoId2, { entity_type: 'suspect', is_ignored: 0 });
+            seedFace(db, photoId1, { entity_type: 'human', is_ignored: 0 }); // Exclude (not suspect)
+
+            // Act
+            const result = FaceRepository.getSuspectFaces(10);
+
+            // Assert
+            expect(result).toHaveLength(2);
+            expect(result[0].id).toBe(faceId2); // Most recent first
+            expect(result[1].id).toBe(faceId1);
+        });
+
+        it('should exclude ignored suspect faces', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, { entity_type: 'suspect', is_ignored: 0 }); // Include
+            seedFace(db, photoId, { entity_type: 'suspect', is_ignored: 1 }); // Exclude
+
+            // Act
+            const result = FaceRepository.getSuspectFaces(10);
+
+            // Assert
+            expect(result).toHaveLength(1);
+        });
+
+        it('should respect limit parameter', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            for (let i = 0; i < 5; i++) {
+                seedFace(db, photoId, { entity_type: 'suspect', is_ignored: 0 });
+            }
+
+            // Act
+            const result = FaceRepository.getSuspectFaces(3);
+
+            // Assert
+            expect(result).toHaveLength(3);
+        });
+    });
+
+    describe('countSuspectFaces', () => {
+        it('should return count of non-ignored suspect faces', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, { entity_type: 'suspect', is_ignored: 0 });
+            seedFace(db, photoId, { entity_type: 'suspect', is_ignored: 0 });
+            seedFace(db, photoId, { entity_type: 'suspect', is_ignored: 1 }); // Exclude
+            seedFace(db, photoId, { entity_type: 'human', is_ignored: 0 }); // Exclude
+
+            // Act
+            const count = FaceRepository.countSuspectFaces();
+
+            // Assert
+            expect(count).toBe(2);
+        });
+
+        it('should return 0 when no suspect faces exist', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, { entity_type: 'human', is_ignored: 0 });
+
+            // Act
+            const count = FaceRepository.countSuspectFaces();
+
+            // Assert
+            expect(count).toBe(0);
+        });
+    });
+
+    describe('updateFaceEntityType', () => {
+        it('should update entity_type for a face', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { entity_type: 'suspect' });
+
+            // Act
+            FaceRepository.updateFaceEntityType(faceId, 'human');
+
+            // Assert
+            const face = db.prepare('SELECT entity_type FROM faces WHERE id = ?').get(faceId) as any;
+            expect(face.entity_type).toBe('human');
+        });
+    });
+
+    describe('markFaceAsRejected', () => {
+        it('should set is_ignored to 1', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { is_ignored: 0 });
+
+            // Act
+            FaceRepository.markFaceAsRejected(faceId);
+
+            // Assert
+            const face = db.prepare('SELECT is_ignored FROM faces WHERE id = ?').get(faceId) as any;
+            expect(face.is_ignored).toBe(1);
+        });
+    });
+
+    describe('incrementVerificationAttempts', () => {
+        it('should increment verification_attempts and return new count', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { verification_attempts: 0 });
+
+            // Act
+            const newCount = FaceRepository.incrementVerificationAttempts(faceId);
+
+            // Assert
+            expect(newCount).toBe(1);
+            const face = db.prepare('SELECT verification_attempts FROM faces WHERE id = ?').get(faceId) as any;
+            expect(face.verification_attempts).toBe(1);
+        });
+
+        it('should handle multiple increments', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { verification_attempts: 2 });
+
+            // Act
+            const newCount = FaceRepository.incrementVerificationAttempts(faceId);
+
+            // Assert
+            expect(newCount).toBe(3);
+        });
+    });
+
+    describe('markLowConfidenceAsSuspect', () => {
+        it('should mark faces with score < 0.45 as suspect', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const lowConfidenceFaceId = seedFace(db, photoId, { score: 0.40, entity_type: 'human', is_ignored: 0 });
+            const highConfidenceFaceId = seedFace(db, photoId, { score: 0.50, entity_type: 'human', is_ignored: 0 });
+
+            // Act
+            const updated = FaceRepository.markLowConfidenceAsSuspect();
+
+            // Assert
+            expect(updated).toBe(1);
+            const lowFace = db.prepare('SELECT entity_type FROM faces WHERE id = ?').get(lowConfidenceFaceId) as any;
+            const highFace = db.prepare('SELECT entity_type FROM faces WHERE id = ?').get(highConfidenceFaceId) as any;
+            expect(lowFace.entity_type).toBe('suspect');
+            expect(highFace.entity_type).toBe('human');
+        });
+
+        it('should not mark already ignored faces', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, { score: 0.40, entity_type: 'human', is_ignored: 1 });
+
+            // Act
+            const updated = FaceRepository.markLowConfidenceAsSuspect();
+
+            // Assert
+            expect(updated).toBe(0);
+        });
+
+        it('should not mark already suspect faces', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, { score: 0.40, entity_type: 'suspect', is_ignored: 0 });
+
+            // Act
+            const updated = FaceRepository.markLowConfidenceAsSuspect();
+
+            // Assert
+            expect(updated).toBe(0);
+        });
+    });
 });

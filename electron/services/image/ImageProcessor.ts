@@ -4,7 +4,9 @@ import { IImageProcessor, ProcessingOptions } from './interfaces';
 export class SharpImageProcessor implements IImageProcessor {
 
     async process(filePath: string, options: ProcessingOptions, dbOrientation: number = 1): Promise<Buffer> {
-        const pipeline = sharp(filePath);
+        // [Phase 83] Relax Error Handling
+        // Metadata warnings (e.g. "ASCII value ... contains null byte") should not fail the pipeline
+        const pipeline = sharp(filePath, { failOnError: false });
         return this.processPipeline(pipeline, options, dbOrientation, false);
     }
 
@@ -82,7 +84,7 @@ export class SharpImageProcessor implements IImageProcessor {
     }
 
     async convertRaw(filePath: string): Promise<Buffer> {
-        return await sharp(filePath)
+        return await sharp(filePath, { failOnError: false })
             .rotate()
             .toFormat('jpeg', { quality: 80 })
             .toBuffer();

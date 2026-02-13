@@ -235,6 +235,33 @@ export class FaceRepository {
         }
     }
 
+    /**
+     * [Phase 79] Get ALL faces for a photo, including ignored ones.
+     * Used during rescan to properly clean up ignored faces in the pre-pass.
+     * Without this, ignored faces are invisible to deduplication and get re-inserted as new faces.
+     */
+    static getFacesByPhotoIncludingIgnored(photoId: number) {
+        const db = getDB();
+        try {
+            const stmt = db.prepare(`
+                SELECT f.*, p.name as person_name 
+                FROM faces f
+                LEFT JOIN people p ON f.person_id = p.id
+                WHERE f.photo_id = ?
+            `);
+            const faces = stmt.all(photoId);
+            return faces.map((f: any) => ({
+                ...f,
+                box: JSON.parse(f.box_json),
+                descriptor: f.descriptor ? Array.from(new Float32Array(f.descriptor.buffer, f.descriptor.byteOffset, f.descriptor.byteLength / 4)) : null,
+                is_reference: !!f.is_reference
+            }));
+        } catch (error) {
+            console.error('FaceRepository.getFacesByPhotoIncludingIgnored failed:', error);
+            return [];
+        }
+    }
+
     static getAllFaces(limit = 100, offset = 0, filter: { personId?: number, unnamed?: boolean } = {}, includeDescriptors = true) {
         const db = getDB();
         try {
@@ -786,6 +813,30 @@ export class FaceRepository {
     static updateFaceEra(faceId: number, eraId: number) {
         const db = getDB();
         db.prepare('UPDATE faces SET era_id = ? WHERE id = ?').run(eraId, faceId);
+    }
+
+    /**
+     * [Phase 68] Update face demographics from VLM reasoning.
+     */
+    static updateFaceDemographics(faceId: number, data: { gender?: string, age?: number }) {
+        const db = getDB();
+        const updates: string[] = [];
+        const params: any[] = [];
+
+        if (data.gender) {
+            updates.push('gender = ?');
+            params.push(data.gender);
+        }
+        if (data.age) {
+            updates.push('estimated_age = ?');
+            params.push(data.age);
+        }
+
+        if (updates.length === 0) return;
+
+        params.push(faceId);
+        const query = `UPDATE faces SET ${updates.join(', ')} WHERE id = ?`;
+        db.prepare(query).run(...params);
     }
 
     // ============== BACKGROUND BUCKETING (Phase B1) ==============

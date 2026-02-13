@@ -48,7 +48,7 @@ export class PhotoService {
             }
 
             const ext = path.extname(filePath).toLowerCase();
-            const isRaw = !['.jpg', '.jpeg', '.png'].includes(ext);
+            const isRaw = !['.jpg', '.jpeg', '.png', '.jfif'].includes(ext);
             let rotationDegrees = 0;
             let shouldRotate = false;
 
@@ -99,7 +99,7 @@ export class PhotoService {
             // 2. Sharp
             if (!extracted) {
                 try {
-                    const pipeline = sharp(filePath);
+                    const pipeline = sharp(filePath, { failOnError: false });
                     if (shouldRotate) pipeline.rotate(rotationDegrees);
                     await pipeline.resize(2560, 2560, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(previewPath);
                     extracted = true;
@@ -254,9 +254,10 @@ export class PhotoService {
         try {
             let oldFaces: any[] = [];
             if (cleanRescan === true) {
-                logger.info(`[PhotoService] cleanRescan=TRUE for Photo ${photoId}. Fetching old faces...`);
-                oldFaces = FaceRepository.getFacesByPhoto(photoId);
-                logger.info(`[PhotoService] Found ${oldFaces.length} existing faces.`);
+                logger.info(`[PhotoService] cleanRescan=TRUE for Photo ${photoId}. Fetching old faces (including ignored)...`);
+                // [Phase 84] Use getFacesByPhotoIncludingIgnored to ensure ghosts/ignored faces are cleared
+                oldFaces = FaceRepository.getFacesByPhotoIncludingIgnored(photoId);
+                logger.info(`[PhotoService] Found ${oldFaces.length} existing faces to purge.`);
 
                 if (oldFaces.length > 0) {
                     const oldIds = oldFaces.map(f => f.id);
@@ -322,5 +323,19 @@ export class PhotoService {
             this._scanningPhotos.delete(photoId);
             logger.info(`[PhotoService] Scan completed for Photo ${photoId}`);
         }
+    }
+
+    /**
+     * [Phase 84] Force Rescan
+     * Triggers a clean rescan that wipes ALL previous face data (including ignored) for a photo.
+     */
+    static async forceRescan(photoId: number, filePath: string) {
+        logger.info(`[PhotoService] Force Rescan requested for Photo ${photoId}`);
+        return this.analyzeImage({
+            photoId,
+            filePath,
+            scanMode: 'MACRO',
+            cleanRescan: true
+        });
     }
 }
