@@ -24,8 +24,8 @@ def load_ai_config():
              'enabled': False,
              'prompt_version': 'v1',
              'verification_threshold': 0.85,
-             'forbidden_keywords': ["rock", "stone", "foliage", "ground", "clothing", "fabric"],
-             'forbidden_objects': ["knee", "hand", "glove", "hat", "cap", "camera", "microphone", "stone", "rock"]
+             'forbidden_keywords': ["rock", "stone", "foliage", "ground", "clothing", "fabric", "balloon", "star", "decoration", "ornament", "toy", "metallic", "shiny", "reflective"],
+             'forbidden_objects': ["knee", "hand", "glove", "hat", "cap", "camera", "microphone", "stone", "rock", "balloon", "star", "decoration", "ornament", "toy"]
          }
     }
     
@@ -54,20 +54,22 @@ MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifica
 # VLM Settings
 # [Phase 58] Simplified prompt - semantic verification only (detector handles face counting)
 # [Phase 82] Simplified Non-JSON Prompt (Robustness)
+# [Phase 89.3] Added balloon/decoration warnings
 VLM_VERIFICATION_PROMPT = """Analyze this image crop.
 Determine if it contains a REAL HUMAN FACE.
 
 OUTPUT STRICTLY IN THIS FORMAT:
 IS_FACE: YES or NO
 CONFIDENCE: 0.0 to 1.0
-OBJECT: face, hand, rock, etc.
+OBJECT: face, hand, rock, balloon, etc.
 DESCRIPTION: Short visual description.
 
 RULES:
 1. If you see a HUMAN FACE (even if blurry, side view, or partially covered), output IS_FACE: YES.
-2. If you see HANDS, KNEES, CLOTHING, ROCKS, or BACKGROUND TEXTURE, output IS_FACE: NO.
+2. If you see HANDS, KNEES, CLOTHING, ROCKS, BALLOONS, DECORATIONS, SHINY OBJECTS, or BACKGROUND TEXTURE, output IS_FACE: NO.
 3. If you see MULTIPLE PEOPLE, output IS_FACE: YES.
-4. Do NOT output markdown, JSON, or extra text.
+4. BALLOONS, TOYS, ORNAMENTS, and REFLECTIVE SURFACES are NOT faces - output IS_FACE: NO.
+5. Do NOT output markdown, JSON, or extra text.
 """
 
 # [Phase 59] AdaFace Configuration

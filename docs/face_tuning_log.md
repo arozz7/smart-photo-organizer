@@ -12,6 +12,52 @@
 
 ## Tuning History
 
+### Phase 89.3: VLM Balloon/Decoration False Positive Fix (2026-02-13)
+**Problem:**
+- VLM accepted a star balloon as a valid face (Face 533, confidence 0.987654321).
+- Example: `26777898695_60060f2dfb_o.jpg` showed 3 boxes total, 2 were correctly rejected, but 1 star balloon passed VLM verification via TTA rotation (90 degrees).
+- VLM response: `IS_FACE: YES, object: Face` with no detailed description.
+- This is NOT a Phase 89.2 override issue — VLM directly hallucinated and accepted the balloon as a face.
+- Phase 89.2 dual threshold successfully cleared most false positives (blur/body parts), but couldn't prevent VLM from accepting balloons.
+
+**Root Cause:**
+- VLM prompt didn't warn about balloons, decorations, or shiny/reflective objects.
+- `forbidden_keywords` and `forbidden_objects` didn't include balloon-related terms.
+- VLM training data likely includes party/celebration photos where balloons are near faces, causing association.
+- Shiny, reflective surfaces (metallic balloons) may trigger face-like pattern recognition.
+
+**Fix (ai-config.json + config.py):**
+- **Added forbidden_keywords**: `"balloon", "star", "decoration", "ornament", "toy", "metallic", "shiny", "reflective", "inflatable"`
+- **Added forbidden_objects**: `"balloon", "star", "decoration", "ornament", "toy"`
+- **Updated VLM prompt** (config.py):
+  - Rule 2: Added "BALLOONS, DECORATIONS, SHINY OBJECTS" to rejection list
+  - Rule 4: NEW - "BALLOONS, TOYS, ORNAMENTS, and REFLECTIVE SURFACES are NOT faces"
+  - Updated OBJECT example to include "balloon"
+
+**How It Works:**
+- VLM verification checks `obj_type` against `forbidden_objects` list (vlm.py line 553-570)
+- If VLM responds with `object: balloon` or `object: star`, forces `is_face=False`
+- Keyword check also scans description for forbidden terms (vlm.py line 616-631)
+- Both checks must fail for face to be accepted
+
+**Threshold Rationale:**
+- Balloons, toys, and decorations are common in family photos (birthdays, celebrations)
+- Shiny/metallic surfaces can create face-like reflections/patterns
+- Adding these terms is conservative but necessary to prevent obvious false positives
+
+**Outcome:**
+- Star balloons detected by VLM should now be rejected ✅
+- Decorations, toys, and ornaments explicitly forbidden ✅
+- VLM prompt warnings reduce hallucination likelihood ✅
+- Both `forbidden_keywords` (description) and `forbidden_objects` (obj_type) provide dual protection ✅
+
+**Testing:**
+- Force rescan `26777898695_60060f2dfb_o.jpg` — star balloon should be rejected
+- Check logs for: `[VLM] Categorized as .../balloon. Forcing is_face=False.`
+- Or: `[VLM] Overriding is_face=True -> False because reason mentioned non-face keyword 'balloon'`
+
+---
+
 ### Phase 89.1: Macro Close-Up Sub-Face Artifact Fix (2026-02-13)
 **Problem:**
 - Extreme macro close-up photos (e.g. `CLOSEUP.jfif`) produced 4 face boxes instead of 1.

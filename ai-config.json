@@ -37,7 +37,16 @@
             "microphone",
             "hand",
             "glove",
-            "clothing"
+            "clothing",
+            "balloon",
+            "star",
+            "decoration",
+            "ornament",
+            "toy",
+            "metallic",
+            "shiny",
+            "reflective",
+            "inflatable"
         ],
         "forbidden_objects": [
             "knee",
@@ -48,7 +57,12 @@
             "camera",
             "microphone",
             "stone",
-            "rock"
+            "rock",
+            "balloon",
+            "star",
+            "decoration",
+            "ornament",
+            "toy"
         ]
     }
 }
