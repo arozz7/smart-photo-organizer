@@ -6,6 +6,7 @@ import logger from '../logger';
 import { getDB, getDBLock } from '../db';
 import { FaceRepository } from '../data/repositories/FaceRepository';
 import { FaceService } from '../core/services/FaceService';
+import { ConfigService } from '../core/services/ConfigService';
 
 export function registerAIHandlers() {
     // Generic Proxy 
@@ -13,6 +14,8 @@ export function registerAIHandlers() {
 
     ipcMain.handle('ai:analyzeImage', async (_event, options) => {
         try {
+            console.log(`[IPC] ai:analyzeImage options keys: ${Object.keys(options).join(',')}`);
+            if (options.cleanRescan) console.log(`[IPC] cleanRescan=TRUE received!`);
             let { photoId, filePath, ...rest } = options;
 
             if (!filePath && photoId) {
@@ -34,6 +37,23 @@ export function registerAIHandlers() {
         }
     });
 
+    // [Phase 84] Force Rescan
+    ipcMain.handle('ai:forceRescan', async (_event, { photoId, filePath }) => {
+        try {
+            if (!filePath && photoId) {
+                const db = getDB();
+                const row = db.prepare('SELECT file_path FROM photos WHERE id = ?').get(photoId) as any;
+                if (row) filePath = row.file_path;
+            }
+            if (!filePath) return { success: false, error: 'Missing filePath' };
+
+            return await PhotoService.forceRescan(photoId, filePath);
+        } catch (e) {
+            logger.error(`[IPC] ai:forceRescan failed: ${e}`);
+            return { success: false, error: String(e) };
+        }
+    });
+
     // Alias for analyzeImage used by Blur Calculation and older contexts
     ipcMain.handle('ai:scanImage', async (_event, options) => {
         let { photoId, filePath, ...rest } = options;
@@ -45,7 +65,8 @@ export function registerAIHandlers() {
         if (!filePath) return { success: false, error: 'Missing filePath' };
 
         // Use FAST mode for simple blur score calc if not specified
-        return await PhotoService.analyzeImage({ photoId, filePath, scanMode: 'FAST', ...rest });
+        // Logic Update: Manual Rescan should clean up potential duplicate faces
+        return await PhotoService.analyzeImage({ photoId, filePath, scanMode: 'FAST', cleanRescan: true, ...rest });
     });
 
     ipcMain.handle('ai:generateTags', async (_event, { photoId }) => {
@@ -62,6 +83,26 @@ export function registerAIHandlers() {
         setAISettings(settings);
         pythonProvider.syncSettings(); // Use new method
         return true;
+    });
+
+    ipcMain.handle('ai:getAdvancedSettings', () => ConfigService.getAdvancedFaceSettings());
+
+    ipcMain.handle('ai:saveAdvancedSettings', (_event, settings) => {
+        ConfigService.setAdvancedFaceSettings(settings);
+        return true;
+    });
+
+    ipcMain.handle('ai:rotateImage', async (_event, options) => {
+        let { photoId, filePath, rotation } = options;
+        if (!filePath && photoId) {
+            const db = getDB();
+            const row = db.prepare('SELECT file_path FROM photos WHERE id = ?').get(photoId) as any;
+            if (row) filePath = row.file_path;
+        }
+        if (!filePath) return { success: false, error: 'Missing filePath' };
+
+        // Use PhotoService (handles RAW via ExifTool)
+        return await PhotoService.rotatePhoto(photoId, filePath, rotation);
     });
 
     ipcMain.handle('ai:downloadModel', async (_event, { modelName }) => {
@@ -582,6 +623,47 @@ export function registerAIHandlers() {
         } catch (e) {
             logger.error(`[Main] ai:debugCluster failed: ${e}`);
             return { error: String(e) };
+        }
+    });
+
+    // [Phase 56] VLM Face Verification
+    ipcMain.handle('ai:verifyFace', async (_event, { imagePath, box }) => {
+        try {
+            return await pythonProvider.verifyFace(imagePath, box);
+        } catch (e) {
+            logger.error(`[IPC] ai:verifyFace failed: ${e}`);
+            return { is_face: null, confidence: 0, error: String(e) };
+        }
+    });
+
+    // [Phase 56] Audit Low Confidence Faces
+    ipcMain.handle('face:auditLowConfidence', async () => {
+        try {
+            const updated = FaceRepository.markLowConfidenceAsSuspect();
+            logger.info(`[IPC] face:auditLowConfidence: Marked ${updated} faces as suspect`);
+            return { success: true, updated };
+        } catch (e) {
+            logger.error(`[IPC] face:auditLowConfidence failed: ${e}`);
+            return { success: false, error: String(e) };
+        }
+    });
+
+    // [Phase 56] Get Verification Status
+    ipcMain.handle('face:getVerificationStatus', async () => {
+        try {
+            const pending = FaceRepository.countSuspectFaces();
+            const { ServiceManager } = await import('../core/services/ServiceManager');
+            const service = ServiceManager.getInstance().get('BackgroundVerificationService') as any;
+            const isRunning = service?.isServiceRunning() ?? false;
+
+            return {
+                success: true,
+                pending,
+                isRunning
+            };
+        } catch (e) {
+            logger.error(`[IPC] face:getVerificationStatus failed: ${e}`);
+            return { success: false, error: String(e) };
         }
     });
 }

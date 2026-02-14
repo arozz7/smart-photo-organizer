@@ -139,18 +139,43 @@ def search_index_batch(descriptors, k=10, threshold=0.6):
 def rebuild_index(descriptors, ids):
     """
     Rebuilds the index from scratch.
+    [Phase 60] Hybrid Strategy:
+    - N < 2000: IndexFlatL2 (Brute Force, Fast start)
+    - N >= 2000: IndexIVFFlat (Clustered, Scalable to 500k+)
     """
     faiss_lib = get_faiss()
     if not faiss_lib: raise ImportError("FAISS not available")
     
     global index, id_map
     
-    new_index = faiss_lib.IndexFlatL2(512)
-    new_id_map = {}
+    n_total = len(descriptors)
+    d = 512
     
-    if descriptors:
+    # [Phase 60] Hybrid Selection Logic
+    if n_total >= 2000:
+        logger.info(f"Rebuilding Index: Using IndexIVFFlat (N={n_total})")
+        # Calc nlist (clusters): 4 * sqrt(N), min 32, max 4096
+        nlist = int(4 * np.sqrt(n_total))
+        nlist = max(32, min(nlist, 4096))
+        
+        quantizer = faiss_lib.IndexFlatL2(d)
+        new_index = faiss_lib.IndexIVFFlat(quantizer, d, nlist, faiss_lib.METRIC_L2)
+        
+        # Train
         X = np.array(descriptors).astype('float32')
         faiss_lib.normalize_L2(X)
+        logger.info(f"Training IVF Index with {nlist} clusters...")
+        new_index.train(X)
+    else:
+        logger.info(f"Rebuilding Index: Using IndexFlatL2 (N={n_total})")
+        new_index = faiss_lib.IndexFlatL2(d)
+        X = np.array(descriptors).astype('float32') if descriptors else np.empty((0, d), dtype='float32')
+        if len(X) > 0:
+            faiss_lib.normalize_L2(X)
+            
+    new_id_map = {}
+    
+    if len(X) > 0:
         new_index.add(X)
         for i, face_id in enumerate(ids):
             new_id_map[i] = face_id

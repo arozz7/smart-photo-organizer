@@ -121,6 +121,14 @@ def inject_runtime():
     return False
 
 def configure_logging(log_path=None):
+    # [Fix] Ensure stderr is UTF-8 encoded on Windows for console logging
+    if sys.platform == 'win32': 
+        if sys.stderr.encoding != 'utf-8':
+            try:
+                sys.stderr.reconfigure(encoding='utf-8')
+            except AttributeError:
+                pass
+
     handlers = [logging.StreamHandler(sys.stderr)]
     if not log_path:
         log_path = os.environ.get('LOG_PATH')
@@ -129,10 +137,12 @@ def configure_logging(log_path=None):
         if not os.path.exists(log_path):
             os.makedirs(log_path, exist_ok=True)
         from logging.handlers import RotatingFileHandler
+        # [Fix] Explicitly set encoding='utf-8' to handle special chars in filenames
         handlers.append(RotatingFileHandler(
             os.path.join(log_path, 'python.log'),
             maxBytes=5*1024*1024, # 5MB
-            backupCount=1
+            backupCount=1,
+            encoding='utf-8'
         ))
 
     # Determine log level from environment
@@ -184,7 +194,7 @@ def get_model_status(model_urls, weights_dir):
     runtime_path = os.path.join(library_path, 'ai-runtime')
     models_info["AI GPU Runtime (Torch/CUDA)"] = {
         "exists": os.path.exists(runtime_path),
-        "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.3.0/ai-runtime-win-x64.zip",
+        "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.6.0/ai-runtime-win-x64.zip",
         "size": 5800000000, # Approx 5.8GB
         "localPath": runtime_path,
         "isRuntime": True

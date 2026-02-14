@@ -20,6 +20,19 @@ export function registerDBHandlers() {
         } catch (e) { return { success: false, error: String(e) }; }
     });
 
+    // Generic SQL query handler (use sparingly, prefer specific handlers)
+    ipcMain.handle('db:query', async (_, { sql, params = [] }) => {
+        try {
+            const db = getDB();
+            const result = db.prepare(sql).all(...params);
+            return result;
+        } catch (e) {
+            console.error('[Main] db:query failed:', e);
+            return [];
+        }
+    });
+
+
     // --- SCAN ERRORS ---
     ipcMain.handle('db:getScanErrors', async () => {
         try {

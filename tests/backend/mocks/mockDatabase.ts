@@ -80,6 +80,8 @@ const TEST_SCHEMA = `
     session_folder TEXT,
     session_date TEXT,
     entity_type TEXT DEFAULT 'human',
+    verification_attempts INTEGER DEFAULT 0,
+    score REAL,
     needs_bucketing INTEGER DEFAULT 0,
     bucket_id INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -160,14 +162,15 @@ export function seedPhoto(db: Database.Database, overrides: Partial<TestPhoto> =
     };
 
     const stmt = db.prepare(`
-    INSERT INTO photos (file_path, file_name, file_size, width, height, date_taken, metadata_json, blur_score, description)
-    VALUES (@file_path, @file_name, @file_size, @width, @height, @date_taken, @metadata_json, @blur_score, @description)
+    INSERT INTO photos (file_path, file_name, file_size, width, height, date_taken, metadata_json, blur_score, description, created_at)
+    VALUES (@file_path, @file_name, @file_size, @width, @height, @date_taken, @metadata_json, @blur_score, @description, @created_at)
   `);
 
     const result = stmt.run({
         ...photo,
         blur_score: photo.blur_score ?? null,
-        description: photo.description ?? null
+        description: photo.description ?? null,
+        created_at: photo.created_at ?? new Date().toISOString()
     });
     return result.lastInsertRowid as number;
 }
@@ -215,12 +218,12 @@ export function seedFace(
     INSERT INTO faces (
         photo_id, person_id, box_json, descriptor, confidence, blur_score, 
         is_ignored, is_reference, confidence_tier, suggested_person_id, match_distance,
-        pose_yaw, pose_pitch, pose_roll, face_quality, session_folder, session_date, entity_type
+        pose_yaw, pose_pitch, pose_roll, face_quality, session_folder, session_date, entity_type, verification_attempts, score
     )
     VALUES (
         @photo_id, @person_id, @box_json, @descriptor, @confidence, @blur_score, 
         @is_ignored, @is_reference, @confidence_tier, @suggested_person_id, @match_distance,
-        @pose_yaw, @pose_pitch, @pose_roll, @face_quality, @session_folder, @session_date, @entity_type
+        @pose_yaw, @pose_pitch, @pose_roll, @face_quality, @session_folder, @session_date, @entity_type, @verification_attempts, @score
     )
   `);
 
@@ -236,7 +239,9 @@ export function seedFace(
         face_quality: face.face_quality ?? null,
         session_folder: face.session_folder ?? null,
         session_date: face.session_date ?? null,
-        entity_type: face.entity_type ?? 'human'
+        entity_type: face.entity_type ?? 'human',
+        verification_attempts: face.verification_attempts ?? 0,
+        score: face.score ?? 0.95
     });
 
     return result.lastInsertRowid as number;
@@ -260,6 +265,7 @@ interface TestPhoto {
     metadata_json: string | null;
     blur_score?: number;
     description?: string;
+    created_at?: string;
 }
 
 interface TestFace {
@@ -281,4 +287,6 @@ interface TestFace {
     session_folder?: string | null;
     session_date?: string | null;
     entity_type?: string;
+    verification_attempts?: number;
+    score?: number;
 }

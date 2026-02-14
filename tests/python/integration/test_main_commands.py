@@ -99,3 +99,60 @@ def test_analyze_image_mocked(mocker, mock_ai_modules):
     assert "tags" in response
     assert response["tags"] == ["tag1", "tag2"]
     assert response["description"] == "A photo"
+
+def test_analyze_image_with_advanced_config(mocker, mock_ai_modules):
+    # Mock image loading
+    mocker.patch('main.load_image_cv2', return_value=np.zeros((100, 100, 3), dtype=np.uint8))
+    
+    # Mock face results
+    mock_face = MagicMock()
+    mock_face.bbox = np.array([10, 10, 50, 50])
+    mock_face.det_score = 0.9
+    mock_ai_modules.get.return_value = [mock_face]
+    
+    config = {
+        "detThreshStandard": 0.88,
+        "detThreshMacro": 0.11,
+        "nmsIouThresh": 0.22,
+        "nmsIoMinThresh": 0.55,
+        "enableAreaBasedNMS": False,
+        "enableMacroLowRes": False,
+        "enableTTA": True
+    }
+    
+    cmd = {
+        "type": "analyze_image",
+        "payload": {
+            "photoId": 124,
+            "filePath": "dummy.jpg",
+            "scanMode": "FAST", # Standard mode, should use detThreshStandard
+            "config": config
+        }
+    }
+    
+    # Mock init_insightface to verify it gets called with new threshold
+    mock_init = mocker.patch('facelib.faces.init_insightface')
+    
+    # Inject config via command, but also mock CONFIG global if needed? 
+    # The code we write will pull from cmd payload, so mocking global isn't strictly necessary for *this* test
+    # unless logic falls back to it.
+    
+    # Ensure Global Config doesn't interfere (mocking main.CONFIG dict if it existed, but we patch dict in handle_command usually)
+    # Here just running handle_command
+    
+    main.handle_command(cmd)
+    
+    # Verify init was called with our custom threshold (0.88)
+    # init_insightface is called at least once.
+    assert mock_init.called
+    
+    # Check the call arguments for the detection pass
+    # We look for a call where det_thresh=0.88
+    found_call = False
+    for call in mock_init.call_args_list:
+        if call.kwargs.get('det_thresh') == 0.88:
+            found_call = True
+            break
+            
+    assert found_call, "init_insightface was not called with det_thresh=0.88"
+

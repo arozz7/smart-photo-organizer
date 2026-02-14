@@ -7,6 +7,7 @@ import { IService } from '../core/interfaces/IService';
 import { IAIProvider } from '../core/interfaces/IAIProvider';
 import { FaceService } from '../core/services/FaceService';
 import { PhotoRepository } from '../data/repositories/PhotoRepository';
+import { ConfigService } from '../core/services/ConfigService';
 import { getAISettings, getLibraryPath } from '../store'; // ConfigService later
 
 export class PythonAIProvider implements IAIProvider, IService {
@@ -14,6 +15,11 @@ export class PythonAIProvider implements IAIProvider, IService {
     private mainWindow: BrowserWindow | null = null;
     private scanPromises = new Map<number, { resolve: (v: any) => void, reject: (err: any) => void }>();
     private isShuttingDown = false;
+
+    // [Phase 65] HTTP fallback for standalone backend mode
+    private httpFallbackEnabled = false;
+    private apiBaseUrl = 'http://localhost:3001';
+    private standaloneCheckDone = false;
 
     constructor() { }
 
@@ -45,6 +51,7 @@ export class PythonAIProvider implements IAIProvider, IService {
             stdio: ['pipe', 'pipe', 'pipe'],
             env: {
                 ...process.env,
+                API_MODE: undefined, // [Phase 65] Ensure IPC mode, not HTTP
                 IS_DEV: app.isPackaged ? 'false' : 'true',
                 HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
                 LIBRARY_PATH: LIBRARY_PATH,
@@ -77,8 +84,35 @@ export class PythonAIProvider implements IAIProvider, IService {
         if (this.process.stderr) {
             this.process.stderr.on('data', (data) => {
                 const msg = data.toString();
-                if (msg.toLowerCase().includes('error')) logger.error(`[Python Error] ${msg}`);
-                else logger.info(`[Python Log] ${msg}`);
+                if (msg.toLowerCase().includes('error')) {
+                    logger.error(`[Python Error] ${msg}`);
+                } else {
+                    // Filter noisy logs
+                    if (msg.includes('Applied providers:')) {
+                        logger.debug(`[Python Debug] ${msg}`);
+                        // Extract just the providers list for INFO
+                        const providersMatch = msg.match(/Applied providers: (\[.*?\])/);
+                        if (providersMatch) {
+                            logger.info(`[Python Log] Applied providers: ${providersMatch[1]}`);
+                        } else {
+                            logger.info(`[Python Log] Applied providers (details in debug)`);
+                        }
+                    } else if (msg.includes('model ignore:')) {
+                        logger.debug(`[Python Debug] ${msg}`);
+                        // Summarize
+                        const parts = msg.split('model ignore:');
+                        const details = parts[1] || '';
+                        // Try to get model name/path
+                        logger.info(`[Python Log] Model ignored: ${details.trim().split(' ')[0]}...`);
+                    } else if (msg.includes('find model:')) {
+                        logger.debug(`[Python Debug] ${msg}`);
+                        const parts = msg.split('find model:');
+                        const details = parts[1] || '';
+                        logger.info(`[Python Log] Found model: ${details.trim().split(' ')[0]}...`);
+                    } else {
+                        logger.info(`[Python Log] ${msg}`);
+                    }
+                }
             });
         }
 
@@ -188,7 +222,87 @@ export class PythonAIProvider implements IAIProvider, IService {
         }
     }
 
+    // [Phase 65] Check if standalone backend is running (HTTP mode)
+    async checkStandaloneBackend(): Promise<boolean> {
+        if (this.standaloneCheckDone) return this.httpFallbackEnabled;
+
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 2000);
+
+            const response = await fetch(`${this.apiBaseUrl}/api/v1/health`, {
+                method: 'GET',
+                signal: controller.signal
+            });
+            clearTimeout(timeout);
+
+            if (response.ok) {
+                logger.info('[PythonAIProvider] Standalone backend detected at ' + this.apiBaseUrl);
+                this.httpFallbackEnabled = true;
+            }
+        } catch {
+            // Standalone not available - use IPC mode
+            this.httpFallbackEnabled = false;
+        }
+
+        this.standaloneCheckDone = true;
+        return this.httpFallbackEnabled;
+    }
+
+    // [Phase 65] Send HTTP request to standalone backend
+    private async sendHttpRequest(type: string, payload: any, timeoutMs: number): Promise<any> {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            // Map command types to API endpoints
+            let endpoint = '/api/v1/command';
+            let method = 'POST';
+            let body: string | undefined = JSON.stringify({ type, ...payload });
+
+            // Debug-specific endpoints
+            if (type === 'analyze_image') {
+                endpoint = '/api/v1/debug/detect-faces';
+                body = JSON.stringify({ imagePath: payload.filePath, ...payload });
+            } else if (type === 'get_system_status') {
+                endpoint = '/api/v1/status';
+                method = 'GET';
+                body = undefined;
+            } else if (type === 'health_check') {
+                endpoint = '/api/v1/health';
+                method = 'GET';
+                body = undefined;
+            } else if (type === 'update_config') {
+                endpoint = '/api/v1/debug/config';
+                body = JSON.stringify(payload.config || payload);
+            }
+
+            const response = await fetch(`${this.apiBaseUrl}${endpoint}`, {
+                method,
+                headers: body ? { 'Content-Type': 'application/json' } : undefined,
+                body,
+                signal: controller.signal
+            });
+
+            clearTimeout(timeout);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            return await response.json();
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     sendRequest(type: string, payload: any, timeoutMs = 120000): Promise<any> {
+        // [Phase 65] Use HTTP if standalone backend is running
+        if (this.httpFallbackEnabled) {
+            return this.sendHttpRequest(type, payload, timeoutMs);
+        }
+
+        // Default: IPC mode
         return new Promise((resolve, reject) => {
             const requestId = Math.floor(Math.random() * 1000000);
             this.scanPromises.set(requestId, { resolve, reject });
@@ -204,7 +318,14 @@ export class PythonAIProvider implements IAIProvider, IService {
 
     // IAIProvider Implementation
     async analyzeImage(filePath: string, options?: any): Promise<any> {
-        return this.sendRequest('analyze_image', { filePath, ...options });
+        const settings = ConfigService.getSettings();
+        // Inject advanced settings
+        const payload = {
+            filePath,
+            config: settings.advancedFace,
+            ...options
+        };
+        return this.sendRequest('analyze_image', payload);
     }
 
     async clusterFaces(faces: { id: number; descriptor: number[]; }[], eps?: number, minSamples?: number, timeoutMs = 900000): Promise<any> {
@@ -282,6 +403,109 @@ export class PythonAIProvider implements IAIProvider, IService {
                 logger.error(`[PythonAIProvider] extractAgeFromFace failed:`, e);
             }
             return { age: null, gender: null, poseYaw: null, posePitch: null, poseRoll: null, descriptorV2: null, failureReason: `exception:${msg.slice(0, 50)}` };
+        }
+    }
+
+    /**
+     * Verify if a detected region is actually a human face using VLM.
+     * Used by BackgroundVerificationService (Phase 56).
+     */
+    async verifyFace(imagePath: string, box: { x1: number; y1: number; x2: number; y2: number }): Promise<{
+        is_face: boolean | null;
+        confidence: number;
+        reason?: string;
+        suggested_metadata?: { gender?: string; age?: number };
+        error?: string;
+    }> {
+        try {
+            const result = await this.sendRequest('verify_face', {
+                imagePath,
+                box
+            }, 120000);
+
+            if (result.error) {
+                return {
+                    is_face: null,
+                    confidence: 0,
+                    error: result.error
+                };
+            }
+
+            return {
+                is_face: result.is_face ?? null,
+                confidence: result.confidence ?? 0,
+                reason: result.reason,
+                suggested_metadata: result.suggested_metadata,
+                error: result.error
+            };
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes('Shutdown')) {
+                logger.error(`[PythonAIProvider] verifyFace failed:`, e);
+            }
+            return {
+                is_face: null,
+                confidence: 0,
+                error: `exception:${msg.slice(0, 50)}`
+            };
+        }
+    }
+
+    /**
+     * [Phase 58] Re-run face detection on a specific region to count/split faces.
+     * Used when aspect ratio filter flags a potential multi-face box.
+     */
+    async detectFacesInRegion(
+        filePath: string,
+        box: { x: number; y: number; width: number; height: number },
+        options: {
+            orientation?: number;
+            detThreshold?: number;
+            detSize?: [number, number];
+        } = {}
+    ): Promise<{
+        faceCount: number;
+        faces: Array<{
+            box: { x: number; y: number; width: number; height: number };
+            score: number;
+            embedding: number[] | null;
+        }>;
+        error?: string;
+    }> {
+        try {
+            const { orientation = 1, detThreshold = 0.5, detSize } = options;
+
+            const result = await this.sendRequest('detect_faces_in_region', {
+                filePath,
+                box,
+                orientation,
+                detThreshold,
+                detSize
+            }, 30000);
+
+            if (result.error) {
+                return {
+                    faceCount: 0,
+                    faces: [],
+                    error: result.error
+                };
+            }
+
+            return {
+                faceCount: result.faceCount ?? 0,
+                faces: result.faces ?? [],
+                error: result.error
+            };
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes('Shutdown')) {
+                logger.error(`[PythonAIProvider] detectFacesInRegion failed:`, e);
+            }
+            return {
+                faceCount: 0,
+                faces: [],
+                error: `exception:${msg.slice(0, 50)}`
+            };
         }
     }
 }

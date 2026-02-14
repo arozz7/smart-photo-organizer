@@ -68,7 +68,8 @@ export default function Library() {
             description: `Force rescan (refresh metadata + AI) for ${selectedIds.size} selected photos?`,
             confirmLabel: 'Rescan Now',
             onConfirm: async () => {
-                await rescanFiles(Array.from(selectedIds))
+                console.log(`[UI] User confirmed Rescan Selected IDs: ${selectedIds.size}, Force: TRUE`);
+                await rescanFiles(Array.from(selectedIds), true) // Always force rescan for manual selection? Or allow choice? UI implies force "Rescan Now"
                 setIsSelectionMode(false)
                 setSelectedIds(new Set())
             }
@@ -99,6 +100,7 @@ export default function Library() {
                                 description: `Found ${photosToRescan.length} photos. Proceed with ${forceRescan ? 'FORCE ' : ''}Rescan?`,
                                 confirmLabel: 'Start Processing',
                                 onConfirm: async () => {
+                                    console.log(`[UI] User confirmed Rescan Filtered. Count: ${photosToRescan.length}, Force: ${forceRescan}`);
                                     await rescanFiles(photosToRescan, forceRescan);
                                 }
                             });

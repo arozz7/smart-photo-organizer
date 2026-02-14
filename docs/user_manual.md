@@ -15,6 +15,8 @@ When you first open the application, you'll need to tell it where to store its d
 3.  **Initial Scan:** Click **"Scan Library"** in the sidebar. 
     - **Scan (Default):** Runs an incremental scan, skipping files already in the database.
     - **Force Rescan (Dropdown):** Click the arrow next to the button to **Force Rescan**. This checks every file, regenerates previews if missing, and queues everything for AI analysis.
+        - **Scanning Indicator:** The button will show a spinner ("Scanning...") while the analysis is active. This process runs in the background.
+    - **RAW Support:** The app natively supports Professional RAW formats (NEF, CR2, ARW). If a RAW decoder fails (e.g., "Unsupported file format"), the system automatically falls back to using the embedded preview image, ensuring your photo is always visible and analyzable.
 
 ---
 
@@ -28,6 +30,7 @@ The **Library** is your main hub.
     -   **Enhance:** Open the photo in the AI Enhance Lab.
     -   **Delete:** Remove the photo from the database (does not delete the original file).
     -   **Re-scan:** Force the AI to re-analyze the photo.
+    -   **Force Face Scan:** In the Photo Detail view, if no faces are found, click the "Force Face Scan" button (or the magnifying glass icon) to run a high-sensitivity MACRO scan. This is useful for finding small faces or faces in difficult lighting. The button will disable and spin until the scan is complete.
 
 ---
 

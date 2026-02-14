@@ -3,7 +3,7 @@ import { PersonRepository } from '../../data/repositories/PersonRepository';
 import { PersonService } from './PersonService';
 import logger from '../../logger';
 import { getDB } from '../../db';
-import { getAISettings } from '../../store';
+import { getAISettings, ConfigService } from '../../store';
 import { FaceAnalysisService } from './FaceAnalysisService';
 
 /**
@@ -432,7 +432,69 @@ export class FaceService {
     ) {
         logger.info(`[FaceService] Processing ${faces.length} faces for photo ${photoId}`);
         const db = getDB();
-        const existingFaces = FaceRepository.getFacesByPhoto(photoId);
+        // [Phase 79 Fix] Load ALL faces including ignored ones for proper cleanup
+        // Without this, ignored faces are invisible to deduplication and get re-inserted as new faces
+        let existingFaces = FaceRepository.getFacesByPhotoIncludingIgnored(photoId) as any[];
+
+        // [Phase 79 Fix] Extract ignored faces for rejection memory filtering
+        // These faces were VLM-rejected (hands, sand, etc.) and should NOT be deleted.
+        // We'll use them to filter out new detections that overlap with them.
+        const ignoredFaces = existingFaces.filter((f: any) => f.is_ignored === 1);
+        if (ignoredFaces.length > 0) {
+            logger.info(`[FaceService] Found ${ignoredFaces.length} ignored faces (rejection memory). Will use to filter new detections.`);
+        }
+
+        // [Phase 68.5] Pre-Pass: Clean existing DB overlaps (Garbage Collection)
+        try {
+            const idsToDelete = new Set<number>();
+
+            const sortedExisting = [...existingFaces].sort((a: any, b: any) => (b.score || 0) - (a.score || 0)); // High score first
+
+            for (let i = 0; i < sortedExisting.length; i++) {
+                if (idsToDelete.has(sortedExisting[i].id)) continue;
+                for (let j = i + 1; j < sortedExisting.length; j++) {
+                    if (idsToDelete.has(sortedExisting[j].id)) continue;
+
+                    const f1: any = sortedExisting[i];
+                    const f2: any = sortedExisting[j];
+
+                    // Simple IOU Check
+                    const interX1 = Math.max(f1.box.x, f2.box.x);
+                    const interY1 = Math.max(f1.box.y, f2.box.y);
+                    const interX2 = Math.min(f1.box.x + f1.box.width, f2.box.x + f2.box.width);
+                    const interY2 = Math.min(f1.box.y + f1.box.height, f2.box.y + f2.box.height);
+                    const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
+                    const unionArea = (f1.box.width * f1.box.height) + (f2.box.width * f2.box.height) - interArea;
+                    const iou = unionArea > 0 ? interArea / unionArea : 0;
+
+                    // [Phase 68] Centralized Config for Deduplication
+                    const advancedSettings = ConfigService.getAdvancedFaceSettings();
+                    const DEDUP_THRESHOLD = advancedSettings.dedupIoUThresh ?? 0.55;
+
+                    if (iou > DEDUP_THRESHOLD) {
+                        const f1Protected = f1.is_confirmed;
+                        const f2Protected = f2.is_confirmed;
+
+                        if (f2Protected && !f1Protected) {
+                            idsToDelete.add(f1.id);
+                        } else if (!f2Protected) {
+                            idsToDelete.add(f2.id);
+                        }
+                    }
+                }
+            }
+            if (idsToDelete.size > 0) {
+                const idArray = Array.from(idsToDelete);
+                const placeholders = idArray.map(() => '?').join(',');
+                // We are not in a transaction yet, so we can run this directly.
+                // Actually, verify if getFacesByPhoto starts one? No.
+                db.prepare(`DELETE FROM faces WHERE id IN (${placeholders})`).run(...idArray);
+                existingFaces = existingFaces.filter((f: any) => !idsToDelete.has(f.id));
+                logger.info(`[FaceService] Pre-Pass: Deleted ${idsToDelete.size} overlapping garbage faces.`);
+            }
+        } catch (e) {
+            logger.error(`[FaceService] Pre-Pass failed: ${e}`);
+        }
 
         if (width && height) {
             try { db.prepare('UPDATE photos SET width = ?, height = ? WHERE id = ?').run(width, height, photoId); } catch (e) { }
@@ -482,7 +544,9 @@ export class FaceService {
             assignment_source = COALESCE(assignment_source, ?),
             is_confirmed = COALESCE(is_confirmed, ?),
             estimated_age = COALESCE(estimated_age, ?),
-            gender = COALESCE(gender, ?)
+            gender = COALESCE(gender, ?),
+            entity_type = COALESCE(entity_type, ?),
+            score = COALESCE(score, ?)
             WHERE id = ?
         `);
 
@@ -492,13 +556,25 @@ export class FaceService {
                 is_reference, confidence_tier, suggested_person_id, match_distance,
                 pose_yaw, pose_pitch, pose_roll, face_quality,
                 session_folder, session_date, needs_bucketing,
-                assignment_source, is_confirmed, estimated_age, gender
+                assignment_source, is_confirmed, estimated_age, gender,
+                entity_type, score, verification_attempts
             )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
 
         db.transaction(() => {
+            // [Phase 74] Removed duplicate deduplication - already handled in pre-pass above
+            // The duplicate code was using hardcoded iou > 0.3 threshold which was too aggressive
+            // and was re-merging faces that Python NMS had correctly kept separate
+
+            const matchedFaceIds = new Set<number>();
+            const claimedExistingIds = new Set<number>(); // [Phase 68] Track claimed matches
+
+            let faceIdx = 0;
             for (const face of faces) {
+                faceIdx++;
+                logger.info(`[FaceService] Processing face ${faceIdx}/${faces.length} - Box: x=${face.box.x.toFixed(0)}, y=${face.box.y.toFixed(0)}, w=${face.box.width.toFixed(0)}, h=${face.box.height.toFixed(0)}, score=${face.score?.toFixed(2) ?? 'N/A'}`);
+
                 // Deduplication Logic
                 let bestMatch: any = null;
                 let maxIoU = 0;
@@ -513,9 +589,60 @@ export class FaceService {
                     const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
                     const unionArea = (newBox.width * newBox.height) + (oldBox.width * oldBox.height) - interArea;
                     const iou = unionArea > 0 ? interArea / unionArea : 0;
-                    if (iou > 0.5 && iou > maxIoU) {
+
+                    // [Phase 68] Retroactive Hysteresis (Cleanup Existing Trash)
+                    // Use Centralized Deduplication Threshold
+                    const advancedSettings = ConfigService.getAdvancedFaceSettings();
+                    const DEDUP_THRESHOLD = advancedSettings.dedupIoUThresh ?? 0.55;
+
+                    if (iou > DEDUP_THRESHOLD && iou > maxIoU) {
                         maxIoU = iou;
                         bestMatch = oldFace;
+                    }
+                }
+
+                // [Phase 68] Claim Check
+                if (bestMatch) {
+                    if (claimedExistingIds.has(bestMatch.id)) {
+                        logger.info(`[FaceService] Face clash! Face ${bestMatch.id} already claimed by another detection. Treating new face as distinct.`);
+                        bestMatch = null; // Force insert as new
+                    } else {
+                        claimedExistingIds.add(bestMatch.id);
+                        matchedFaceIds.add(bestMatch.id);
+                        logger.info(`[FaceService] Face ${faceIdx} matched existing face ID ${bestMatch.id} (IoU=${maxIoU.toFixed(2)}). Will UPDATE.`);
+                    }
+                } else {
+                    logger.info(`[FaceService] Face ${faceIdx} has no match. Will INSERT as new.`);
+                }
+
+                // [Phase 79 Fix] Rejection Memory Filter
+                // Skip new detections that overlap with ignored faces (VLM-rejected non-face boxes)
+                // This prevents re-detection of hands, sand, body parts, etc. on rescans
+                if (!bestMatch) { // Only check for new faces, not updates
+                    let overlapsWithIgnored = false;
+                    for (const ignoredFace of ignoredFaces) {
+                        const ignoredBox = ignoredFace.box;
+                        const newBox = face.box;
+                        const interX1 = Math.max(newBox.x, ignoredBox.x);
+                        const interY1 = Math.max(newBox.y, ignoredBox.y);
+                        const interX2 = Math.min(newBox.x + newBox.width, ignoredBox.x + ignoredBox.width);
+                        const interY2 = Math.min(newBox.y + newBox.height, ignoredBox.y + ignoredBox.height);
+                        const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
+                        const newArea = newBox.width * newBox.height;
+                        const ignoredArea = ignoredBox.width * ignoredBox.height;
+                        const minArea = Math.min(newArea, ignoredArea);
+                        const ioMin = minArea > 0 ? interArea / minArea : 0;
+
+                        // If >50% overlap with ignored face, skip this detection
+                        if (ioMin > 0.5) {
+                            logger.info(`[FaceService] SKIPPING face ${faceIdx} - overlaps with ignored face ${ignoredFace.id} (IoMin=${ioMin.toFixed(2)}). Rejection memory working.`);
+                            overlapsWithIgnored = true;
+                            break;
+                        }
+                    }
+
+                    if (overlapsWithIgnored) {
+                        continue; // Skip this face entirely
                     }
                 }
 
@@ -540,7 +667,9 @@ export class FaceService {
                 let matchDistance = bestMatch ? bestMatch.match_distance : null;
 
                 // Track Source & Confirmation (Phase 3)
-                let assignmentSource = bestMatch ? bestMatch.assignment_source : 'manual';
+                // [BUG FIX] Default source should be 'ai_scan', NOT 'manual'. 
+                // Only inherit if updating existing.
+                let assignmentSource = bestMatch ? bestMatch.assignment_source : 'ai_scan';
                 let isConfirmed = bestMatch ? bestMatch.is_confirmed : 0;
 
                 if (matchData) {
@@ -602,11 +731,47 @@ export class FaceService {
                         isConfirmed,
                         face.estimatedAge ?? null, // Age-Based ERA Categorization
                         face.gender ?? null,       // Age-Based ERA Categorization
+                        face.entityType ?? 'human', // Phase 56: VLM Verification
+                        face.score ?? null,         // Phase 56: Detection score
                         bestMatch.id
                     );
                     finalId = bestMatch.id;
                 } else {
-                    // Insert
+                    // [Phase 90] 3-Tier Detection Score System
+                    // Reject (<0.40), Verify/suspect (0.40-0.69), Accept/human (>=0.70)
+                    const advancedSettings = ConfigService.getAdvancedFaceSettings();
+                    const REJECT_FLOOR = advancedSettings.scoreThresholdReject ?? 0.40;
+                    const ACCEPT_CEILING = advancedSettings.scoreThresholdAccept ?? 0.70;
+
+                    const detectionScore = face.score ?? 0.95;
+
+                    if (detectionScore < REJECT_FLOOR) {
+                        logger.info(`[FaceService] REJECT face ${faceIdx} — score ${detectionScore.toFixed(2)} < ${REJECT_FLOOR}`);
+                        continue;
+                    }
+
+                    // Check box characteristics for multi-face suspect flagging
+                    const box = face.box;
+                    const boxWidth = box.width || 0;
+                    const boxHeight = box.height || 0;
+                    const aspectRatio = boxHeight > 0 ? boxWidth / boxHeight : 1.0;
+                    const boxArea = boxWidth * boxHeight;
+                    const isLargeBox = boxArea > 4000000;
+                    const isUnusualAspect = aspectRatio > 1.6 || aspectRatio < 0.6;
+
+                    // Accept (>= 0.70) → 'human', Verify (0.40-0.69) → 'suspect'
+                    // Also flag large/unusual boxes as suspect for multi-face split checking
+                    let entityType: string;
+                    if (detectionScore >= ACCEPT_CEILING && !isLargeBox && !isUnusualAspect) {
+                        entityType = 'human';
+                    } else {
+                        entityType = 'suspect';
+                    }
+
+                    if (isLargeBox || isUnusualAspect) {
+                        logger.info(`[FaceService] Flagged face as suspect: ${isLargeBox ? `large box (${boxArea.toLocaleString()}px)` : ''} ${isUnusualAspect ? `unusual aspect (${aspectRatio.toFixed(2)})` : ''}`);
+                    }
+
                     const insertParams = [
                         photoId,
                         personId ?? null,
@@ -627,7 +792,10 @@ export class FaceService {
                         assignmentSource, // assignment_source
                         isConfirmed,      // is_confirmed
                         face.estimatedAge ?? null, // Age-Based ERA Categorization
-                        face.gender ?? null        // Age-Based ERA Categorization
+                        face.gender ?? null,       // Age-Based ERA Categorization
+                        entityType,                // Phase 56: VLM Verification
+                        detectionScore,            // Phase 56: Detection score
+                        0                          // Phase 56: verification_attempts
                     ];
 
                     // DEBUG: Log parameter count and types
@@ -657,30 +825,38 @@ export class FaceService {
                     facesForFaiss.push({ id: finalId, descriptor: face.descriptor });
                 }
             }
-        })();
 
-        if (facesForFaiss.length > 0 && aiProvider) {
-            aiProvider.addToIndex(facesForFaiss);
-        }
+            // [Phase 67] Cleanup: Prune orphans (Faces in DB but not in this Scan)
+            // Safety: Only delete if NOT confirmed. (Manual is NOT protected if unconfirmed)
+            const orphanFaces = existingFaces.filter((f: any) => !matchedFaceIds.has(f.id));
+            if (orphanFaces.length > 0) {
+                const pruneCandidates = orphanFaces.filter((f: any) => !f.is_confirmed);
+
+                if (pruneCandidates.length > 0) {
+                    const pruneIds = pruneCandidates.map((f: any) => f.id);
+                    logger.info(`[FaceService] Pruning ${pruneIds.length} orphan faces (Ghost/Trash) involved in rescan.`);
+
+                    const placeholders = pruneIds.map(() => '?').join(',');
+                    try {
+                        db.prepare(`DELETE FROM faces WHERE id IN (${placeholders})`).run(...pruneIds);
+                    } catch (e) {
+                        logger.error(`[FaceService] Pruning failed: ${e}`);
+                    }
+                }
+
+                // Log kept orphans (Manual/Confirmed)
+                const keptCount = orphanFaces.length - pruneCandidates.length;
+                if (keptCount > 0) {
+                    logger.info(`[FaceService] Kept ${keptCount} orphan faces (Protected: Confirmed/High-Score Manual).`);
+                }
+            }
+        })();
 
         // We replaced step `this.autoAssignFaces` with the inline logic above.
         // However, we might want to run re-calcs if we assigned anything.
-        // Or we can leave autoAssignFaces for cleanup?
-        // Note: autoAssignFaces does ITERATIVE assignment (multi-pass).
-        // Our inline logic is SINGLE PASS.
-        // For scan time, single pass against existing library is usually enough.
-        // The iterative pass helps when uploading a huge batch of new people at once.
-        // But for steady state, single pass is fine.
-
-        // If we assigned faces, we should probably update person means eventually.
-        // For simplicity/performance, we might skip rigorous recalc on every single photo scan.
-        // Triggering it periodically or relying on user action is safer.
-        // BUT `autoAssignFaces` did it.
-        // Let's log success.
-        // Logic complete.
-        if (assignedCount > 0) logger.info(`[FaceService] Auto - assigned ${assignedCount} faces via scan - time logic.`);
-
-        // Logic complete.
+        if (assignedCount > 0) {
+            logger.info(`[FaceService] Auto-assigned ${assignedCount} faces via scan-time logic.`);
+        }
     }
 }
 

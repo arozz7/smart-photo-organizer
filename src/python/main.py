@@ -12,6 +12,20 @@ from io import BytesIO
 import base64
 import requests
 
+# [Fix] Force UTF-8 for IPC on Windows (handles special chars like '☆')
+if sys.platform == 'win32':
+    if sys.stdin.encoding != 'utf-8':
+        try:
+            sys.stdin.reconfigure(encoding='utf-8')
+        except AttributeError:
+            # Python < 3.7 fallback or non-text stream
+            pass
+    if sys.stdout.encoding != 'utf-8':
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except AttributeError:
+            pass
+
 # Configure PyTorch Allocator for Windows to prevent expandable_segments warning
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:False"
 
@@ -21,6 +35,7 @@ import facelib.vlm as vlm
 import facelib.utils as utils
 import facelib.vector_store as vector_store
 import facelib.image_ops as image_ops
+import facelib.adaface as adaface  # [Phase 59] AdaFace for low-quality faces
 import enhance # Local module
 
 # Configure logging
@@ -34,6 +49,14 @@ utils.inject_runtime()
 torch_lib = utils.get_torch()
 # faces.init_insightface() # Lazy init in command
 vector_store.init_faiss()
+
+# [Phase 59] Initialize AdaFace (optional, graceful fallback if model missing)
+logger.info("[Startup] Initializing AdaFace model...")
+adaface_loaded = adaface.init_adaface()
+if adaface_loaded:
+    logger.info("[Startup] AdaFace model loaded successfully")
+else:
+    logger.warning("[Startup] AdaFace model not available, using ArcFace only")
 
 # --- HELPER FUNCTIONS (Specific to Orchestration/API) ---
 
@@ -50,10 +73,17 @@ def load_image_cv2(file_path):
         return _img_cache["img"]
         
     try:
+        ext = os.path.splitext(file_path)[1].lower()
+        is_raw = ext in ['.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.kdc', '.mrw']
         from PIL import Image, ImageFile, ImageOps as PILImageOps
         ImageFile.LOAD_TRUNCATED_IMAGES = True
         
         try:
+            # PIL often loads the embedded JPEG preview for RAWs, which is low res.
+            # Force RawPy for legitimate RAW files.
+            if is_raw:
+                 raise Exception("Force RawPy for RAW file")
+
             pil_img = Image.open(file_path)
             pil_img = PILImageOps.exif_transpose(pil_img)
             rgb_img = np.array(pil_img)
@@ -65,6 +95,12 @@ def load_image_cv2(file_path):
                  
             img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
             
+            # Check if PIL returned a tiny thumbnail (common with some RAW loaders)
+            h, w = img.shape[:2]
+            if is_raw and max(h, w) < 1000:
+                 logger.warning(f"PIL loaded small preview ({w}x{h}) for RAW. Retrying with RawPy.")
+                 raise Exception("PIL thumbnail detected")
+            
             # Update cache
             _img_cache["path"] = file_path
             _img_cache["img"] = img
@@ -72,17 +108,44 @@ def load_image_cv2(file_path):
             
             return img
         except Exception as e:
-            logger.warning(f"PIL Load failed: {e}. Trying RawPy...")
-            with rawpy.imread(file_path) as raw:
-                rgb = raw.postprocess(use_camera_wb=True)
-                img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            # logger.warning(f"PIL Load failed: {e}. Trying RawPy...")
+            try:
+                with rawpy.imread(file_path) as raw:
+                    # RawPy postprocess is high quality
+                    rgb = raw.postprocess(use_camera_wb=True)
+                    img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+                    
+                    # Update cache
+                    _img_cache["path"] = file_path
+                    _img_cache["img"] = img
+                    _img_cache["timestamp"] = time.time()
+                    
+                    return img
+            except Exception as raw_e:
+                logger.warning(f"RawPy failed to load {os.path.basename(file_path)}: {raw_e}. Falling back to standard PIL (Embedded Preview).")
                 
-                # Update cache
-                _img_cache["path"] = file_path
-                _img_cache["img"] = img
-                _img_cache["timestamp"] = time.time()
-                
-                return img
+                # FINAL FALLBACK: Try to load whatever PIL can find (usually embedded JPEG)
+                # We simply repeat the PIL logic but WITHOUT the 'is_raw' check/raise
+                try:
+                    pil_img = Image.open(file_path)
+                    pil_img = PILImageOps.exif_transpose(pil_img)
+                    rgb_img = np.array(pil_img)
+                    
+                    if len(rgb_img.shape) == 2:
+                        rgb_img = cv2.cvtColor(rgb_img, cv2.COLOR_GRAY2RGB)
+                    elif rgb_img.shape[2] == 4:
+                        rgb_img = cv2.cvtColor(rgb_img, cv2.COLOR_RGBA2RGB)
+                        
+                    img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
+                    
+                    # Update cache
+                    _img_cache["path"] = file_path
+                    _img_cache["img"] = img
+                    _img_cache["timestamp"] = time.time()
+                    return img
+                except Exception as final_e:
+                    logger.error(f"Fatal: All loading methods failed for {file_path}: {final_e}")
+                    return None
     except Exception as e:
         logger.error(f"Failed to load image: {e}")
         return None
@@ -130,7 +193,7 @@ def handle_command(command):
             runtime_exists = os.path.exists(os.path.join(os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer')), 'ai-runtime'))
             
             # Use dynamic URL if provided, otherwise default (though default might be outdated if version mismatch)
-            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.3.0/ai-runtime-win-x64.zip")
+            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.6.0/ai-runtime-win-x64.zip")
             
             models_info["AI GPU Runtime (Torch/CUDA)"] = {
                 "exists": runtime_exists,
@@ -273,22 +336,35 @@ def handle_command(command):
                         if thumb and thumb.format == rawpy.ThumbFormat.JPEG:
                              # Use embedded JPEG
                              logger.debug("Using embedded RAW thumbnail")
-                             pil_img = Image.open(BytesIO(thumb.data))
-                             # Recalculate scale if thumb is smaller
-                             if pil_img.width != raw_w or pil_img.height != raw_h:
-                                 # Aspect ratio check? Just naive scale
-                                 raw_scale_x = pil_img.width / raw_w
-                                 raw_scale_y = pil_img.height / raw_h
-                                 logger.debug(f"Applied RAW Scale: {raw_scale_x:.3f}, {raw_scale_y:.3f}")
-                                 
+                             candidate_img = Image.open(BytesIO(thumb.data))
+                             
+                             # [Phase 53] Quality Check: Reject small embedded thumbs
+                             if max(candidate_img.size) < 1200:
+                                 logger.debug(f"Embedded thumbnail too small ({candidate_img.size}), forcing full RAW conversion.")
+                                 pil_img = None # Trigger fallback
+                             else:
+                                 pil_img = candidate_img
+                                 # Recalculate scale if thumb is smaller
+                                 if pil_img.width != raw_w or pil_img.height != raw_h:
+                                     raw_scale_x = pil_img.width / raw_w
+                                     raw_scale_y = pil_img.height / raw_h
+                                     logger.debug(f"Applied RAW Scale: {raw_scale_x:.3f}, {raw_scale_y:.3f}")
+                                     
                         elif thumb and thumb.format == rawpy.ThumbFormat.BITMAP:
                              # Use embedded Bitmap
                              logger.debug("Using embedded RAW bitmap thumbnail")
-                             pil_img = Image.fromarray(thumb.data)
-                             if pil_img.width != raw_w or pil_img.height != raw_h:
-                                 raw_scale_x = pil_img.width / raw_w
-                                 raw_scale_y = pil_img.height / raw_h
+                             candidate_img = Image.fromarray(thumb.data)
+                             if max(candidate_img.size) < 1200:
+                                 pil_img = None
+                             else:
+                                 pil_img = candidate_img
+                                 if pil_img.width != raw_w or pil_img.height != raw_h:
+                                     raw_scale_x = pil_img.width / raw_w
+                                     raw_scale_y = pil_img.height / raw_h
                         else:
+                             pil_img = None
+
+                        if pil_img is None:
                              # Fallback to full conversion (Slow)
                              logger.debug("Full RAW conversion (slow)")
                              rgb = raw.postprocess(use_camera_wb=True, bright=1.0, user_sat=None) # bright=1.0 default
@@ -309,10 +385,12 @@ def handle_command(command):
                 if expects_portrait and is_landscape_dims:
                     # logger.debug(f"Thumb Gen: Orientation {orientation} (Portrait) but Image is {w}x{h}. Rotating.")
                     if orientation == 6:
-                        pil_img = pil_img.rotate(-90, expand=True) # -90 is CW
+                        # Orientation 6 (Right Top) -> Needs 90 CW to be Upright
+                        pil_img = pil_img.rotate(-90, expand=True) 
                         swapped_dims = True
                     elif orientation == 8:
-                        pil_img = pil_img.rotate(90, expand=True) # 90 CCW
+                        # Orientation 8 (Left Bottom) -> Needs 90 CCW (270 CW) to be Upright
+                        pil_img = pil_img.rotate(90, expand=True)
                         swapped_dims = True
                 elif orientation == 3:
                      pil_img = pil_img.rotate(180, expand=True)
@@ -402,297 +480,16 @@ def handle_command(command):
             response = {"success": False, "error": str(e)}
 
     elif cmd_type == 'analyze_image':
+        # [Phase 57.5] Refactored to commands/scan.py for file size compliance
+        from commands import scan
+        scan.set_config(CONFIG)  # Pass global config
+        response = scan.analyze_image(payload, load_image_cv2, req_id)
 
-        t_start = time.time()
-        
-        photo_id = payload.get('photoId')
-        file_path = payload.get('filePath')
-        scan_mode = payload.get('scanMode', 'FAST')
-        enable_vlm = payload.get('enableVLM', False)
-        orientation = payload.get('orientation', 1) # Default 1 (Normal)
-        
-        metrics = {'load': 0, 'scan': 0, 'tag': 0, 'total': 0}
-        
-        logger.debug(f"Analyzing {photo_id} (Mode: {scan_mode}, VLM: {enable_vlm}, Ori: {orientation})...")
-        
-        # 1. Image Loading
-        t_load_start = time.time()
-        img = load_image_cv2(file_path)
+    elif cmd_type == 'detect_faces_in_region':
+        # [Phase 58] Detector-based multi-face verification
+        from commands import scan
+        response = scan.detect_faces_in_region(payload, load_image_cv2, req_id)
 
-        if img is None:
-            response = {"type": "analysis_result", "photoId": photo_id, "error": f"Image Load Failed", "scanMode": scan_mode}
-            return response 
-        
-        
-        # 2. Conditional Orientation Correction
-        # To avoid double-rotation (if PIL worked or RawPy flipped it), check dimensions.
-        h, w = img.shape[:2]
-        is_landscape_dims = w > h
-        is_portrait_dims = h > w
-        
-        # Orientation 6 (90 CW) or 8 (270 CW) implies Portrait final result
-        expects_portrait = (orientation == 6 or orientation == 8)
-        
-        if expects_portrait and is_landscape_dims:
-            logger.info(f"Orientation {orientation} (Portrait) but Image is {w}x{h} (Landscape). Applying Rotation.")
-            if orientation == 6:
-                img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-            elif orientation == 8:
-                img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        elif orientation == 3: # 180 Rotation (Landscape -> Landscape)
-             # Harder to detect by dims alone, but 180 usually means upsidedown. 
-             # We assume if explicit 180 passed, we should rotate 180 unless we have strong reason not to.
-             # But for safety, let's trust the flag if it's 180.
-             img = cv2.rotate(img, cv2.ROTATE_180)
-             logger.info("Applied Manual Rotation: 180")
-             
-        # Re-calc dimensions
-        h, w = img.shape[:2]
-
-        metrics['load'] = (time.time() - t_load_start) * 1000
-        
-        # 2. Face Scanning
-        t_scan_start = time.time()
-        scan_results = []
-        global_blur = 0.0
-        
-        try:
-            if not faces.app: faces.init_insightface()
-            
-            # Param Selection
-            target_size = (1280, 1280)
-            det_thresh = faces.DET_THRESH
-            if scan_mode == 'BALANCED':
-                target_size = (640, 640)
-                det_thresh = 0.4
-            elif scan_mode == 'MACRO':
-                target_size = (1280, 1280) 
-                # Respect user setting for strictness, but use high-res
-                det_thresh = faces.DET_THRESH
-                
-            faces.init_insightface(providers=faces.CURRENT_PROVIDERS, allowed_modules=faces.ALLOWED_MODULES, det_size=target_size, det_thresh=det_thresh)
-            
-            f_results = faces.app.get(img)
-            
-            # --- Global Quality (VoL) ---
-            try:
-                 h, w = img.shape[:2]
-                 if max(h, w) > 1024:
-                     s = 1024 / max(h, w)
-                     small = cv2.resize(img, (int(w*s), int(h*s)))
-                 else:
-                     small = img
-                 global_blur = image_ops.estimate_blur(small)
-            except: pass
-            
-            # Process Faces
-            for face in f_results:
-                bbox = face.bbox.astype(int).tolist()
-                kps = face.kps if hasattr(face, 'kps') else None
-                expanded = image_ops.smart_crop_landmarks(bbox, kps, img.shape[1], img.shape[0])
-                
-                # Check blur
-                x1, y1, x2, y2 = bbox
-                face_crop = img[max(0,y1):min(img.shape[0],y2), max(0,x1):min(img.shape[1],x2)]
-                f_blur = image_ops.estimate_blur(face_crop, target_size=112)
-                f_ten = image_ops.estimate_sharpness_tenengrad(face_crop, target_size=112)
-                
-                # Extract Pose Data (Phase 5: Challenging Face Recognition)
-                pose_yaw, pose_pitch, pose_roll = None, None, None
-                if hasattr(face, 'pose') and face.pose is not None:
-                    try:
-                        # InsightFace pose is [pitch, yaw, roll] in degrees
-                        pose = face.pose
-                        pose_pitch = float(pose[0]) if len(pose) > 0 else None
-                        pose_yaw = float(pose[1]) if len(pose) > 1 else None
-                        pose_roll = float(pose[2]) if len(pose) > 2 else None
-                    except (TypeError, IndexError):
-                        pass  # Pose data not available, keep as None
-                
-                # Calculate Face Quality Score (Phase 5)
-                face_quality = None
-                if f_blur is not None:
-                    blur_factor = min(f_blur / 100.0, 1.0)
-                    pose_factor = 0.5  # Default if no pose
-                    if pose_yaw is not None:
-                        # 0° = 1.0 (frontal), 90° = 0.0 (profile)
-                        pose_factor = max(0, 1.0 - (abs(pose_yaw) / 90.0))
-                    det_score = float(face.det_score) if hasattr(face, 'det_score') else 0.5
-                    face_size = bbox[2] - bbox[0]  # width
-                    size_factor = min(face_size / 200.0, 1.0)
-                    
-                    # Weighted average
-                    face_quality = (blur_factor * 0.3 + pose_factor * 0.3 + det_score * 0.2 + size_factor * 0.2)
-                
-                # Thresholds
-                vol_th = CONFIG.get('faceBlurThreshold', 20.0)
-                ten_th = 100.0
-                if scan_mode == 'MACRO':
-                    vol_th = 5.0
-                    ten_th = 25.0
-                    
-                if (f_blur < vol_th) and (f_ten < ten_th):
-                    continue # Skip blurry
-                
-                scan_results.append({
-                    "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
-                    "descriptor": face.embedding.tolist() if hasattr(face, 'embedding') else [],
-                    "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
-                    "blurScore": float(f_blur),
-                    "poseYaw": pose_yaw,
-                    "posePitch": pose_pitch,
-                    "poseRoll": pose_roll,
-                    "faceQuality": face_quality,
-                    # Age-Based ERA Categorization: Extract age and gender from genderage module
-                    "estimatedAge": int(face.age) if hasattr(face, 'age') and face.age is not None else None,
-                    "gender": "M" if hasattr(face, 'sex') and face.sex == "M" else ("F" if hasattr(face, 'sex') and face.sex == "F" else None)
-                })
-
-            
-            logger.info(f"[Face] Initial scan found {len(f_results)} faces.")
-                
-        except Exception as e:
-            logger.error(f"Analysis (Scan) Error: {e}")
-
-        # Test Time Augmentation (TTA)
-        if scan_mode == 'MACRO':
-            logger.info("[TTA] MACRO mode: Initiating Rotation Augmentation (TTA)...")
-            
-            for rot_angle in [90, 180, 270]:
-                try:
-                    logger.info(f"[TTA] Trying rotation {rot_angle}...")
-                    rotated_img = None
-                    if rot_angle == 90: rotated_img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-                    elif rot_angle == 180: rotated_img = cv2.rotate(img, cv2.ROTATE_180)
-                    elif rot_angle == 270: rotated_img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-                    else: continue
-
-                    faces.init_insightface(providers=faces.CURRENT_PROVIDERS, allowed_modules=faces.ALLOWED_MODULES, det_size=target_size, det_thresh=det_thresh) # Re-init params
-                    r_faces = faces.app.get(rotated_img)
-
-                    if len(r_faces) > 0:
-                        orig_h, orig_w = img.shape[:2]
-                        # ... Transformation Logic (kept inline for now as it's TTA specific) ...
-                        # Simplified for brevity in this tool call, but copying Full Logic from original
-                        for face in r_faces:
-                            bbox = face.bbox.astype(int).tolist()
-                            rx1, ry1, rx2, ry2 = bbox
-                            nx1, ny1, nx2, ny2 = 0, 0, 0, 0
-                            
-                            if rot_angle == 90: # 90 CW
-                                pts = [(rx1, ry1), (rx2, ry2), (rx1, ry2), (rx2, ry1)]
-                                orig_pts = [(py, orig_h - px) for px, py in pts]
-                            elif rot_angle == 180:
-                                pts = [(rx1, ry1), (rx2, ry2)]
-                                orig_pts = [(orig_w - px, orig_h - py) for px, py in pts]
-                            elif rot_angle == 270: # 90 CCW
-                                pts = [(rx1, ry1), (rx2, ry2), (rx1, ry2), (rx2, ry1)]
-                                orig_pts = [(orig_w - py, px) for px, py in pts]
-                            
-                            oxs = [p[0] for p in orig_pts]
-                            oys = [p[1] for p in orig_pts]
-                            nx1, nx2 = min(oxs), max(oxs)
-                            ny1, ny2 = min(oys), max(oys)
-                            nx1, nx2 = max(0, nx1), min(orig_w, nx2)
-                            ny1, ny2 = max(0, ny1), min(orig_h, ny2)
-
-                            expanded = image_ops.smart_crop_landmarks([nx1, ny1, nx2, ny2], None, orig_w, orig_h)
-                            face_crop = img[int(ny1):int(ny2), int(nx1):int(nx2)]
-                            f_blur = image_ops.estimate_blur(face_crop, target_size=112)
-                            
-
-                            pose_yaw, pose_pitch, pose_roll = None, None, None
-                            if hasattr(face, 'pose') and face.pose is not None:
-                                try:
-                                    pose = face.pose
-                                    pose_pitch = float(pose[0]) if len(pose) > 0 else None
-                                    pose_yaw = float(pose[1]) if len(pose) > 1 else None
-                                    pose_roll = float(pose[2]) if len(pose) > 2 else None
-                                except (TypeError, IndexError): pass
-
-                            face_quality = None
-                            if f_blur is not None:
-                                blur_factor = min(f_blur / 100.0, 1.0)
-                                pose_factor = 0.5 
-                                if pose_yaw is not None:
-                                    pose_factor = max(0, 1.0 - (abs(pose_yaw) / 90.0))
-                                det_score = float(face.det_score) if hasattr(face, 'det_score') else 0.5
-                                face_size = nx2 - nx1 
-                                size_factor = min(face_size / 200.0, 1.0)
-                                face_quality = (blur_factor * 0.3 + pose_factor * 0.3 + det_score * 0.2 + size_factor * 0.2)
-
-                            scan_results.append({
-                                "box": {"x": expanded[0], "y": expanded[1], "width": expanded[2]-expanded[0], "height": expanded[3]-expanded[1]},
-                                "descriptor": face.embedding.tolist() if hasattr(face, 'embedding') else [],
-                                "score": float(face.det_score) if hasattr(face, 'det_score') else 0.0,
-                                "blurScore": float(f_blur),
-                                "poseYaw": pose_yaw,
-                                "posePitch": pose_pitch,
-                                "poseRoll": pose_roll,
-                                "faceQuality": face_quality,
-                                "rotation_fix": rot_angle,
-                                # Age-Based ERA Categorization
-                                "estimatedAge": int(face.age) if hasattr(face, 'age') and face.age is not None else None,
-                                "gender": "M" if hasattr(face, 'sex') and face.sex == "M" else ("F" if hasattr(face, 'sex') and face.sex == "F" else None)
-                            })
-
-                except Exception as e:
-                    logger.error(f"[TTA] Rotation {rot_angle} failed: {e}")
-        
-        # NMS (De-Duplicate)
-        if len(scan_results) > 1:
-            unique_faces = []
-            scan_results.sort(key=lambda x: x['score'], reverse=True)
-            for f in scan_results:
-                box_a = f['box']
-                is_dup = False
-                for existing in unique_faces:
-                    box_b = existing['box']
-                    x1 = max(box_a['x'], box_b['x'])
-                    y1 = max(box_a['y'], box_b['y'])
-                    x2 = min(box_a['x'] + box_a['width'], box_b['x'] + box_b['width'])
-                    y2 = min(box_a['y'] + box_a['height'], box_b['y'] + box_b['height'])
-                    inter_area = max(0, x2 - x1) * max(0, y2 - y1)
-                    area_a = box_a['width'] * box_a['height']
-                    area_b = box_b['width'] * box_b['height']
-                    iou = inter_area / float(area_a + area_b - inter_area)
-                    if iou > 0.5: 
-                        is_dup = True
-                        break
-                if not is_dup: unique_faces.append(f)
-            scan_results = unique_faces
-        
-        metrics['scan'] = (time.time() - t_scan_start) * 1000
-        logger.info(f"[Face] Analysis complete. Total unique faces: {len(scan_results)}")
-        
-        # 3. VLM Tagging
-        t_tag_start = time.time()
-        tags_result = []
-        description_result = ""
-        
-        if enable_vlm:
-            try:
-                if not vlm.vlm_model: vlm.init_vlm()
-                if vlm.vlm_model:
-                     description_result, tags_result = vlm.generate_captions(file_path)
-            except Exception as e:
-                logger.error(f"Analysis (VLM) Error: {e}")
-        
-        metrics['tag'] = (time.time() - t_tag_start) * 1000
-        metrics['total'] = (time.time() - t_start) * 1000
-        
-        response = {
-            "type": "analysis_result",
-            "photoId": photo_id,
-            "faces": scan_results,
-            "tags": tags_result,
-            "description": description_result,
-            "metrics": metrics,
-            "scanMode": scan_mode,
-            "globalBlurScore": float(global_blur),
-            "width": img.shape[1],
-            "height": img.shape[0]
-        }
 
     elif cmd_type == 'generate_tags':
         photo_id = payload.get('photoId')
@@ -776,341 +573,39 @@ def handle_command(command):
             response = {"type": "enhance_result", "success": False, "error": str(e), "reqId": req_id}
 
     elif cmd_type == 'download_model':
-        model_name = payload.get('modelName')
-        logger.info(f"Downloading model: {model_name}")
-        try:
-            def progress_callback(current, total):
-                if total > 0:
-                    pct = (current / total) * 100
-                    print(json.dumps({
-                        "type": "download_progress",
-                        "modelName": model_name,
-                        "current": current,
-                        "total": total,
-                        "percent": pct,
-                        "reqId": req_id
-                    }))
-                    sys.stdout.flush()
-
-            if "AI GPU Runtime" in model_name:
-                import zipfile
-                temp_zip = os.path.join(tempfile.gettempdir(), "ai-runtime.zip")
-                if os.path.exists(temp_zip):
-                    try: os.remove(temp_zip)
-                    except: pass
-
-                # Dynamic URL support
-                base_url = payload.get('url')
-                if not base_url:
-                    # Fallback default if not provided (should accept version from IPC though)
-                    # Note: We expect IPC to provide versioned URL now.
-                    base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.5.0/ai-runtime-win-x64.zip"
-
-                # Check if this is a custom override (likely single file) or standard release (multi-part)
-                # Heuristic: Try .001 first. If 404, fallback to single file.
-                
-                parts_downloaded = []
-                part_num = 1
-                multi_part_mode = False
-                
-                # Try .001 first
-                first_part_url = f"{base_url}.001"
-                logger.info(f"Checking for multi-part existence: {first_part_url}")
-                
-                try:
-                    # quick head/get check or just try download
-                    # Since we don't have a dedicated HEAD method in 'enhance' easily exposed, 
-                    # let's try to download part 1.
-                    part_1_path = f"{temp_zip}.001"
-                    if os.path.exists(part_1_path): os.remove(part_1_path)
-                    
-                    try:
-                        # Attempt download part 1
-                        logger.info(f"Attempting download of Part 1: {first_part_url}")
-                        saved_p1 = enhance.enhancer.download_model_at_url(first_part_url, part_1_path, progress_callback)
-                        parts_downloaded.append(saved_p1)
-                        multi_part_mode = True
-                    except Exception as e:
-                        logger.info(f"Part 1 not found ({e}). Assuming single file.")
-                        multi_part_mode = False
-                
-                except:
-                    multi_part_mode = False
-                
-                if multi_part_mode:
-                    # Continue downloading subsequent parts
-                    while True:
-                        part_num += 1
-                        next_url = f"{base_url}.{part_num:03d}"
-                        next_part_path = f"{temp_zip}.{part_num:03d}"
-                        if os.path.exists(next_part_path): os.remove(next_part_path)
-                        
-                        logger.info(f"Downloading Part {part_num}: {next_url}")
-                        try:
-                            saved_pn = enhance.enhancer.download_model_at_url(next_url, next_part_path, progress_callback)
-                            parts_downloaded.append(saved_pn)
-                        except Exception:
-                            logger.info(f"Part {part_num} not found. Finished downloading parts.")
-                            break
-                    
-                    # Concatenate
-                    logger.info(f"Concatenating {len(parts_downloaded)} parts...")
-                    with open(temp_zip, 'wb') as outfile:
-                        for p_path in parts_downloaded:
-                            with open(p_path, 'rb') as infile:
-                                import shutil
-                                shutil.copyfileobj(infile, outfile)
-                            try: os.remove(p_path) # Cleanup part
-                            except: pass
-                            
-                else:
-                    # Single file mode (Override or legacy)
-                    logger.info(f"Downloading single file: {base_url}")
-                    enhance.enhancer.download_model_at_url(base_url, temp_zip, progress_callback)
-
-                
-                logger.info("Extracting AI Runtime...")
-                # Signal extraction start to UI
-                print(json.dumps({
-                    "type": "download_progress",
-                    "modelName": model_name,
-                    "status": "extracting",
-                    "reqId": req_id
-                }))
-                sys.stdout.flush()
-                
-                with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
-                    zip_ref.extractall(utils.AI_RUNTIME_PATH)
-                
-                if os.path.exists(temp_zip): os.remove(temp_zip)
-                
-                # RE-INJECT
-                logger.info("Attempting to inject new runtime...")
-                if utils.inject_runtime():
-                    logger.info("Runtime injected. Re-initializing...")
-                    # 1. Reload Torch (not easy in python without reload, but utils.get_torch might pick it up if sys.path changed)
-                    # 2. Reset faces app
-                    faces.app = None
-                    faces.AI_MODE = "GPU" # Optimistic
-                else:
-                    logger.warning("Runtime injection failed after download.")
-            else:
-                save_path = enhance.enhancer.download_model_with_progress(model_name, progress_callback)
-            
-            response = {"type": "download_result", "success": True, "modelName": model_name, "savePath": str(utils.AI_RUNTIME_PATH), "reqId": req_id}
-        except Exception as e:
-            logger.exception("Download Error")
-            response = {"type": "download_result", "success": False, "error": str(e), "reqId": req_id}
+        # [Phase 57.5] Refactored to commands/utilities.py
+        from commands import utilities
+        response = utilities.download_model(payload, req_id)
 
     elif cmd_type == 'rebuild_index':
-        descriptors = payload.get('descriptors', [])
-        ids = payload.get('ids', [])
-        
-        # Support file-based payload for large datasets
-        if 'dataPath' in payload:
-             dpath = payload['dataPath']
-             if os.path.exists(dpath):
-                 try:
-                     logger.info(f"Loading rebuild data from {dpath}...")
-                     with open(dpath, 'r') as f:
-                         file_payload = json.load(f)
-                         # Expecting {"faces": [{"id": 1, "descriptor": [...]}, ...]}
-                         # OR {"descriptors": [...], "ids": [...]}
-                         if 'faces' in file_payload:
-                             descriptors = [x['descriptor'] for x in file_payload['faces']]
-                             ids = [x['id'] for x in file_payload['faces']]
-                         else:
-                             descriptors = file_payload.get('descriptors', descriptors)
-                             ids = file_payload.get('ids', ids)
-                 except Exception as e:
-                     logger.error(f"Failed to read data path: {e}")
-
-        logger.info(f"Rebuilding FAISS index with {len(descriptors)} vectors...")
-        try:
-            count = vector_store.rebuild_index(descriptors, ids)
-            response = {"type": "rebuild_index_result", "count": count, "success": True, "reqId": req_id}
-        except Exception as e:
-            logger.exception("Index rebuild failed")
-            response = {"error": str(e), "reqId": req_id}
+        # [Phase 57.5] Refactored to commands/index.py
+        from commands import index
+        response = index.rebuild_index(payload, req_id)
 
     elif cmd_type == 'search_index':
-        descriptor = payload.get('descriptor')
-        k = payload.get('k', 10)
-        threshold = payload.get('threshold', 0.6)
-        try:
-            matches = vector_store.search_index(descriptor, k, threshold)
-            response = {"type": "search_result", "matches": matches, "reqId": req_id}
-        except Exception as e:
-            logger.exception("Search failed")
-            response = {"error": str(e), "reqId": req_id}
+        # [Phase 57.5] Refactored to commands/index.py
+        from commands import index
+        response = index.search_index(payload, req_id)
 
     elif cmd_type == 'batch_search_index':
-        descriptors = payload.get('descriptors', [])
-        k = payload.get('k', 10)
-        threshold = payload.get('threshold', 0.6)
-        try:
-            results = vector_store.search_index_batch(descriptors, k, threshold)
-            response = {"type": "batch_search_result", "results": results, "reqId": req_id}
-        except Exception as e:
-            logger.exception("Batch search failed")
-            response = {"error": str(e), "reqId": req_id}
+        # [Phase 57.5] Refactored to commands/index.py
+        from commands import index
+        response = index.batch_search_index(payload, req_id)
 
     elif cmd_type == 'get_system_status':
-        status = {}
-        try:
-            # Check Models (Robustly)
-            try:
-                status['models'] = utils.get_model_status(enhance.MODEL_URLS, enhance.WEIGHTS_DIR)
-            except Exception as e:
-                logger.error(f"Status Check (Models) failed: {e}")
-                status['models'] = {"error": str(e)}
-
-            # InsightFace
-            status['insightface'] = {
-                'loaded': (faces.app is not None),
-                'providers': faces.CURRENT_PROVIDERS if faces.CURRENT_PROVIDERS else [],
-                'det_thresh': faces.DET_THRESH
-            }
-
-            # FAISS
-            try:
-                status['faiss'] = {
-                    'loaded': (vector_store.index is not None), 
-                    'count': vector_store.index.ntotal if vector_store.index else 0,
-                    'dim': (vector_store.index.d if (vector_store.index and hasattr(vector_store.index, 'd') and vector_store.index.d > 0) else 512) if vector_store.index else 0
-                }
-            except Exception as e:
-                logger.error(f"Status Check (FAISS) failed: {e}")
-                status['faiss'] = {'loaded': False, 'error': str(e)}
-
-            # VLM
-            status['vlm'] = {
-                'loaded': (vlm.vlm_model is not None),
-                'device': "cuda" if torch_lib and torch_lib.cuda.is_available() else "cpu",
-                'model': 'SmolVLM-Instruct'
-            }
-            
-            # System
-            status['system'] = {
-                'python': sys.version.split()[0],
-                'torch': "Unknown",
-                'cuda_available': False,
-                'cuda_device': "N/A",
-                'onnxruntime': "Unknown",
-                'opencv': cv2.__version__ if hasattr(cv2, '__version__') else "Unknown",
-                'ai_runtime_path': utils.AI_RUNTIME_PATH
-            }
-            try:
-                import onnxruntime
-                status['system']['onnxruntime'] = onnxruntime.__version__
-            except: pass
-
-            try:
-                if torch_lib:
-                    status['system']['torch'] = torch_lib.__version__
-                    if torch_lib.cuda.is_available():
-                        status['system']['cuda_available'] = True
-                        status['system']['cuda_device'] = torch_lib.cuda.get_device_name(0)
-            except: pass
-
-            response = {"type": "system_status_result", "status": status, "reqId": req_id}
-            
-        except Exception as e:
-             logger.exception("FATAL in get_system_status")
-             response = {"type": "system_status_result", "error": str(e), "reqId": req_id}
+        # [Phase 57.5] Refactored to commands/utilities.py
+        from commands import utilities
+        response = utilities.get_system_status(req_id)
 
     elif cmd_type == 'get_index_status':
-        # Diagnostic: Get detailed FAISS index status
-        try:
-            index_status = {
-                'loaded': (vector_store.index is not None),
-                'total_vectors': vector_store.index.ntotal if vector_store.index else 0,
-                'dimension': vector_store.index.d if vector_store.index else 0,
-            }
-            
-            # Get ID mapping breakdown
-            if hasattr(vector_store, 'id_map') and vector_store.id_map:
-                index_status['id_map_size'] = len(vector_store.id_map)
-                # Sample of IDs in index
-                sample_ids = list(vector_store.id_map.values())[:20]
-                index_status['sample_face_ids'] = sample_ids
-            else:
-                index_status['id_map_size'] = 0
-                index_status['sample_face_ids'] = []
-            
-            response = {"type": "index_status_result", "status": index_status, "reqId": req_id}
-        except Exception as e:
-            logger.error(f"Get index status error: {e}")
-            response = {"type": "index_status_result", "error": str(e), "reqId": req_id}
+        # [Phase 57.5] Refactored to commands/utilities.py
+        from commands import utilities
+        response = utilities.get_index_status(req_id)
 
     elif cmd_type == 'cluster_faces':
-        faces_data = payload.get('faces', [])
-        if 'dataPath' in payload:
-             dpath = payload['dataPath']
-             if os.path.exists(dpath):
-                 try:
-                     with open(dpath, 'r') as f:
-                         file_payload = json.load(f)
-                         faces_data = file_payload.get('faces', [])
-                 except: pass
-
-        logger.info(f"Clustering {len(faces_data)} faces...")
-        try:
-            descriptors = [f['descriptor'] for f in faces_data]
-            ids = [f['id'] for f in faces_data]
-            eps = float(payload.get('eps', 0.55))
-            min_samples = int(payload.get('min_samples', 2))
-            max_size = int(payload.get('max_size', 200)) # Default to 200
-            debug = bool(payload.get('debug', False))
-            
-            result = faces.cluster_faces_dbscan(descriptors, ids, eps, min_samples, debug=debug)
-            
-            # Handle both debug (dict) and normal (list) return types
-            if isinstance(result, dict):
-                cluster_list = result.get('clusters', [])
-                debug_info = result.get('debug_info')
-            else:
-                cluster_list = result
-                debug_info = None
-            
-            # Use normalized descriptors for splitting
-            X = np.array(descriptors)
-            norm = np.linalg.norm(X, axis=1, keepdims=True)
-            norm[norm == 0] = 1e-10
-            X_normalized = X / norm
-            
-            id_to_idx = {fid: idx for idx, fid in enumerate(ids)}
-            
-            # Split oversized clusters
-            final_clusters = []
-            for cluster in cluster_list:
-                if len(cluster) > max_size:
-                    logger.info(f"Splitting oversized cluster of size {len(cluster)} (max={max_size})")
-                    sub_clusters = faces.split_oversized_cluster(cluster, X_normalized, id_to_idx, max_size)
-                    final_clusters.extend(sub_clusters)
-                else:
-                    final_clusters.append(cluster)
-            
-            cluster_list = final_clusters 
-
-            
-            # Identify singles (all IDs not in flattened cluster list)
-            clustered_ids = set([i for c in cluster_list for i in c])
-            singles = [i for i in ids if i not in clustered_ids]
-            
-            # Sort by size
-            cluster_list.sort(key=len, reverse=True)
-            
-            response = {
-                "type": "cluster_result", 
-                "clusters": cluster_list, 
-                "singles": singles, 
-                "debug_info": debug_info,
-                "reqId": req_id
-            }
-        except Exception as e:
-            logger.error(f"Clustering error: {e}")
-            response = {"type": "cluster_result", "error": str(e), "reqId": req_id}
+        # [Phase 57.5] Refactored to commands/clustering.py
+        from commands import clustering
+        response = clustering.cluster_faces(payload, req_id)
 
     elif cmd_type == 'find_ungroupable_faces':
         faces_data = payload.get('faces', [])
@@ -1179,241 +674,40 @@ def handle_command(command):
             response = {"type": "background_faces_result", "success": False, "error": str(e), "reqId": req_id}
 
     elif cmd_type == 'extract_face_pose':
-        # Phase 5 Backfill: Extract pose data for a specific face region
-        file_path = payload.get('filePath')
-        box = payload.get('box')  # {x, y, width, height}
-        face_id = payload.get('faceId')
-        
-        logger.debug(f"Extracting pose for face {face_id} from {file_path}")
-        
-        try:
-            img = load_image_cv2(file_path)
-            if img is None:
-                response = {"type": "face_pose_result", "success": False, "error": "Image load failed", "faceId": face_id}
-            else:
-                # Apply Orientation Correction (Match analyze_image logic)
-                orientation = payload.get('orientation', 1)
-                h_img, w_img = img.shape[:2]
-                is_landscape_dims = w_img > h_img
-                expects_portrait = (orientation == 6 or orientation == 8)
-                
-                if expects_portrait and is_landscape_dims:
-                    if orientation == 6:
-                        img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-                    elif orientation == 8:
-                        img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-                elif orientation == 3:
-                     img = cv2.rotate(img, cv2.ROTATE_180)
-
-                # Expand box slightly for better face detection
-                x = int(box.get('x', 0))
-                y = int(box.get('y', 0))
-                w = int(box.get('width', 100))
-                h = int(box.get('height', 100))
-                
-                # Add 100% padding (context is crucial for detection on crops)
-                pad_x = int(w * 1.0)
-                pad_y = int(h * 1.0)
-                x1 = max(0, x - pad_x)
-                y1 = max(0, y - pad_y)
-                x2 = min(img.shape[1], x + w + pad_x)
-                y2 = min(img.shape[0], y + h + pad_y)
-                
-                face_crop = img[y1:y2, x1:x2]
-                
-                t_prep = time.time()
-                # logger.debug(f"Prep time: {t_prep - t_start:.3f}s")
-
-                if face_crop.size == 0 or face_crop.shape[0] < 10 or face_crop.shape[1] < 10:
-                    logger.warning(f"Face crop too small/empty for face {face_id}")
-                    response = {"type": "face_pose_result", "success": False, "error": "Face crop too small", "faceId": face_id}
-                else:
-                    if not faces.app or (faces.ALLOWED_MODULES and 'recognition' not in faces.ALLOWED_MODULES): 
-                        faces.init_insightface()
-                    
-                    # Run detection on crop
-                    t_det_start = time.time()
-                    f_results = faces.app.get(face_crop)
-                    t_det_end = time.time()
-                    logger.debug(f"Face {face_id} detection took {t_det_end - t_det_start:.3f}s")
-                    
-                    pose_yaw, pose_pitch, pose_roll, face_quality, descriptor_v2 = None, None, None, None, None
-                    
-                    if len(f_results) > 0:
-                        # Take the largest detected face
-                        best_face = max(f_results, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
-                        
-                        # Extract pose
-                         # ... (rest of logic) ...
-                        if hasattr(best_face, 'pose') and best_face.pose is not None:
-                            try:
-                                pose = best_face.pose
-                                pose_pitch = float(pose[0]) if len(pose) > 0 else None
-                                pose_yaw = float(pose[1]) if len(pose) > 1 else None
-                                pose_roll = float(pose[2]) if len(pose) > 2 else None
-                            except (TypeError, IndexError):
-                                pass
-                        
-                        # Calculate quality
-                        f_blur = image_ops.estimate_blur(face_crop, target_size=112)
-                        blur_factor = min(f_blur / 100.0, 1.0) if f_blur else 0.5
-                        pose_factor = max(0, 1.0 - (abs(pose_yaw) / 90.0)) if pose_yaw is not None else 0.5
-                        det_score = float(best_face.det_score) if hasattr(best_face, 'det_score') else 0.5
-                        size_factor = min(w / 200.0, 1.0)
-                        face_quality = (blur_factor * 0.3 + pose_factor * 0.3 + det_score * 0.2 + size_factor * 0.2)
-                        
-                        # Extract descriptor_v2
-                        if hasattr(best_face, 'embedding'):
-                            if best_face.embedding is not None:
-                                try:
-                                    embedding = best_face.embedding.tolist()
-                                    norm = sum(e**2 for e in embedding) ** 0.5
-                                    if norm > 0:
-                                        descriptor_v2 = [e / norm for e in embedding]
-                                    else:
-                                        logger.warning(f"[extract_face_pose] Face {face_id}: embedding norm is 0")
-                                except Exception as emb_err:
-                                    logger.warning(f"[extract_face_pose] Embedding extraction failed: {emb_err}")
-                            else:
-                                logger.warning(f"[extract_face_pose] Face {face_id}: embedding attribute is None. Modules: {faces.ALLOWED_MODULES}")
-                        else:
-                            logger.warning(f"[extract_face_pose] Face {face_id}: no embedding attribute. Modules: {faces.ALLOWED_MODULES}")
-                    
-                    response = {
-                        "type": "face_pose_result",
-                        "success": True,
-                        "faceId": face_id,
-                        "poseYaw": pose_yaw,
-                        "posePitch": pose_pitch,
-                        "poseRoll": pose_roll,
-                        "faceQuality": face_quality,
-                        "descriptorV2": descriptor_v2
-                    }
-                
-        except Exception as e:
-            logger.error(f"Pose extraction error: {e}")
-            response = {"type": "face_pose_result", "success": False, "error": str(e), "faceId": face_id}
+        # [Phase 57.5] Refactored to commands/face_analysis.py
+        from commands import face_analysis
+        response = face_analysis.extract_face_pose(payload, load_image_cv2, req_id)
 
     elif cmd_type == 'extract_age':
-        # Age Backfill: Extract age from a face crop using InsightFace genderage module
-        file_path = payload.get('filePath')
-        preview_path = payload.get('previewPath')
-        box = payload.get('box')  # JSON string: {x, y, width, height}
-        face_id = payload.get('faceId')
-        photo_id = payload.get('photoId')
+        # [Phase 57.5] Refactored to commands/face_analysis.py
+        from commands import face_analysis
+        response = face_analysis.extract_age(payload, load_image_cv2, req_id)
+
+    elif cmd_type == 'verify_face':
+        # [Phase 56] VLM Face Verification
+        image_path = payload.get('imagePath')
+        box = payload.get('box')
         
-        logger.info(f"Extracting age for face {face_id}: file={file_path}, box={box}")
+        logger.info(f"[VLM] Verifying face region in {os.path.basename(image_path)}")
         
         try:
-            # Parse box if string
-            if isinstance(box, str):
-                box = json.loads(box)
-            
-            # IMPORTANT: Use original file path, NOT preview - box coords are from original scan
-            img = load_image_cv2(file_path)
-            if img is None:
-                logger.warning(f"Failed to load image: {file_path}")
-                response = {"type": "extract_age_result", "success": True, "faceId": face_id, "age": None, "gender": None, "failureReason": "image_load_failed", "reqId": req_id}
-            else:
-                logger.debug(f"Image loaded: {img.shape[1]}x{img.shape[0]}")
-                
-                # Expand box for better detection
-                x = int(box.get('x', 0))
-                y = int(box.get('y', 0))
-                w = int(box.get('width', 100))
-                h = int(box.get('height', 100))
-                
-                logger.debug(f"Face {face_id} box: x={x}, y={y}, w={w}, h={h}")
-                
-                # Add 100% padding for context (same as pose extraction)
-                pad_x = int(w * 1.0)
-                pad_y = int(h * 1.0)
-                x1 = max(0, x - pad_x)
-                y1 = max(0, y - pad_y)
-                x2 = min(img.shape[1], x + w + pad_x)
-                y2 = min(img.shape[0], y + h + pad_y)
-                
-                face_crop = img[y1:y2, x1:x2]
-                
-                logger.debug(f"Face crop size: {face_crop.shape[1]}x{face_crop.shape[0]}")
-                
-                if face_crop.size == 0 or face_crop.shape[0] < 10 or face_crop.shape[1] < 10:
-                    logger.warning(f"Face crop too small/empty for face {face_id}")
-                    response = {"type": "extract_age_result", "success": True, "faceId": face_id, "age": None, "gender": None, "failureReason": "crop_too_small", "reqId": req_id}
-                else:
-                    # Use very low detection threshold for crops - face is already known to exist
-                    # Re-init with low threshold to maximize re-detection on crops
-                    faces.init_insightface(det_thresh=0.2)
-                    
-                    # Run detection on crop
-                    f_results = faces.app.get(face_crop)
-                    logger.debug(f"Face {face_id}: detected {len(f_results)} faces in crop")
-                    
-                    age, gender, failure_reason = None, None, None
-                    
-                    if len(f_results) > 0:
-                        # Take the largest detected face
-                        best_face = max(f_results, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
-                        
-                        # Extract age and gender from genderage module
-                        if hasattr(best_face, 'age') and best_face.age is not None:
-                            age = int(best_face.age)
-                        else:
-                            failure_reason = "no_age_attribute"
-                        
-                        if hasattr(best_face, 'sex') and best_face.sex is not None:
-                            gender = "M" if best_face.sex == "M" else ("F" if best_face.sex == "F" else None)
-                        
-                        # Log success at INFO level so it's visible
-                        if age is not None:
-                            logger.info(f"[OK] Face {face_id}: age={age}, gender={gender}") # codeql[py/clear-text-logging-sensitive-data]
-                        else:
-                            logger.warning(f"Face {face_id}: detected but no age attribute")
-                    else:
-                        failure_reason = "no_face_detected"
-                        logger.warning(f"No face detected in crop for face {face_id}")
-                    
-                    # Extract pose data if available (Phase 2.1: Pose Backfill)
-                    pose_yaw, pose_pitch, pose_roll = None, None, None
-                    if len(f_results) > 0 and hasattr(best_face, 'pose') and best_face.pose is not None:
-                        try:
-                            pose = best_face.pose
-                            pose_pitch = float(pose[0]) if len(pose) > 0 else None
-                            pose_yaw = float(pose[1]) if len(pose) > 1 else None
-                            pose_roll = float(pose[2]) if len(pose) > 2 else None
-                        except (TypeError, IndexError):
-                            pass
-                    
-                    # Extract descriptor_v2 (Phase 2.3: AdaFace/Quality-Aware Embeddings)
-                    # This re-embeds the face from the padded crop for potentially better quality
-                    descriptor_v2 = None
-                    if len(f_results) > 0 and hasattr(best_face, 'embedding') and best_face.embedding is not None:
-                        try:
-                            embedding = best_face.embedding.tolist()
-                            # Normalize the embedding
-                            norm = sum(e**2 for e in embedding) ** 0.5
-                            if norm > 0:
-                                descriptor_v2 = [e / norm for e in embedding]
-                        except Exception as emb_err:
-                            logger.warning(f"[extract_age] Embedding extraction failed: {emb_err}")
-                    
-                    response = {
-                        "type": "extract_age_result",
-                        "success": True,
-                        "faceId": face_id,
-                        "age": age,
-                        "gender": gender,
-                        "poseYaw": pose_yaw,
-                        "posePitch": pose_pitch,
-                        "poseRoll": pose_roll,
-                        "descriptorV2": descriptor_v2,
-                        "failureReason": failure_reason,
-                        "reqId": req_id
-                    }
-                
+            result = vlm.verify_is_face(image_path, box)
+            response = {
+                "type": "verify_face_result",
+                "success": True,
+                **result,
+                "reqId": req_id
+            }
         except Exception as e:
-            logger.error(f"Age extraction error for face {face_id}: {e}")
-            response = {"type": "extract_age_result", "success": True, "faceId": face_id, "age": None, "gender": None, "failureReason": f"exception:{str(e)[:50]}", "reqId": req_id}
+            logger.error(f"VLM verification error: {e}")
+            response = {
+                "type": "verify_face_result",
+                "success": False,
+                "is_face": None,
+                "confidence": 0,
+                "error": str(e),
+                "reqId": req_id
+            }
 
     else:
 
@@ -1450,7 +744,7 @@ def main_loop():
                 
                 result = handle_command(command_data)
                 if result:
-                    print(json.dumps(result)) # codeql[py/clear-text-logging-sensitive-data] - IPC Output (Standard Communication Channel)
+                    print(json.dumps(result))  # noqa - IPC stdout channel to Electron, not logging
                     sys.stdout.flush()
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON input: {line}")
@@ -1468,10 +762,24 @@ def main_loop():
             except: pass
 
 if __name__ == '__main__':
-    try:
-        main_loop()
-    except Exception as e:
-        logger.critical(f"FATAL ERROR in Python Backend: {e}")
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        sys.exit(1)
+    # [Debug API] Dual-mode startup: HTTP server or stdin IPC
+    import os
+    if os.environ.get('API_MODE') == 'http':
+        logger.info("[Startup] API_MODE=http detected, starting HTTP server...")
+        try:
+            from api.server import start_http_server
+            start_http_server()
+        except Exception as e:
+            logger.critical(f"FATAL ERROR starting HTTP server: {e}")
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
+    else:
+        # Default: stdin/stdout IPC mode
+        try:
+            main_loop()
+        except Exception as e:
+            logger.critical(f"FATAL ERROR in Python Backend: {e}")
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)

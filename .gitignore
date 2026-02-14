@@ -28,8 +28,9 @@ dbs/
 scan_results.json
 test-exif.js
 
-# Gemini Agent
+# AI Agent Memory
 .gemini/
+.claude/
 
 # Generated Files
 vectors.index
@@ -42,6 +43,16 @@ __pycache__/
 lint_*.txt
 verify_*.py
 verify_*.js
+
+# Debug output files
+debug_*.txt
+full_debug_output.txt
+output_vlm.txt
+inspect_schema.py
+nul
+
+# AI Models (binary)
+models/
 
 # App Build Artifacts
 dist/

@@ -11,7 +11,7 @@ export async function getExifTool(): Promise<ExifTool | null> {
     return PhotoService.getExifTool();
 }
 
-const SUPPORTED_EXTS = ['.jpg', '.jpeg', '.png', '.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.tif', '.tiff'];
+const SUPPORTED_EXTS = ['.jpg', '.jpeg', '.png', '.jfif', '.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.tif', '.tiff'];
 
 // Helper to extract preview (delegated to PhotoService)
 export async function extractPreview(filePath: string, previewDir: string, forceRescan: boolean = false): Promise<string | null> {
@@ -46,7 +46,7 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
             needsUpdate = true;
         }
 
-        const isRaw = !['.jpg', '.jpeg', '.png'].includes(ext);
+        const isRaw = !['.jpg', '.jpeg', '.png', '.jfif'].includes(ext);
         let previewMissing = false;
 
         if (isRaw) {

@@ -17,9 +17,9 @@ interface PhotoDetailProps {
 export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDetailProps) {
     const navigate = useNavigate()
     const { loadTags, setFilter, refreshPhoto } = useScan()
-    const { onPhotoProcessed } = useAI()
+    const { onPhotoProcessed, addToQueue } = useAI()
     const { assignPerson, people, loadPeople } = usePeople()
-    const { showConfirm } = useAlert()
+    const { showConfirm, showAlert } = useAlert()
 
     const [metadata, setMetadata] = useState<any>(null)
     const [imagePath, setImagePath] = useState<string>('')
@@ -48,6 +48,7 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
     const [reassignName, setReassignName] = useState('');
     const [imgRect, setImgRect] = useState<{ width: number, height: number, left: number, top: number } | null>(null)
     const [isImageLoaded, setIsImageLoaded] = useState(false)
+    const [isScanning, setIsScanning] = useState(false)
     const imgRef = useRef<HTMLImageElement>(null)
     const photoAreaRef = useRef<HTMLDivElement>(null)
 
@@ -72,7 +73,8 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
             // - RAW files: use cached preview or generate on-the-fly
             // This avoids issues with stale/missing preview_cache_path entries
             console.log(`[UI] Loading image from file_path: ${photo.file_path}`)
-            setImagePath(`local-resource://${encodeURIComponent(photo.file_path)}`)
+            // [Phase 53] Add cache-busting timestamp to force browser to reload the image
+            setImagePath(`local-resource://${encodeURIComponent(photo.file_path)}?t=${Date.now()}`)
 
             // Fetch tags
             // Fetch tags
@@ -508,7 +510,11 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                                 await refreshPhoto(photo.id);
                                                 onClose();
                                             } catch (e) {
-                                                alert("Rotation failed: " + e);
+                                                showAlert({
+                                                    title: 'Rotation Failed',
+                                                    description: String(e),
+                                                    variant: 'danger'
+                                                });
                                             } finally {
                                                 setIsRotating(false);
                                             }
@@ -628,16 +634,32 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                             <button
                                 onClick={async () => {
                                     try {
+                                        setIsScanning(true);
+                                        console.log("[UI] User clicked Force Rescan (No Faces)");
                                         // @ts-ignore
-                                        await window.ipcRenderer.invoke('ai:analyzeImage', { photoId: photo.id, scanMode: 'MACRO', enableVLM: false, debug: true })
+                                        await window.ipcRenderer.invoke('ai:forceRescan', { photoId: photo.id, filePath: photo.file_path })
+                                        await refreshPhoto(photo.id);
                                     } catch (e) {
                                         console.error(e)
+                                    } finally {
+                                        setIsScanning(false);
                                     }
                                 }}
-                                className="px-2 py-1 bg-indigo-900/30 text-indigo-300 text-xs rounded border border-indigo-500/30 hover:bg-indigo-900/50 transition-colors"
+                                disabled={isScanning}
+                                className={`px-2 py-1 ${isScanning ? 'bg-indigo-900/50 cursor-wait' : 'bg-indigo-900/30 hover:bg-indigo-900/50'} text-indigo-300 text-xs rounded border border-indigo-500/30 transition-colors flex items-center gap-2`}
                                 title="Force deep scan for faces (Macro Mode)"
                             >
-                                Force Face Scan
+                                {isScanning ? (
+                                    <>
+                                        <svg className="animate-spin h-3 w-3 text-indigo-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Scanning...
+                                    </>
+                                ) : (
+                                    'Force Face Scan'
+                                )}
                             </button>
                         </div>
                     ) : (
@@ -751,16 +773,29 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                                 <button
                                     onClick={async () => {
                                         try {
+                                            setIsScanning(true);
+                                            console.log("[UI] User clicked Force Rescan (Magnifying Glass)");
                                             // @ts-ignore
-                                            await window.ipcRenderer.invoke('ai:analyzeImage', { photoId: photo.id, scanMode: 'MACRO', enableVLM: false, debug: true })
+                                            await window.ipcRenderer.invoke('ai:forceRescan', { photoId: photo.id, filePath: photo.file_path })
+                                            await refreshPhoto(photo.id);
                                         } catch (e) {
                                             console.error(e)
+                                        } finally {
+                                            setIsScanning(false);
                                         }
                                     }}
-                                    className="px-2 py-1 bg-gray-800 text-gray-400 text-xs rounded-full border border-gray-700 hover:bg-gray-700 hover:text-gray-200 transition-colors flex items-center gap-1"
+                                    disabled={isScanning}
+                                    className={`px-2 py-1 ${isScanning ? 'bg-gray-800 cursor-wait' : 'bg-gray-800 hover:bg-gray-700'} text-gray-400 text-xs rounded-full border border-gray-700 hover:text-gray-200 transition-colors flex items-center gap-1`}
                                     title="Force deep scan for missed faces"
                                 >
-                                    <span className="text-xs">🔍</span>
+                                    {isScanning ? (
+                                        <svg className="animate-spin h-3 w-3 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                    ) : (
+                                        <span className="text-xs">🔍</span>
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -802,6 +837,54 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
                             className="bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded text-xs"
                         >
                             +
+                        </button>
+                    </div>
+
+                    {/* Rescan Button */}
+                    <div className="mt-4 text-right border-t border-gray-800 pt-3">
+                        <button
+                            onClick={async () => {
+                                console.log("[PhotoDetail] Force Rescan Clicked! Initiating scan-files...");
+                                try {
+                                    // Use the shared rescanFiles from context if available, or invoke directly?
+                                    // PhotoDetail is usually used inside ScanProvider?
+                                    // Let's assume we can use a simpler approach if context isn't handy:
+                                    // But ScanContext manages the Queue nicely.
+                                    // Let's use window.ipcRenderer directly for now to be safe about deps, 
+                                    // mirrors what we did in ScanContext but manual triggers are safer via ScanContext usually.
+                                    // Actually, let's just trigger the context function if possible.
+                                    // But I need to modify imports.
+                                    // Simpler: Just invoke scan-files with forceRescan=true AND add to queue manually via IPC?
+                                    // No, duplication of logic.
+                                    // I'll emit an event or assume ScanContext is wrapper.
+
+                                    // Best approach: Invoke Scan Context.
+                                    // But I need to verify if I can import useScan here.
+                                    // Checking file...
+                                    // It does NOT import useScan.
+
+                                    // FALLBACK: IPC Only (Manual implementation of what ScanContext does)
+                                    // 1. Scan File
+                                    const scanned = await window.ipcRenderer.invoke('scan-files', [photo.file_path], { forceRescan: true });
+                                    // 2. Add to Queue with cleanRescan (This is the critical part)
+                                    if (scanned && scanned.length > 0) {
+                                        // Use context function
+                                        const items = scanned.map((p: any) => ({ ...p, cleanRescan: true }));
+                                        console.log("[PhotoDetail] Manually adding to AI Queue:", items);
+                                        addToQueue(items, true);
+
+                                        refreshPhoto(photo.id);
+                                    }
+                                } catch (e) {
+                                    console.error(e)
+                                }
+                            }}
+                            className="text-xs text-orange-400 hover:text-orange-300 flex items-center justify-end gap-1 w-full"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Force Rescan Faces (Debug)
                         </button>
                     </div>
 

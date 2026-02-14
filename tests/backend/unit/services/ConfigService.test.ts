@@ -127,4 +127,42 @@ describe('ConfigService', () => {
         expect(settings.aiSettings.faceSimilarityThreshold).toBe(0.65);
         expect(consoleErrorSpy).toHaveBeenCalled();
     });
+    it('should support advanced face settings', () => {
+        // Arrange
+        const mockConfig = {
+            advancedFace: {
+                detThreshStandard: 0.9,
+                detThreshMacro: 0.1,
+                minFaceSize: 20,
+                nmsIouThresh: 0.2,
+                nmsIoMinThresh: 0.5,
+                enableAreaBasedNMS: false,
+                enableMacroLowRes: false,
+                enableTTA: true
+            }
+        };
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockConfig));
+
+        // Act
+        const settings = ConfigService.getSettings();
+
+        // Assert
+        expect(settings.advancedFace).toBeDefined();
+        expect(settings.advancedFace.detThreshStandard).toBe(0.9);
+        expect(settings.advancedFace.enableTTA).toBe(true);
+    });
+
+    it('should use defaults for advanced face settings if missing', () => {
+        // Arrange
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+
+        // Act
+        const settings = ConfigService.getSettings();
+
+        // Assert
+        expect(settings.advancedFace).toBeDefined();
+        expect(settings.advancedFace.detThreshStandard).toBe(0.65);
+        expect(settings.advancedFace.detThreshMacro).toBe(0.25);
+    });
 });

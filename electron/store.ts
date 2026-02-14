@@ -1,3 +1,4 @@
+export { ConfigService } from './core/services/ConfigService';
 import { ConfigService, AISettings } from './core/services/ConfigService';
 
 // Re-export Schema for compatibility if needed

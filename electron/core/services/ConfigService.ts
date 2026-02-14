@@ -11,6 +11,7 @@ export interface AISettings {
     aiProfile: 'fast' | 'balanced' | 'high';
     useGpu: boolean;
     vlmEnabled: boolean;
+    vlmVerificationThreshold?: number; // Default 0.65 - faces below this score are marked as 'suspect' for VLM verification
     runtimeUrl?: string;
     // L2 distance thresholds for scan-time face classification
     autoAssignThreshold?: number;  // Default 0.7 - faces below this are auto-assigned
@@ -18,6 +19,37 @@ export interface AISettings {
     // Era Generation
     minFacesForEra?: number;       // Default 50
     eraMergeThreshold?: number;    // Default 0.75
+}
+
+export interface AdvancedFaceConfig {
+    // Detection
+    detThreshStandard: number; // Default 0.65
+    detThreshMacro: number;    // Default 0.25 (New default)
+
+    // Filter
+    minFaceSize: number;       // Default 40
+
+    // NMS
+    nmsIouThresh: number;      // Default 0.3 (Standard overlap)
+    nmsIoMinThresh: number;    // Default 0.65 (Containment)
+    dedupIoUThresh?: number;   // Default 0.55 (Deduplication overlap)
+    enableAreaBasedNMS: boolean; // Default true (for size prioritization)
+
+    // Scan Scales (Simplified for UI)
+    enableMacroLowRes: boolean; // Enable 160px pass?
+    enableTTA: boolean;         // Enable rotation augmentation?
+
+    // [Phase 74] High-Quality Face Threshold
+    // Faces with faceQuality > this are kept even if detection score is low
+    highQualityFaceThreshold?: number; // Default 0.70
+
+    // [Phase 79] Large Face Threshold (Web Size)
+    // Faces larger than this (width or height) are kept even if detection score is low
+    largeFaceThreshold?: number; // Default 300
+
+    // [Phase 90] 3-Tier Detection Score System
+    scoreThresholdReject?: number;  // Default 0.40 — below this, auto-reject
+    scoreThresholdAccept?: number;  // Default 0.70 — above this, auto-accept as human
 }
 
 export interface WindowBounds {
@@ -62,6 +94,7 @@ export interface SmartIgnoreSettings {
 
 export interface AppConfig {
     libraryPath: string;
+    advancedFace: AdvancedFaceConfig;
     aiSettings: AISettings;
     windowBounds: WindowBounds;
     firstRun: boolean;
@@ -74,6 +107,20 @@ export interface AppConfig {
 // Default Config
 export const DEFAULT_CONFIG: AppConfig = {
     libraryPath: '',
+    advancedFace: {
+        detThreshStandard: 0.65,
+        detThreshMacro: 0.25,
+        minFaceSize: 40,
+        nmsIouThresh: 0.3,
+        nmsIoMinThresh: 0.65,
+        enableAreaBasedNMS: true,
+        enableMacroLowRes: true,
+        enableTTA: true,
+        highQualityFaceThreshold: 0.65, // [Phase 74] Faces with quality > this bypass low detection score filter
+        largeFaceThreshold: 300,        // [Phase 79] Default
+        scoreThresholdReject: 0.40,     // [Phase 90] Below this → auto-reject
+        scoreThresholdAccept: 0.70      // [Phase 90] Above this → auto-accept as human
+    },
     aiSettings: {
         faceSimilarityThreshold: 0.65,
         faceBlurThreshold: 20,
@@ -82,6 +129,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         aiProfile: 'balanced',
         useGpu: true,
         vlmEnabled: false, // Default to off for performance
+        vlmVerificationThreshold: 0.85, // Phase 56: VLM Verification threshold
         runtimeUrl: undefined
     },
     windowBounds: { width: 1200, height: 800, x: 0, y: 0 },
@@ -111,18 +159,80 @@ export class ConfigService {
     private static load() {
         if (this.config) return;
         try {
-            if (fs.existsSync(this.configPath)) {
-                const raw = fs.readFileSync(this.configPath, 'utf8');
-                const parsed = JSON.parse(raw);
-                this.config = { ...DEFAULT_CONFIG, ...parsed };
-                // Deep merge nested objects
-                this.config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...(parsed.aiSettings || {}) };
-                this.config.queue = { ...DEFAULT_CONFIG.queue, ...(parsed.queue || {}) };
-                this.config.smartIgnore = { ...DEFAULT_CONFIG.smartIgnore, ...(parsed.smartIgnore || {}) };
-            } else {
-                this.config = { ...DEFAULT_CONFIG };
-                this.save();
+            // [Phase 66] Load Enterprise Defaults from ai-config.json
+            let enterpriseDefaults = {};
+            const aiConfigPath = path.join(process.cwd(), 'ai-config.json');
+
+            try {
+                if (fs.existsSync(aiConfigPath)) {
+                    const aiRaw = fs.readFileSync(aiConfigPath, 'utf8');
+                    const aiJson = JSON.parse(aiRaw);
+
+                    // Map ai-config.json to AppConfig structure
+                    enterpriseDefaults = {
+                        advancedFace: {
+                            detThreshStandard: aiJson.face_detection?.score_threshold_strict ?? 0.40, // [Phase 90] Aligned with reject floor
+                            minFaceSize: aiJson.face_detection?.min_face_size_standard ?? 40,
+                            nmsIouThresh: aiJson.face_detection?.nms_iou_threshold ?? 0.3,
+                            dedupIoUThresh: aiJson.face_detection?.deduplication_iou_threshold ?? 0.55,
+                            enableTTA: aiJson.face_detection?.enable_tta ?? false,
+                            largeFaceThreshold: aiJson.face_detection?.large_face_threshold ?? 300,
+                            scoreThresholdReject: aiJson.face_detection?.score_threshold_reject ?? 0.40, // [Phase 90]
+                            scoreThresholdAccept: aiJson.face_detection?.score_threshold_accept ?? 0.70  // [Phase 90]
+                        },
+                        aiSettings: {
+                            vlmVerificationThreshold: aiJson.vlm?.verification_threshold ?? 0.85,
+                            faceSimilarityThreshold: aiJson.face_detection?.score_threshold_confident ?? 0.85, // Use confident threshold as similarity baseline
+                            faceBlurThreshold: aiJson.face_detection?.face_blur_threshold ?? 15,
+                            vlmEnabled: aiJson.vlm?.enabled ?? false
+                        }
+                    };
+                    console.log('[ConfigService] Loaded Enterprise Defaults from ai-config.json');
+                }
+            } catch (aiErr) {
+                console.warn('[ConfigService] Failed to load ai-config.json, using hardcoded defaults:', aiErr);
             }
+
+            // Merge: Hardcoded Defaults -> User Config -> Enterprise Defaults (Policy Enforcement)
+            const baseConfig = { ...DEFAULT_CONFIG };
+            let userConfig = {};
+
+            if (fs.existsSync(this.configPath)) {
+                try {
+                    const raw = fs.readFileSync(this.configPath, 'utf8');
+                    userConfig = JSON.parse(raw);
+                } catch (e) {
+                    console.error('Failed to parse user config:', e);
+                }
+            } else {
+                // Save defaults if no config exists
+                this.config = { ...baseConfig };
+                this.save();
+                // But we still want to apply enterprise defaults below
+            }
+
+            // 1. Apply User Config on top of Base
+            let intermediateConfig = { ...baseConfig, ...userConfig };
+            // Deep merge nested objects
+            intermediateConfig.aiSettings = { ...baseConfig.aiSettings, ...(userConfig as any).aiSettings || {} };
+            intermediateConfig.advancedFace = { ...baseConfig.advancedFace, ...(userConfig as any).advancedFace || {} };
+            intermediateConfig.queue = { ...baseConfig.queue, ...(userConfig as any).queue || {} };
+            intermediateConfig.smartIgnore = { ...baseConfig.smartIgnore, ...(userConfig as any).smartIgnore || {} };
+
+            // 2. Apply Enterprise Defaults (ai-config.json) as FINAL OVERRIDE for specific tuned keys
+            if (enterpriseDefaults) {
+                // Deep merge specific sections
+                intermediateConfig.advancedFace = {
+                    ...intermediateConfig.advancedFace,
+                    ...((enterpriseDefaults as any).advancedFace || {})
+                };
+                intermediateConfig.aiSettings = {
+                    ...intermediateConfig.aiSettings,
+                    ...((enterpriseDefaults as any).aiSettings || {})
+                };
+            }
+
+            this.config = intermediateConfig as AppConfig;
         } catch (e) {
             console.error('Failed to load config, resetting:', e);
             this.config = { ...DEFAULT_CONFIG };
@@ -163,6 +273,16 @@ export class ConfigService {
     static setAISettings(settings: Partial<AISettings>) {
         this.load();
         this.config.aiSettings = { ...this.config.aiSettings, ...settings };
+        this.save();
+    }
+
+    static getAdvancedFaceSettings(): AdvancedFaceConfig {
+        return this.getSettings().advancedFace;
+    }
+
+    static setAdvancedFaceSettings(settings: Partial<AdvancedFaceConfig>) {
+        this.load();
+        this.config.advancedFace = { ...this.config.advancedFace, ...settings };
         this.save();
     }
 

@@ -179,6 +179,12 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             const scanResults: any[] = await window.ipcRenderer.invoke('scan-directory', path, options)
             console.log(`[ScanContext] Scan complete. Found ${scanResults.length} photos.`);
 
+            // DEBUG: Log isNew status for first few photos
+            if (scanResults.length > 0) {
+                const sample = scanResults.slice(0, 3);
+                console.log(`[ScanContext] Sample photos:`, sample.map(p => ({ id: p.id, isNew: p.isNew, needsUpdate: p.needsUpdate })));
+            }
+
             // Queue Logic:
             // If forceRescan: Queue ALL returned photos
             // Else: Queue ONLY photos marked as isNew
@@ -186,9 +192,12 @@ export function ScanProvider({ children }: { children: ReactNode }) {
                 ? scanResults
                 : scanResults.filter(p => p.isNew);
 
+            console.log(`[ScanContext] forceRescan=${options.forceRescan}, scanResults.length=${scanResults.length}, photosToQueue.length=${photosToQueue.length}`);
+
             if (photosToQueue.length > 0) {
                 console.log(`[ScanContext] Queueing ${photosToQueue.length} photos for AI (Total Scanned: ${scanResults.length})`);
-                addToQueue(photosToQueue, true)
+                const queueItems = photosToQueue.map(p => ({ ...p, cleanRescan: options.forceRescan }));
+                await addToQueue(queueItems, true)
             } else {
                 console.log(`[ScanContext] No new photos to queue for AI.`);
             }
@@ -219,19 +228,27 @@ export function ScanProvider({ children }: { children: ReactNode }) {
             const pathsToScan = await window.ipcRenderer.invoke('db:getFilePaths', ids);
 
             if (pathsToScan.length > 0) {
-                console.log(`[ScanContext] Rescanning ${pathsToScan.length} specific files (force=${forceRescan})...`);
+                console.log(`[ScanContext] Rescanning ${pathsToScan.length} specific files (force=${forceRescan}, cleanRescan=${forceRescan})...`);
                 // @ts-ignore
-                const scannedPhotos = await window.ipcRenderer.invoke('scan-files', pathsToScan, { forceRescan });
+                const scannedPhotos = await window.ipcRenderer.invoke('scan-files', pathsToScan, { forceRescan, cleanRescan: forceRescan });
 
                 // Queue Logic: Queue ALL returned photos as they are forced/requested
                 if (scannedPhotos.length > 0) {
-                    addToQueue(scannedPhotos, true);
+                    const queueItems = scannedPhotos.map((p: any) => ({ ...p, cleanRescan: forceRescan }));
+                    addToQueue(queueItems, true);
                 }
 
                 // Refresh view hack
                 setPhotos(prev => prev.map(p => {
                     const updated = scannedPhotos.find((sp: any) => sp.id === p.id);
-                    if (updated) return { ...updated, _cacheBust: Date.now() };
+                    if (updated) {
+                        const newP = { ...updated, _cacheBust: Date.now() };
+                        // Also update viewingPhoto if it matches
+                        if (navigation.viewingPhoto && navigation.viewingPhoto.id === newP.id) {
+                            navigation.setViewingPhoto(newP);
+                        }
+                        return newP;
+                    }
                     return p;
                 }));
             }
