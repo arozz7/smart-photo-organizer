@@ -1,51 +1,77 @@
-## Summary of Current Best Settings (as of 2026-02-08)
+## Summary of Current Best Settings (as of 2026-02-13)
 
 | Setting | Value | Logic |
 | :--- | :--- | :--- |
-| **Strict Floor** | `0.65` | Faces < 0.65 are REJECTED (restore profiles). |
-| **VLM Threshold** | `0.85` | Faces < 0.85 are 'suspect' (Queue profiles + ghosts for verifying). |
-| **High Confidence** | `> 0.85` | Faces > 0.85 are ACCEPTED immediately. |
-| **High Quality Threshold** | `0.65` | Faces with quality > 0.65 bypass low detection score filter. |
-| **VLM Prompt** | `Hardened` | Includes explicit warnings for rocks/foliage. |
+| **Reject Floor** | `0.40` | Faces < 0.40 are auto-rejected (no VLM needed). |
+| **Accept Ceiling** | `0.70` | Faces >= 0.70 are auto-accepted as 'human' (no VLM needed). |
+| **Verify Tier** | `0.40 - 0.69` | Faces in this range go to VLM verification. |
+| **MACRO Floor** | `0.30` | Python-side detection threshold for macro mode. |
+| **VLM Role** | Negative-only | VLM can reject (identify non-face), cannot promote. |
 
 ---
 
 ## Tuning History
 
-### Phase 89.4: Require Descriptive Evidence — Close Hallucination Paths (2026-02-13)
+### Phase 90: Pipeline Simplification — 3-Tier Detection Score System (2026-02-13)
 **Problem:**
-- VLM hallucinated on non-face objects (star balloons, wooden seats, jackets) by responding `IS_FACE: YES, Object: Face` with **no description**.
-- Adding keywords (Phase 89.3) was whack-a-mole — wouldn't scale to hundreds of thousands of photos.
-- Root cause: 5 acceptance paths in `vlm.py` allowed faces to be accepted WITHOUT any descriptive evidence.
+- 20+ decision points from incremental tuning (Phases 56-89.5)
+- Each fix solved one problem but created another ("whack-a-mole")
+- Multiple override layers fighting each other (Python accepts → TS rejects → TS re-overrides)
+- MACRO floor at 0.10 flooded pipeline with noise
+- SmolVLM bore too much responsibility despite being unreliable
+- Fail-open bias meant every uncertain case became a false positive
 
-**Root Cause Analysis:**
-- **Path #1 (Critical):** `category='face'` + empty description → auto-accepted ("Trusting face: Category='face'")
-- **Path #2 (Critical):** Bare `YES` response + no description → auto-accepted ("Explicit 'YES' response")
-- **Path #3:** Missing `IS_FACE` key but `YES` in response → set `is_face=True` (caught by downstream)
-- **Path #4:** Ambiguous/unparseable response → FAIL OPEN → `is_face=True`
-- **Path #5:** Parse exception + `"yes"` in first 10 chars → return `is_face=True` (bypassed all validation)
+**Root Design Change:**
+Trust the detector (InsightFace RetinaFace) — it's the most reliable signal. VLM is a weak secondary filter, not a gate.
+
+**Changes:**
+1. **ai-config.json** — Added `score_threshold_reject` (0.40), `score_threshold_accept` (0.70), raised `det_thresh_macro` (0.10 → 0.30)
+2. **config.py** — MACRO default raised from 0.15 → 0.30
+3. **vlm.py** — Fail-closed on garbage/ambiguous (return `is_face=None` instead of `True`), removed generic hallucination filter, removed echo stripping, removed bare claim heuristic acceptance. Kept: TTA with evidence gate, forbidden object/keyword rejection, metadata extraction.
+4. **FaceService.ts** — Replaced complex intake logic with 3-tier: reject (<0.40), verify/suspect (0.40-0.69), accept/human (>=0.70). Removed high-quality exception, large face exception, complex isLowScore/isLargeBox/isUnusualAspect logic.
+5. **BackgroundVerificationService.ts** — VLM is negative-only: `is_face===false` → ignore, anything else → accept as human. Removed: fail-open score filtering, score-gated VLM trust, tiered detection score override.
+6. **ConfigService.ts** — Added `scoreThresholdReject` and `scoreThresholdAccept` to AdvancedFaceConfig with enterprise defaults wiring.
+
+**What's Preserved:**
+- NMS, AdaFace, multi-face splitting, face quality calculation
+- TTA with Phase 89.5 evidence gate
+- Forbidden objects/keywords rejection
+- EXIF transpose, RAW file handling
+- Multi-face split check (aspect ratio + VLM multi-face flag)
+
+---
+
+### Phase 89.5: TTA-Specific Hallucination Guard (2026-02-13)
+**Problem:**
+- Phase 89.4 was TOO AGGRESSIVE — SmolVLM often returns bare "IS_FACE: YES" with NO description even for **real faces**.
+- Birthday photo (`26777898695_60060f2dfb_o.jpg`) showed ZERO face boxes after Phase 89.4.
+- Wrong assumption: "real faces always produce SOME description." SmolVLM is too limited for that.
 
 **Key Insight:**
-- If VLM can't **describe** what it sees, it shouldn't be trusted.
-- Real faces almost always produce SOME description (eyes, nose, man, woman, smiling, etc.).
-- Hallucinations produce bare "YES/Face" with nothing else.
+- Hallucinations happen specifically during **TTA rotation** (180/90/270°), NOT in upright verification.
+- SmolVLM sees rotated blur/texture and says "face" without describing anything.
+- Upright verification bare claims are mostly correct — SmolVLM just can't articulate WHY.
 
-**Fix (vlm.py — 4 locations):**
-1. **Path #1 closed (line ~605):** `category='face'` + no evidence → **REJECT** with "Bare category claim without evidence (hallucination guard)"
-2. **Path #2 closed (line ~605):** Bare `YES` + no evidence now falls to existing `else` clause → **REJECT** with "No anatomical proof"
-3. **Path #4 closed (line ~520):** Ambiguous responses → **FAIL CLOSED** (was FAIL OPEN)
-4. **Path #5 closed (line ~757):** Heuristic fallback bare "Yes"/"is_face:true" without facial features → **REJECT** with "bare claim without evidence"
+**Fix (vlm.py — Phase 89.5):**
+1. **Reverted** Phase 89.4 landmark validation — upright bare claims are trusted again
+2. **Reverted** ambiguous response handling back to FAIL OPEN
+3. **Reverted** heuristic fallback to accept bare "Yes"/"is_face:true"
+4. **NEW: TTA evidence gate** (verify_is_face TTA loop) — when a rotated crop claims `is_face=True`, require descriptive evidence (anatomical terms OR face proof words like "man", "woman", "face", "person"). Bare claims from rotated crops are rejected as hallucinations.
 
-**Safety Net:**
-- Phase 89.2 dual threshold (score >= 0.82 AND quality >= 0.70) on TypeScript side handles truly high-confidence detections that VLM conservatively rejects.
-- Real faces with descriptive evidence (has_anatomical or face_proof words) are unaffected — they pass via the "Evidence found in description" path.
+**Why This Works:**
+- **Upright real faces**: Accepted even with bare "Yes" (SmolVLM limitation) ✅
+- **Rotated real faces**: Accepted because SmolVLM describes what it sees when the orientation is correct ✅
+- **TTA hallucinations** (balloons, seats, blur): Rejected because SmolVLM can't describe facial features in rotated non-face crops ✅
+- Phase 89.2 dual threshold (score ≥ 0.82 AND quality ≥ 0.70) provides additional safety net on TypeScript side ✅
 
-**Outcome:**
-- All 5 hallucination acceptance paths closed ✅
-- VLM can no longer accept faces based on bare claims without evidence ✅
-- Scales to hundreds of thousands of photos without keyword chasing ✅
-- Real faces unaffected (VLM always describes real faces with SOME detail) ✅
-- Phase 89.2 override provides safety net for edge cases ✅
+**Scales** to hundreds of thousands of photos without keyword chasing ✅
+
+---
+
+### Phase 89.4: [REVERTED] Require Descriptive Evidence — Too Aggressive (2026-02-13)
+**Status:** REVERTED by Phase 89.5. SmolVLM doesn't reliably provide descriptions for real faces.
+Closed all 5 hallucination paths but also rejected all real faces that lacked descriptions.
+See Phase 89.5 for the correct, targeted fix.
 
 ---
 

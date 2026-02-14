@@ -355,10 +355,31 @@ def verify_is_face(image_path, box):
                  try:
                      rotated_crop = face_crop.rotate(angle, expand=True) # expand=True to keep corners
                      result_rotated = analyze_face_crop(rotated_crop, original_reason_prefix=f"[TTA-{angle}]")
-                     
+
                      if result_rotated.get('is_face') is True:
-                         logger.info(f"[VLM] TTA Success! Face confirmed at {angle} degrees.")
-                         return result_rotated
+                         # [Phase 89.5] TTA requires descriptive evidence to accept.
+                         # Hallucinations happen specifically during TTA rotation — SmolVLM sees
+                         # rotated blur/texture and says "face" without describing anything.
+                         # Real rotated faces produce SOME evidence (eyes, nose, man, woman, etc.).
+                         tta_reason = (result_rotated.get('reason') or '').lower()
+                         tta_anatomical = [
+                             "eye", "nose", "mouth", "lip", "chin", "ear", "eyebrow", "cheek",
+                             "forehead", "hairline", "profile", "smile", "nostril", "eyelid", "head"
+                         ]
+                         tta_face_proof = [
+                             "smiling", "smile", "expression", "glasses", "beard", "mustache",
+                             "girl", "boy", "man", "woman", "child", "baby", "lady", "gentleman",
+                             "bride", "groom", "infant", "toddler", "couple",
+                             "men", "women", "children", "people", "adults", "faces",
+                             "portrait", "person", "human"
+                         ]
+                         has_tta_evidence = any(re.search(r'\b' + re.escape(t) + r'\b', tta_reason, re.IGNORECASE) for t in tta_anatomical + tta_face_proof)
+
+                         if has_tta_evidence:
+                             logger.info(f"[VLM] TTA Success! Face confirmed at {angle} degrees with evidence.")
+                             return result_rotated
+                         else:
+                             logger.warning(f"[VLM] TTA {angle} claimed face but NO evidence in description: '{tta_reason}'. Rejecting as hallucination.")
                      else:
                          logger.debug(f"[VLM] TTA {angle} Failed.")
                  except Exception as tta_e:
@@ -461,14 +482,14 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
             
     logger.info(f"[VLM] Verification Response: {response}")
     
-    # Fail Open if still garbage
+    # [Phase 90] Fail CLOSED if still garbage — VLM cannot confirm, return unknown
     if is_garbage_final:
-        logger.warning("[VLM] Max retries reached with garbage output. FAILING OPEN (Accepting Face).")
+        logger.warning("[VLM] Max retries reached with garbage output. Failing closed (unknown).")
         return {
-            "is_face": True,
-            "confidence": 0.5,
-            "reason": "VLM Generation Failure (Fail Open)",
-            "error": None
+            "is_face": None,
+            "confidence": 0.0,
+            "reason": "VLM Generation Failure",
+            "error": "Garbage output after max retries"
         }
     
     try:
@@ -478,21 +499,28 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
 
         # [Phase 82] Robust Text Parsing
         # [Phase 89 Fix] Split on actual newlines, not literal '\\n'
-        lines = clean_response.replace('\\n', '\n').split('\n')
+        # [Phase 89.5] Strip "OUTPUT:" prefix — SmolVLM often wraps responses in "OUTPUT: ..."
+        stripped_response = clean_response
+        if stripped_response.upper().startswith('OUTPUT'):
+            # Remove "OUTPUT:" or "OUTPUT" prefix
+            stripped_response = re.sub(r'^OUTPUT\s*:?\s*', '', stripped_response, flags=re.IGNORECASE).strip()
+
+        lines = stripped_response.replace('\\n', '\n').split('\n')
         parsed = {}
-        
+
         for line in lines:
             line = line.strip()
             if ':' in line:
                 key, val = line.split(':', 1)
                 key = key.strip().upper()
                 val = val.strip()
-                
+
                 if key == 'IS_FACE':
-                    parsed['is_face'] = (val.upper() == 'YES')
+                    parsed['is_face'] = (val.upper().startswith('YES'))
                 elif key == 'CONFIDENCE':
                     try:
-                        parsed['confidence'] = float(val)
+                        # Handle trailing text after number (e.g. "0.95.")
+                        parsed['confidence'] = float(re.sub(r'[^\d.]', '', val) or '0.5')
                     except:
                         parsed['confidence'] = 0.5
                 elif key == 'OBJECT':
@@ -506,9 +534,8 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
         category = 'face' if is_face else 'none'
         obj_type = parsed.get('specific_object', 'unknown')
         reason = parsed.get('description', 'No description provided')
-        landmarks = '' 
         
-        # Fallback for 'IS_FACE' missing
+        # [Phase 90] Fallback for 'IS_FACE' missing — fail closed (unknown)
         if 'is_face' not in parsed:
             if 'YES' in clean_response.upper() and 'NO' not in clean_response.upper():
                 is_face = True
@@ -517,11 +544,9 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
                 is_face = False
                 confidence = 0.8
             else:
-                # [Phase 89.4] Ambiguous responses should FAIL CLOSED, not open.
-                # If VLM can't clearly say YES or NO, reject — Phase 89.2 override handles real faces.
-                logger.warning(f"[VLM] Ambiguous text response. FAILING CLOSED. Response: {clean_response}")
-                is_face = False
-                confidence = 0.3
+                logger.warning(f"[VLM] Ambiguous text response. Failing closed (unknown). Response: {clean_response}")
+                is_face = None
+                confidence = 0.0
         
         if obj_type and obj_type not in reason:
             reason += f" (object: {obj_type})"
@@ -571,52 +596,14 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
                 is_face = False
                 reason = f"Categorized as {category}/{obj_type} ({reason})"
 
-        # [Phase 56.9] AGGRESSIVE ECHO STRIPPING
-        echo_terms = [
-            "list 2+", "specific anatomical", "parts seen", "seen or", 
-            "specific facial", "facial parts", "be specific and honest",
-            "json with these fields", "valid json", "characterize exactly",
-            "catching errors", "automated face detector"
-        ]
-        if any(term in landmarks for term in echo_terms):
-            landmarks = "unknown"
-        if any(term in reason for term in echo_terms):
-            reason = "unknown"
+        logger.info(f"[VLM] Parsed Result: is_face={is_face}, cat={category}, obj={obj_type}")
         
-        logger.info(f"[VLM] Parsed Result: is_face={is_face}, cat={category}, obj={obj_type}, landmarks={landmarks}")
-        
-        # [Phase 56.5] LANDMARK VALIDATION
-        # [Phase 89.4] Require descriptive evidence — bare claims without evidence are hallucinations.
-        # If VLM can't describe what it sees, it shouldn't be trusted.
+        # [Phase 90] Log evidence level for debugging
         if is_face is True:
-            # Re-define face_proof (local scope)
-            face_proof = [
-                "smiling", "smile", "expression", "glasses", "beard", "mustache",
-                "tilted head", "head angle", "profile view",
-                "side-view", "side view",
-                "girl", "boy", "man", "woman", "child", "baby", "lady", "gentleman",
-                "bride", "groom", "infant", "toddler", "couple",
-                "men", "women", "children", "people", "adults", "faces"
-            ]
-
-            has_category_proof = category and category.lower() == "face"
-
-            if has_anatomical or has_word(reason, face_proof):
-                # Real evidence exists in the description — trust it
-                logger.info(f"[VLM] Trusting face: Evidence found in description.")
-            elif has_category_proof and not (has_anatomical or has_word(reason, face_proof)):
-                # [Phase 89.4] Category='face' but NO descriptive evidence.
-                # This is the hallucination pattern: VLM says "Object: Face" with empty description.
-                # Real faces almost always produce SOME description (eyes, nose, man, woman, etc.).
-                # Bare category claims are unreliable — reject and let Phase 89.2 override handle
-                # truly high-confidence detections on the TypeScript side (score >= 0.82 AND quality >= 0.70).
-                logger.warning(f"[VLM] Rejecting bare category claim 'face' with NO descriptive evidence (Confidence: {confidence:.4f}). Likely hallucination.")
-                is_face = False
-                reason = f"Bare category claim without evidence (hallucination guard)"
+            if has_anatomical or has_face_proof:
+                logger.info(f"[VLM] Face confirmed with anatomical/subject evidence.")
             else:
-                logger.warning(f"[VLM] Overriding is_face=True -> False because NO anatomical proof was found in text (Confidence: {confidence:.4f}).")
-                is_face = False
-                reason = f"No anatomical proof in description (reason: {reason})"
+                logger.info(f"[VLM] Face accepted (no descriptive evidence).")
         
         # [Phase 56.9] Secondary Safeguards
         if is_face is True:
@@ -637,42 +624,9 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
                     elif has_anatomical or has_face_proof:
                          logger.info(f"[VLM] Keyword '{kw}' found but ignored due to valid face proof: {reason}")
         
-        # [Phase 63.5] Generic Hallucination Filter
-        if is_face is True:
-            generic_phrases = [
-                "face is visible", "the object is a face", 
-                "facial features are visible", "person's face", "a face",
-                "visible face", "human head", "the image contains a face",
-                "close-up of a face"
-            ]
-            clean_reason = reason.lower().strip().strip(".").strip()
-            is_generic = any(clean_reason == gp or clean_reason == f"a {gp}" or clean_reason == f"the {gp}" for gp in generic_phrases)
-            
-            if not is_generic:
-                 for gp in generic_phrases:
-                     if gp in clean_reason and len(clean_reason) < 45: 
-                         is_generic = True
-                         break
-            
-            if is_generic:
-                details = [
-                    "pink", "blue", "red", "green", "hair", " dress", "shirt", "eyes", "nose", "mouth", "smile", "looking",
-                    "woman", "man", "boy", "girl", "baby", "child", "person", "lady", "gentleman",
-                    "bride", "groom", "infant", "toddler", "couple", "people", "portrait",
-                    "beautiful", "pretty", "human", "mask", "costume", "makeup", 
-                    "men", "women", "adults", "faces"
-                ]
-                has_detail = has_word(clean_reason, details)
-                if has_detail:
-                     is_generic = False 
-                else:
-                     logger.warning(f"[VLM] Generic description ('{clean_reason}') REJECTED (No details).")
-                
-                if not has_detail:
-                    logger.warning(f"[VLM] Overriding is_face=True -> False. Reason is too generic ('{reason}') and lacks specific details.")
-                    is_face = False
-                    reason = f"Generic Hallucination Detected (reason: {reason})"
-        
+        # [Phase 90] Removed generic hallucination filter — VLM is negative-only,
+        # so generic "yes" responses are acceptable (detector score is the real gate).
+
         # [Phase 68] Extract Suggested Metadata
         suggested_metadata = {}
         mining_text = (str(reason) + " " + str(obj_type)).lower()
@@ -751,22 +705,17 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
                  "error": None
              }
         elif has_is_face_true or has_yes_prefix:
-             # [Phase 89.4] Bare claims without descriptive evidence — reject.
-             # Previously these accepted faces just from "is_face: true" or bare "Yes".
-             # Without facial features in the description, this is unreliable.
-             # Phase 89.2 override (score >= 0.82 AND quality >= 0.70) provides safety net.
-             tag = "JSON key" if has_is_face_true else "'Yes' prefix"
-             logger.warning(f"[VLM] Heuristic fallback: bare {tag} without facial features — rejecting as hallucination.")
+             # [Phase 90] Bare claim without facial features — fail closed (unknown)
              return {
-                 "is_face": False,
-                 "confidence": 0.3,
-                 "reason": f"Heuristic fallback: bare {tag} without evidence (hallucination guard)",
+                 "is_face": None,
+                 "confidence": 0.0,
+                 "reason": "Heuristic fallback: bare VLM claim (no evidence)",
                  "error": None
              }
         else:
              is_face = False
-        
-        confidence = 0.9 if is_face else 0.1
+
+        confidence = 0.1
         reason = response.strip()
         
         suggested_metadata = {} 

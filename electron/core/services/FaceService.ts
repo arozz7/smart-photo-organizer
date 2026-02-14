@@ -737,72 +737,40 @@ export class FaceService {
                     );
                     finalId = bestMatch.id;
                 } else {
-                    // [Phase 57] Determine entity_type based on detection score AND box characteristics
-                    // Read threshold from settings (Centralized Config)
-                    const settings = getAISettings();
-                    const advancedSettings = ConfigService.getAdvancedFaceSettings(); // Contains strict floor
+                    // [Phase 90] 3-Tier Detection Score System
+                    // Reject (<0.40), Verify/suspect (0.40-0.69), Accept/human (>=0.70)
+                    const advancedSettings = ConfigService.getAdvancedFaceSettings();
+                    const REJECT_FLOOR = advancedSettings.scoreThresholdReject ?? 0.40;
+                    const ACCEPT_CEILING = advancedSettings.scoreThresholdAccept ?? 0.70;
 
-                    const vlmThreshold = settings.vlmVerificationThreshold ?? 0.85;
-                    // FIX: Python returns 'score' (lowercase), use it directly
                     const detectionScore = face.score ?? 0.95;
 
-                    // Check box characteristics for multi-face indicators
+                    if (detectionScore < REJECT_FLOOR) {
+                        logger.info(`[FaceService] REJECT face ${faceIdx} — score ${detectionScore.toFixed(2)} < ${REJECT_FLOOR}`);
+                        continue;
+                    }
+
+                    // Check box characteristics for multi-face suspect flagging
                     const box = face.box;
                     const boxWidth = box.width || 0;
                     const boxHeight = box.height || 0;
                     const aspectRatio = boxHeight > 0 ? boxWidth / boxHeight : 1.0;
                     const boxArea = boxWidth * boxHeight;
-
-                    // Flag as suspect if:
-                    // 1. Low detection score (< threshold)
-                    // 2. Unusually large box (>4M pixels - likely contains multiple faces)
-                    // 3. Unusual aspect ratio (>1.4 or <0.7 - may contain multiple faces)
-                    const isLowScore = detectionScore < vlmThreshold;
-                    const isLargeBox = boxArea > 4000000; // 2000x2000 pixels
+                    const isLargeBox = boxArea > 4000000;
                     const isUnusualAspect = aspectRatio > 1.6 || aspectRatio < 0.6;
 
-                    // FIX: Ignore Python's entityType. Enforce local centralized thresholds.
-                    const entityType = (isLowScore || isLargeBox || isUnusualAspect) ? 'suspect' : 'human';
+                    // Accept (>= 0.70) → 'human', Verify (0.40-0.69) → 'suspect'
+                    // Also flag large/unusual boxes as suspect for multi-face split checking
+                    let entityType: string;
+                    if (detectionScore >= ACCEPT_CEILING && !isLargeBox && !isUnusualAspect) {
+                        entityType = 'human';
+                    } else {
+                        entityType = 'suspect';
+                    }
 
                     if (isLargeBox || isUnusualAspect) {
                         logger.info(`[FaceService] Flagged face as suspect: ${isLargeBox ? `large box (${boxArea.toLocaleString()}px)` : ''} ${isUnusualAspect ? `unusual aspect (${aspectRatio.toFixed(2)})` : ''}`);
                     }
-
-                    // [Safe Filter]: Strict Hysteresis
-                    // 1. REJECT if score < STRICT_FLOOR (Loaded from ai-config.json via ConfigService)
-                    // 2. QUEUE as 'suspect' if score floor - 0.85 (VLM Verification)
-                    // 3. ACCEPT as 'human' if score > 0.85
-
-                    // Default to 0.60 if config missing, but ConfigService should load from ai-config.json
-                    const STRICT_FLOOR = advancedSettings.detThreshStandard ?? 0.60;
-
-                    // [Phase 74 Fix] High-Quality Exception
-                    const faceQuality = face.faceQuality ?? 0;
-                    const HIGH_QUALITY_THRESHOLD = advancedSettings.highQualityFaceThreshold ?? 0.70;
-                    const isHighQuality = faceQuality > HIGH_QUALITY_THRESHOLD;
-
-                    // [Phase 79 Fix] Large Face Exception
-                    // Python detector allows very large faces (>300px) even with low score.
-                    // Electron must match this policy or we lose valid faces.
-                    const LARGE_FACE_SIZE = advancedSettings.largeFaceThreshold ?? 300;
-                    const isLargeWebSize = boxWidth > LARGE_FACE_SIZE || boxHeight > LARGE_FACE_SIZE;
-
-                    if (detectionScore < STRICT_FLOOR && !isHighQuality && !isLargeWebSize) {
-                        logger.info(`[FaceService] SKIPPING face ${faceIdx} - low score (Score: ${detectionScore.toFixed(2)} < ${STRICT_FLOOR}), low quality (${faceQuality.toFixed(2)}), and not large size.`);
-                        continue;
-                    }
-
-                    if (detectionScore < STRICT_FLOOR && isLargeWebSize) {
-                        logger.info(`[FaceService] LARGE FACE OVERRIDE for face ${faceIdx}: Score=${detectionScore.toFixed(2)} < ${STRICT_FLOOR} BUT Size > ${LARGE_FACE_SIZE}px. Keeping.`);
-                    }
-
-                    if (detectionScore < STRICT_FLOOR && isHighQuality) {
-                        logger.info(`[FaceService] HIGH QUALITY OVERRIDE for face ${faceIdx}: Score=${detectionScore.toFixed(2)} < ${STRICT_FLOOR} BUT Quality=${faceQuality.toFixed(2)} > ${HIGH_QUALITY_THRESHOLD}. Keeping.`);
-                    }
-
-                    // Note: Faces between 0.65 and 0.85 will have entityType='suspect' (from VLM threshold)
-                    // and will proceed to insertion below.
-
 
                     const insertParams = [
                         photoId,

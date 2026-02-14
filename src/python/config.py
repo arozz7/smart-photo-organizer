@@ -14,7 +14,7 @@ def load_ai_config():
              'score_threshold_vlm_verification': 0.85, 
              'box_margin_percent': 0.10,
              'min_face_size_macro': 50,
-             'det_thresh_macro': 0.15, # [Phase 78] Lowered to 0.15 for difficult/profile faces
+             'det_thresh_macro': 0.30, # [Phase 90] Raised to 0.30 — eliminates texture/blur false positives
              'min_face_size_standard': 40,
              'face_blur_threshold': 15.0,
              'nms_iou_threshold': 0.45,

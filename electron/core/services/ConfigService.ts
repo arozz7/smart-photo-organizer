@@ -46,6 +46,10 @@ export interface AdvancedFaceConfig {
     // [Phase 79] Large Face Threshold (Web Size)
     // Faces larger than this (width or height) are kept even if detection score is low
     largeFaceThreshold?: number; // Default 300
+
+    // [Phase 90] 3-Tier Detection Score System
+    scoreThresholdReject?: number;  // Default 0.40 — below this, auto-reject
+    scoreThresholdAccept?: number;  // Default 0.70 — above this, auto-accept as human
 }
 
 export interface WindowBounds {
@@ -113,7 +117,9 @@ export const DEFAULT_CONFIG: AppConfig = {
         enableMacroLowRes: true,
         enableTTA: true,
         highQualityFaceThreshold: 0.65, // [Phase 74] Faces with quality > this bypass low detection score filter
-        largeFaceThreshold: 300         // [Phase 79] Default
+        largeFaceThreshold: 300,        // [Phase 79] Default
+        scoreThresholdReject: 0.40,     // [Phase 90] Below this → auto-reject
+        scoreThresholdAccept: 0.70      // [Phase 90] Above this → auto-accept as human
     },
     aiSettings: {
         faceSimilarityThreshold: 0.65,
@@ -165,12 +171,14 @@ export class ConfigService {
                     // Map ai-config.json to AppConfig structure
                     enterpriseDefaults = {
                         advancedFace: {
-                            detThreshStandard: aiJson.face_detection?.score_threshold_strict ?? 0.60, // Map strict floor
+                            detThreshStandard: aiJson.face_detection?.score_threshold_strict ?? 0.40, // [Phase 90] Aligned with reject floor
                             minFaceSize: aiJson.face_detection?.min_face_size_standard ?? 40,
                             nmsIouThresh: aiJson.face_detection?.nms_iou_threshold ?? 0.3,
-                            dedupIoUThresh: aiJson.face_detection?.deduplication_iou_threshold ?? 0.55, // [Phase 68] Centralized Deduplication Threshold
-                            enableTTA: aiJson.face_detection?.enable_tta ?? false, // [Phase 67] Disable TTA to fix alignment drift
-                            largeFaceThreshold: aiJson.face_detection?.large_face_threshold ?? 300 // [Phase 79]
+                            dedupIoUThresh: aiJson.face_detection?.deduplication_iou_threshold ?? 0.55,
+                            enableTTA: aiJson.face_detection?.enable_tta ?? false,
+                            largeFaceThreshold: aiJson.face_detection?.large_face_threshold ?? 300,
+                            scoreThresholdReject: aiJson.face_detection?.score_threshold_reject ?? 0.40, // [Phase 90]
+                            scoreThresholdAccept: aiJson.face_detection?.score_threshold_accept ?? 0.70  // [Phase 90]
                         },
                         aiSettings: {
                             vlmVerificationThreshold: aiJson.vlm?.verification_threshold ?? 0.85,

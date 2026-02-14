@@ -103,36 +103,16 @@ export class BackgroundVerificationService implements IService {
                 // Call VLM verification
                 const result = await pythonProvider.verifyFace(face.file_path, boxCoords);
 
-                // [Phase 79 Part 4] Fail Open Filtering
-                // If VLM failed open (confusion), we only accept if detector was confident (>0.6)
-                // PREVENTS: Low-confidence false positives (like hair/shoulders, score 0.24) from being accepted
-                // ALLOWS: High-confidence occluded faces (like Girl duo left, score 0.80) to pass
-                const score = face.score || 0;
-                if (result.is_face === true && result.reason?.includes('Fail Open') && score < 0.6) {
-                    logger.warn(`[BackgroundVerificationService] Face ${face.id} Fail Open REJECTED due to low score (${score.toFixed(2)} < 0.6).`);
-                    result.is_face = false;
-                    result.reason = 'Fail Open + Low Score';
-                }
+                // [Phase 90] VLM as Negative Filter Only
+                // VLM can reject (is_face===false) but cannot override detector.
+                // If VLM says "Yes" or returns unknown/error, trust the detector's 0.40+ score.
 
-                // [Phase 89.2] High Detection Score + Quality Override
-                // When VLM says "No" with no clear reason (obj=unknown), but BOTH:
-                // 1. Detector was very confident (score >= 0.82)
-                // 2. Face quality is high (>= 0.70 - sharp, frontal, well-framed)
-                // Then trust the detector over VLM. This handles cases where VLM is overly conservative on valid faces
-                // (e.g., groom in wedding photo with shadows/angles, partially occluded faces).
-                // Dual threshold prevents false positives: blurred backgrounds/body parts have low quality (<0.70).
-                const quality = face.face_quality || 0;
-                if (result.is_face === false &&
-                    result.reason?.includes('No description provided (object: unknown)') &&
-                    score >= 0.82 &&
-                    quality >= 0.70) {
-                    logger.info(`[BackgroundVerificationService] Face ${face.id} VLM rejection OVERRIDDEN due to high score (${score.toFixed(2)}) AND quality (${quality.toFixed(2)}). Treating as valid face.`);
-                    result.is_face = true;
-                    result.confidence = score;
-                    result.reason = 'High Detection Score + Quality Override (VLM Conservative)';
-                }
-
-                if (result.is_face === true) {
+                if (result.is_face === false) {
+                    // VLM identified a specific non-face object → reject
+                    FaceRepository.ignoreFaces([face.id]);
+                    this.notifyPhotoChanged(face.photo_id);
+                    logger.info(`[BackgroundVerificationService] Face ${face.id} rejected by VLM (reason: ${result.reason})`);
+                } else if (result.is_face === true) {
                     // [Phase 58 Part 3] If VLM confirms face AND (aspect ratio is suspicious OR multi-face detected), check for split
                     // Cast to any to access is_multi_face which might not be in interface yet
                     const isMultiFace = (result.suggested_metadata as any)?.is_multi_face === true;
@@ -225,22 +205,12 @@ export class BackgroundVerificationService implements IService {
                         this.notifyPhotoChanged(face.photo_id);
                         logger.info(`[BackgroundVerificationService] Face ${face.id} verified as human (confidence: ${result.confidence})`);
                     }
-                } else if (result.is_face === false) {
-                    // [Phase 64] Safety Net: Soft Delete (Ignore) instead of Hard Delete
-                    // If VLM makes a mistake (e.g. valid face rejected as "generic"), we want to be able to restore it.
-                    FaceRepository.ignoreFaces([face.id]);
-                    this.notifyPhotoChanged(face.photo_id);
-                    logger.info(`[BackgroundVerificationService] Face ${face.id} soft-deleted/ignored as non-face (reason: ${result.reason})`);
                 } else {
-                    // VLM error (is_face = null)
-                    const attempts = FaceRepository.incrementVerificationAttempts(face.id);
-                    logger.warn(`[BackgroundVerificationService] VLM error for face ${face.id} (attempt ${attempts}/${MAX_ATTEMPTS}): ${result.error}`);
-
-                    // Auto-ignore after max attempts
-                    if (attempts >= MAX_ATTEMPTS) {
-                        FaceRepository.markFaceAsRejected(face.id);
-                        logger.warn(`[BackgroundVerificationService] Face ${face.id} auto-ignored after ${MAX_ATTEMPTS} failed attempts`);
-                    }
+                    // [Phase 90] VLM returned unknown/error (is_face=null) → accept as human
+                    // Detector's 0.40+ score is trusted. VLM only has veto power.
+                    FaceRepository.updateFaceEntityType(face.id, 'human');
+                    this.notifyPhotoChanged(face.photo_id);
+                    logger.info(`[BackgroundVerificationService] Face ${face.id} accepted as human (VLM unknown/error, trusting detector score)`);
                 }
 
                 // Yield to event loop between faces
