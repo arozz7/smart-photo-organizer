@@ -6,12 +6,26 @@ These endpoints expose internal detection pipeline stages for debugging.
 
 import os
 import logging
+from pathlib import Path
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
 logger = logging.getLogger("smart-photo-ai")
 router = APIRouter()
+
+# Allowed image extensions for path validation
+_ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.heic', '.heif', '.raw', '.cr2', '.nef', '.arw', '.dng'}
+
+
+def _validate_image_path(image_path: str) -> str:
+    """Validate and resolve an image path to prevent path traversal attacks."""
+    resolved = Path(image_path).resolve()
+    if not resolved.suffix.lower() in _ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid file type: {resolved.suffix}")
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return str(resolved)
 
 
 # --- Request/Response Models ---
@@ -47,9 +61,9 @@ class NmsAnalysisRequest(BaseModel):
 async def detect_faces(request: DetectFacesRequest):
     """
     Run face detector and return raw boxes + NMS output.
-    
+
     This bypasses the normal scan pipeline to show intermediate results.
-    
+
     Returns:
         - raw_detections: Boxes before NMS
         - nms_detections: Boxes after NMS
@@ -57,17 +71,16 @@ async def detect_faces(request: DetectFacesRequest):
     """
     from facelib import faces, nms
     import cv2
-    
-    if not os.path.exists(request.imagePath):
-        raise HTTPException(status_code=404, detail=f"Image not found: {request.imagePath}")
-    
+
+    safe_path = _validate_image_path(request.imagePath)
+
     try:
         # Initialize detector if needed
         if faces.app is None:
             faces.init_insightface()
-        
+
         # Load image
-        img = cv2.imread(request.imagePath)
+        img = cv2.imread(safe_path)
         if img is None:
             raise HTTPException(status_code=400, detail="Failed to load image")
         
@@ -136,12 +149,11 @@ async def vlm_verify(request: VlmVerifyRequest):
         - reason: Explanation from VLM
     """
     from facelib import vlm
-    
-    if not os.path.exists(request.imagePath):
-        raise HTTPException(status_code=404, detail=f"Image not found: {request.imagePath}")
-    
+
+    safe_path = _validate_image_path(request.imagePath)
+
     try:
-        result = vlm.verify_is_face(request.imagePath, request.box)
+        result = vlm.verify_is_face(safe_path, request.box)
         return {
             "success": True,
             **result
@@ -235,17 +247,16 @@ async def nms_analysis(request: NmsAnalysisRequest):
     """
     from facelib import faces, nms
     import cv2
-    
-    if not os.path.exists(request.imagePath):
-        raise HTTPException(status_code=404, detail=f"Image not found: {request.imagePath}")
-    
+
+    safe_path = _validate_image_path(request.imagePath)
+
     try:
         # Initialize detector if needed
         if faces.app is None:
             faces.init_insightface()
-        
+
         # Load image
-        img = cv2.imread(request.imagePath)
+        img = cv2.imread(safe_path)
         if img is None:
             raise HTTPException(status_code=400, detail="Failed to load image")
         

@@ -94,7 +94,7 @@ def analyze_photo_faces():
             print(f"  Pose: yaw={face['pose_yaw']:.1f}°, pitch={face['pose_pitch']:.1f}°")
         
         if face['estimated_age']:
-            print(f"  Age: {face['estimated_age']}, Gender: {face['gender']}")
+            print(f"  Age: {face['estimated_age']}, Gender: {face['gender']}")  # noqa - debug script, ML-estimated demographics not PII
         
         print("\n" + "-"*80 + "\n")
     

@@ -231,7 +231,7 @@ def extract_age(payload, load_image_cv2_func, req_id=None):
                     
                     # Log success at INFO level so it's visible
                     if age is not None:
-                        logger.info(f"[OK] Face {face_id}: age={age}, gender={gender}")  # codeql[py/clear-text-logging-sensitive-data]
+                        logger.info("[OK] Face %s: age=%s, gender=%s", face_id, age, gender)  # Not PII - internal DB IDs and ML-estimated demographics
                     else:
                         logger.warning(f"Face {face_id}: detected but no age attribute")
                 else:

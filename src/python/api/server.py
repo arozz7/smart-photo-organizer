@@ -89,7 +89,7 @@ def start_http_server():
     config = get_api_config()
     app = create_app()
     
-    logger.info(f"[API] Starting HTTP server on {config['host']}:{config['port']}")
+    logger.info("[API] Starting HTTP server on %s:%s", config['host'], config['port'])  # noqa: LOG002 - host/port are not sensitive
     uvicorn.run(
         app,
         host=config["host"],
