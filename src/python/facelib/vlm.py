@@ -517,9 +517,11 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
                 is_face = False
                 confidence = 0.8
             else:
-                logger.warning(f"[VLM] Ambiguous text response. FAILING OPEN. Response: {clean_response}")
-                is_face = True
-                confidence = 0.5
+                # [Phase 89.4] Ambiguous responses should FAIL CLOSED, not open.
+                # If VLM can't clearly say YES or NO, reject — Phase 89.2 override handles real faces.
+                logger.warning(f"[VLM] Ambiguous text response. FAILING CLOSED. Response: {clean_response}")
+                is_face = False
+                confidence = 0.3
         
         if obj_type and obj_type not in reason:
             reason += f" (object: {obj_type})"
@@ -584,28 +586,33 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
         logger.info(f"[VLM] Parsed Result: is_face={is_face}, cat={category}, obj={obj_type}, landmarks={landmarks}")
         
         # [Phase 56.5] LANDMARK VALIDATION
+        # [Phase 89.4] Require descriptive evidence — bare claims without evidence are hallucinations.
+        # If VLM can't describe what it sees, it shouldn't be trusted.
         if is_face is True:
             # Re-define face_proof (local scope)
             face_proof = [
-                "smiling", "smile", "expression", "glasses", "beard", "mustache", 
-                "tilted head", "head angle", "profile view", 
-                "side-view", "side view", 
+                "smiling", "smile", "expression", "glasses", "beard", "mustache",
+                "tilted head", "head angle", "profile view",
+                "side-view", "side view",
                 "girl", "boy", "man", "woman", "child", "baby", "lady", "gentleman",
                 "bride", "groom", "infant", "toddler", "couple",
                 "men", "women", "children", "people", "adults", "faces"
             ]
-            
+
             has_category_proof = category and category.lower() == "face"
-            
-            if has_anatomical or has_word(reason, face_proof) or has_category_proof:
-                if has_category_proof and not (has_anatomical or has_word(reason, face_proof)):
-                    logger.info(f"[VLM] Trusting face: Category='face' (description empty)")
-                else:
-                    logger.info(f"[VLM] Trusting face: Evidence found in description.")
-            elif re.match(r'^(OUTPUT:\s*)?YES\b', clean_response.strip(), re.IGNORECASE):
-                logger.info(f"[VLM] Trusting face: Explicit 'YES' response (description empty/missing).")
-                if reason == "No description provided":
-                    reason = "Explicit 'YES' confirmed by VLM"
+
+            if has_anatomical or has_word(reason, face_proof):
+                # Real evidence exists in the description — trust it
+                logger.info(f"[VLM] Trusting face: Evidence found in description.")
+            elif has_category_proof and not (has_anatomical or has_word(reason, face_proof)):
+                # [Phase 89.4] Category='face' but NO descriptive evidence.
+                # This is the hallucination pattern: VLM says "Object: Face" with empty description.
+                # Real faces almost always produce SOME description (eyes, nose, man, woman, etc.).
+                # Bare category claims are unreliable — reject and let Phase 89.2 override handle
+                # truly high-confidence detections on the TypeScript side (score >= 0.82 AND quality >= 0.70).
+                logger.warning(f"[VLM] Rejecting bare category claim 'face' with NO descriptive evidence (Confidence: {confidence:.4f}). Likely hallucination.")
+                is_face = False
+                reason = f"Bare category claim without evidence (hallucination guard)"
             else:
                 logger.warning(f"[VLM] Overriding is_face=True -> False because NO anatomical proof was found in text (Confidence: {confidence:.4f}).")
                 is_face = False
@@ -729,6 +736,7 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
         has_yes_prefix = "yes" in response_lower[:10]
         
         if has_facial_features:
+             # Real evidence: VLM described facial anatomy — trust it
              return {
                  "is_face": True,
                  "confidence": 0.5,
@@ -742,18 +750,17 @@ def analyze_face_crop(face_crop, original_reason_prefix=""):
                  "reason": "Heuristic fallback: forbidden keywords",
                  "error": None
              }
-        elif has_is_face_true:
+        elif has_is_face_true or has_yes_prefix:
+             # [Phase 89.4] Bare claims without descriptive evidence — reject.
+             # Previously these accepted faces just from "is_face: true" or bare "Yes".
+             # Without facial features in the description, this is unreliable.
+             # Phase 89.2 override (score >= 0.82 AND quality >= 0.70) provides safety net.
+             tag = "JSON key" if has_is_face_true else "'Yes' prefix"
+             logger.warning(f"[VLM] Heuristic fallback: bare {tag} without facial features — rejecting as hallucination.")
              return {
-                 "is_face": True,
-                 "confidence": 0.6,
-                 "reason": "Heuristic fallback: explicit JSON key",
-                 "error": None
-             }
-        elif has_yes_prefix:
-             return {
-                 "is_face": True,
-                 "confidence": 0.6,
-                 "reason": "Heuristic fallback: explicit 'Yes'",
+                 "is_face": False,
+                 "confidence": 0.3,
+                 "reason": f"Heuristic fallback: bare {tag} without evidence (hallucination guard)",
                  "error": None
              }
         else:

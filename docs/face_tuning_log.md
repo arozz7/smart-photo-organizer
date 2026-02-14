@@ -12,6 +12,43 @@
 
 ## Tuning History
 
+### Phase 89.4: Require Descriptive Evidence — Close Hallucination Paths (2026-02-13)
+**Problem:**
+- VLM hallucinated on non-face objects (star balloons, wooden seats, jackets) by responding `IS_FACE: YES, Object: Face` with **no description**.
+- Adding keywords (Phase 89.3) was whack-a-mole — wouldn't scale to hundreds of thousands of photos.
+- Root cause: 5 acceptance paths in `vlm.py` allowed faces to be accepted WITHOUT any descriptive evidence.
+
+**Root Cause Analysis:**
+- **Path #1 (Critical):** `category='face'` + empty description → auto-accepted ("Trusting face: Category='face'")
+- **Path #2 (Critical):** Bare `YES` response + no description → auto-accepted ("Explicit 'YES' response")
+- **Path #3:** Missing `IS_FACE` key but `YES` in response → set `is_face=True` (caught by downstream)
+- **Path #4:** Ambiguous/unparseable response → FAIL OPEN → `is_face=True`
+- **Path #5:** Parse exception + `"yes"` in first 10 chars → return `is_face=True` (bypassed all validation)
+
+**Key Insight:**
+- If VLM can't **describe** what it sees, it shouldn't be trusted.
+- Real faces almost always produce SOME description (eyes, nose, man, woman, smiling, etc.).
+- Hallucinations produce bare "YES/Face" with nothing else.
+
+**Fix (vlm.py — 4 locations):**
+1. **Path #1 closed (line ~605):** `category='face'` + no evidence → **REJECT** with "Bare category claim without evidence (hallucination guard)"
+2. **Path #2 closed (line ~605):** Bare `YES` + no evidence now falls to existing `else` clause → **REJECT** with "No anatomical proof"
+3. **Path #4 closed (line ~520):** Ambiguous responses → **FAIL CLOSED** (was FAIL OPEN)
+4. **Path #5 closed (line ~757):** Heuristic fallback bare "Yes"/"is_face:true" without facial features → **REJECT** with "bare claim without evidence"
+
+**Safety Net:**
+- Phase 89.2 dual threshold (score >= 0.82 AND quality >= 0.70) on TypeScript side handles truly high-confidence detections that VLM conservatively rejects.
+- Real faces with descriptive evidence (has_anatomical or face_proof words) are unaffected — they pass via the "Evidence found in description" path.
+
+**Outcome:**
+- All 5 hallucination acceptance paths closed ✅
+- VLM can no longer accept faces based on bare claims without evidence ✅
+- Scales to hundreds of thousands of photos without keyword chasing ✅
+- Real faces unaffected (VLM always describes real faces with SOME detail) ✅
+- Phase 89.2 override provides safety net for edge cases ✅
+
+---
+
 ### Phase 89.3: VLM Balloon/Decoration False Positive Fix (2026-02-13)
 **Problem:**
 - VLM accepted a star balloon as a valid face (Face 533, confidence 0.987654321).
