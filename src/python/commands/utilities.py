@@ -61,7 +61,7 @@ def download_model(payload, req_id=None):
             if not base_url:
                 # Fallback default if not provided (should accept version from IPC though)
                 # Note: We expect IPC to provide versioned URL now.
-                base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.5.0/ai-runtime-win-x64.zip"
+                base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.6.0/ai-runtime-win-x64.zip"
 
             # Check if this is a custom override (likely single file) or standard release (multi-part)
             # Heuristic: Try .001 first. If 404, fallback to single file.

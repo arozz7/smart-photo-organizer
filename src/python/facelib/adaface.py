@@ -45,12 +45,18 @@ def init_adaface(model_path=None):
         
         MODEL_PATH = model_path
         
-        # Check if model file exists
+        # Check if model file exists (try CWD-relative first, then AI runtime directory)
         if not os.path.exists(model_path):
-            logger.warning(f"[AdaFace] Model not found at {model_path}")
-            logger.warning("[AdaFace] Please download or convert AdaFace model to ONNX format")
-            logger.warning("[AdaFace] Falling back to ArcFace only")
-            return False
+            from facelib.utils import AI_RUNTIME_PATH
+            runtime_model_path = os.path.join(AI_RUNTIME_PATH, model_path)
+            if os.path.exists(runtime_model_path):
+                logger.info(f"[AdaFace] Model found in AI runtime: {runtime_model_path}")
+                model_path = runtime_model_path
+            else:
+                logger.warning(f"[AdaFace] Model not found at {model_path} or {runtime_model_path}")
+                logger.warning("[AdaFace] Please download or convert AdaFace model to ONNX format")
+                logger.warning("[AdaFace] Falling back to ArcFace only")
+                return False
         
         # Load ONNX model
         logger.info(f"[AdaFace] Loading model from {model_path}...")

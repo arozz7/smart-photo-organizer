@@ -72,6 +72,15 @@ heavyPackages.forEach(pkg => {
     }
 });
 
+// 2b. Collect AI model files (ONNX etc.)
+const modelsDir = path.join(__dirname, '../models');
+if (fs.existsSync(modelsDir)) {
+    console.log('Copying AI model files...');
+    fs.cpSync(modelsDir, path.join(stagingDir, 'models'), { recursive: true });
+} else {
+    console.warn('Warning: models/ directory not found. AdaFace ONNX model will be missing from runtime.');
+}
+
 // 3. Collect DLLs for bin folder
 // Many NVIDIA/PyTorch DLLs are deep in site-packages. We'll search for them and copy to bin.
 // Or we can just let Python find them in site-packages (os.add_dll_directory handles this if we point to the right place).

@@ -193,7 +193,7 @@ def handle_command(command):
             runtime_exists = os.path.exists(os.path.join(os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer')), 'ai-runtime'))
             
             # Use dynamic URL if provided, otherwise default (though default might be outdated if version mismatch)
-            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.3.0/ai-runtime-win-x64.zip")
+            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.6.0/ai-runtime-win-x64.zip")
             
             models_info["AI GPU Runtime (Torch/CUDA)"] = {
                 "exists": runtime_exists,
