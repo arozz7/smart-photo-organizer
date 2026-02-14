@@ -40,6 +40,48 @@
 
 ---
 
+### Phase 89.2: High Detection Score + Quality VLM Override (2026-02-13)
+**Problem (Initial):**
+- Valid faces with high detection scores (e.g., 0.80+) were being rejected by VLM with vague "No" responses (`obj=unknown`).
+- Example: Groom in wedding photo (`Boda en iglesia.jfif`) rejected despite high confidence from detector.
+- VLM was being overly conservative on faces with shadows, angles, or partial occlusion.
+
+**Problem (Refinement):**
+- Initial fix (score >= 0.80) was too permissive — accepting many false positives.
+- Example: `DSC_2480.NEF` showed 4 face boxes, only 1 was a real face (3 were blurred background/body parts).
+- Logs showed 30+ override messages in short period — VLM was CORRECTLY rejecting false positives, but override ignored VLM's good judgment.
+- Detection score alone is insufficient: detector assigns high scores (0.80-0.89) to blur artifacts and body parts.
+
+**Root Cause:**
+- Need BOTH high detection score AND high face quality to distinguish real faces from false positives.
+- Blurred backgrounds/body parts have low quality scores (<0.70) despite high detection scores.
+
+**Fix (BackgroundVerificationService.ts + FaceRepository.ts):**
+- Added **Dual Threshold Override** after VLM verification (line ~117).
+- Requires BOTH conditions:
+  1. **Detection score >= 0.82** (raised from 0.80, more conservative)
+  2. **Face quality >= 0.70** (high quality threshold - filters blur/artifacts)
+- Quality calculation (from detector.py): 30% blur + 30% pose + 20% det_score + 20% size
+- Updated `FaceRepository.getSuspectFaces` to include `face_quality` field in SELECT query
+- When both thresholds met:
+  - Override VLM rejection
+  - Mark as `is_face=true` with reason `"High Detection Score + Quality Override (VLM Conservative)"`
+  - Use detection score as confidence value
+
+**Threshold Rationale:**
+- **Score 0.82:** Slightly above VLM threshold (0.85), catching faces that should have auto-passed
+- **Quality 0.70:** Standard "high quality" threshold used elsewhere in codebase (see FaceService.ts, ConfigService.ts)
+- Consistent with existing quality-based filtering patterns
+
+**Outcome:**
+- False positives (blur/body parts) with quality < 0.70: NOT overridden, VLM rejection stands ✅
+- Valid faces with quality >= 0.70 + score >= 0.82: Overridden and accepted ✅
+- Groom in wedding photo: Correctly detected (high quality + high score) ✅
+- Blurred background boxes (DSC_2480.NEF): Correctly rejected (low quality) ✅
+- Backward compatible: NULL face_quality defaults to 0, fails quality check (conservative) ✅
+
+---
+
 ### Phase 88: NMS Strict Tuning (Duplicate Removal & Preservation) (2026-02-12)
 **Problem 1: Duplicate Faces in TTA (`hugs.jfif`)**
 - "Test Time Augmentation" (TTA) created multiple crops of the same face with slightly different embeddings.

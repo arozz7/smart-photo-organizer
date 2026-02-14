@@ -1010,14 +1010,15 @@ export class FaceRepository {
         preview_cache_path: string | null;
         verification_attempts: number;
         score: number | null;
+        face_quality: number | null;
     }> {
         const db = getDB();
         return db.prepare(`
-            SELECT f.id, f.photo_id, f.box_json, f.verification_attempts, f.score,
+            SELECT f.id, f.photo_id, f.box_json, f.verification_attempts, f.score, f.face_quality,
                    p.file_path, p.preview_cache_path
             FROM faces f
             JOIN photos p ON f.photo_id = p.id
-            WHERE f.entity_type = 'suspect' 
+            WHERE f.entity_type = 'suspect'
               AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
             ORDER BY p.created_at DESC
             LIMIT ?
@@ -1029,6 +1030,7 @@ export class FaceRepository {
             preview_cache_path: string | null;
             verification_attempts: number;
             score: number | null;
+            face_quality: number | null;
         }>;
     }
 

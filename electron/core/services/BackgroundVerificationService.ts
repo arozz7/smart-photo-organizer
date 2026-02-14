@@ -114,6 +114,24 @@ export class BackgroundVerificationService implements IService {
                     result.reason = 'Fail Open + Low Score';
                 }
 
+                // [Phase 89.2] High Detection Score + Quality Override
+                // When VLM says "No" with no clear reason (obj=unknown), but BOTH:
+                // 1. Detector was very confident (score >= 0.82)
+                // 2. Face quality is high (>= 0.70 - sharp, frontal, well-framed)
+                // Then trust the detector over VLM. This handles cases where VLM is overly conservative on valid faces
+                // (e.g., groom in wedding photo with shadows/angles, partially occluded faces).
+                // Dual threshold prevents false positives: blurred backgrounds/body parts have low quality (<0.70).
+                const quality = face.face_quality || 0;
+                if (result.is_face === false &&
+                    result.reason?.includes('No description provided (object: unknown)') &&
+                    score >= 0.82 &&
+                    quality >= 0.70) {
+                    logger.info(`[BackgroundVerificationService] Face ${face.id} VLM rejection OVERRIDDEN due to high score (${score.toFixed(2)}) AND quality (${quality.toFixed(2)}). Treating as valid face.`);
+                    result.is_face = true;
+                    result.confidence = score;
+                    result.reason = 'High Detection Score + Quality Override (VLM Conservative)';
+                }
+
                 if (result.is_face === true) {
                     // [Phase 58 Part 3] If VLM confirms face AND (aspect ratio is suspicious OR multi-face detected), check for split
                     // Cast to any to access is_multi_face which might not be in interface yet
