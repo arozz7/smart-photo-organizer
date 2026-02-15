@@ -76,7 +76,28 @@
 - **Modularization:** All logic in new hooks (`useCtrlScroll`, `useDynamicGrid`, `GridSizeContext`) to avoid bloating existing large files.
 - **Implementation Plan:** See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/ctrl-scroll-grid-size-plan.md)
 
-### 6. Age-Based ERA Categorization
+### 6. UX Modernization (UI Polish)
+- **Goal:** Elevate the UI from functional to polished product quality through systematic improvements to navigation, controls, typography, accessibility, and first-run experience.
+- **Core Features:**
+    - **Sidebar Navigation:** Add Radix icons to all nav links, group items by category (Core/Tools/System) with subtle dividers, extract reusable `SidebarLink` component.
+    - **Form Control Theming:** Replace native `<input type="checkbox">` with Radix Switch in SettingsModal (3 instances). Replace native `<select>` dropdowns in Library with styled alternatives.
+    - **Library Filter UX:** Show active filters as removable pill/chip badges instead of hiding state inside dropdowns. Fix folder disambiguation — show 2-3 path segments instead of leaf-only names to resolve duplicate "Birthday" folders.
+    - **Typography:** Bundle Inter font via `@fontsource-variable/inter` — currently declared but not loaded, causing silent fallback to Segoe UI.
+    - **Empty States:** Add `EmptyState` component for first-run (no photos), no filter results, no people found, and empty tab states with contextual action buttons.
+    - **Accessibility:** Add `role="button"` + `tabIndex` + keyboard handlers to clickable `<div>` elements (PersonCard, grid items). Add `aria-label` to icon-only buttons. Add `role="status"` + `aria-live` to StatusBar. Global `focus-visible` outline.
+    - **Z-Index Scale:** Define semantic z-index tokens (`z-navigation: 10`, `z-sticky: 20`, `z-overlay: 30`, `z-modal: 40`, `z-toast: 50`, `z-tooltip: 60`) to replace ad-hoc values (`z-50`, `z-[100]`, `z-[200]`, `z-[201]`).
+    - **PhotoDetail Decomposition:** Split 1000+ line component into `PhotoViewer`, `FaceOverlay`, `PhotoMetadata`, `PhotoActions` + orchestrator (~200 lines each) following refactoring protocol.
+- **Implementation Phases:**
+    1. Navigation & Sidebar (Low effort, high impact)
+    2. Form Control Theming (Medium effort, high impact)
+    3. Typography & Font Loading (Low effort, medium impact)
+    4. Empty States & First-Run (Medium effort, high impact)
+    5. Accessibility Audit (Medium effort, medium impact)
+    6. Z-Index Scale & PhotoDetail Decomposition (High effort, medium impact)
+- **Synergies:** Phase 2 prepares Library header for Advanced Filtering (#1). Phase 1+4 prepare navigation for Home Page Dashboard (#2). Phase 6 makes PhotoDetail safer for future feature additions.
+- **Implementation Plan:** See [UX Modernization Plan](file:///j:/Projects/smart-photo-organizer/docs/ux-modernization-plan.md)
+
+### 7. Age-Based ERA Categorization
 - **Goal:** Replace visual clustering with actual age estimation for ERA generation, enabling life-stage tracking (Newborn → Child → Teen → Adult).
 - **Problem:** Current ERA system uses K-Means visual clustering, which groups all faces into one bucket instead of meaningful life stages.
 - **Core Features:**
@@ -92,7 +113,7 @@
     4. Rewrite `PersonService.generateEras` to use age buckets instead of visual clustering.
 - **Performance:** Genderage adds ~5-10% to face detection time (one-time cost per photo).
 
-### 7. Hard Pose Handling & Context Propagation
+### 8. Hard Pose Handling & Context Propagation
 - **Goal:** Improve recognition accuracy for side profiles, top-down views, and other challenging face angles.
 - **Problem:** Standard embeddings from extreme angles (yaw > 45°) produce lower-quality matches, leading to missed identifications or false positives.
 - **Technical Reference:** See [Face Recognition Technology](file:///j:/Projects/smart-photo-organizer/docs/face-recognition-technology.md) for detailed research.
@@ -109,9 +130,9 @@
     4. New `ContextualMatchingService`: Propagate labels via temporal/GPS clustering.
     5. UI: Add pose filter toggle to Unnamed Faces view.
 - **Performance:** Pose extraction is already included in InsightFace detection (no additional cost).
-- **Dependencies:** Benefits from #6 (Age-Based ERA) for comprehensive person modeling.
+- **Dependencies:** Benefits from #7 (Age-Based ERA) for comprehensive person modeling.
 
-### 8. VLM Multi-Face Fix (Phase 58)
+### 9. VLM Multi-Face Fix (Phase 58)
 - **Goal:** Fix SmolVLM's inability to count faces in cropped regions.
 - **Problem:** VLM reports `face_count: "one"` even for boxes containing 2+ faces.
 - **Solution:** Use face detector re-run instead of VLM for face counting.
@@ -121,7 +142,7 @@
     - If `face_count > 1`, split box into separate face records
 - **Implementation Plan:** See [VLM Accuracy Research Review](file:///j:/Projects/smart-photo-organizer/docs/vlm-accuracy-research-review.md)
 
-### 9. AdaFace Integration (Phase 59)
+### 10. AdaFace Integration (Phase 59)
 - **Goal:** Improve recognition accuracy on low-quality (blurry) faces.
 - **Problem:** ArcFace produces weak embeddings for blurry/motion-blur faces, causing mismatches.
 - **Solution:** Use AdaFace adaptively for faces with `blur_score < 50`.
@@ -131,7 +152,7 @@
     - Config option: `useAdaFaceForLowQuality: true`
 - **Performance:** AdaFace adds ~5-10ms overhead per face (one-time cost).
 
-### 10. Vector Database Scaling (Phase 60)
+### 11. Vector Database Scaling (Phase 60)
 - **Goal:** Prepare FAISS for 500K+ face libraries spanning decades of photos.
 - **Problem:** Current `IndexFlatL2` is O(n) brute-force search — won't scale.
 - **Solution:** Migrate to `IndexIVFFlat` with training step.
@@ -141,7 +162,7 @@
     - ~10x faster search at 500K+ scale
 - **Alternatives Evaluated:** Milvus Lite, ScaNN (deferred — IVF sufficient for now).
 
-### 11. Scan Performance Optimization (Phase 61)
+### 12. Scan Performance Optimization (Phase 61)
 - **Goal:** Reduce 7s/photo to 3-4s/photo in MACRO mode.
 - **Problem:** 7 inference passes per image (4 scales + 3 TTA rotations).
 - **Solution:** Adaptive early-exit detection, TensorRT priority, batch embedding.

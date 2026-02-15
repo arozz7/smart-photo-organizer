@@ -65,12 +65,11 @@ class FaceDetector:
             det_thresh = self.det_thresh_macro 
 
         # Define scan passes
+        # [Phase 90.1] Removed 160px pass — too imprecise, generates noise
         scan_passes = [target_size]
         if scan_mode == 'MACRO':
             if target_size[0] > 640: scan_passes.append((640, 640))
             if target_size[0] > 320: scan_passes.append((320, 320))
-            if self.enable_macro_low_res:
-                scan_passes.append((160, 160))
         
         pass_idx = 0
         all_detections = []  # List of (face_obj, scan_scale)
@@ -173,9 +172,8 @@ class FaceDetector:
         else:
             safe_thresh = max(det_thresh + TTA_THRESHOLD_BOOST, 0.45) if det_thresh < 0.5 else det_thresh 
 
+        # [Phase 90.1] Single TTA scale only — two scales per rotation is redundant
         tta_scales = [(1280, 1280)]
-        if scan_mode == 'MACRO':
-            tta_scales.append((640, 640))
 
         # We append TTA results to base results
         # Format for TTA items: (face_object, scale, rotation_angle)
@@ -232,13 +230,77 @@ class FaceDetector:
                             
                             # Hack: Update the face.bbox to the derotated one so downstream logic works
                             face.bbox = np.array([nx1, ny1, nx2, ny2])
-                            
+
+                            # [Phase 90.1] De-rotate keypoints so aligned box and quality metrics are correct
+                            if hasattr(face, 'kps') and face.kps is not None:
+                                kps = face.kps.copy()
+                                if rot_angle == 90:
+                                    # 90 CW: (kx, ky) -> (ky, orig_h - kx)
+                                    kps_new = np.column_stack([kps[:, 1], orig_h - kps[:, 0]])
+                                elif rot_angle == 180:
+                                    # 180: (kx, ky) -> (orig_w - kx, orig_h - ky)
+                                    kps_new = np.column_stack([orig_w - kps[:, 0], orig_h - kps[:, 1]])
+                                elif rot_angle == 270:
+                                    # 270 CW: (kx, ky) -> (orig_w - ky, kx)
+                                    kps_new = np.column_stack([orig_w - kps[:, 1], kps[:, 0]])
+                                else:
+                                    kps_new = kps
+                                face.kps = kps_new
+
                             combined_results.append((face, current_tta_size[0], rot_angle))
 
                 except Exception as e:
                     logger.error(f"[Detector] TTA Error: {e}")
-        
-        return combined_results
+
+        # [Phase 90.1] Pre-merge: de-duplicate TTA faces that spatially overlap base detections.
+        # For genuinely rotated photos, TTA at the correct angle will have HIGHER det_score
+        # than the base (which detected a sideways face). Keep the higher-scoring detection.
+        base_results_list = list([(f, s, r) for f, s, r in combined_results if r == 0])
+        tta_results_list = [(f, s, r) for f, s, r in combined_results if r != 0]
+
+        kept_tta = []
+        bases_to_remove = set()  # indices of base items to remove (replaced by TTA)
+        for tta_item in tta_results_list:
+            tta_face = tta_item[0]
+            tb = tta_face.bbox
+            tta_score = tta_face.det_score if hasattr(tta_face, 'det_score') else 0
+            best_overlap_idx = -1
+            best_iou = 0
+            for bi, base_item in enumerate(base_results_list):
+                base_face = base_item[0]
+                bb = base_face.bbox
+                xx1 = max(tb[0], bb[0])
+                yy1 = max(tb[1], bb[1])
+                xx2 = min(tb[2], bb[2])
+                yy2 = min(tb[3], bb[3])
+                inter = max(0, xx2 - xx1) * max(0, yy2 - yy1)
+                area_t = (tb[2] - tb[0]) * (tb[3] - tb[1])
+                area_b = (bb[2] - bb[0]) * (bb[3] - bb[1])
+                union = area_t + area_b - inter
+                iou = inter / union if union > 0 else 0
+                if iou > 0.5 and iou > best_iou:
+                    best_iou = iou
+                    best_overlap_idx = bi
+
+            if best_overlap_idx >= 0:
+                base_face = base_results_list[best_overlap_idx][0]
+                base_score = base_face.det_score if hasattr(base_face, 'det_score') else 0
+                if tta_score > base_score:
+                    # TTA is better (genuinely rotated photo) — replace base with TTA
+                    bases_to_remove.add(best_overlap_idx)
+                    kept_tta.append(tta_item)
+                    logger.info(f"[Detector] TTA Pre-Merge: TTA rot={tta_item[2]} WINS over base (TTA={tta_score:.3f} > Base={base_score:.3f}, IoU={best_iou:.2f}). Replacing base.")
+                else:
+                    # Base is better — discard TTA duplicate
+                    logger.info(f"[Detector] TTA Pre-Merge: Removed rot={tta_item[2]} face (Base={base_score:.3f} >= TTA={tta_score:.3f}, IoU={best_iou:.2f})")
+            else:
+                kept_tta.append(tta_item)
+
+        # Build final list: surviving bases + kept TTA
+        surviving_bases = [b for i, b in enumerate(base_results_list) if i not in bases_to_remove]
+        merged = surviving_bases + kept_tta
+        logger.info(f"[Detector] TTA Pre-Merge: {len(tta_results_list)} TTA, {len(base_results_list)} base -> {len(surviving_bases)} base kept, {len(kept_tta)} TTA kept, {len(merged)} total")
+        return merged
 
     def _format_results(self, img, detections, scan_mode):
         """

@@ -92,8 +92,18 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
                  providers.append('CPUExecutionProvider')
 
              logger.info(f"Initializing FaceAnalysis with Providers: {providers}")
+
+             # Validate landmark data files before init to catch packaging issues early
+             if 'landmark_3d_68' in allowed_modules:
+                 from insightface.data import get_object
+                 if get_object('meanshape_68.pkl') is None:
+                     logger.warning("meanshape_68.pkl not found — landmark_3d_68 will fail. "
+                                    "Falling back to landmark_2d_106 only. "
+                                    "Rebuild with '--collect-data insightface' to fix.")
+                     allowed_modules = [m for m in allowed_modules if m != 'landmark_3d_68']
+
              new_app = FaceAnalysis(name='buffalo_l', providers=providers, allowed_modules=allowed_modules)
-             
+
              # Prepare
              new_app.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=det_thresh)
              if hasattr(new_app, 'det_model'):
