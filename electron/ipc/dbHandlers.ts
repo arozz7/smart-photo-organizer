@@ -4,6 +4,7 @@ import { FaceRepository } from '../data/repositories/FaceRepository';
 import { PersonRepository } from '../data/repositories/PersonRepository';
 import { BucketRepository } from '../data/repositories/BucketRepository';
 import { AppStateRepository } from '../data/repositories/AppStateRepository';
+import { SmartAlbumRepository } from '../data/repositories/SmartAlbumRepository';
 import { PersonService } from '../core/services/PersonService';
 import { FaceService } from '../core/services/FaceService';
 import { FaceAnalysisService } from '../core/services/FaceAnalysisService';
@@ -988,6 +989,74 @@ export function registerDBHandlers() {
         } catch (e) {
             return { success: false, error: String(e) };
         }
+    });
+
+    // --- ADVANCED FILTERING (Phase: v0.6.5) ---
+
+    ipcMain.handle('db:getCameraModels', async () => {
+        try {
+            return { success: true, models: PhotoRepository.getCameraModels() };
+        } catch (e) { return { success: false, error: String(e) }; }
+    });
+
+    ipcMain.handle('db:getYears', async () => {
+        try {
+            return { success: true, years: PhotoRepository.getYears() };
+        } catch (e) { return { success: false, error: String(e) }; }
+    });
+
+    ipcMain.handle('db:getFileTypes', async () => {
+        try {
+            return { success: true, fileTypes: PhotoRepository.getFileTypes() };
+        } catch (e) { return { success: false, error: String(e) }; }
+    });
+
+    ipcMain.handle('db:searchPhotos', async (_, args) => {
+        try {
+            console.log('[IPC] db:searchPhotos called:', JSON.stringify({ compound: args.compound, filter: args.filter, sort: args.sort }));
+            let result;
+            if (args.compound) {
+                result = PhotoRepository.getPhotosByCompoundFilter(
+                    args.filter, args.page, args.limit, args.sort, args.offset
+                );
+            } else {
+                result = PhotoRepository.getPhotos(args.page, args.limit, args.sort, args.filter, args.offset);
+            }
+            console.log(`[IPC] db:searchPhotos returned ${result.photos?.length} photos, total: ${result.total}`);
+            return result;
+        } catch (e) {
+            console.error('[IPC] db:searchPhotos ERROR:', e);
+            return { photos: [], total: 0, error: String(e) };
+        }
+    });
+
+    // --- SMART ALBUMS ---
+
+    ipcMain.handle('db:createSmartAlbum', async (_, { name, filterJson }) => {
+        try {
+            const album = SmartAlbumRepository.create(name, filterJson);
+            return { success: true, album };
+        } catch (e) { return { success: false, error: String(e) }; }
+    });
+
+    ipcMain.handle('db:getSmartAlbums', async () => {
+        try {
+            return { success: true, albums: SmartAlbumRepository.getAll() };
+        } catch (e) { return { success: false, error: String(e) }; }
+    });
+
+    ipcMain.handle('db:updateSmartAlbum', async (_, { id, name, filterJson }) => {
+        try {
+            SmartAlbumRepository.update(id, name, filterJson);
+            return { success: true };
+        } catch (e) { return { success: false, error: String(e) }; }
+    });
+
+    ipcMain.handle('db:deleteSmartAlbum', async (_, id) => {
+        try {
+            SmartAlbumRepository.delete(id);
+            return { success: true };
+        } catch (e) { return { success: false, error: String(e) }; }
     });
 
     // Auto-resume age backfill if interrupted session exists (after short delay for services to init)

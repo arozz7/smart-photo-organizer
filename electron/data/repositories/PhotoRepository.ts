@@ -1,8 +1,17 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { getDB } from '../../db';
+import type { CompoundFilter, FilterCondition } from '../../types/filterTypes';
 
 export class PhotoRepository {
+    /** Ensure custom SQLite functions are registered */
+    private static ensureFunctions(db: any) {
+        try {
+            db.function('DIRNAME', (p: string) => path.dirname(p));
+            db.function('EXTNAME', (p: string) => path.extname(p).toLowerCase());
+        } catch (_) { /* already registered */ }
+    }
+
     static getPhotos(page = 1, limit = 50, sort = 'date_desc', filter: any = {}, offset?: number) {
         const db = getDB();
         const calculatedOffset = offset !== undefined ? offset : (page - 1) * limit;
@@ -36,6 +45,61 @@ export class PhotoRepository {
         }
         if (filter.untagged === 'untagged') {
             conditions.push('id IN (SELECT photo_id FROM faces WHERE person_id IS NULL)');
+        }
+
+        // --- Extended filters (Phase: Advanced Filtering) ---
+        // Photo sharpness (photos.blur_score via Variance of Laplacian): higher = sharper
+        if (filter.blurScoreMin !== undefined) {
+            conditions.push('blur_score IS NOT NULL AND blur_score >= ?');
+            params.push(filter.blurScoreMin);
+        }
+        if (filter.blurScoreMax !== undefined) {
+            conditions.push('blur_score IS NOT NULL AND blur_score <= ?');
+            params.push(filter.blurScoreMax);
+        }
+        if (filter.dateFrom) {
+            conditions.push('created_at >= ?');
+            params.push(filter.dateFrom);
+        }
+        if (filter.dateTo) {
+            conditions.push('created_at <= ?');
+            params.push(filter.dateTo);
+        }
+        if (filter.year !== undefined) {
+            conditions.push("strftime('%Y', created_at) = ?");
+            params.push(String(filter.year));
+        }
+        if (filter.month !== undefined) {
+            conditions.push("strftime('%m', created_at) = ?");
+            params.push(String(filter.month).padStart(2, '0'));
+        }
+        if (filter.camera) {
+            conditions.push("json_extract(metadata_json, '$.Model') = ?");
+            params.push(filter.camera);
+        }
+        if (filter.fileType) {
+            PhotoRepository.ensureFunctions(db);
+            conditions.push('EXTNAME(file_path) = ?');
+            params.push(filter.fileType.toLowerCase());
+        }
+        if (filter.hasFaces === true) {
+            conditions.push('id IN (SELECT DISTINCT photo_id FROM faces WHERE is_ignored = 0)');
+        } else if (filter.hasFaces === false) {
+            conditions.push('id NOT IN (SELECT DISTINCT photo_id FROM faces WHERE is_ignored = 0)');
+        }
+        if (filter.faceQualityMin !== undefined) {
+            conditions.push('id IN (SELECT DISTINCT photo_id FROM faces WHERE face_quality >= ? AND is_ignored = 0)');
+            params.push(filter.faceQualityMin);
+        }
+        if (filter.frontalFacesOnly) {
+            conditions.push('id IN (SELECT DISTINCT photo_id FROM faces WHERE ABS(pose_yaw) < 30 AND ABS(pose_pitch) < 30 AND is_ignored = 0)');
+        }
+        if (filter.unnamedFacesOnly) {
+            conditions.push('id IN (SELECT DISTINCT photo_id FROM faces WHERE person_id IS NULL AND is_ignored = 0)');
+        }
+        if (filter.confidenceTier) {
+            conditions.push('id IN (SELECT DISTINCT photo_id FROM faces WHERE confidence_tier = ? AND is_ignored = 0)');
+            params.push(filter.confidenceTier);
         }
 
         let whereClause = '';
@@ -400,19 +464,196 @@ export class PhotoRepository {
             const transaction = db.transaction(() => {
                 db.prepare('DELETE FROM photo_tags').run();
                 db.prepare('DELETE FROM faces').run();
-                db.prepare('DELETE FROM people').run(); // Or keep people? "Factory Reset" usually implies wipe.
+                db.prepare('DELETE FROM people').run();
                 db.prepare('DELETE FROM tags').run();
                 db.prepare('DELETE FROM scan_errors').run();
                 db.prepare('DELETE FROM scan_history').run();
                 db.prepare('DELETE FROM photos').run();
-
-                // Vacuum to reclaim space
-                // db.exec('VACUUM'); // Optional, might be slow.
             });
             transaction();
             return { success: true };
         } catch (e: any) {
             return { success: false, error: e.message };
         }
+    }
+
+    // --- Metadata queries for filter dropdowns ---
+
+    static getCameraModels(): string[] {
+        const db = getDB();
+        try {
+            const rows = db.prepare(`
+                SELECT DISTINCT json_extract(metadata_json, '$.Model') as model
+                FROM photos
+                WHERE metadata_json IS NOT NULL
+                  AND json_extract(metadata_json, '$.Model') IS NOT NULL
+                ORDER BY model ASC
+            `).all() as { model: string }[];
+            return rows.map(r => r.model).filter(Boolean);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    static getYears(): number[] {
+        const db = getDB();
+        try {
+            const rows = db.prepare(`
+                SELECT DISTINCT CAST(strftime('%Y', created_at) AS INTEGER) as year
+                FROM photos
+                WHERE created_at IS NOT NULL
+                ORDER BY year DESC
+            `).all() as { year: number }[];
+            return rows.map(r => r.year).filter(Boolean);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    static getFileTypes(): string[] {
+        const db = getDB();
+        PhotoRepository.ensureFunctions(db);
+        try {
+            const rows = db.prepare(`
+                SELECT DISTINCT EXTNAME(file_path) as ext
+                FROM photos
+                ORDER BY ext ASC
+            `).all() as { ext: string }[];
+            return rows.map(r => r.ext).filter(Boolean);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    // --- Compound filter search ---
+
+    static getPhotosByCompoundFilter(
+        filter: CompoundFilter,
+        page = 1,
+        limit = 50,
+        sort = 'date_desc',
+        offset?: number
+    ) {
+        const db = getDB();
+        PhotoRepository.ensureFunctions(db);
+        const calculatedOffset = offset !== undefined ? offset : (page - 1) * limit;
+        let orderBy = 'created_at DESC';
+        switch (sort) {
+            case 'date_asc': orderBy = 'created_at ASC'; break;
+            case 'name_asc': orderBy = 'file_path ASC'; break;
+            case 'name_desc': orderBy = 'file_path DESC'; break;
+        }
+
+        const params: any[] = [];
+        const groupSqls: string[] = [];
+
+        for (const group of filter.groups) {
+            const condSqls: string[] = [];
+            for (const cond of group.conditions) {
+                const { sql, condParams } = PhotoRepository.buildConditionSQL(cond);
+                if (sql) {
+                    condSqls.push(cond.exclude ? `NOT (${sql})` : sql);
+                    params.push(...condParams);
+                }
+            }
+            if (condSqls.length > 0) {
+                groupSqls.push(`(${condSqls.join(` ${group.logic} `)})`);
+            }
+        }
+
+        let whereClause = '';
+        if (groupSqls.length > 0) {
+            whereClause = ' WHERE ' + groupSqls.join(` ${filter.logic} `);
+        }
+
+        try {
+            const query = `SELECT * FROM photos${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
+            const countQuery = `SELECT COUNT(*) as count FROM photos${whereClause}`;
+            const photos = db.prepare(query).all(...params, limit, calculatedOffset);
+            const total = (db.prepare(countQuery).get(...params) as { count: number }).count;
+            return { photos, total };
+        } catch (e) {
+            throw new Error(`PhotoRepository.getPhotosByCompoundFilter failed: ${String(e)}`);
+        }
+    }
+
+    /** Build SQL fragment for a single filter condition */
+    private static buildConditionSQL(cond: FilterCondition): { sql: string; condParams: any[] } {
+        const p: any[] = [];
+        let sql = '';
+
+        switch (cond.field) {
+            case 'blur_score':
+                sql = PhotoRepository.numericCondition('blur_score', cond.operator, cond.value, p);
+                break;
+            case 'created_at':
+                if (cond.operator === 'between' && Array.isArray(cond.value)) {
+                    sql = 'created_at >= ? AND created_at <= ?';
+                    p.push(cond.value[0], cond.value[1]);
+                } else {
+                    sql = PhotoRepository.numericCondition('created_at', cond.operator, cond.value, p);
+                }
+                break;
+            case 'year':
+                sql = "strftime('%Y', created_at) = ?";
+                p.push(String(cond.value));
+                break;
+            case 'camera':
+                sql = "json_extract(metadata_json, '$.Model') = ?";
+                p.push(cond.value);
+                break;
+            case 'file_type':
+                sql = 'EXTNAME(file_path) = ?';
+                p.push(String(cond.value).toLowerCase());
+                break;
+            case 'folder':
+                sql = 'file_path LIKE ?';
+                p.push(`${cond.value}%`);
+                break;
+            case 'search':
+                sql = 'file_path LIKE ?';
+                p.push(`%${cond.value}%`);
+                break;
+            case 'tag':
+                sql = 'id IN (SELECT photo_id FROM photo_tags pt JOIN tags t ON pt.tag_id = t.id WHERE t.name = ?)';
+                p.push(cond.value);
+                break;
+            case 'person':
+                sql = 'id IN (SELECT photo_id FROM faces WHERE person_id = ?)';
+                p.push(cond.value);
+                break;
+            case 'has_faces':
+                sql = cond.value
+                    ? 'id IN (SELECT DISTINCT photo_id FROM faces WHERE is_ignored = 0)'
+                    : 'id NOT IN (SELECT DISTINCT photo_id FROM faces WHERE is_ignored = 0)';
+                break;
+            case 'face_quality':
+                sql = 'id IN (SELECT DISTINCT photo_id FROM faces WHERE face_quality >= ? AND is_ignored = 0)';
+                p.push(cond.value);
+                break;
+            case 'frontal_faces':
+                sql = 'id IN (SELECT DISTINCT photo_id FROM faces WHERE ABS(pose_yaw) < 30 AND ABS(pose_pitch) < 30 AND is_ignored = 0)';
+                break;
+            case 'unnamed_faces':
+                sql = 'id IN (SELECT DISTINCT photo_id FROM faces WHERE person_id IS NULL AND is_ignored = 0)';
+                break;
+            case 'confidence_tier':
+                sql = 'id IN (SELECT DISTINCT photo_id FROM faces WHERE confidence_tier = ? AND is_ignored = 0)';
+                p.push(cond.value);
+                break;
+            default:
+                break;
+        }
+        return { sql, condParams: p };
+    }
+
+    /** Build a numeric comparison SQL fragment */
+    private static numericCondition(column: string, op: string, value: any, params: any[]): string {
+        const ops: Record<string, string> = {
+            eq: '=', neq: '!=', gt: '>', gte: '>=', lt: '<', lte: '<='
+        };
+        const sqlOp = ops[op] || '=';
+        params.push(value);
+        return `${column} ${sqlOp} ?`;
     }
 }
