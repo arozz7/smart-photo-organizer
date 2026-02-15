@@ -179,6 +179,14 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     CREATE INDEX IF NOT EXISTS idx_face_buckets_status ON face_buckets(status);
     CREATE INDEX IF NOT EXISTS idx_face_buckets_type ON face_buckets(bucket_type);
 
+    -- Phase: Advanced Filtering — Smart Albums
+    CREATE TABLE IF NOT EXISTS smart_albums (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      filter_json TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- App State: Key-value store for service flags and checkpoints
     CREATE TABLE IF NOT EXISTS app_state (
       key TEXT PRIMARY KEY,

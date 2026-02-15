@@ -194,7 +194,7 @@ def get_model_status(model_urls, weights_dir):
     runtime_path = os.path.join(library_path, 'ai-runtime')
     models_info["AI GPU Runtime (Torch/CUDA)"] = {
         "exists": os.path.exists(runtime_path),
-        "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.6.0/ai-runtime-win-x64.zip",
+        "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.6.5/ai-runtime-win-x64.zip",
         "size": 5800000000, # Approx 5.8GB
         "localPath": runtime_path,
         "isRuntime": True

@@ -10,6 +10,7 @@ import Queues from './views/Queues'
 import Create from './views/Create'
 import LoadingScreen from './components/LoadingScreen'
 import StatusBar from './components/StatusBar'
+import Search from './views/Search'
 import EnhanceLab from './views/EnhanceLab' // Added
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Library />} />
+          <Route path="search" element={<Search />} />
           <Route path="people" element={<People />} />
           <Route path="person/:personId" element={<PersonDetail />} />
           <Route path="create" element={<Create />} />

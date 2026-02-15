@@ -137,7 +137,51 @@ When the AI can't visually match a face (e.g., top-down view), you can use conte
 
 ---
 
-## 🪄 4. AI Enhance Lab: Upgrading Your Memories
+## 🔎 4. Search & Filtering
+
+The **Search** view provides advanced tools for finding specific photos across your entire library.
+
+### Getting Started
+Click the **Search** tab in the navigation bar. You'll see a filter sidebar on the left and an empty grid area. Apply any filter to start seeing results.
+
+### Filter Sidebar
+The sidebar is organized into collapsible sections:
+
+- **Search:** Free-text search across file names, tags, and descriptions.
+- **Quality (Blur):** Filter by photo sharpness. Use the presets (**Sharp**, **Medium**, **Blurry**) or enter custom min/max blur scores.
+- **Date:** Filter by **Year** and/or **Month** dropdowns, or specify a custom date range with **From** and **To** fields.
+- **Camera:** Filter by camera model (populated from your library's EXIF data).
+- **File Type:** Filter by image format (JPEG, PNG, RAW, etc.).
+- **Faces:** Toggle filters for photos with/without faces, unnamed faces only, frontal faces only, minimum face quality, and confidence tier (High, Review, Unknown).
+- **Folder / Tag / Person:** Filter by folder path, AI-generated tag, or identified person.
+- **Advanced (Compound Filters):** Open the compound filter builder to create AND/OR/NOT logic across multiple conditions.
+
+### Active Filter Chips
+Applied filters appear as chips in the top bar. Click the **x** on any chip to remove that filter, or click **Clear all** to reset everything.
+
+### Sorting
+Use the dropdown in the top-right to sort results by **Newest**, **Oldest**, **Name A-Z**, or **Name Z-A**.
+
+### Compound Filter Builder
+Click **Open Compound Builder** in the Advanced section to build complex queries:
+1. Add **groups** of conditions (e.g., "Person is Alice AND Year is 2024").
+2. Toggle each group between **AND** / **OR** logic.
+3. Use the **Exclude** toggle on individual conditions for NOT logic.
+4. Combine multiple groups with a top-level AND/OR operator.
+
+### Smart Albums
+Save your current filter configuration as a **Smart Album** for quick reuse:
+1. Apply your desired filters.
+2. In the **Smart Albums** section of the sidebar, type a name and click **Save**.
+3. To reload, select a saved album from the list.
+4. Click the **delete** button next to an album to remove it.
+
+> [!NOTE]
+> **Blur scores** are computed during photo scanning. If you imported photos before v0.6.5, go to **Settings > Database Management** and rescan your library to populate blur data for the Quality filter.
+
+---
+
+## 🪄 5. AI Enhance Lab: Upgrading Your Memories
 
 
 Found an old, blurry, or low-resolution photo? Use the **Enhance Lab**.
@@ -149,7 +193,7 @@ Found an old, blurry, or low-resolution photo? Use the **Enhance Lab**.
 3.  **Model Selection:** Use "General" for standard photos and "Anime" for illustrations or cartoons.
 ### 💻 Hardware Requirements & Performance
 AI enhancement is a computationally intensive task. For the best experience:
-- **NVIDIA GPU (Recommended):** A modern NVIDIA GPU with **at least 2GB of VRAM** will provide the fastest results (seconds vs minutes). **Note:** Requires downloading the **AI GPU Runtime** (see Section 6).
+- **NVIDIA GPU (Recommended):** A modern NVIDIA GPU with **at least 2GB of VRAM** will provide the fastest results (seconds vs minutes). **Note:** Requires downloading the **AI GPU Runtime** (see Section 7).
 - **CPU Fallback:** The app will work on systems without a GPU or if the runtime is not downloaded. Processing will be slower but functional.
 - **Memory (RAM):** We recommend at least **16GB of system RAM** for processing large RAW files.
 - **Tagging (VLM):** Requires the **AI GPU Runtime** to be installed. Not available on CPU-only mode.
@@ -165,7 +209,7 @@ To keep the initial app size small (~400MB), the large AI models and runtimes ar
 
 ---
 
-## 🎨 5. Create & Export: Building Sets
+## 🎨 6. Create & Export: Building Sets
 
 The **Create** view is for when you want to gather specific photos for a project or album.
 
@@ -177,7 +221,7 @@ The **Create** view is for when you want to gather specific photos for a project
 
 ---
 
-## 🛠️ 6. Advanced Settings & Maintenance
+## 🛠️ 7. Advanced Settings & Maintenance
 
 The **Settings** tab contains advanced controls to fine-tune the application's performance and manage your data.
 

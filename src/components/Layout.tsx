@@ -25,6 +25,15 @@ export default function Layout() {
                         Library
                     </NavLink>
                     <NavLink
+                        to="/search"
+                        className={({ isActive }) =>
+                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                            }`
+                        }
+                    >
+                        Search
+                    </NavLink>
+                    <NavLink
                         to="/create"
                         className={({ isActive }) =>
                             `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
@@ -73,7 +82,7 @@ export default function Layout() {
 
                 <div className="p-4 border-t border-gray-700 space-y-2">
                     <AIStatusIndicator />
-                    <div className="text-xs text-gray-500">v0.6.0</div>
+                    <div className="text-xs text-gray-500">v0.6.5</div>
                 </div>
             </aside>
 

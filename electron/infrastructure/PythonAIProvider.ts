@@ -162,6 +162,22 @@ export class PythonAIProvider implements IAIProvider, IService {
                 );
             }
 
+            // Save global blur score + description to photos table
+            try {
+                const photoUpdates: { blur_score?: number; description?: string } = {};
+                if (message.globalBlurScore !== undefined && message.globalBlurScore !== null) {
+                    photoUpdates.blur_score = message.globalBlurScore;
+                }
+                if (message.description) {
+                    photoUpdates.description = message.description;
+                }
+                if (Object.keys(photoUpdates).length > 0) {
+                    PhotoRepository.updatePhoto(message.photoId, photoUpdates);
+                }
+            } catch (e) {
+                logger.error('[Main] Failed to save photo blur_score/description:', e);
+            }
+
             // Record Scan History for Metrics
             try {
                 const metrics = message.metrics || {};
