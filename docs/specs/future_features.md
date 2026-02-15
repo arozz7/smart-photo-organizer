@@ -2,16 +2,9 @@
 
 ## 🚀 Priority Roadmap
 
-### 1. Advanced Library Filtering
-- **Goal:** Comprehensive filtering system with AND/OR/NOT logic, dedicated Search View, and Smart Albums.
-- **Core Features:**
-    - **Search View:** Dedicated tab with advanced filter sidebar.
-    - **New Filters:** Blur Score, Dual Dates (File/EXIF), Camera Model, File Type.
-    - **Compound Logic:** AND/OR/NOT combinations with a visual filter builder.
-    - **Smart Albums:** Save and reuse filter presets (Smart Searches).
-- **Implementation Plan:** See [Advanced Filtering Plan](file:///j:/Projects/smart-photo-organizer/docs/advanced_library_filtering_plan.md)
 
-### 2. Home Page Dashboard
+
+### 1. Home Page Dashboard
 - **Goal:** Replace Library as default startup page with an engaging, widget-based home experience.
 - **Core Features:**
     - **Widget Grid System:** 12-column snap-to-grid layout with drag-and-drop. Supports 1x1, 2x1, 2x2 widget sizes.
@@ -36,7 +29,7 @@
 
 
 
-### 3. Frontend Streamlining (UX Consolidation)
+### 2. Frontend Streamlining (UX Consolidation)
 - **Goal:** Simplify the People management workflow by automating high-confidence assignments, reducing tabs from 4 to 3, and consolidating modal-heavy interactions.
 - **Core Features:**
     - **Auto-Assign Suggestions:** Eliminate Suggestions tab; auto-assign high-confidence matches directly to people.
@@ -55,7 +48,7 @@
     - **Performance Limits:** Enforced 150-face limit for Ignore/Group views to prevent UI lag.
     - **UX Polish:** Removed AI suggestions from Move modal; improved Edge Case navigation.
 
-### 4. Error Export & Library Health
+### 3. Error Export & Library Health
 - **Goal:** Enable users to export scan errors for external review and provide persistent library health visibility.
 - **Phased Approach:**
     - **Phase 1 (Immediate):** Add "Export CSV" button to existing Scan Errors modal.
@@ -65,7 +58,7 @@
 - **Dependencies:** Phase 2 requires #2 (Home Page Dashboard); Phase 3 requires Corrupt File Recovery Center.
 - **Implementation Plan:** See [Error Export Plan](file:///j:/Projects/smart-photo-organizer/docs/error-export-plan.md)
 
-### 5. Ctrl+Scroll Grid Size Control
+### 4. Ctrl+Scroll Grid Size Control
 - **Goal:** Allow users to dynamically adjust face thumbnail grid density using Ctrl+scroll wheel.
 - **Core Features:**
     - **Ctrl+Scroll Zoom:** Increase/decrease grid columns (4-12 range).
@@ -76,7 +69,7 @@
 - **Modularization:** All logic in new hooks (`useCtrlScroll`, `useDynamicGrid`, `GridSizeContext`) to avoid bloating existing large files.
 - **Implementation Plan:** See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/ctrl-scroll-grid-size-plan.md)
 
-### 6. UX Modernization (UI Polish)
+### 5. UX Modernization (UI Polish)
 - **Goal:** Elevate the UI from functional to polished product quality through systematic improvements to navigation, controls, typography, accessibility, and first-run experience.
 - **Core Features:**
     - **Sidebar Navigation:** Add Radix icons to all nav links, group items by category (Core/Tools/System) with subtle dividers, extract reusable `SidebarLink` component.
@@ -97,7 +90,7 @@
 - **Synergies:** Phase 2 prepares Library header for Advanced Filtering (#1). Phase 1+4 prepare navigation for Home Page Dashboard (#2). Phase 6 makes PhotoDetail safer for future feature additions.
 - **Implementation Plan:** See [UX Modernization Plan](file:///j:/Projects/smart-photo-organizer/docs/ux-modernization-plan.md)
 
-### 7. Age-Based ERA Categorization
+### 6. Age-Based ERA Categorization
 - **Goal:** Replace visual clustering with actual age estimation for ERA generation, enabling life-stage tracking (Newborn → Child → Teen → Adult).
 - **Problem:** Current ERA system uses K-Means visual clustering, which groups all faces into one bucket instead of meaningful life stages.
 - **Core Features:**
@@ -113,7 +106,7 @@
     4. Rewrite `PersonService.generateEras` to use age buckets instead of visual clustering.
 - **Performance:** Genderage adds ~5-10% to face detection time (one-time cost per photo).
 
-### 8. Hard Pose Handling & Context Propagation
+### 7. Hard Pose Handling & Context Propagation
 - **Goal:** Improve recognition accuracy for side profiles, top-down views, and other challenging face angles.
 - **Problem:** Standard embeddings from extreme angles (yaw > 45°) produce lower-quality matches, leading to missed identifications or false positives.
 - **Technical Reference:** See [Face Recognition Technology](file:///j:/Projects/smart-photo-organizer/docs/face-recognition-technology.md) for detailed research.
@@ -132,7 +125,7 @@
 - **Performance:** Pose extraction is already included in InsightFace detection (no additional cost).
 - **Dependencies:** Benefits from #7 (Age-Based ERA) for comprehensive person modeling.
 
-### 9. VLM Multi-Face Fix (Phase 58)
+### 8. VLM Multi-Face Fix (Phase 58)
 - **Goal:** Fix SmolVLM's inability to count faces in cropped regions.
 - **Problem:** VLM reports `face_count: "one"` even for boxes containing 2+ faces.
 - **Solution:** Use face detector re-run instead of VLM for face counting.
@@ -142,7 +135,7 @@
     - If `face_count > 1`, split box into separate face records
 - **Implementation Plan:** See [VLM Accuracy Research Review](file:///j:/Projects/smart-photo-organizer/docs/vlm-accuracy-research-review.md)
 
-### 10. AdaFace Integration (Phase 59)
+### 9. AdaFace Integration (Phase 59)
 - **Goal:** Improve recognition accuracy on low-quality (blurry) faces.
 - **Problem:** ArcFace produces weak embeddings for blurry/motion-blur faces, causing mismatches.
 - **Solution:** Use AdaFace adaptively for faces with `blur_score < 50`.
@@ -152,7 +145,7 @@
     - Config option: `useAdaFaceForLowQuality: true`
 - **Performance:** AdaFace adds ~5-10ms overhead per face (one-time cost).
 
-### 11. Vector Database Scaling (Phase 60)
+### 10. Vector Database Scaling (Phase 60)
 - **Goal:** Prepare FAISS for 500K+ face libraries spanning decades of photos.
 - **Problem:** Current `IndexFlatL2` is O(n) brute-force search — won't scale.
 - **Solution:** Migrate to `IndexIVFFlat` with training step.
@@ -162,7 +155,7 @@
     - ~10x faster search at 500K+ scale
 - **Alternatives Evaluated:** Milvus Lite, ScaNN (deferred — IVF sufficient for now).
 
-### 12. Scan Performance Optimization (Phase 61)
+### 11. Scan Performance Optimization (Phase 61)
 - **Goal:** Reduce 7s/photo to 3-4s/photo in MACRO mode.
 - **Problem:** 7 inference passes per image (4 scales + 3 TTA rotations).
 - **Solution:** Adaptive early-exit detection, TensorRT priority, batch embedding.
@@ -280,7 +273,20 @@
 
 # ✅ Implemented Features
 
-## v0.5.5 (Current Release)
+## v0.6.5 (Current Release)
+
+### Advanced Library Filtering
+*Details: See [Advanced Filtering Plan](file:///j:/Projects/smart-photo-organizer/docs/advanced_library_filtering_plan.md)*
+
+- **Goal:** Comprehensive filtering system with AND/OR/NOT logic, dedicated Search View, and Smart Albums.
+- **Core Features:**
+    - **Search View:** Dedicated tab with advanced filter sidebar.
+    - **New Filters:** Blur Score, Dual Dates (File/EXIF), Camera Model, File Type.
+    - **Compound Logic:** AND/OR/NOT combinations with a visual filter builder.
+    - **Smart Albums:** Save and reuse filter presets (Smart Searches).
+- **Files Created/Modified:** See [Changelog](aiChangeLog/phase-89-advanced-filtering.md)
+
+## v0.5.5
 
 ### Background Auto Face Bucketing
 *Details: See [Background Bucketing Plan](file:///j:/Projects/smart-photo-organizer/docs/background-bucketing-plan.md)*

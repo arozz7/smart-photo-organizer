@@ -1,5 +1,14 @@
 # Smart Photo Organizer
 
+## Core Philosophy
+> Readability and Order > Speed and Complex Interconnections
+
+Prioritize maintainability and clarity over clever, hyper-optimized code. Follow SOLID, DRY, and KISS principles.
+
+## 🛑 The Golden Rule
+**DO NOT WRITE CODE** until an Implementation Plan is explicitly approved (for multi-file or architectural changes).
+**NO DELETIONS** are allowed without explicit confirmation.
+
 ## Stack
 - **Frontend:** React + TypeScript (Vite)
 - **Backend:** Electron (main process, TypeScript)
@@ -58,7 +67,23 @@
 
 ## Change Logging
 After completing a significant phase of work, update `aiChangeLog/phase-XX.md` with:
-- Files created/modified
+- Files created/modified (include refactor mappings if applicable: `Moved 'X' from 'A.ts' -> 'B.ts'`)
 - Behavior changes
 - Tests added
 - Assumptions and risks
+
+## Refactoring Safety
+When refactoring:
+1. **Run Tests FIRST:** Ensure all current tests pass
+2. **Refactor:** Apply the changes
+3. **Run Tests AGAIN:** If any test fails, revert and analyze
+4. **DO NOT delete files** — Refactor or deprecate instead
+
+## Planning & Execution
+For multi-file or architectural changes:
+1. Propose an Implementation Plan with phases, tasks, TDD requirements
+2. Wait for explicit approval
+3. Execute one task at a time
+4. Update documentation (README.md, docs/) as you go
+
+For simple single-file changes, proceed directly.
