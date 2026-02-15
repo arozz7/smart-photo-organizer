@@ -53,7 +53,8 @@ def resolve_conflicts(detections, config):
         area_large = box_large['width'] * box_large['height']
         q_large = large.get('faceQuality', 0)
         emb_large = large.get('descriptor')
-        
+        rotation_large = large.get('rotation_fix', 0)
+
         for j, small in enumerate(detections):
             if i == j:
                 continue
@@ -61,7 +62,8 @@ def resolve_conflicts(detections, config):
             area_small = box_small['width'] * box_small['height']
             q_small = small.get('faceQuality', 0)
             emb_small = small.get('descriptor')
-            
+            rotation_small = small.get('rotation_fix', 0)
+
             # Check if small is contained in large
             # Calculate IoMin (containment)
             x1 = max(box_large['x'], box_small['x'])
@@ -70,10 +72,27 @@ def resolve_conflicts(detections, config):
             y2 = min(box_large['y'] + box_large['height'], box_small['y'] + box_small['height'])
             inter_area = max(0, x2 - x1) * max(0, y2 - y1)
             io_min = inter_area / float(area_small) if area_small > 0 else 0
-            
+
             # If small is mostly contained in large (IoMin > 0.9)
             if io_min > 0.9 and area_large > area_small * 1.15:
-                # Check embedding distance - are they different people?
+                # [Phase 90.1] Cross-rotation containment: use geometry only, skip embedding.
+                # TTA embeddings from rotated images diverge from base embeddings,
+                # so embedding distance is unreliable across rotations.
+                is_cross_rotation = (rotation_large != rotation_small)
+                if is_cross_rotation:
+                    # Cross-rotation containment: prefer higher quality detection.
+                    # For genuinely rotated photos, the correct-rotation detection
+                    # will have higher quality than the sideways base detection.
+                    if q_large >= q_small:
+                        logger.info(f"[NMS] Cross-Rotation Container Merge: Removing rot={rotation_small} small box (Q={q_small:.2f}) contained in rot={rotation_large} large box (Q={q_large:.2f}). IoMin={io_min:.2f}")
+                        container_ids_to_remove.add(j)
+                    else:
+                        logger.info(f"[NMS] Cross-Rotation Container Merge: Removing rot={rotation_large} large box (Q={q_large:.2f}) containing higher-quality rot={rotation_small} small box (Q={q_small:.2f}). IoMin={io_min:.2f}")
+                        container_ids_to_remove.add(i)
+                        break
+                    continue
+
+                # Same-rotation: check embedding distance as before
                 dist = 2.0
                 if emb_large and emb_small and len(emb_large) > 0 and len(emb_small) > 0:
                     v_a = np.array(emb_large)
@@ -83,7 +102,7 @@ def resolve_conflicts(detections, config):
                     if n_a > 0: v_a /= n_a
                     if n_b > 0: v_b /= n_b
                     dist = np.linalg.norm(v_a - v_b)
-                
+
                 # If different people AND small face is high quality
                 if dist > 1.0 and q_small > high_quality_threshold:
                     # [Phase 86 Fix] Box Quality Arbitration
@@ -194,8 +213,23 @@ def resolve_conflicts(detections, config):
             
             # RULE A: The "Physics" Rule (High Containment > 90%)
             # This handles duplicates from different zoom levels/crops
+            is_cross_rotation = (rotation_a != rotation_b)
             if io_min > 0.90:
-                # [Phase 72 Fix] Mother+Baby Containment Exception
+                # [Phase 90.1] Cross-rotation: always merge, embedding unreliable across rotations.
+                # Mother+Baby exception only applies within same rotation.
+                if is_cross_rotation:
+                    should_merge = True
+                    # Prefer higher quality detection (not blindly upright)
+                    q_a = f.get('faceQuality', 0)
+                    q_b = existing.get('faceQuality', 0)
+                    if q_a > q_b:
+                        existing.update(f)
+                        logger.info(f"[NMS] Cross-Rotation Merge (Rule A): Replaced rot={rotation_b} (Q={q_b:.2f}) with rot={rotation_a} (Q={q_a:.2f}). IoMin={io_min:.2f}, Dist={dist:.2f}")
+                    else:
+                        logger.info(f"[NMS] Cross-Rotation Merge (Rule A): Keeping rot={rotation_b} (Q={q_b:.2f}), discarding rot={rotation_a} (Q={q_a:.2f}). IoMin={io_min:.2f}, Dist={dist:.2f}")
+                    break
+
+                # [Phase 72 Fix] Mother+Baby Containment Exception (same-rotation only)
                 # If one face is inside another (IoMin=1.0) but they are CLEARLY DIFFERENT people (Dist > 1.0),
                 # we must keep both (Concentric Faces).
                 if dist > 1.0:
@@ -267,9 +301,23 @@ def resolve_conflicts(detections, config):
             # RULE B: The "Trash / Ghost" Rule (Medium Containment > 60%)
             # Often handles artifacts
             if io_min > 0.60:
+                # [Phase 90.1] Cross-rotation: use looser threshold since embeddings diverge
+                cross_rot_threshold = 1.5
+                if is_cross_rotation and dist < cross_rot_threshold:
+                    should_merge = True
+                    # Prefer higher quality (not blindly upright)
+                    q_a = f.get('faceQuality', 0)
+                    q_b = existing.get('faceQuality', 0)
+                    if q_a > q_b:
+                        existing.update(f)
+                        logger.info(f"[NMS] Cross-Rotation Merge (Rule B): Replaced rot={rotation_b} (Q={q_b:.2f}) with rot={rotation_a} (Q={q_a:.2f}). IoMin={io_min:.2f}, Dist={dist:.2f}")
+                    else:
+                        logger.info(f"[NMS] Cross-Rotation Merge (Rule B): Keeping rot={rotation_b} (Q={q_b:.2f}), discarding rot={rotation_a} (Q={q_a:.2f}). IoMin={io_min:.2f}, Dist={dist:.2f}")
+                    break
+
                 # [Phase 77 Fix] Stacked Face Protection (Mother/Baby)
                 logger.info(f"[NMS Debug] checking Rule B: IoMin={io_min:.2f}, IoU={iou:.2f}, Dist={dist:.2f}")
-                
+
                 if iou < 0.50 and dist > 0.8:
                      # [Phase 88.6] Geometric Check for Stacked Faces
                      # Even if IoU is low, if centers are concentric, it's a duplicate (just different zoom).
