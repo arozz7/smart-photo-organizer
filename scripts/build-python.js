@@ -49,10 +49,15 @@ const buildCmd = [
     '--hidden-import modulefinder', // Required by torchvision (runtime)
     '--hidden-import cProfile',     // Required by torch (dynamo)
     '--hidden-import pstats',       // often used with cProfile
+    // Collect ALL files (code + data) for packages with critical non-Python assets
     '--collect-all mpmath',         // Required by sympy (used by torch)
     '--collect-all imageio',
     '--collect-all rawpy',
     '--collect-all PIL',            // Ensure full Pillow is included
+    // Collect DATA files only for packages whose .pkl/.pem assets are missed by import tracing
+    // Note: PyInstaller auto-collects .pyd/.dll extensions via --onedir; these are for non-code assets
+    '--collect-data insightface',   // meanshape_68.pkl required by landmark_3d_68 for pose estimation
+    '--collect-data certifi',       // cacert.pem required for HTTPS model downloads
     // EXCLUDE HEAVY MODULES for extreme slim installer
     '--exclude-module torch',
     '--exclude-module torchvision',
