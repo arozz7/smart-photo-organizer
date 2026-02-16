@@ -153,9 +153,6 @@ When the AI can't visually match a face (e.g., top-down view), you can use conte
 
 ---
 
-<<<<<<< Updated upstream:docs/user_manual.md
-## 🪄 4. AI Enhance Lab: Upgrading Your Memories
-=======
 ## 🔎 5. Search & Filtering
 
 The **Search** view provides advanced tools for finding specific photos across your entire library.
@@ -201,7 +198,6 @@ Save your current filter configuration as a **Smart Album** for quick reuse:
 ---
 
 ## 🪄 6. AI Enhance Lab: Upgrading Your Memories
->>>>>>> Stashed changes:docs/guides/user_manual.md
 
 
 Found an old, blurry, or low-resolution photo? Use the **Enhance Lab**.
@@ -229,11 +225,7 @@ To keep the initial app size small (~400MB), the large AI models and runtimes ar
 
 ---
 
-<<<<<<< Updated upstream:docs/user_manual.md
-## 🎨 5. Create & Export: Building Sets
-=======
 ## 🎨 7. Create & Export: Building Sets
->>>>>>> Stashed changes:docs/guides/user_manual.md
 
 The **Create** view is for when you want to gather specific photos for a project or album.
 
@@ -245,11 +237,7 @@ The **Create** view is for when you want to gather specific photos for a project
 
 ---
 
-<<<<<<< Updated upstream:docs/user_manual.md
-## 🛠️ 6. Advanced Settings & Maintenance
-=======
 ## 🛠️ 8. Advanced Settings & Maintenance
->>>>>>> Stashed changes:docs/guides/user_manual.md
 
 The **Settings** tab contains advanced controls to fine-tune the application's performance and manage your data.
 
