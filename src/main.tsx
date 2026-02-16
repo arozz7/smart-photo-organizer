@@ -4,6 +4,7 @@ import App from './App.tsx'
 import { ScanProvider } from './context/ScanContext'
 import { AIProvider } from './context/AIContext'
 import { PeopleProvider } from './context/PeopleContext'
+import { DashboardProvider } from './context/DashboardContext'
 import { AlertProvider } from './context/AlertContext'
 import { ToastProvider } from './context/ToastContext'
 import './index.css'
@@ -15,7 +16,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <AIProvider>
           <ScanProvider>
             <PeopleProvider>
-              <App />
+              <DashboardProvider>
+                <App />
+              </DashboardProvider>
             </PeopleProvider>
           </ScanProvider>
         </AIProvider>

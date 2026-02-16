@@ -209,7 +209,7 @@ Found an old, blurry, or low-resolution photo? Use the **Enhance Lab**.
 3.  **Model Selection:** Use "General" for standard photos and "Anime" for illustrations or cartoons.
 ### 💻 Hardware Requirements & Performance
 AI enhancement is a computationally intensive task. For the best experience:
-- **NVIDIA GPU (Recommended):** A modern NVIDIA GPU with **at least 2GB of VRAM** will provide the fastest results (seconds vs minutes). **Note:** Requires downloading the **AI GPU Runtime** (see Section 6).
+- **NVIDIA GPU (Recommended):** A modern NVIDIA GPU with **at least 2GB of VRAM** will provide the fastest results (seconds vs minutes). **Note:** Requires downloading the **AI GPU Runtime** (see Section 7).
 - **CPU Fallback:** The app will work on systems without a GPU or if the runtime is not downloaded. Processing will be slower but functional.
 - **Memory (RAM):** We recommend at least **16GB of system RAM** for processing large RAW files.
 - **Tagging (VLM):** Requires the **AI GPU Runtime** to be installed. Not available on CPU-only mode.

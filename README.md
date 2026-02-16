@@ -28,6 +28,7 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
 *   **📷 RAW Support:** Native support for professional formats (Sony ARW, Canon CR2, Nikon NEF, etc.) with fast preview extraction.
 *   **⚡ High Performance:** Virtualized grid and optimized backend handles libraries with 100,000+ photos smoothly.
 *   **🔍 Semantic Search:** Search your photos by content, date, or person using AI-generated descriptions and tags.
+*   **🔎 Advanced Search & Filtering:** Dedicated Search view with a powerful filter sidebar — filter by blur quality, date range, camera model, file type, face attributes, and more. Build compound AND/OR/NOT queries and save filter presets as **Smart Albums**.
 *   **🎨 Set Builder (Create View):** Build custom collections by combining complex filters (e.g., "Person A AND Person B in 2024"). Export your sets to organized folders on disk.
     
     ![Set Builder](docs/assets/CreateAlbumFromFilters.gif)
