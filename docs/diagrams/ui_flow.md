@@ -6,6 +6,7 @@ flowchart TD
     Splash --> Layout[Main Layout]
 
     subgraph Navigation
+        Layout --> Home[Home Dashboard]
         Layout --> Library[Library View (Grid)]
         Layout --> Search[Search View]
         Layout --> People[People View]
