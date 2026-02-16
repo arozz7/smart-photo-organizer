@@ -30,12 +30,13 @@ const WIDGET_LABELS: Record<string, { name: string; description: string }> = {
     timeline: { name: 'Photo Timeline', description: 'Photo count by year with monthly drill-down' },
     libraryHealth: { name: 'Library Health', description: 'Processing status, error breakdown, and health score' },
     collage: { name: 'Photo Collage', description: 'Auto-generated photo collage with layout modes and export' },
+    locationHeatmap: { name: 'Location Heatmap', description: 'World map showing where your photos were taken' },
 };
 
 const PRESETS: Record<string, string[]> = {
     minimal: ['libraryStats', 'peopleSpotlight'],
     balanced: ['scanEntertainment', 'onThisDay', 'libraryStats', 'peopleSpotlight', 'recentActivity', 'funFacts', 'timeline'],
-    power: ['scanEntertainment', 'onThisDay', 'libraryStats', 'peopleSpotlight', 'recentActivity', 'funFacts', 'timeline', 'libraryHealth', 'collage'],
+    power: ['scanEntertainment', 'onThisDay', 'libraryStats', 'peopleSpotlight', 'recentActivity', 'funFacts', 'timeline', 'libraryHealth', 'collage', 'locationHeatmap'],
 };
 
 export default function WidgetCustomizationModal({ open, onOpenChange, onSave }: WidgetCustomizationModalProps) {
@@ -93,11 +94,10 @@ export default function WidgetCustomizationModal({ open, onOpenChange, onSave }:
                                 <button
                                     key={p}
                                     onClick={() => applyPreset(p)}
-                                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                                        preset === p
+                                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${preset === p
                                             ? 'bg-indigo-600 text-white'
                                             : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                                    }`}
+                                        }`}
                                 >
                                     {p.charAt(0).toUpperCase() + p.slice(1)}
                                 </button>
@@ -114,11 +114,10 @@ export default function WidgetCustomizationModal({ open, onOpenChange, onSave }:
                             return (
                                 <div
                                     key={widget.id}
-                                    className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                                        widget.enabled
+                                    className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${widget.enabled
                                             ? 'bg-gray-800 border-gray-600'
                                             : 'bg-gray-800/50 border-gray-800'
-                                    }`}
+                                        }`}
                                 >
                                     <div className="flex-1 min-w-0 mr-3">
                                         <div className={`text-sm font-medium ${widget.enabled ? 'text-white' : 'text-gray-500'}`}>
@@ -128,14 +127,12 @@ export default function WidgetCustomizationModal({ open, onOpenChange, onSave }:
                                     </div>
                                     <button
                                         onClick={() => toggleWidget(widget.id)}
-                                        className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${
-                                            widget.enabled ? 'bg-indigo-600' : 'bg-gray-700'
-                                        }`}
+                                        className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${widget.enabled ? 'bg-indigo-600' : 'bg-gray-700'
+                                            }`}
                                     >
                                         <div
-                                            className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                                                widget.enabled ? 'translate-x-5' : 'translate-x-0.5'
-                                            }`}
+                                            className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${widget.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                                                }`}
                                         />
                                     </button>
                                 </div>
@@ -151,14 +148,12 @@ export default function WidgetCustomizationModal({ open, onOpenChange, onSave }:
                         </div>
                         <button
                             onClick={() => setReduceMotion(!reduceMotion)}
-                            className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${
-                                reduceMotion ? 'bg-indigo-600' : 'bg-gray-700'
-                            }`}
+                            className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${reduceMotion ? 'bg-indigo-600' : 'bg-gray-700'
+                                }`}
                         >
                             <div
-                                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                                    reduceMotion ? 'translate-x-5' : 'translate-x-0.5'
-                                }`}
+                                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${reduceMotion ? 'translate-x-5' : 'translate-x-0.5'
+                                    }`}
                             />
                         </button>
                     </div>

@@ -6,12 +6,16 @@
 
 ### 1. Home Page Dashboard
 - **Goal:** Replace Library as default startup page with an engaging, widget-based home experience.
+- **Status:** ✅ All Phases Complete (Phases 1-8)
 - **Core Features:**
-    - **Widget Grid System:** 12-column snap-to-grid layout with drag-and-drop. Supports 1x1, 2x1, 2x2 widget sizes.
+    - **Widget Grid System:** 12-column snap-to-grid layout with drag-and-drop reorder and resize.
     - **On This Day Memories:** Surface photos from same date in previous years (±3 day tolerance).
     - **Auto-Generated Collages:** Daily collage with "Save as PNG/JPG" export and "Regenerate" button.
     - **People Spotlight:** Carousel of named people with photo counts.
     - **Library Stats:** Pie chart of processed/pending/corrupt files.
+    - **Photo Timeline:** Bar chart with year/month drill-down, click-to-Search navigation.
+    - **Library Health:** SVG ring gauge, error breakdown by stage, CSV export.
+    - **Location Heatmap:** SVG world map showing GPS photo clusters with density visualization.
     - **Notification Badge:** Purple dot on Home nav when new memories are available.
 - **Scan-Time Entertainment:**
     - **Live Discovery Feed:** Show completed scan thumbnails with fade-in animation.
@@ -19,12 +23,10 @@
     - **Live Stats:** Faces found, people matched, new locations counters.
     - **Fun Facts:** Library insights ("You took 342 photos in March 2023!").
 - **Widget Customization Modal:**
-    - Toggle widgets ON/OFF, select sizes (1x1, 2x1, 2x2).
+    - Toggle widgets ON/OFF, drag-and-drop reorder, snap-to-grid resize.
     - Layout presets: Minimal, Balanced, Power User.
     - Persistent layout saved to user preferences.
-- **Performance:**
-    - 60fps animations with "Reduce Motion" setting for lower-end hardware.
-    - Offline-capable: Stats & memories work without AI backend.
+- **Changelogs:** See Phase 91-93 changelogs in `aiChangeLog/`
 - **Wireframes:** See [Home Page Wireframes](file:///C:/Users/arozz/.gemini/antigravity/brain/e4c43ef8-5d37-4b2a-b227-6fbddeaf706b/home-page-wireframes.md)
 
 

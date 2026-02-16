@@ -173,6 +173,7 @@ export const DEFAULT_CONFIG: AppConfig = {
             { id: 'timeline', enabled: true, size: '2x1' },
             { id: 'libraryHealth', enabled: false, size: '1x1' },
             { id: 'collage', enabled: false, size: '2x1' },
+            { id: 'locationHeatmap', enabled: false, size: '2x1' },
         ],
         preset: 'balanced',
         reduceMotion: false,

@@ -4,8 +4,12 @@
 - Phase 1 (MVP Dashboard): Complete
 - Phase 2 (Scan-Time Entertainment): Complete
 - Phase 3 (Widget Customization): Complete
-- **Phase 4 (Auto-Generated Collages):** Complete
-- Phase 5+ — see below
+- Phase 4 (Auto-Generated Collages): Complete
+- **Phase 5a (Drag-and-Drop Reorder):** Complete
+- **Phase 5b (Resizable Widgets):** Complete
+- Phase 6 (Library Health): Complete
+- **Phase 7 (Location Heatmap):** Complete
+- Phase 8 (Timeline): Complete
 
 ---
 
@@ -209,11 +213,12 @@ GROUP BY month ORDER BY month ASC;
 | 8 | Timeline Widget | Low | High | **High** — easy win, great visual impact |
 
 ### Recommended Order
-1. **Phase 8: Timeline Widget** — Easy CSS bars, high visual impact, no dependencies
-2. **Phase 6: Library Health Widget** — Low effort, feeds into Error Export feature
-3. **Phase 4: Collages** — Complex but visually impressive
-4. **Phase 5a: Drag-and-Drop** — Polish feature, defer until widget count justifies it
-5. **Phase 7: Location Heatmap** — Depends on GPS data; assess data availability first
+1. ~~**Phase 8: Timeline Widget** — Easy CSS bars, high visual impact, no dependencies~~ ✅ Complete
+2. ~~**Phase 6: Library Health Widget** — Low effort, feeds into Error Export feature~~ ✅ Complete
+3. ~~**Phase 4: Collages** — Complex but visually impressive~~ ✅ Complete
+4. ~~**Phase 5a: Drag-and-Drop** — Polish feature~~ ✅ Complete
+5. ~~**Phase 5b: Resizable Widgets** — Snap-to-grid resize~~ ✅ Complete
+6. ~~**Phase 7: Location Heatmap** — SVG world map with GPS clusters~~ ✅ Complete
 
 ---
 

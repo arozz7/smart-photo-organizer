@@ -33,7 +33,12 @@ Your personal command center for your photo library.
 - **Photo Timeline:** Interactive bar chart showing photo counts by year. Click a year to drill down into monthly counts, then click a month to jump directly to the **Search** view filtered to that time period.
 - **Library Health:** A visual health gauge showing your library's processing completeness, with an error breakdown by scan stage and a CSV export option for diagnostics.
 - **Photo Collage:** Auto-generated collage from your "On This Day" memories (or best library photos as fallback). Choose from three layout modes — **Grid** (2x2 or 3x3), **Feature** (one hero + supporting photos), or **Mosaic** (variable-height masonry). Click **Regenerate** to shuffle photos, or **Export PNG** to save the collage to disk.
+- **Location Heatmap:** A world map showing where your photos were taken. GPS coordinates from your photos' EXIF metadata are clustered and displayed as color-coded dots (blue = few photos, orange = many). Hover over a dot to see the count and approximate coordinates. Photos without GPS data are simply ignored. Enable via the **Power** preset or the Customize modal.
 - **Scan Entertainment:** Watch live updates and memory flashbacks while you scan.
+
+### Widget Layout
+- **Drag-and-Drop Reorder:** Hover over any widget to reveal a **grip icon** (top-right). Drag and drop widgets to rearrange your dashboard layout. Your custom order is automatically saved.
+- **Snap-to-Grid Resize:** Stat-type widgets (Library Stats, Fun Facts, Library Health, etc.) show a **resize handle** (bottom-right corner) on hover. Drag to resize — widgets snap to column widths of 4, 8, or 12 columns. Some widgets like Scan Entertainment and On This Day always span full width.
 
 **Customization:** Click the **Gear Icon** in the dashboard header to toggle individual widgets on/off, or choose from layout presets (**Minimal**, **Balanced**, **Power User**).
 

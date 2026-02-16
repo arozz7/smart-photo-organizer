@@ -360,4 +360,39 @@ export class DashboardRepository {
 
         return { healthScore, errorsByStage, recentErrorCount, totalErrors };
     }
+
+    /**
+     * Photo locations clustered by GPS coordinates for the heatmap widget.
+     * Returns empty array if no GPS data is available.
+     */
+    static getPhotoLocations(): LocationCluster[] {
+        const db = getDB();
+        try {
+            const clusters = db.prepare(`
+                SELECT 
+                    ROUND(CAST(json_extract(metadata_json, '$.GPSLatitude') AS REAL), 1) as lat,
+                    ROUND(CAST(json_extract(metadata_json, '$.GPSLongitude') AS REAL), 1) as lng,
+                    COUNT(*) as photoCount
+                FROM photos
+                WHERE metadata_json IS NOT NULL
+                  AND json_extract(metadata_json, '$.GPSLatitude') IS NOT NULL
+                  AND json_extract(metadata_json, '$.GPSLongitude') IS NOT NULL
+                  AND CAST(json_extract(metadata_json, '$.GPSLatitude') AS REAL) BETWEEN -90 AND 90
+                  AND CAST(json_extract(metadata_json, '$.GPSLongitude') AS REAL) BETWEEN -180 AND 180
+                GROUP BY lat, lng
+                ORDER BY photoCount DESC
+                LIMIT 500
+            `).all() as LocationCluster[];
+            return clusters;
+        } catch (err) {
+            console.error('[DashboardRepository] Failed to query photo locations:', err);
+            return [];
+        }
+    }
+}
+
+interface LocationCluster {
+    lat: number;
+    lng: number;
+    photoCount: number;
 }
