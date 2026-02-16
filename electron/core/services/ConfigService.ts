@@ -92,6 +92,18 @@ export interface SmartIgnoreSettings {
     ungroupableDistanceThreshold: number;
 }
 
+export interface DashboardWidgetConfig {
+    id: string;
+    enabled: boolean;
+    size: '1x1' | '2x1' | '2x2';
+}
+
+export interface DashboardConfig {
+    widgets: DashboardWidgetConfig[];
+    preset: 'minimal' | 'balanced' | 'power';
+    reduceMotion: boolean;
+}
+
 export interface AppConfig {
     libraryPath: string;
     advancedFace: AdvancedFaceConfig;
@@ -100,6 +112,7 @@ export interface AppConfig {
     firstRun: boolean;
     queue: QueueConfig;
     smartIgnore: SmartIgnoreSettings;
+    dashboard: DashboardConfig;
     ai_queue: any[]; // Queue items
     faissStaleCount?: number; // Tracks faces removed that need FAISS rebuild
 }
@@ -148,6 +161,18 @@ export const DEFAULT_CONFIG: AppConfig = {
         enableQualityAdjustedThresholds: true,
         lowQualityThresholdBoost: 0.15,
         ungroupableDistanceThreshold: 1.0
+    },
+    dashboard: {
+        widgets: [
+            { id: 'scanEntertainment', enabled: true, size: '2x1' },
+            { id: 'onThisDay', enabled: true, size: '2x1' },
+            { id: 'libraryStats', enabled: true, size: '1x1' },
+            { id: 'peopleSpotlight', enabled: true, size: '2x1' },
+            { id: 'recentActivity', enabled: true, size: '1x1' },
+            { id: 'funFacts', enabled: true, size: '1x1' },
+        ],
+        preset: 'balanced',
+        reduceMotion: false,
     },
     ai_queue: []
 };
@@ -218,6 +243,11 @@ export class ConfigService {
             intermediateConfig.advancedFace = { ...baseConfig.advancedFace, ...(userConfig as any).advancedFace || {} };
             intermediateConfig.queue = { ...baseConfig.queue, ...(userConfig as any).queue || {} };
             intermediateConfig.smartIgnore = { ...baseConfig.smartIgnore, ...(userConfig as any).smartIgnore || {} };
+            intermediateConfig.dashboard = { ...baseConfig.dashboard, ...(userConfig as any).dashboard || {} };
+            // Preserve widget array from user config if present, otherwise use defaults
+            if ((userConfig as any).dashboard?.widgets) {
+                intermediateConfig.dashboard.widgets = (userConfig as any).dashboard.widgets;
+            }
 
             // 2. Apply Enterprise Defaults (ai-config.json) as FINAL OVERRIDE for specific tuned keys
             if (enterpriseDefaults) {
@@ -303,6 +333,20 @@ export class ConfigService {
     static updateSmartIgnoreSettings(settings: Partial<SmartIgnoreSettings>) {
         this.load();
         this.config.smartIgnore = { ...this.config.smartIgnore, ...settings };
+        this.save();
+    }
+
+    // Dashboard Helpers
+    static getDashboardConfig(): DashboardConfig {
+        return this.getSettings().dashboard;
+    }
+
+    static updateDashboardConfig(config: Partial<DashboardConfig>) {
+        this.load();
+        this.config.dashboard = { ...this.config.dashboard, ...config };
+        if (config.widgets) {
+            this.config.dashboard.widgets = config.widgets;
+        }
         this.save();
     }
 }

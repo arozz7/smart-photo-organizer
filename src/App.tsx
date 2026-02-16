@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
+import Home from './views/Home'
 import Library from './views/Library'
 import People from './views/People'
 import PersonDetail from './views/PersonDetail'
@@ -11,7 +12,7 @@ import Create from './views/Create'
 import LoadingScreen from './components/LoadingScreen'
 import StatusBar from './components/StatusBar'
 import Search from './views/Search'
-import EnhanceLab from './views/EnhanceLab' // Added
+import EnhanceLab from './views/EnhanceLab'
 
 function App() {
   const [isReady, setIsReady] = useState(false)
@@ -24,7 +25,8 @@ function App() {
     <HashRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
-          <Route index element={<Library />} />
+          <Route index element={<Home />} />
+          <Route path="library" element={<Library />} />
           <Route path="search" element={<Search />} />
           <Route path="people" element={<People />} />
           <Route path="person/:personId" element={<PersonDetail />} />

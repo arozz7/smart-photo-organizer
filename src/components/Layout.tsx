@@ -2,10 +2,12 @@ import { Outlet, NavLink } from 'react-router-dom'
 import StatusBar from './StatusBar'
 import { AIStatusIndicator } from './AIStatusIndicator'
 import { useScan } from '../context/ScanContext'
+import { useDashboard } from '../context/DashboardContext'
 import PhotoDetail from './PhotoDetail'
 
 export default function Layout() {
     const { viewingPhoto, setViewingPhoto, navigateToPhoto } = useScan()
+    const { hasNewMemories } = useDashboard()
     return (
         <div className="flex h-screen bg-gray-900 text-gray-100 overflow-hidden font-sans">
             {/* Sidebar */}
@@ -17,6 +19,19 @@ export default function Layout() {
                 <nav className="flex-1 p-2 space-y-1">
                     <NavLink
                         to="/"
+                        end
+                        className={({ isActive }) =>
+                            `flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                            }`
+                        }
+                    >
+                        Home
+                        {hasNewMemories && (
+                            <span className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0" title="New memories available" />
+                        )}
+                    </NavLink>
+                    <NavLink
+                        to="/library"
                         className={({ isActive }) =>
                             `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                             }`
