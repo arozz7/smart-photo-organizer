@@ -18,11 +18,27 @@ When you first open the application, you'll need to tell it where to store its d
         - **Scanning Indicator:** The button will show a spinner ("Scanning...") while the analysis is active. This process runs in the background.
     - **RAW Support:** The app natively supports Professional RAW formats (NEF, CR2, ARW). If a RAW decoder fails (e.g., "Unsupported file format"), the system automatically falls back to using the embedded preview image, ensuring your photo is always visible and analyzable.
 
+
 ---
 
-## 🖼️ 2. Library View: Interacting with Your Photos
+## 🏠 2. Home Dashboard
 
-The **Library** is your main hub. 
+Your personal command center for your photo library.
+
+- **On This Day:** Relive memories from this exact date in previous years.
+- **Library Stats:** Visualize your collection growth and composition.
+- **People Spotlight:** Quick access to your top-identified people.
+- **Recent Activity:** See the latest photos scanned or imported.
+- **Fun Facts:** Discover interesting insights about your library.
+- **Scan Entertainment:** Watch live updates and memory flashbacks while you scan.
+
+**Customization:** Click the **Gear Icon** in the dashboard header to toggle widgets on/off or change the layout density.
+
+---
+
+## 🖼️ 3. Library View: Interacting with Your Photos
+
+The **Library** allows you to browse and manage your entire photo collection. 
 
 -   **Grid Navigation:** Scroll through your entire library smoothly. Use the **Date Filter** in the sidebar to jump to specific years or months.
 -   **Photo Details:** Click any photo to see a large preview, its EXIF metadata (camera, lens, ISO), and any AI-generated tags.
@@ -34,7 +50,7 @@ The **Library** is your main hub.
 
 ---
 
-## 👤 3. People Management: Organizing Faces
+## 👤 4. People Management: Organizing Faces
 
 The AI automatically detects faces during the scan. Your job is to give them names!
 
@@ -53,7 +69,7 @@ The AI automatically detects faces during the scan. Your job is to give them nam
     - **Group by AI Suggestion:** Switch to this mode to have the AI automatically group faces by who it thinks they are.
         - **Smart Grouping:** The AI preserves coherent clusters (e.g., 50 faces from the same event) and tags the entire group with a suggestion (e.g., "Suggested: Mom").
         - **Bulk Action:** Clicking "Accept" on a group assigns **all** faces in that cluster at once.
-## ⚡ 3.1 High-Density Review UX (Power Users)
+## ⚡ 4.1 High-Density Review UX (Power Users)
 When managing libraries with 10,000+ unnamed faces, use these tools to speed up your workflow:
 
 #### ⌨️ Keyboard Navigation
@@ -73,7 +89,7 @@ When managing libraries with 10,000+ unnamed faces, use these tools to speed up 
 > *   **Background Filter:** A "trash disposal" for mass noise. It finds people who only appear once or twice in your library (strangers in crowds, blurry background faces) so you can bulk-ignore them.
 > *   **Ungroupable Search:** A "sorting tool" to find potential new people. It looks for faces that have clear AI data but are far (distant) from your *Identified People*.
 
-### 🧠 3.2 Automated Suggestions & Discoveries
+### 🧠 4.2 Automated Suggestions & Discoveries
 The app works in the background to organize your photos even when you aren't naming them.
 - **Suggestion Buckets:** Groups of faces that match people you've already named. Click "Confirm" to accept them all at once.
 - **Discovery Buckets:** New groups of unknown people found by the AI. You can name these groups to create a new Person.
@@ -93,7 +109,7 @@ The app works in the background to organize your photos even when you aren't nam
     - **Stale Index Alert:** If you see an amber "Face Index Needs Update" banner on the "Identified People" tab, it means faces have been removed or reassigned, and the search index is out of date.
     - **Rebuild Index:** Click the **"Rebuild Index"** button on the banner to refresh the AI search index. This is quick (usually < 10 seconds) and ensures accurate duplicate detection.
 
-## ⏳ 3.3 Era Generation (Advanced)
+## ⏳ 4.3 Era Generation (Advanced)
 Some people change significantly over time (e.g., from child to adult). A single facial model might struggle to match both "Baby Nick" and "Adult Nick" accurately.
 
 1.  **Generate Eras:** On a Person's detail page, click the **"Generate Eras"** button (Clock icon).
@@ -105,7 +121,7 @@ Some people change significantly over time (e.g., from child to adult). A single
 > [!NOTE]
 > **Prerequisite:** Era Generation requires advanced face data (Pose & V2 Embeddings). If this feature is disabled or inaccurate, please go to **Settings > Database Management** and run the **Face Data Upgrade**.
 
-### 🤖 3.4 How Face Recognition Works
+### 🤖 4.4 How Face Recognition Works
 
 Understanding how the AI identifies faces can help you interpret confidence indicators and improve your workflow.
 
@@ -137,7 +153,55 @@ When the AI can't visually match a face (e.g., top-down view), you can use conte
 
 ---
 
+<<<<<<< Updated upstream:docs/user_manual.md
 ## 🪄 4. AI Enhance Lab: Upgrading Your Memories
+=======
+## 🔎 5. Search & Filtering
+
+The **Search** view provides advanced tools for finding specific photos across your entire library.
+
+### Getting Started
+Click the **Search** tab in the navigation bar. You'll see a filter sidebar on the left and an empty grid area. Apply any filter to start seeing results.
+
+### Filter Sidebar
+The sidebar is organized into collapsible sections:
+
+- **Search:** Free-text search across file names, tags, and descriptions.
+- **Quality (Blur):** Filter by photo sharpness. Use the presets (**Sharp**, **Medium**, **Blurry**) or enter custom min/max blur scores.
+- **Date:** Filter by **Year** and/or **Month** dropdowns, or specify a custom date range with **From** and **To** fields.
+- **Camera:** Filter by camera model (populated from your library's EXIF data).
+- **File Type:** Filter by image format (JPEG, PNG, RAW, etc.).
+- **Faces:** Toggle filters for photos with/without faces, unnamed faces only, frontal faces only, minimum face quality, and confidence tier (High, Review, Unknown).
+- **Folder / Tag / Person:** Filter by folder path, AI-generated tag, or identified person.
+- **Advanced (Compound Filters):** Open the compound filter builder to create AND/OR/NOT logic across multiple conditions.
+
+### Active Filter Chips
+Applied filters appear as chips in the top bar. Click the **x** on any chip to remove that filter, or click **Clear all** to reset everything.
+
+### Sorting
+Use the dropdown in the top-right to sort results by **Newest**, **Oldest**, **Name A-Z**, or **Name Z-A**.
+
+### Compound Filter Builder
+Click **Open Compound Builder** in the Advanced section to build complex queries:
+1. Add **groups** of conditions (e.g., "Person is Alice AND Year is 2024").
+2. Toggle each group between **AND** / **OR** logic.
+3. Use the **Exclude** toggle on individual conditions for NOT logic.
+4. Combine multiple groups with a top-level AND/OR operator.
+
+### Smart Albums
+Save your current filter configuration as a **Smart Album** for quick reuse:
+1. Apply your desired filters.
+2. In the **Smart Albums** section of the sidebar, type a name and click **Save**.
+3. To reload, select a saved album from the list.
+4. Click the **delete** button next to an album to remove it.
+
+> [!NOTE]
+> **Blur scores** are computed during photo scanning. If you imported photos before v0.6.5, go to **Settings > Database Management** and rescan your library to populate blur data for the Quality filter.
+
+---
+
+## 🪄 6. AI Enhance Lab: Upgrading Your Memories
+>>>>>>> Stashed changes:docs/guides/user_manual.md
 
 
 Found an old, blurry, or low-resolution photo? Use the **Enhance Lab**.
@@ -165,7 +229,11 @@ To keep the initial app size small (~400MB), the large AI models and runtimes ar
 
 ---
 
+<<<<<<< Updated upstream:docs/user_manual.md
 ## 🎨 5. Create & Export: Building Sets
+=======
+## 🎨 7. Create & Export: Building Sets
+>>>>>>> Stashed changes:docs/guides/user_manual.md
 
 The **Create** view is for when you want to gather specific photos for a project or album.
 
@@ -177,7 +245,11 @@ The **Create** view is for when you want to gather specific photos for a project
 
 ---
 
+<<<<<<< Updated upstream:docs/user_manual.md
 ## 🛠️ 6. Advanced Settings & Maintenance
+=======
+## 🛠️ 8. Advanced Settings & Maintenance
+>>>>>>> Stashed changes:docs/guides/user_manual.md
 
 The **Settings** tab contains advanced controls to fine-tune the application's performance and manage your data.
 
@@ -223,6 +295,6 @@ Other Fine-Tuning controls:
 - **Tagging Creativity (Temperature):** 
     - **LOWER (0.1 - 0.3):** Factual, consistent descriptions. 
     - **HIGHER (0.7+):** Multi-sentence, descriptive, and "creative" tagging.
-     - **HIGHER (0.7+):** Multi-sentence, descriptive, and "creative" tagging.
+
 -   **Queue Management:** In the **Queues** tab, you can watch the AI working in real-time. 
     -   **Manual Start:** The AI Queue starts in a **Paused** state to prevent slowing down your system on startup. Click **"Resume"** to begin processing pending tasks.
