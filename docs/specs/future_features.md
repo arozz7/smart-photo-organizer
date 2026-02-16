@@ -92,21 +92,16 @@
 - **Synergies:** Phase 2 prepares Library header for Advanced Filtering (#1). Phase 1+4 prepare navigation for Home Page Dashboard (#2). Phase 6 makes PhotoDetail safer for future feature additions.
 - **Implementation Plan:** See [UX Modernization Plan](file:///j:/Projects/smart-photo-organizer/docs/ux-modernization-plan.md)
 
-### 6. Age-Based ERA Categorization
+### 6. Age-Based ERA Categorization ✅ Complete (v0.5.5)
 - **Goal:** Replace visual clustering with actual age estimation for ERA generation, enabling life-stage tracking (Newborn → Child → Teen → Adult).
-- **Problem:** Current ERA system uses K-Means visual clustering, which groups all faces into one bucket instead of meaningful life stages.
+- **Status:** Implemented in Phase 42
 - **Core Features:**
-    - **Age Extraction:** Enable InsightFace `genderage` module to extract `face.age` during all scans.
-    - **Age Buckets:** Newborn (0-1), Infant (1-2), Toddler (2-4), Child (5-12), Teen (13-19), Young Adult (20-35), Adult (36-55), Senior (56-69), Elderly (70+).
-    - **Background Backfill:** Service to rescan existing photos for age data (resumable, graceful shutdown).
-    - **Auto-Generation:** Automatically generate ERAs for all named persons after backfill completes.
-    - **Progress UI:** Status updates during backfill with estimated time remaining.
-- **Implementation Phases:**
-    1. Enable `genderage` module in Python AI + extract age in scan response.
-    2. DB migration: Add `estimated_age` and `gender` columns to faces table.
-    3. Background backfill service following `BackgroundBucketingService` pattern.
-    4. Rewrite `PersonService.generateEras` to use age buckets instead of visual clustering.
-- **Performance:** Genderage adds ~5-10% to face detection time (one-time cost per photo).
+    - [x] **Age Extraction:** InsightFace `genderage` module extracts `face.age` during all scans.
+    - [x] **Age Buckets:** Newborn (0-1), Infant (1-2), Toddler (2-4), Child (5-12), Teen (13-19), Young Adult (20-35), Adult (36-55), Senior (56-69), Elderly (70+).
+    - [x] **Background Backfill:** Resumable service to rescan existing photos for age data.
+    - [x] **Auto-Generation:** Automatically generate ERAs for all named persons after backfill completes.
+    - [x] **Progress UI:** Status updates during backfill with estimated time remaining.
+- **Changelog:** [Phase 42](aiChangeLog/phase-42-age-based-eras.md)
 
 ### 7. Hard Pose Handling & Context Propagation
 - **Goal:** Improve recognition accuracy for side profiles, top-down views, and other challenging face angles.
@@ -137,25 +132,27 @@
     - If `face_count > 1`, split box into separate face records
 - **Implementation Plan:** See [VLM Accuracy Research Review](file:///j:/Projects/smart-photo-organizer/docs/vlm-accuracy-research-review.md)
 
-### 9. AdaFace Integration (Phase 59)
+### 9. AdaFace Integration ✅ Complete (v0.5.5)
 - **Goal:** Improve recognition accuracy on low-quality (blurry) faces.
-- **Problem:** ArcFace produces weak embeddings for blurry/motion-blur faces, causing mismatches.
-- **Solution:** Use AdaFace adaptively for faces with `blur_score < 50`.
+- **Status:** Implemented in Phase 59
 - **Core Features:**
-    - Hybrid embedding selection based on face quality
-    - `HybridEmbedder` class with automatic model switching
-    - Config option: `useAdaFaceForLowQuality: true`
-- **Performance:** AdaFace adds ~5-10ms overhead per face (one-time cost).
+    - [x] Hybrid embedding selection based on face quality (blur_score < 50 uses AdaFace)
+    - [x] `HybridEmbedder` class with automatic model switching
+    - [x] Config option: `ADAFACE_ENABLED`, `ADAFACE_BLUR_THRESHOLD`
+    - [x] Graceful fallback to ArcFace if AdaFace model unavailable
+- **Performance:** AdaFace adds ~5-10ms overhead per low-quality face (one-time cost).
+- **Changelog:** [Phase 59](aiChangeLog/phase-59-adaface-integration.md)
 
-### 10. Vector Database Scaling (Phase 60)
+### 10. Vector Database Scaling ✅ Complete (v0.5.5)
 - **Goal:** Prepare FAISS for 500K+ face libraries spanning decades of photos.
-- **Problem:** Current `IndexFlatL2` is O(n) brute-force search — won't scale.
-- **Solution:** Migrate to `IndexIVFFlat` with training step.
+- **Status:** Implemented in Phase 60
 - **Core Features:**
-    - Automatic migration from FlatL2 to IVF on first use
-    - Training step during index rebuild
-    - ~10x faster search at 500K+ scale
-- **Alternatives Evaluated:** Milvus Lite, ScaNN (deferred — IVF sufficient for now).
+    - [x] Hybrid index strategy: `IndexFlatL2` for <2K faces, `IndexIVFFlat` for ≥2K
+    - [x] Automatic migration from FlatL2 to IVF on first use
+    - [x] Training step during index rebuild
+    - [x] ~10x faster search at 500K+ scale
+    - [x] Dynamic cluster calculation: `4 * sqrt(N)`, clamped 32-4096
+- **Changelog:** [Phase 60](aiChangeLog/phase-60-faiss-ivf.md)
 
 ### 11. Scan Performance Optimization (Phase 61)
 - **Goal:** Reduce 7s/photo to 3-4s/photo in MACRO mode.
@@ -191,7 +188,6 @@
     - **Details:** Metrics per person (photo count), heatmaps for tags/years, and exportable format (PDF/HTML).
 - **Batch Renaming & Cleanup:** Template-based renaming (`{Date}_{Location}`), Deduplication via perceptual hash.
 - **Duplicate Photo Detection:** SHA-256 (exact) and pHash (visual) detection with "Safe Deduplication" UI.
-- **Saved Smart Searches:** Save active filters as "Smart Albums".
 - **Batch Tagging:** Multi-select context menu actions (Add/Remove Tags).
 - **Exif Metadata Injection:** Write application tags back to file headers (IPTC/XMP).
 - **Location Heatmap:** World map visualization with "Trip" clustering.
