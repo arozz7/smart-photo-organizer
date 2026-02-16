@@ -32,6 +32,7 @@ Your personal command center for your photo library.
 - **Fun Facts:** Discover interesting insights about your library (peak year, busiest day, most-used camera, and more).
 - **Photo Timeline:** Interactive bar chart showing photo counts by year. Click a year to drill down into monthly counts, then click a month to jump directly to the **Search** view filtered to that time period.
 - **Library Health:** A visual health gauge showing your library's processing completeness, with an error breakdown by scan stage and a CSV export option for diagnostics.
+- **Photo Collage:** Auto-generated collage from your "On This Day" memories (or best library photos as fallback). Choose from three layout modes — **Grid** (2x2 or 3x3), **Feature** (one hero + supporting photos), or **Mosaic** (variable-height masonry). Click **Regenerate** to shuffle photos, or **Export PNG** to save the collage to disk.
 - **Scan Entertainment:** Watch live updates and memory flashbacks while you scan.
 
 **Customization:** Click the **Gear Icon** in the dashboard header to toggle individual widgets on/off, or choose from layout presets (**Minimal**, **Balanced**, **Power User**).

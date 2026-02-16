@@ -52,6 +52,12 @@ export function registerDashboardHandlers() {
         } catch (e) { return { success: false, error: String(e) }; }
     });
 
+    ipcMain.handle('dashboard:getCollagePhotos', async (_, count = 6) => {
+        try {
+            return { success: true, photos: DashboardRepository.getCollagePhotos(count) };
+        } catch (e) { return { success: false, error: String(e) }; }
+    });
+
     // Dashboard layout config
     ipcMain.handle('dashboard:getLayout', async () => {
         try {

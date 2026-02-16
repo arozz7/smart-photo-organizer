@@ -29,12 +29,13 @@ const WIDGET_LABELS: Record<string, { name: string; description: string }> = {
     funFacts: { name: 'Fun Facts', description: 'Random insights about your library' },
     timeline: { name: 'Photo Timeline', description: 'Photo count by year with monthly drill-down' },
     libraryHealth: { name: 'Library Health', description: 'Processing status, error breakdown, and health score' },
+    collage: { name: 'Photo Collage', description: 'Auto-generated photo collage with layout modes and export' },
 };
 
 const PRESETS: Record<string, string[]> = {
     minimal: ['libraryStats', 'peopleSpotlight'],
     balanced: ['scanEntertainment', 'onThisDay', 'libraryStats', 'peopleSpotlight', 'recentActivity', 'funFacts', 'timeline'],
-    power: ['scanEntertainment', 'onThisDay', 'libraryStats', 'peopleSpotlight', 'recentActivity', 'funFacts', 'timeline', 'libraryHealth'],
+    power: ['scanEntertainment', 'onThisDay', 'libraryStats', 'peopleSpotlight', 'recentActivity', 'funFacts', 'timeline', 'libraryHealth', 'collage'],
 };
 
 export default function WidgetCustomizationModal({ open, onOpenChange, onSave }: WidgetCustomizationModalProps) {

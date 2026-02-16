@@ -6,10 +6,11 @@ import FunFactsWidget from './FunFactsWidget'
 import ScanEntertainmentWidget from './ScanEntertainmentWidget'
 import TimelineWidget from './TimelineWidget'
 import LibraryHealthWidget from './LibraryHealthWidget'
+import CollageWidget from './CollageWidget'
 import { useDashboard } from '../../context/DashboardContext'
 
 export default function WidgetGrid() {
-    const { memories, stats, topPeople, recentScans, funFact, refreshFunFact, timeline, libraryHealth, isWidgetEnabled } = useDashboard();
+    const { memories, stats, topPeople, recentScans, funFact, refreshFunFact, timeline, libraryHealth, collagePhotos, isWidgetEnabled } = useDashboard();
 
     return (
         <div className="grid grid-cols-12 gap-4">
@@ -24,6 +25,13 @@ export default function WidgetGrid() {
             {isWidgetEnabled('onThisDay') && (
                 <div className="col-span-12">
                     <OnThisDayWidget memories={memories} />
+                </div>
+            )}
+
+            {/* Collage — full width */}
+            {isWidgetEnabled('collage') && (
+                <div className="col-span-12">
+                    <CollageWidget photos={collagePhotos} />
                 </div>
             )}
 

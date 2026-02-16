@@ -15,7 +15,7 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
 *   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. **Smart Confidence Tiers** classify matches as High, Review (Amber Ring), or Unknown. Learns as you name them. Uses FAISS for lightning-fast similarity search across millions of faces.
     
     ![People Interactions](docs/assets/PeopleSectionInteractions.gif)
-*   **🏠 Home Dashboard:** Your personal command center. View "On This Day" memories, library statistics, recent activity, people spotlights, fun facts, a **Photo Timeline** chart (with year/month drill-down that links to Search), and a **Library Health** gauge with error breakdown and CSV export. Fully customizable with widget toggles and layout presets.
+*   **🏠 Home Dashboard:** Your personal command center. View "On This Day" memories, library statistics, recent activity, people spotlights, fun facts, a **Photo Timeline** chart (with year/month drill-down that links to Search), a **Library Health** gauge with error breakdown and CSV export, and an auto-generated **Photo Collage** with multiple layout modes (Grid, Feature, Mosaic) and PNG/JPG export. Fully customizable with widget toggles and layout presets.
 *   **📐 Challenging Face Recognition:** Robust matching for side profiles (>30° yaw) and partial faces using multi-sample voting and dynamic, quality-based confidence thresholds.
 *   **⚙️ Configurable AI & Storage:** Fine-tune face detection, blur sensitivity, and tagging creativity settings. Choose where your library data (DB, previews, indices) is stored.
 *   **🧼 Blur Detection & Cleanup:** Automatically filters out blurry faces and provides tools to bulk-cleanup low-quality captures.

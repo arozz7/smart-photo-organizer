@@ -90,6 +90,42 @@ export class DashboardRepository {
     }
 
     /**
+     * Photos for collage generation.
+     * Prefers On This Day memories; fills remainder with highest-quality photos.
+     */
+    static getCollagePhotos(count = 6): MemoryPhoto[] {
+        const db = getDB();
+        const memories = this.getOnThisDayPhotos(3);
+
+        if (memories.length >= count) {
+            // Shuffle and pick a random subset
+            const shuffled = memories.sort(() => Math.random() - 0.5);
+            return shuffled.slice(0, count);
+        }
+
+        // Fill remaining with high-quality photos not already in memories
+        const memoryIds = new Set(memories.map(m => m.id));
+        const remaining = count - memories.length;
+        const placeholders = memories.length > 0
+            ? `AND id NOT IN (${memories.map(() => '?').join(',')})`
+            : '';
+        const params = memories.length > 0 ? [...memories.map(m => m.id), remaining] : [remaining];
+
+        const fillStmt = db.prepare(`
+            SELECT id, file_path, preview_cache_path, created_at, width, height,
+                   CAST(strftime('%Y', date_taken) AS INTEGER) as year
+            FROM photos
+            WHERE preview_cache_path IS NOT NULL
+              ${placeholders}
+            ORDER BY blur_score DESC, date_taken DESC
+            LIMIT ?
+        `);
+
+        const fill = fillStmt.all(...params) as MemoryPhoto[];
+        return [...memories, ...fill.filter(p => !memoryIds.has(p.id))].slice(0, count);
+    }
+
+    /**
      * Aggregate library stats for the dashboard.
      */
     static getDashboardStats(): DashboardStats {
