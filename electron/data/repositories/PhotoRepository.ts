@@ -15,10 +15,10 @@ export class PhotoRepository {
     static getPhotos(page = 1, limit = 50, sort = 'date_desc', filter: any = {}, offset?: number) {
         const db = getDB();
         const calculatedOffset = offset !== undefined ? offset : (page - 1) * limit;
-        let orderBy = 'created_at DESC';
+        let orderBy = 'date_taken DESC';
 
         switch (sort) {
-            case 'date_asc': orderBy = 'created_at ASC'; break;
+            case 'date_asc': orderBy = 'date_taken ASC'; break;
             case 'name_asc': orderBy = 'file_path ASC'; break;
             case 'name_desc': orderBy = 'file_path DESC'; break;
         }
@@ -58,19 +58,19 @@ export class PhotoRepository {
             params.push(filter.blurScoreMax);
         }
         if (filter.dateFrom) {
-            conditions.push('created_at >= ?');
+            conditions.push('date_taken >= ?');
             params.push(filter.dateFrom);
         }
         if (filter.dateTo) {
-            conditions.push('created_at <= ?');
+            conditions.push('date_taken <= ?');
             params.push(filter.dateTo);
         }
         if (filter.year !== undefined) {
-            conditions.push("strftime('%Y', created_at) = ?");
+            conditions.push("strftime('%Y', date_taken) = ?");
             params.push(String(filter.year));
         }
         if (filter.month !== undefined) {
-            conditions.push("strftime('%m', created_at) = ?");
+            conditions.push("strftime('%m', date_taken) = ?");
             params.push(String(filter.month).padStart(2, '0'));
         }
         if (filter.camera) {
@@ -499,9 +499,9 @@ export class PhotoRepository {
         const db = getDB();
         try {
             const rows = db.prepare(`
-                SELECT DISTINCT CAST(strftime('%Y', created_at) AS INTEGER) as year
+                SELECT DISTINCT CAST(strftime('%Y', date_taken) AS INTEGER) as year
                 FROM photos
-                WHERE created_at IS NOT NULL
+                WHERE date_taken IS NOT NULL
                 ORDER BY year DESC
             `).all() as { year: number }[];
             return rows.map(r => r.year).filter(Boolean);
@@ -537,9 +537,9 @@ export class PhotoRepository {
         const db = getDB();
         PhotoRepository.ensureFunctions(db);
         const calculatedOffset = offset !== undefined ? offset : (page - 1) * limit;
-        let orderBy = 'created_at DESC';
+        let orderBy = 'date_taken DESC';
         switch (sort) {
-            case 'date_asc': orderBy = 'created_at ASC'; break;
+            case 'date_asc': orderBy = 'date_taken ASC'; break;
             case 'name_asc': orderBy = 'file_path ASC'; break;
             case 'name_desc': orderBy = 'file_path DESC'; break;
         }
@@ -587,15 +587,16 @@ export class PhotoRepository {
                 sql = PhotoRepository.numericCondition('blur_score', cond.operator, cond.value, p);
                 break;
             case 'created_at':
+            case 'date_taken':
                 if (cond.operator === 'between' && Array.isArray(cond.value)) {
-                    sql = 'created_at >= ? AND created_at <= ?';
+                    sql = 'date_taken >= ? AND date_taken <= ?';
                     p.push(cond.value[0], cond.value[1]);
                 } else {
-                    sql = PhotoRepository.numericCondition('created_at', cond.operator, cond.value, p);
+                    sql = PhotoRepository.numericCondition('date_taken', cond.operator, cond.value, p);
                 }
                 break;
             case 'year':
-                sql = "strftime('%Y', created_at) = ?";
+                sql = "strftime('%Y', date_taken) = ?";
                 p.push(String(cond.value));
                 break;
             case 'camera':

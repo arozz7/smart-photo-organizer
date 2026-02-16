@@ -4,7 +4,8 @@
 - Phase 1 (MVP Dashboard): Complete
 - Phase 2 (Scan-Time Entertainment): Complete
 - Phase 3 (Widget Customization): Complete
-- **Phase 4+: Not Started** — this document
+- **Phase 4 (Auto-Generated Collages):** Complete
+- Phase 5+ — see below
 
 ---
 

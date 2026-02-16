@@ -27,12 +27,32 @@ export interface DashboardLayoutConfig {
     reduceMotion: boolean;
 }
 
+interface TimelineEntry {
+    period: string;
+    count: number;
+}
+
+interface ErrorByStage {
+    stage: string;
+    count: number;
+}
+
+interface LibraryHealth {
+    healthScore: number;
+    errorsByStage: ErrorByStage[];
+    recentErrorCount: number;
+    totalErrors: number;
+}
+
 interface DashboardContextType {
     memories: any[];
     stats: DashboardStats | null;
     topPeople: any[];
     recentScans: any[];
     funFact: FunFact | null;
+    timeline: TimelineEntry[];
+    libraryHealth: LibraryHealth | null;
+    collagePhotos: any[];
     loading: boolean;
     hasNewMemories: boolean;
     refresh: () => Promise<void>;
@@ -56,6 +76,9 @@ const DEFAULT_LAYOUT: DashboardLayoutConfig = {
         { id: 'peopleSpotlight', enabled: true, size: '2x1' },
         { id: 'recentActivity', enabled: true, size: '1x1' },
         { id: 'funFacts', enabled: true, size: '1x1' },
+        { id: 'timeline', enabled: true, size: '2x1' },
+        { id: 'libraryHealth', enabled: false, size: '1x1' },
+        { id: 'collage', enabled: false, size: '2x1' },
     ],
     preset: 'balanced',
     reduceMotion: false,
@@ -69,6 +92,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     const [topPeople, setTopPeople] = useState<any[]>([]);
     const [recentScans, setRecentScans] = useState<any[]>([]);
     const [funFact, setFunFact] = useState<FunFact | null>(null);
+    const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+    const [libraryHealth, setLibraryHealth] = useState<LibraryHealth | null>(null);
+    const [collagePhotos, setCollagePhotos] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     const [loaded, setLoaded] = useState(false);
     const [layoutConfig, setLayoutConfig] = useState<DashboardLayoutConfig>(DEFAULT_LAYOUT);
@@ -76,13 +102,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     const refresh = useCallback(async () => {
         setLoading(true);
         try {
-            const [memoriesRes, statsRes, peopleRes, recentRes, factRes, layoutRes] = await Promise.all([
+            const [memoriesRes, statsRes, peopleRes, recentRes, factRes, layoutRes, timelineRes, healthRes, collageRes] = await Promise.all([
                 window.ipcRenderer.invoke('dashboard:getOnThisDayPhotos', 3),
                 window.ipcRenderer.invoke('dashboard:getStats'),
                 window.ipcRenderer.invoke('dashboard:getTopPeople', 10),
                 window.ipcRenderer.invoke('dashboard:getRecentScans', 12),
                 window.ipcRenderer.invoke('dashboard:getFunFact'),
                 window.ipcRenderer.invoke('dashboard:getLayout'),
+                window.ipcRenderer.invoke('dashboard:getPhotoTimeline'),
+                window.ipcRenderer.invoke('dashboard:getLibraryHealth'),
+                window.ipcRenderer.invoke('dashboard:getCollagePhotos', 6),
             ]);
 
             if (memoriesRes.success) setMemories(memoriesRes.photos);
@@ -91,6 +120,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             if (recentRes.success) setRecentScans(recentRes.photos);
             if (factRes.success) setFunFact(factRes.fact);
             if (layoutRes.success && layoutRes.config) setLayoutConfig(layoutRes.config);
+            if (timelineRes.success) setTimeline(timelineRes.data);
+            if (healthRes.success) setLibraryHealth(healthRes.data);
+            if (collageRes.success) setCollagePhotos(collageRes.photos);
         } catch (err) {
             console.error('Dashboard refresh failed:', err);
         } finally {
@@ -124,6 +156,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             topPeople,
             recentScans,
             funFact,
+            timeline,
+            libraryHealth,
+            collagePhotos,
             loading,
             loaded,
             hasNewMemories: memories.length > 0,

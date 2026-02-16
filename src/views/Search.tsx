@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { VirtuosoGrid } from 'react-virtuoso'
 import { useSearch } from '../hooks/useSearch'
 import FilterPanel from '../components/FilterPanel'
@@ -7,6 +8,7 @@ import PhotoDetail from '../components/PhotoDetail'
 import type { PhotoFilter, SearchSort } from '../types/filterTypes'
 
 export default function Search() {
+    const [searchParams, setSearchParams] = useSearchParams()
     const {
         photos,
         total,
@@ -30,6 +32,23 @@ export default function Search() {
 
     const [showCompound, setShowCompound] = useState(false)
     const [viewingPhoto, setViewingPhoto] = useState<any>(null)
+    const urlParamsApplied = useRef(false)
+
+    // Apply URL query params as initial filter (e.g. from Timeline widget)
+    useEffect(() => {
+        if (urlParamsApplied.current) return
+        const year = searchParams.get('year')
+        const month = searchParams.get('month')
+        if (year || month) {
+            const initialFilter: PhotoFilter = {}
+            if (year) initialFilter.year = parseInt(year)
+            if (month) initialFilter.month = parseInt(month)
+            setFilter(initialFilter)
+            // Clean URL params after applying
+            setSearchParams({}, { replace: true })
+            urlParamsApplied.current = true
+        }
+    }, [searchParams, setFilter, setSearchParams])
 
     const navigatePhoto = (dir: number) => {
         if (!viewingPhoto) return

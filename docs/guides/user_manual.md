@@ -25,14 +25,20 @@ When you first open the application, you'll need to tell it where to store its d
 
 Your personal command center for your photo library.
 
-- **On This Day:** Relive memories from this exact date in previous years.
+- **On This Day:** Relive memories from this exact date in previous years. Uses the actual photo capture date (from EXIF metadata), not the import date.
 - **Library Stats:** Visualize your collection growth and composition.
 - **People Spotlight:** Quick access to your top-identified people.
 - **Recent Activity:** See the latest photos scanned or imported.
-- **Fun Facts:** Discover interesting insights about your library.
+- **Fun Facts:** Discover interesting insights about your library (peak year, busiest day, most-used camera, and more).
+- **Photo Timeline:** Interactive bar chart showing photo counts by year. Click a year to drill down into monthly counts, then click a month to jump directly to the **Search** view filtered to that time period.
+- **Library Health:** A visual health gauge showing your library's processing completeness, with an error breakdown by scan stage and a CSV export option for diagnostics.
+- **Photo Collage:** Auto-generated collage from your "On This Day" memories (or best library photos as fallback). Choose from three layout modes — **Grid** (2x2 or 3x3), **Feature** (one hero + supporting photos), or **Mosaic** (variable-height masonry). Click **Regenerate** to shuffle photos, or **Export PNG** to save the collage to disk.
 - **Scan Entertainment:** Watch live updates and memory flashbacks while you scan.
 
-**Customization:** Click the **Gear Icon** in the dashboard header to toggle widgets on/off or change the layout density.
+**Customization:** Click the **Gear Icon** in the dashboard header to toggle individual widgets on/off, or choose from layout presets (**Minimal**, **Balanced**, **Power User**).
+
+> [!NOTE]
+> **Date Accuracy:** All date-based dashboard features (On This Day, Fun Facts, Timeline) use the `date_taken` field, which is sourced from EXIF metadata (`DateTimeOriginal`, `CreateDate`, or `MediaCreateDate`). If no EXIF date is available, the file's filesystem creation date is used as a fallback. This ensures your memories and statistics reflect when photos were actually taken, not when they were imported into the library.
 
 ---
 

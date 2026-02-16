@@ -1,8 +1,8 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
 import { ExifTool } from 'exiftool-vendored';
 import logger from './logger';
-import { getDB } from './db';
+import { getDB, parseExifDate } from './db';
 
 import { PhotoService } from './core/services/PhotoService';
 
@@ -28,8 +28,8 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
 
     const selectStmt = db.prepare('SELECT * FROM photos WHERE file_path = ?');
     const insertStmt = db.prepare(`
-        INSERT INTO photos (file_path, preview_cache_path, created_at, metadata_json, width, height) 
-        VALUES (@file_path, @preview_cache_path, @created_at, @metadata_json, @width, @height)
+        INSERT INTO photos (file_path, preview_cache_path, created_at, date_taken, metadata_json, width, height)
+        VALUES (@file_path, @preview_cache_path, @created_at, @date_taken, @metadata_json, @width, @height)
         ON CONFLICT(file_path) DO NOTHING
     `);
 
@@ -190,10 +190,24 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
                 logger.error(`Failed to read metadata for ${fullPath}`, e);
             }
 
+            // Resolve date_taken: EXIF → file birthtime → now
+            const exifDateRaw = (metadata as any).DateTimeOriginal
+                || (metadata as any).CreateDate
+                || (metadata as any).MediaCreateDate;
+            let dateTaken = parseExifDate(exifDateRaw);
+            if (!dateTaken) {
+                try {
+                    dateTaken = statSync(fullPath).birthtime.toISOString();
+                } catch (_) {
+                    dateTaken = new Date().toISOString();
+                }
+            }
+
             const info = insertStmt.run({
                 file_path: fullPath,
                 preview_cache_path: previewPath, // Might be null
                 created_at: new Date().toISOString(),
+                date_taken: dateTaken,
                 metadata_json: JSON.stringify(metadata),
                 width,
                 height

@@ -284,7 +284,7 @@ export class FaceRepository {
             // [Phase 56] Exclude suspect faces (pending VLM verification)
             query += (query.includes('WHERE') ? ' AND' : ' WHERE') + ' (f.entity_type = \'human\' OR f.entity_type IS NULL)';
 
-            query += ' ORDER BY p.created_at DESC LIMIT ? OFFSET ?';
+            query += ' ORDER BY p.date_taken DESC LIMIT ? OFFSET ?';
             params.push(limit, offset);
 
             const faces = db.prepare(query).all(...params);
