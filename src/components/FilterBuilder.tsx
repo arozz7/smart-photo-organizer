@@ -22,7 +22,7 @@ const FIELD_OPTIONS = [
     { value: 'unnamed_faces', label: 'Unnamed Faces', type: 'boolean' },
     { value: 'confidence_tier', label: 'Confidence Tier', type: 'select' },
     { value: 'search', label: 'File Name', type: 'text' },
-    { value: 'created_at', label: 'Date', type: 'date' },
+    { value: 'date_taken', label: 'Date Taken', type: 'date' },
 ]
 
 const OPERATORS: Record<string, { value: string; label: string }[]> = {

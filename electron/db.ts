@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
+import * as fs from 'node:fs';
 import logger from './logger';
 // import { getAISettings } from './store';
 // Deprecated functions are removed.
@@ -9,6 +10,35 @@ const INSTANCE_ID = Math.random().toString(36).slice(7);
 logger.info(`[DB Module] Loading Module Instance: ${INSTANCE_ID}`);
 
 let db: any;
+
+/**
+ * Parse EXIF date string to ISO 8601.
+ * EXIF format: "YYYY:MM:DD HH:MM:SS" or ExifDateTime objects with rawValue.
+ * Returns ISO string or null if unparseable.
+ */
+export function parseExifDate(exifDate: any): string | null {
+    if (!exifDate) return null;
+
+    // ExifDateTime objects from exiftool-vendored have a rawValue or toString
+    const raw: string = typeof exifDate === 'string'
+        ? exifDate
+        : exifDate.rawValue || exifDate.toString?.() || String(exifDate);
+
+    if (!raw || raw === 'undefined' || raw === 'null') return null;
+
+    // EXIF format: "YYYY:MM:DD HH:MM:SS" → "YYYY-MM-DDTHH:MM:SS"
+    const match = raw.match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}:\d{2}:\d{2})/);
+    if (match) {
+        const iso = `${match[1]}-${match[2]}-${match[3]}T${match[4]}`;
+        if (!isNaN(Date.parse(iso))) return iso;
+    }
+
+    // Already ISO format or other parseable format
+    const parsed = Date.parse(raw);
+    if (!isNaN(parsed)) return new Date(parsed).toISOString();
+
+    return null;
+}
 
 export async function initDB(basePath: string, onProgress?: (status: string) => void) {
   const dbPath = path.join(basePath, 'library.db');
@@ -28,6 +58,7 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
       file_hash TEXT,
       preview_cache_path TEXT,
       created_at DATETIME,
+      date_taken DATETIME,
       width INTEGER,
       height INTEGER,
       blur_score REAL,
@@ -409,6 +440,78 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
 
     db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(bucketingMigrationKey, '1');
     logger.info('[DB Module] Migration complete.');
+  }
+
+  // --- MIGRATION: date_taken column (Phase 91b) ---
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN date_taken DATETIME');
+  } catch (e) { /* Column exists */ }
+
+  // Create index for date_taken queries
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_photos_date_taken ON photos(date_taken)');
+  } catch (e) { /* Index exists */ }
+
+  // Backfill date_taken from EXIF metadata or file birthtime
+  const dateTakenMigrationKey = 'migration_date_taken_backfill_v1';
+  const dateTakenCheck = db.prepare('SELECT value FROM app_state WHERE key = ?').get(dateTakenMigrationKey);
+
+  if (!dateTakenCheck) {
+    logger.info('[DB Module] Running one-time migration: Backfilling date_taken from EXIF/file dates...');
+    if (onProgress) onProgress('Backfilling photo dates...');
+
+    const photos = db.prepare('SELECT id, file_path, metadata_json, created_at FROM photos WHERE date_taken IS NULL').all() as any[];
+    const updateStmt = db.prepare('UPDATE photos SET date_taken = ? WHERE id = ?');
+
+    let backfilledCount = 0;
+    const BATCH_SIZE = 500;
+
+    for (let i = 0; i < photos.length; i += BATCH_SIZE) {
+      const batch = photos.slice(i, i + BATCH_SIZE);
+      const transaction = db.transaction(() => {
+        for (const photo of batch) {
+          let dateTaken: string | null = null;
+
+          // 1. Try EXIF metadata
+          if (photo.metadata_json) {
+            try {
+              const meta = JSON.parse(photo.metadata_json);
+              const exifDate = meta.DateTimeOriginal || meta.CreateDate || meta.MediaCreateDate;
+              if (exifDate) {
+                dateTaken = parseExifDate(exifDate);
+              }
+            } catch (_) { /* invalid JSON */ }
+          }
+
+          // 2. Fallback: file system birthtime
+          if (!dateTaken && photo.file_path) {
+            try {
+              const stat = fs.statSync(photo.file_path);
+              dateTaken = stat.birthtime.toISOString();
+            } catch (_) { /* file missing */ }
+          }
+
+          // 3. Final fallback: existing created_at (import date)
+          if (!dateTaken) {
+            dateTaken = photo.created_at;
+          }
+
+          if (dateTaken) {
+            updateStmt.run(dateTaken, photo.id);
+            backfilledCount++;
+          }
+        }
+      });
+      transaction();
+
+      if (onProgress && i % 2000 === 0 && photos.length > 100) {
+        const pct = Math.round((i / photos.length) * 100);
+        onProgress(`Backfilling photo dates: ${pct}%`);
+      }
+    }
+
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(dateTakenMigrationKey, '1');
+    logger.info(`[DB Module] date_taken backfill complete: ${backfilledCount} photos updated.`);
   }
 
   // Initialize app_state with default values if not present

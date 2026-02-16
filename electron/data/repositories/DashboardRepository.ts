@@ -36,6 +36,23 @@ interface FunFact {
     type: string;
 }
 
+interface TimelineEntry {
+    period: string;
+    count: number;
+}
+
+interface ErrorByStage {
+    stage: string;
+    count: number;
+}
+
+interface LibraryHealth {
+    healthScore: number;
+    errorsByStage: ErrorByStage[];
+    recentErrorCount: number;
+    totalErrors: number;
+}
+
 export class DashboardRepository {
 
     /**
@@ -60,12 +77,12 @@ export class DashboardRepository {
         const placeholders = targetDates.map(() => '?').join(',');
         const stmt = db.prepare(`
             SELECT id, file_path, preview_cache_path, created_at, width, height,
-                   CAST(strftime('%Y', created_at) AS INTEGER) as year
+                   CAST(strftime('%Y', date_taken) AS INTEGER) as year
             FROM photos
-            WHERE created_at IS NOT NULL
-              AND CAST(strftime('%Y', created_at) AS INTEGER) < ?
-              AND strftime('%m-%d', created_at) IN (${placeholders})
-            ORDER BY year DESC, created_at DESC
+            WHERE date_taken IS NOT NULL
+              AND CAST(strftime('%Y', date_taken) AS INTEGER) < ?
+              AND strftime('%m-%d', date_taken) IN (${placeholders})
+            ORDER BY year DESC, date_taken DESC
             LIMIT 50
         `);
 
@@ -146,8 +163,8 @@ export class DashboardRepository {
 
         // Library age span
         const dateRange = db.prepare(`
-            SELECT MIN(created_at) as oldest, MAX(created_at) as newest
-            FROM photos WHERE created_at IS NOT NULL
+            SELECT MIN(date_taken) as oldest, MAX(date_taken) as newest
+            FROM photos WHERE date_taken IS NOT NULL
         `).get() as any;
         if (dateRange?.oldest && dateRange?.newest) {
             const oldestYear = new Date(dateRange.oldest).getFullYear();
@@ -160,8 +177,8 @@ export class DashboardRepository {
 
         // Most photographed month
         const topMonth = db.prepare(`
-            SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as cnt
-            FROM photos WHERE created_at IS NOT NULL
+            SELECT strftime('%Y-%m', date_taken) as month, COUNT(*) as cnt
+            FROM photos WHERE date_taken IS NOT NULL
             GROUP BY month ORDER BY cnt DESC LIMIT 1
         `).get() as any;
         if (topMonth) {
@@ -188,8 +205,8 @@ export class DashboardRepository {
 
         // Peak year
         const peakYear = db.prepare(`
-            SELECT CAST(strftime('%Y', created_at) AS INTEGER) as year, COUNT(*) as cnt
-            FROM photos WHERE created_at IS NOT NULL
+            SELECT CAST(strftime('%Y', date_taken) AS INTEGER) as year, COUNT(*) as cnt
+            FROM photos WHERE date_taken IS NOT NULL
             GROUP BY year ORDER BY cnt DESC LIMIT 1
         `).get() as any;
         if (peakYear) {
@@ -221,8 +238,8 @@ export class DashboardRepository {
         // Busiest day of week
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const busiestDay = db.prepare(`
-            SELECT CAST(strftime('%w', created_at) AS INTEGER) as dow, COUNT(*) as cnt
-            FROM photos WHERE created_at IS NOT NULL
+            SELECT CAST(strftime('%w', date_taken) AS INTEGER) as dow, COUNT(*) as cnt
+            FROM photos WHERE date_taken IS NOT NULL
             GROUP BY dow ORDER BY cnt DESC LIMIT 1
         `).get() as any;
         if (busiestDay) {
@@ -232,8 +249,8 @@ export class DashboardRepository {
         // Average photos per month
         const monthlyAvg = db.prepare(`
             SELECT COUNT(*) as total,
-                   COUNT(DISTINCT strftime('%Y-%m', created_at)) as months
-            FROM photos WHERE created_at IS NOT NULL
+                   COUNT(DISTINCT strftime('%Y-%m', date_taken)) as months
+            FROM photos WHERE date_taken IS NOT NULL
         `).get() as any;
         if (monthlyAvg?.months > 0) {
             const avg = Math.round(monthlyAvg.total / monthlyAvg.months);
@@ -245,5 +262,66 @@ export class DashboardRepository {
         }
 
         return facts[Math.floor(Math.random() * facts.length)];
+    }
+
+    /**
+     * Yearly photo counts for the timeline widget.
+     */
+    static getPhotoTimeline(): TimelineEntry[] {
+        const db = getDB();
+        const stmt = db.prepare(`
+            SELECT CAST(strftime('%Y', date_taken) AS TEXT) as period,
+                   COUNT(*) as count
+            FROM photos
+            WHERE date_taken IS NOT NULL
+            GROUP BY period
+            ORDER BY period ASC
+        `);
+        return stmt.all() as TimelineEntry[];
+    }
+
+    /**
+     * Monthly photo counts for a specific year (timeline drill-down).
+     */
+    static getMonthlyBreakdown(year: number): TimelineEntry[] {
+        const db = getDB();
+        const stmt = db.prepare(`
+            SELECT CAST(strftime('%m', date_taken) AS TEXT) as period,
+                   COUNT(*) as count
+            FROM photos
+            WHERE date_taken IS NOT NULL
+              AND strftime('%Y', date_taken) = ?
+            GROUP BY period
+            ORDER BY period ASC
+        `);
+        return stmt.all(String(year)) as TimelineEntry[];
+    }
+
+    /**
+     * Library health metrics: health score, errors by stage, recent error trend.
+     */
+    static getLibraryHealth(): LibraryHealth {
+        const db = getDB();
+
+        const totalPhotos = (db.prepare('SELECT COUNT(*) as c FROM photos').get() as any).c;
+        const processed = (db.prepare('SELECT COUNT(*) as c FROM photos WHERE blur_score IS NOT NULL').get() as any).c;
+
+        const healthScore = totalPhotos > 0 ? Math.round((processed / totalPhotos) * 100) : 100;
+
+        const errorsByStage = db.prepare(`
+            SELECT stage, COUNT(*) as count
+            FROM scan_errors
+            GROUP BY stage
+            ORDER BY count DESC
+        `).all() as ErrorByStage[];
+
+        const totalErrors = (db.prepare('SELECT COUNT(*) as c FROM scan_errors').get() as any).c;
+
+        const recentErrorCount = (db.prepare(`
+            SELECT COUNT(*) as c FROM scan_errors
+            WHERE timestamp > datetime('now', '-7 days')
+        `).get() as any).c;
+
+        return { healthScore, errorsByStage, recentErrorCount, totalErrors };
     }
 }

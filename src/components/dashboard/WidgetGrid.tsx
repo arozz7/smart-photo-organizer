@@ -4,10 +4,12 @@ import PeopleSpotlightWidget from './PeopleSpotlightWidget'
 import RecentActivityWidget from './RecentActivityWidget'
 import FunFactsWidget from './FunFactsWidget'
 import ScanEntertainmentWidget from './ScanEntertainmentWidget'
+import TimelineWidget from './TimelineWidget'
+import LibraryHealthWidget from './LibraryHealthWidget'
 import { useDashboard } from '../../context/DashboardContext'
 
 export default function WidgetGrid() {
-    const { memories, stats, topPeople, recentScans, funFact, refreshFunFact, isWidgetEnabled } = useDashboard();
+    const { memories, stats, topPeople, recentScans, funFact, refreshFunFact, timeline, libraryHealth, isWidgetEnabled } = useDashboard();
 
     return (
         <div className="grid grid-cols-12 gap-4">
@@ -22,6 +24,13 @@ export default function WidgetGrid() {
             {isWidgetEnabled('onThisDay') && (
                 <div className="col-span-12">
                     <OnThisDayWidget memories={memories} />
+                </div>
+            )}
+
+            {/* Timeline — full width */}
+            {isWidgetEnabled('timeline') && (
+                <div className="col-span-12">
+                    <TimelineWidget data={timeline} />
                 </div>
             )}
 
@@ -46,6 +55,13 @@ export default function WidgetGrid() {
             {isWidgetEnabled('funFacts') && (
                 <div className={`col-span-12 ${isWidgetEnabled('recentActivity') ? 'md:col-span-6' : ''}`}>
                     <FunFactsWidget fact={funFact} onRefresh={refreshFunFact} />
+                </div>
+            )}
+
+            {/* Library Health — half width or full */}
+            {isWidgetEnabled('libraryHealth') && libraryHealth && (
+                <div className="col-span-12 md:col-span-6">
+                    <LibraryHealthWidget health={libraryHealth} />
                 </div>
             )}
         </div>

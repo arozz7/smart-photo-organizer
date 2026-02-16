@@ -15,7 +15,7 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
 *   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. **Smart Confidence Tiers** classify matches as High, Review (Amber Ring), or Unknown. Learns as you name them. Uses FAISS for lightning-fast similarity search across millions of faces.
     
     ![People Interactions](docs/assets/PeopleSectionInteractions.gif)
-*   **🏠 Home Dashboard:** Your personal command center. View "On This Day" memories, library statistics, recent activity, people spotlights, and fun facts about your collection.
+*   **🏠 Home Dashboard:** Your personal command center. View "On This Day" memories, library statistics, recent activity, people spotlights, fun facts, a **Photo Timeline** chart (with year/month drill-down that links to Search), and a **Library Health** gauge with error breakdown and CSV export. Fully customizable with widget toggles and layout presets.
 *   **📐 Challenging Face Recognition:** Robust matching for side profiles (>30° yaw) and partial faces using multi-sample voting and dynamic, quality-based confidence thresholds.
 *   **⚙️ Configurable AI & Storage:** Fine-tune face detection, blur sensitivity, and tagging creativity settings. Choose where your library data (DB, previews, indices) is stored.
 *   **🧼 Blur Detection & Cleanup:** Automatically filters out blurry faces and provides tools to bulk-cleanup low-quality captures.
@@ -27,6 +27,7 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
 *   **✨ AI Enhancement Lab:** Upscale old photos (x4) and restore grainy or blurry faces using state-of-the-art models (Real-ESRGAN, GFPGAN).
 *   **📷 RAW Support:** Native support for professional formats (Sony ARW, Canon CR2, Nikon NEF, etc.) with fast preview extraction.
 *   **⚡ High Performance:** Virtualized grid and optimized backend handles libraries with 100,000+ photos smoothly.
+*   **📅 Accurate Photo Dates:** All date-based features use actual photo capture dates from EXIF metadata (`DateTimeOriginal`), with file creation date as fallback — not the database import timestamp.
 *   **🔍 Semantic Search:** Search your photos by content, date, or person using AI-generated descriptions and tags.
 *   **🔎 Advanced Search & Filtering:** Dedicated Search view with a powerful filter sidebar — filter by blur quality, date range, camera model, file type, face attributes, and more. Build compound AND/OR/NOT queries and save filter presets as **Smart Albums**.
 *   **🎨 Set Builder (Create View):** Build custom collections by combining complex filters (e.g., "Person A AND Person B in 2024"). Export your sets to organized folders on disk.

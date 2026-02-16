@@ -27,12 +27,14 @@ const WIDGET_LABELS: Record<string, { name: string; description: string }> = {
     peopleSpotlight: { name: 'People Spotlight', description: 'Your most photographed people' },
     recentActivity: { name: 'Recent Activity', description: 'Latest scanned photos' },
     funFacts: { name: 'Fun Facts', description: 'Random insights about your library' },
+    timeline: { name: 'Photo Timeline', description: 'Photo count by year with monthly drill-down' },
+    libraryHealth: { name: 'Library Health', description: 'Processing status, error breakdown, and health score' },
 };
 
 const PRESETS: Record<string, string[]> = {
     minimal: ['libraryStats', 'peopleSpotlight'],
-    balanced: ['scanEntertainment', 'onThisDay', 'libraryStats', 'peopleSpotlight', 'recentActivity', 'funFacts'],
-    power: ['scanEntertainment', 'onThisDay', 'libraryStats', 'peopleSpotlight', 'recentActivity', 'funFacts'],
+    balanced: ['scanEntertainment', 'onThisDay', 'libraryStats', 'peopleSpotlight', 'recentActivity', 'funFacts', 'timeline'],
+    power: ['scanEntertainment', 'onThisDay', 'libraryStats', 'peopleSpotlight', 'recentActivity', 'funFacts', 'timeline', 'libraryHealth'],
 };
 
 export default function WidgetCustomizationModal({ open, onOpenChange, onSave }: WidgetCustomizationModalProps) {
