@@ -46,7 +46,7 @@ Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for obje
 
 For detailed examples of how the application works, logic flows, and architecture, please see the `docs/` folder:
 
-*   **[User Instruction Manual](docs/user_manual.md):** The comprehensive guide to using every part of the app.
+*   **[User Instruction Manual](docs/guides/user_manual.md):** The comprehensive guide to using every part of the app.
 *   **[Features Guide](docs/features.md):** Detailed breakdown of technical capabilities and AI models.
 *   **[Create & Set Builder](docs/create_feature.md):** Deep dive into the advanced search and album creation tools.
 *   **[System Architecture](docs/architecture.md):** Diagrams of how Electron, React, and Python communicate.
