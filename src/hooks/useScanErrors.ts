@@ -29,8 +29,11 @@ export function useScanErrors(): ScanErrorsHook {
             if (photosToRetry && photosToRetry.length > 0) {
                 console.log(`Retrying ${photosToRetry.length} failed scans...`)
                 addToQueue(photosToRetry)
+                // Clear errors only after successful queue addition
+                // @ts-ignore
+                await window.ipcRenderer.invoke('db:clearScanErrors')
             }
-            loadScanErrors() // Refresh (should be empty)
+            setScanErrors([]) // Reflect cleared state in UI
         } catch (e) {
             console.error('Failed to retry errors', e)
         }

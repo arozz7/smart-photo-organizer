@@ -44,13 +44,12 @@ export function registerDBHandlers() {
     ipcMain.handle('db:deleteScanError', async (_, { id, deleteFile }) => PhotoRepository.deleteScanErrorAndFile(id, deleteFile));
 
     ipcMain.handle('db:clearScanErrors', async () => {
-        // Not implemented in Repo yet, implemented ad-hoc or added? 
-        // I didn't add clearScanErrors to Repo. 
-        // I will implement it here temporarily or skip?
-        // Simulating via deleteScanError loop is slow.
-        // I'll assume users won't click it often or add it next.
-        // For now:
-        return { success: false, error: "Not implemented in refactor yet" };
+        try {
+            PhotoRepository.clearScanErrors();
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
     });
 
     // --- TAGS ---
