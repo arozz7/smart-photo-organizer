@@ -4,17 +4,7 @@
 
 
 
-### 1. Error Export & Library Health
-- **Goal:** Enable users to export scan errors for external review and provide persistent library health visibility.
-- **Phased Approach:**
-    - **Phase 1 (Immediate):** Add "Export CSV" button to existing Scan Errors modal.
-    - **Phase 2 (Home Page):** "Library Health" widget showing error counts with View/Export actions.
-    - **Phase 3 (Tools Page):** Error list feeds into Corrupt File Recovery Center wizards.
-- **Export Format:** CSV with columns: File Path, Error Type, Error Message, Scan Type, Timestamp.
-- **Dependencies:** Phase 2 requires Home Page Dashboard (✅ Complete); Phase 3 requires Corrupt File Recovery Center.
-- **Implementation Plan:** See [Error Export Plan](file:///j:/Projects/smart-photo-organizer/docs/error-export-plan.md)
-
-### 2. Ctrl+Scroll Grid Size Control
+### 1. Ctrl+Scroll Grid Size Control
 - **Goal:** Allow users to dynamically adjust face thumbnail grid density using Ctrl+scroll wheel.
 - **Core Features:**
     - **Ctrl+Scroll Zoom:** Increase/decrease grid columns (4-12 range).
@@ -25,7 +15,7 @@
 - **Modularization:** All logic in new hooks (`useCtrlScroll`, `useDynamicGrid`, `GridSizeContext`) to avoid bloating existing large files.
 - **Implementation Plan:** See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/ctrl-scroll-grid-size-plan.md)
 
-### 3. UX Modernization (UI Polish)
+### 2. UX Modernization (UI Polish)
 - **Goal:** Elevate the UI from functional to polished product quality through systematic improvements to navigation, controls, typography, accessibility, and first-run experience.
 - **Core Features:**
     - **Sidebar Navigation:** Add Radix icons to all nav links, group items by category (Core/Tools/System) with subtle dividers, extract reusable `SidebarLink` component.
@@ -335,6 +325,14 @@
     - **Custom Covers:** Manually "Pin" any face as the person's cover photo.
     - **Shuffle:** Instantly pick a random high-quality face as the cover.
     - **Smart Fallback:** Auto-reverts to the sharpest available face if unpinned.
+
+## v0.6.5 (Current)
+- **Error Export & Library Health (Phase 95):**
+    - **Export CSV:** Added "Export CSV" button to Scan Errors modal with RFC 4180 compliant formatting.
+    - **Retry All Fix:** Fixed bug where "Retry All" failed to queue photos (returned file paths instead of photo objects with IDs).
+    - **Clear List Fix:** Implemented `db:clearScanErrors` IPC handler (was previously stubbed).
+    - **CSV Format:** File Path, Error Type, Error Message, Scan Type, Timestamp.
+    - [See Changelog](aiChangeLog/phase-95-error-export.md)
 
 ## v0.4.0 (Stability Release)
 - **Architecture Refactor:** Modularized Main Process for better stability.
