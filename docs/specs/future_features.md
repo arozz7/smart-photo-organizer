@@ -13,7 +13,7 @@
     - **Performance Optimized:** CSS-only changes, debounced events, VirtuosoGrid-safe.
 - **Affected Components:** AllFacesModal, OutlierReviewModal, BlurryFacesModal, People.tsx (4 sub-views), ClusterRow, PersonDetail, GroupNamingModal, FaceGrid.
 - **Modularization:** All logic in new hooks (`useCtrlScroll`, `useDynamicGrid`, `GridSizeContext`) to avoid bloating existing large files.
-- **Implementation Plan:** See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/ctrl-scroll-grid-size-plan.md)
+- **Implementation Plan:** See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/plans/ctrl-scroll-grid-size-plan.md)
 
 ### 2. UX Modernization (UI Polish)
 - **Goal:** Elevate the UI from functional to polished product quality through systematic improvements to navigation, controls, typography, accessibility, and first-run experience.
@@ -34,12 +34,12 @@
     5. Accessibility Audit (Medium effort, medium impact)
     6. Z-Index Scale & PhotoDetail Decomposition (High effort, medium impact)
 - **Synergies:** Phase 2 prepares Library header for Advanced Filtering (✅ Complete). Phase 1+4 prepare navigation for Home Page Dashboard (✅ Complete). Phase 6 makes PhotoDetail safer for future feature additions.
-- **Implementation Plan:** See [UX Modernization Plan](file:///j:/Projects/smart-photo-organizer/docs/ux-modernization-plan.md)
+- **Implementation Plan:** See [UX Modernization Plan](file:///j:/Projects/smart-photo-organizer/docs/plans/ux-modernization-plan.md)
 
 ### 4. Hard Pose Handling & Context Propagation
 - **Goal:** Improve recognition accuracy for side profiles, top-down views, and other challenging face angles.
 - **Problem:** Standard embeddings from extreme angles (yaw > 45°) produce lower-quality matches, leading to missed identifications or false positives.
-- **Technical Reference:** See [Face Recognition Technology](file:///j:/Projects/smart-photo-organizer/docs/face-recognition-technology.md) for detailed research.
+- **Technical Reference:** See [Face Recognition Technology](file:///j:/Projects/smart-photo-organizer/docs/specs/face-recognition-technology.md) for detailed research.
 - **Core Features:**
     - **Pose Scoring:** Store `face.pose` (yaw/pitch/roll) during scan for pose-aware processing.
     - **Pose Filtering:** Enable UI filtering by face pose ("Show only frontal faces").
@@ -54,7 +54,7 @@
     5. UI: Add pose filter toggle to Unnamed Faces view.
 - **Performance:** Pose extraction is already included in InsightFace detection (no additional cost).
 - **Dependencies:** Benefits from Age-Based ERA (✅ Complete) for comprehensive person modeling.
-
+- **Implementation Plan:** See [Hard Pose Handling & Context Propagation Plan](file:///j:\Projects\smart-photo-organizer\docs\plans\hard-pose-context-propagation-plan.md)
 ---
 
 
