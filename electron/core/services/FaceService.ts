@@ -743,24 +743,39 @@ export class FaceService {
                     const REJECT_FLOOR = advancedSettings.scoreThresholdReject ?? 0.40;
                     const ACCEPT_CEILING = advancedSettings.scoreThresholdAccept ?? 0.70;
 
+
                     const detectionScore = face.score ?? 0.95;
 
-                    if (detectionScore < REJECT_FLOOR) {
-                        logger.info(`[FaceService] REJECT face ${faceIdx} — score ${detectionScore.toFixed(2)} < ${REJECT_FLOOR}`);
-                        continue;
-                    }
-
-                    // Check box characteristics for multi-face suspect flagging
+                    // Check box characteristics
                     const box = face.box;
                     const boxWidth = box.width || 0;
                     const boxHeight = box.height || 0;
                     const aspectRatio = boxHeight > 0 ? boxWidth / boxHeight : 1.0;
                     const boxArea = boxWidth * boxHeight;
+
                     const isLargeBox = boxArea > 4000000;
+
+                    // [Phase 91] Large Face Exception: Allow large faces (>300px) even if score is low
+                    // This matches Python detector.py 'Large Face Fallback' logic which keeps them
+                    const isLargeWidth = boxWidth > 300;
+
+                    if (detectionScore < REJECT_FLOOR) {
+
+                        if (isLargeWidth) {
+
+                            logger.info(`[FaceService] LOW SCORE EXCEPTION: Face ${faceIdx} (score ${detectionScore.toFixed(2)}) accepted because it is LARGE (${boxWidth.toFixed(0)}px width).`);
+                        } else {
+                            logger.info(`[FaceService] REJECT face ${faceIdx} — score ${detectionScore.toFixed(2)} < ${REJECT_FLOOR}`);
+                            continue;
+                        }
+                    }
+
+
                     const isUnusualAspect = aspectRatio > 1.6 || aspectRatio < 0.6;
 
                     // Accept (>= 0.70) → 'human', Verify (0.40-0.69) → 'suspect'
                     // Also flag large/unusual boxes as suspect for multi-face split checking
+
                     let entityType: string;
                     if (detectionScore >= ACCEPT_CEILING && !isLargeBox && !isUnusualAspect) {
                         entityType = 'human';
