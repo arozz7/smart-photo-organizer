@@ -758,17 +758,26 @@ export class FaceService {
                     // [Phase 91] Large Face Exception: Allow large faces (>300px) even if score is low
                     // This matches Python detector.py 'Large Face Fallback' logic which keeps them
                     const isLargeWidth = boxWidth > 300;
+                    const isSquare = Math.abs(aspectRatio - 1.0) < 0.05;
 
                     if (detectionScore < REJECT_FLOOR) {
-
-                        if (isLargeWidth) {
+                        // [Phase 91b] Refined Filter:
+                        // 1. Must be Large (>300px)
+                        // 2. Must have Score >= 0.15 (Filters 0.10-0.14 noise) -> preserves vic_krop (0.16)
+                        // 3. Must NOT be a low-conf square (noise anchors are often square)
+                        if (isLargeWidth && detectionScore >= 0.15 && (!isSquare || detectionScore > 0.25)) {
 
                             logger.info(`[FaceService] LOW SCORE EXCEPTION: Face ${faceIdx} (score ${detectionScore.toFixed(2)}) accepted because it is LARGE (${boxWidth.toFixed(0)}px width).`);
                         } else {
-                            logger.info(`[FaceService] REJECT face ${faceIdx} — score ${detectionScore.toFixed(2)} < ${REJECT_FLOOR}`);
+                            if (isLargeWidth) {
+                                logger.info(`[FaceService] REJECT Large Low-Conf Face ${faceIdx}: Score ${detectionScore.toFixed(2)} < 0.15 or Square.`);
+                            } else {
+                                logger.info(`[FaceService] REJECT face ${faceIdx} — score ${detectionScore.toFixed(2)} < ${REJECT_FLOOR}`);
+                            }
                             continue;
                         }
                     }
+
 
 
                     const isUnusualAspect = aspectRatio > 1.6 || aspectRatio < 0.6;

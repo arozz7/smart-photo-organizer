@@ -66,3 +66,18 @@ This document tracks planned features and ideas for the Smart Photo Organizer. U
 **Goal:** Share without the cloud.
 - [ ] **HTML Export:** Generate a static website (HTML/JS) of a selected Set or Album.
 - [ ] **Self-Hostable:** Ready to upload to S3, GitHub Pages, or a Raspberry Pi.
+
+---
+
+## 🟣 Phase 4: File Health & Recovery
+
+### 1. 🔧 Photo Repair Shop Integration ✅ Complete (v0.6.5)
+**Goal:** Recover corrupt files without leaving SPO.
+- [x] **PRS Client:** Typed HTTP client with token auth, health check, analyze, repair, poll.
+- [x] **Scan Warnings UI:** Per-row repair button with live progress bar and state machine.
+- [x] **Reference Discovery:** Auto-supply healthy library photos as header-grafting candidates.
+- [x] **Two-Stage Verification:** Sharp decode + AI analysis before committing repaired file.
+- [x] **Auto Re-Ingest:** Repaired file enters full library pipeline (faces, tags) on success.
+- [x] **Unrepairable Tracking:** Files that fail verification are permanently flagged in the DB.
+- [ ] **PRS from Lightbox:** Right-click → "Repair with PRS" in the photo detail view.
+- [ ] **Configurable Output Dir:** User-selectable output folder for repaired files (vs. same dir).

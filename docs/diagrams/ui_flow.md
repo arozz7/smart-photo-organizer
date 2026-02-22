@@ -28,6 +28,17 @@ flowchart TD
         Library --> Filter[Filter Panel]
     end
 
+    subgraph PRS Repair Flow
+        ScanWarnings --> PRSCheck{PRS Available?}
+        PRSCheck -- Yes --> Analyzing[Analyzing...]
+        PRSCheck -- No --> PRSUnavailable[Button Disabled]
+        Analyzing --> Repairing[Repairing... with % bar]
+        Repairing --> Verifying[Verifying repaired file]
+        Verifying -- Pass --> RepairDone[✓ Row removed / re-ingested]
+        Verifying -- Fail --> Unrepairable[🚫 Unrepairable badge]
+        Repairing -- Error --> RepairFailed[Error + Retry button]
+    end
+
     PersonDetail --> Lightbox
     Search --> Lightbox
 ```

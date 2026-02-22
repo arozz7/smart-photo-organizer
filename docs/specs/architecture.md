@@ -10,17 +10,22 @@ The Smart Photo Organizer is a local-first application built with Electron, Reac
 graph TD
     User[User] --> UI[React Renderer]
     UI -- IPC (JSON) --> Main[Electron Main Process]
-    
+
     subgraph Electron
         Main -- SQLite --> DB[(SQLite Database)]
         Main -- fs --> FileSystem[Local File System]
         Main -- spawn --> Python[Python AI Process]
+        Main -- HTTP REST --> PRS[Photo Repair Shop :3847]
     end
-    
+
     subgraph AI Engine
         Python -- InsightFace --> FD[Face Detection]
         Python -- SmolVLM --> VLM[Smart Tagging]
         Python -- FAISS --> VectorDB[(Vector DB)]
+    end
+
+    subgraph External Services
+        PRS -- repair output --> FileSystem
     end
 ```
 
@@ -41,6 +46,16 @@ graph TD
   - **IPC Handlers:** `ipcMain.handle` receives requests from the UI.
   - **Database:** Manages `photos.db`, storing metadata, faces, and tags.
   - **Process Management:** Spawns and manages the persistent `python.exe` process (AI Engine). Pipes `stdin`/`stdout` for communication.
+
+### 4. Photo Repair Shop (External Service)
+- **Protocol:** HTTP REST on `localhost:3847`. Token auth via `~/.photo-repair-shop/api-token`.
+- **Responsibilities:**
+  - Analyze corrupt files and suggest repair strategies (`POST /api/analyze`).
+  - Execute file repair using header-grafting, preview-extraction, or marker-sanitization (`POST /api/repair`).
+  - Report job progress over polling (`GET /api/status/:jobId`).
+- **SPO layer:** `electron/lib/prs/` — `PrsClient`, `PrsTokenReader`, `PrsLauncher`.
+- **IPC channels:** `prs:checkAvailability`, `prs:analyzeFile`, `prs:pollStatus`, `prs:submitRepair`, `prs:completeRepair`.
+- **Integration point:** `electron/ipc/prsHandlers.ts` registered in `main.ts`.
 
 ### 3. AI Engine (Python)
 - **Tech Stack:** Python 3.10+, PyTorch, InsightFace, FAISS, Transformers.
@@ -134,6 +149,61 @@ sequenceDiagram
     Main-->>UI: Success
     deactivate Main
 ```
+
+## Data Flow: File Repair (PRS Integration)
+
+```mermaid
+sequenceDiagram
+    participant UI as ScanWarningsModal
+    participant Main as Electron Main
+    participant PRS as Photo Repair Shop :3847
+    participant DB as SQLite
+    participant Py as Python AI
+
+    Note over UI, DB: User clicks 🔧 on a corrupt scan-error row
+
+    UI->>Main: prs:checkAvailability
+    Main->>PRS: GET /health
+    PRS-->>Main: 200 OK
+    Main-->>UI: { available: true }
+
+    UI->>Main: prs:analyzeFile { filePath, photoId }
+    Main->>DB: PhotoRepository.getPhotoById (metadata_json)
+    Main->>PRS: POST /api/analyze { filePath, metadata }
+    PRS-->>Main: { jobId: "a1" }
+    Main-->>UI: { jobId: "a1" }
+
+    loop Every 2s (useRepairJob hook)
+        UI->>Main: prs:pollStatus { jobId: "a1" }
+        Main->>PRS: GET /api/status/a1
+        PRS-->>Main: { status: "done", result: { suggestedStrategies: [...] } }
+        Main-->>UI: status payload
+    end
+
+    UI->>Main: prs:submitRepair { filePath, strategy, sourcePhotoId }
+    Main->>DB: ReferenceRepository.findCandidates (cameraModel, resolution)
+    Main->>PRS: POST /api/repair { filePath, strategy, outputPath, candidateReferences }
+    PRS-->>Main: { jobId: "b2" }
+    Main-->>UI: { jobId: "b2" }
+
+    loop Every 2s
+        UI->>Main: prs:pollStatus { jobId: "b2" }
+        PRS-->>Main: { status: "repairing", percent: 60 }
+        Main-->>UI: progress update
+    end
+
+    PRS-->>Main: { status: "done", result: { outputPath: "/photos/x_repaired.jpg" } }
+    Main-->>UI: done
+
+    UI->>Main: prs:completeRepair { scanErrorId, originalPhotoId, repairedFilePath }
+    Main->>Main: sharp(repairedFilePath).metadata() — decode check
+    Main->>Py: analyze_image(repairedFilePath) — AI check
+    Main->>DB: deleteScanErrorAndFile(scanErrorId)
+    Main->>DB: deletePhotoById(originalPhotoId)
+    Main->>Main: scanQueue.enqueueFiles([repairedFilePath])
+    Main-->>UI: { success: true }
+
+    Note over UI: Row removed; repaired photo enters library
 ```
 
 ## Data Schema
@@ -145,6 +215,7 @@ sequenceDiagram
 - **tags:** `id`, `name`
 - **photo_tags:** `photo_id`, `tag_id`, `source` ('AI' or 'User')
 - **scan_history:** `id`, `photo_id`, `timestamp`, `scan_ms`, `tag_ms`, `face_count`, `status`, `error`
+- **scan_errors:** `id`, `photo_id`, `file_path`, `error_message`, `stage`, `timestamp`, `is_unrepairable` — corrupt files logged here; `is_unrepairable=1` is set after a failed PRS repair attempt passes verification
 
 ### Vector Store (FAISS)
 - Stores 512-dimensional vectors for fast similarity search (currently used internally by Python, but key logic has moved to Node.js for "Mean" calculation).

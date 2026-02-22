@@ -138,6 +138,7 @@ export default function Settings() {
     const [libraryPath, setLibraryPath] = useState(localStorage.getItem('libraryPath') || '')
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [showWarningsModal, setShowWarningsModal] = useState(false);
+    const [prsExecutablePath, setPrsExecutablePath] = useState('');
     const { calculatingBlur, blurProgress, calculateBlurScores } = useAI();
     const { showAlert, showConfirm } = useAlert();
     const { smartIgnoreSettings, updateSmartIgnoreSettings } = usePeople();
@@ -163,6 +164,11 @@ export default function Settings() {
                     mergeThreshold: settings.eraMergeThreshold ?? 0.75
                 });
             }
+        });
+
+        // @ts-ignore
+        window.ipcRenderer.invoke('settings:get').then((cfg: any) => {
+            if (cfg?.prsExecutablePath) setPrsExecutablePath(cfg.prsExecutablePath);
         });
     }, [])
 
@@ -692,6 +698,45 @@ export default function Settings() {
                     </section>
                 </div>
             </div>
+
+            {/* Integrations */}
+            <section className="space-y-4 pt-8">
+                <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Integrations</h3>
+                <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
+                    <div>
+                        <h4 className="font-medium text-white">Photo Repair Shop location</h4>
+                        <p className="text-sm text-gray-400 mt-1 mb-3">
+                            Path to the Photo Repair Shop executable. Required to launch PRS automatically when repairing corrupt files.
+                        </p>
+                        <div className="flex gap-3 items-center">
+                            <input
+                                type="text"
+                                readOnly
+                                value={prsExecutablePath}
+                                placeholder="Not configured"
+                                className="flex-1 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 font-mono cursor-default"
+                            />
+                            <button
+                                onClick={async () => {
+                                    // @ts-ignore
+                                    const result = await window.ipcRenderer.invoke('dialog:openFile', {
+                                        filters: [{ name: 'Executable', extensions: ['exe'] }],
+                                        properties: ['openFile'],
+                                    });
+                                    if (result) {
+                                        setPrsExecutablePath(result);
+                                        // @ts-ignore
+                                        await window.ipcRenderer.invoke('settings:update', { prsExecutablePath: result });
+                                    }
+                                }}
+                                className="px-4 py-2 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 whitespace-nowrap"
+                            >
+                                Browse...
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
             {/* Scan Errors / Warnings */}
             <section className="space-y-4 pt-8">

@@ -775,6 +775,11 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     logger.error('Migration failed:', e);
   }
 
+  // --- MIGRATION: PRS Repair Tracking (Phase PRS) ---
+  try {
+    db.exec('ALTER TABLE scan_errors ADD COLUMN is_unrepairable BOOLEAN DEFAULT 0');
+  } catch { /* column already exists */ }
+
   logger.info('Database schema ensured.');
 }
 

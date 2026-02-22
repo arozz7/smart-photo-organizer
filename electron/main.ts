@@ -9,6 +9,7 @@ import { registerFileHandlers } from './ipc/fileHandlers';
 import { registerAppHandlers } from './ipc/appHandlers';
 import { registerDashboardHandlers } from './ipc/dashboardHandlers';
 import { registerCollageHandlers } from './ipc/collageHandlers';
+import { registerPrsHandlers } from './ipc/prsHandlers';
 import { scanQueue } from './scanQueue';
 import { initDB } from './db'
 import { fileURLToPath } from 'node:url'
@@ -127,6 +128,7 @@ app.whenReady().then(async () => {
   registerAppHandlers(() => WindowManager.getMainWindow());
   registerDashboardHandlers();
   registerCollageHandlers();
+  registerPrsHandlers();
 
   // Pass mainWindow reference to Provider when available
   // We can hook into WindowManager or set it when created.

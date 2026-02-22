@@ -299,6 +299,16 @@ export class PhotoRepository {
         return photos;
     }
 
+    static deletePhotoById(id: number): void {
+        getDB().prepare('DELETE FROM photos WHERE id = ?').run(id);
+    }
+
+    static markUnrepairable(id: number, reason: string): void {
+        getDB()
+            .prepare('UPDATE scan_errors SET is_unrepairable = 1, error_message = ? WHERE id = ?')
+            .run(`Repair attempted but verification failed: ${reason}`, id);
+    }
+
     static clearScanErrors() {
         const db = getDB();
         db.prepare('DELETE FROM scan_errors').run();
