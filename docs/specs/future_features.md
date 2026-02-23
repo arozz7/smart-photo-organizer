@@ -4,63 +4,7 @@
 
 
 
-### 1. Home Page Dashboard
-- **Goal:** Replace Library as default startup page with an engaging, widget-based home experience.
-- **Status:** ✅ All Phases Complete (Phases 1-8)
-- **Core Features:**
-    - **Widget Grid System:** 12-column snap-to-grid layout with drag-and-drop reorder and resize.
-    - **On This Day Memories:** Surface photos from same date in previous years (±3 day tolerance).
-    - **Auto-Generated Collages:** Daily collage with "Save as PNG/JPG" export and "Regenerate" button.
-    - **People Spotlight:** Carousel of named people with photo counts.
-    - **Library Stats:** Pie chart of processed/pending/corrupt files.
-    - **Photo Timeline:** Bar chart with year/month drill-down, click-to-Search navigation.
-    - **Library Health:** SVG ring gauge, error breakdown by stage, CSV export.
-    - **Location Heatmap:** SVG world map showing GPS photo clusters with density visualization.
-    - **Notification Badge:** Purple dot on Home nav when new memories are available.
-- **Scan-Time Entertainment:**
-    - **Live Discovery Feed:** Show completed scan thumbnails with fade-in animation.
-    - **Random Flashback:** Cycle through existing memories every ~10 seconds.
-    - **Live Stats:** Faces found, people matched, new locations counters.
-    - **Fun Facts:** Library insights ("You took 342 photos in March 2023!").
-- **Widget Customization Modal:**
-    - Toggle widgets ON/OFF, drag-and-drop reorder, snap-to-grid resize.
-    - Layout presets: Minimal, Balanced, Power User.
-    - Persistent layout saved to user preferences.
-- **Changelogs:** See Phase 91-93 changelogs in `aiChangeLog/`
-- **Wireframes:** See [Home Page Wireframes](file:///C:/Users/arozz/.gemini/antigravity/brain/e4c43ef8-5d37-4b2a-b227-6fbddeaf706b/home-page-wireframes.md)
-
-
-
-### 2. Frontend Streamlining (UX Consolidation)
-- **Goal:** Simplify the People management workflow by automating high-confidence assignments, reducing tabs from 4 to 3, and consolidating modal-heavy interactions.
-- **Core Features:**
-    - **Auto-Assign Suggestions:** Eliminate Suggestions tab; auto-assign high-confidence matches directly to people.
-    - **Centroid Protection:** Exclude auto-assigned faces from centroid calculation until confirmed.
-    - **Discoveries Merge:** Group discovery buckets by suggested name (like Suggestions merge).
-    - **Tab Consolidation:** 3 tabs (Identified People, Discoveries, Edge Cases) instead of 4.
-    - **Inline Filters:** Replace modals (Ignored, Ungroupable, Blurry, Background) with filter pill toggles.
-    - **Notification Badges:** Guide users to tabs needing attention (new auto-assignments, rebuild alerts).
-    - **Keyboard Enhancement:** Global shortcuts for power users (`1-3` tab switching, `?` help overlay).
-- **User Review Path:** Auto-assigned faces reviewed via existing "Unconfirmed Faces" filter on person detail page.
-- **Testing Strategy:** Pre/post-implementation baseline tests for all tabs, centroid calculation, and keyboard navigation.
-- **Prerequisites:** Requires #6 (Background Bucketing) and #7 (Bucket Merge) to be stable.
-- **Plan:** See [Frontend Streamlining Plan](file:///j:/Projects/smart-photo-organizer/docs/frontend-streamlining-plan.md)
-- **Status:** Implemented (v0.5.5) - [Complete]
-    - **Live Face Counts:** Polling mechanism for real-time unassigned face counts.
-    - **Performance Limits:** Enforced 150-face limit for Ignore/Group views to prevent UI lag.
-    - **UX Polish:** Removed AI suggestions from Move modal; improved Edge Case navigation.
-
-### 3. Error Export & Library Health
-- **Goal:** Enable users to export scan errors for external review and provide persistent library health visibility.
-- **Phased Approach:**
-    - **Phase 1 (Immediate):** Add "Export CSV" button to existing Scan Errors modal.
-    - **Phase 2 (Home Page):** "Library Health" widget showing error counts with View/Export actions.
-    - **Phase 3 (Tools Page):** Error list feeds into Corrupt File Recovery Center wizards.
-- **Export Format:** CSV with columns: File Path, Error Type, Error Message, Scan Type, Timestamp.
-- **Dependencies:** Phase 2 requires #2 (Home Page Dashboard); Phase 3 requires Corrupt File Recovery Center.
-- **Implementation Plan:** See [Error Export Plan](file:///j:/Projects/smart-photo-organizer/docs/error-export-plan.md)
-
-### 4. Ctrl+Scroll Grid Size Control
+### 1. Ctrl+Scroll Grid Size Control
 - **Goal:** Allow users to dynamically adjust face thumbnail grid density using Ctrl+scroll wheel.
 - **Core Features:**
     - **Ctrl+Scroll Zoom:** Increase/decrease grid columns (4-12 range).
@@ -69,9 +13,9 @@
     - **Performance Optimized:** CSS-only changes, debounced events, VirtuosoGrid-safe.
 - **Affected Components:** AllFacesModal, OutlierReviewModal, BlurryFacesModal, People.tsx (4 sub-views), ClusterRow, PersonDetail, GroupNamingModal, FaceGrid.
 - **Modularization:** All logic in new hooks (`useCtrlScroll`, `useDynamicGrid`, `GridSizeContext`) to avoid bloating existing large files.
-- **Implementation Plan:** See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/ctrl-scroll-grid-size-plan.md)
+- **Implementation Plan:** See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/plans/ctrl-scroll-grid-size-plan.md)
 
-### 5. UX Modernization (UI Polish)
+### 2. UX Modernization (UI Polish)
 - **Goal:** Elevate the UI from functional to polished product quality through systematic improvements to navigation, controls, typography, accessibility, and first-run experience.
 - **Core Features:**
     - **Sidebar Navigation:** Add Radix icons to all nav links, group items by category (Core/Tools/System) with subtle dividers, extract reusable `SidebarLink` component.
@@ -89,29 +33,13 @@
     4. Empty States & First-Run (Medium effort, high impact)
     5. Accessibility Audit (Medium effort, medium impact)
     6. Z-Index Scale & PhotoDetail Decomposition (High effort, medium impact)
-- **Synergies:** Phase 2 prepares Library header for Advanced Filtering (#1). Phase 1+4 prepare navigation for Home Page Dashboard (#2). Phase 6 makes PhotoDetail safer for future feature additions.
-- **Implementation Plan:** See [UX Modernization Plan](file:///j:/Projects/smart-photo-organizer/docs/ux-modernization-plan.md)
+- **Synergies:** Phase 2 prepares Library header for Advanced Filtering (✅ Complete). Phase 1+4 prepare navigation for Home Page Dashboard (✅ Complete). Phase 6 makes PhotoDetail safer for future feature additions.
+- **Implementation Plan:** See [UX Modernization Plan](file:///j:/Projects/smart-photo-organizer/docs/plans/ux-modernization-plan.md)
 
-### 6. Age-Based ERA Categorization
-- **Goal:** Replace visual clustering with actual age estimation for ERA generation, enabling life-stage tracking (Newborn → Child → Teen → Adult).
-- **Problem:** Current ERA system uses K-Means visual clustering, which groups all faces into one bucket instead of meaningful life stages.
-- **Core Features:**
-    - **Age Extraction:** Enable InsightFace `genderage` module to extract `face.age` during all scans.
-    - **Age Buckets:** Newborn (0-1), Infant (1-2), Toddler (2-4), Child (5-12), Teen (13-19), Young Adult (20-35), Adult (36-55), Senior (56-69), Elderly (70+).
-    - **Background Backfill:** Service to rescan existing photos for age data (resumable, graceful shutdown).
-    - **Auto-Generation:** Automatically generate ERAs for all named persons after backfill completes.
-    - **Progress UI:** Status updates during backfill with estimated time remaining.
-- **Implementation Phases:**
-    1. Enable `genderage` module in Python AI + extract age in scan response.
-    2. DB migration: Add `estimated_age` and `gender` columns to faces table.
-    3. Background backfill service following `BackgroundBucketingService` pattern.
-    4. Rewrite `PersonService.generateEras` to use age buckets instead of visual clustering.
-- **Performance:** Genderage adds ~5-10% to face detection time (one-time cost per photo).
-
-### 7. Hard Pose Handling & Context Propagation
+### 4. Hard Pose Handling & Context Propagation
 - **Goal:** Improve recognition accuracy for side profiles, top-down views, and other challenging face angles.
 - **Problem:** Standard embeddings from extreme angles (yaw > 45°) produce lower-quality matches, leading to missed identifications or false positives.
-- **Technical Reference:** See [Face Recognition Technology](file:///j:/Projects/smart-photo-organizer/docs/face-recognition-technology.md) for detailed research.
+- **Technical Reference:** See [Face Recognition Technology](file:///j:/Projects/smart-photo-organizer/docs/specs/face-recognition-technology.md) for detailed research.
 - **Core Features:**
     - **Pose Scoring:** Store `face.pose` (yaw/pitch/roll) during scan for pose-aware processing.
     - **Pose Filtering:** Enable UI filtering by face pose ("Show only frontal faces").
@@ -125,50 +53,10 @@
     4. New `ContextualMatchingService`: Propagate labels via temporal/GPS clustering.
     5. UI: Add pose filter toggle to Unnamed Faces view.
 - **Performance:** Pose extraction is already included in InsightFace detection (no additional cost).
-- **Dependencies:** Benefits from #7 (Age-Based ERA) for comprehensive person modeling.
-
-### 8. VLM Multi-Face Fix (Phase 58)
-- **Goal:** Fix SmolVLM's inability to count faces in cropped regions.
-- **Problem:** VLM reports `face_count: "one"` even for boxes containing 2+ faces.
-- **Solution:** Use face detector re-run instead of VLM for face counting.
-- **Core Features:**
-    - `detect_region_faces` command to re-run detection on cropped region
-    - VLM limited to semantic verification only ("Is this a face or a knee?")
-    - If `face_count > 1`, split box into separate face records
-- **Implementation Plan:** See [VLM Accuracy Research Review](file:///j:/Projects/smart-photo-organizer/docs/vlm-accuracy-research-review.md)
-
-### 9. AdaFace Integration (Phase 59)
-- **Goal:** Improve recognition accuracy on low-quality (blurry) faces.
-- **Problem:** ArcFace produces weak embeddings for blurry/motion-blur faces, causing mismatches.
-- **Solution:** Use AdaFace adaptively for faces with `blur_score < 50`.
-- **Core Features:**
-    - Hybrid embedding selection based on face quality
-    - `HybridEmbedder` class with automatic model switching
-    - Config option: `useAdaFaceForLowQuality: true`
-- **Performance:** AdaFace adds ~5-10ms overhead per face (one-time cost).
-
-### 10. Vector Database Scaling (Phase 60)
-- **Goal:** Prepare FAISS for 500K+ face libraries spanning decades of photos.
-- **Problem:** Current `IndexFlatL2` is O(n) brute-force search — won't scale.
-- **Solution:** Migrate to `IndexIVFFlat` with training step.
-- **Core Features:**
-    - Automatic migration from FlatL2 to IVF on first use
-    - Training step during index rebuild
-    - ~10x faster search at 500K+ scale
-- **Alternatives Evaluated:** Milvus Lite, ScaNN (deferred — IVF sufficient for now).
-
-### 11. Scan Performance Optimization (Phase 61)
-- **Goal:** Reduce 7s/photo to 3-4s/photo in MACRO mode.
-- **Problem:** 7 inference passes per image (4 scales + 3 TTA rotations).
-- **Solution:** Adaptive early-exit detection, TensorRT priority, batch embedding.
-- **Core Features:**
-    - Early-exit when high-confidence faces found at standard resolution
-    - Force TensorRT as first provider (20-40% faster on NVIDIA GPUs)
-    - Batch embedding extraction for multi-face photos
-    - Image pyramid caching to avoid repeated resizing
-- **Target:** 30-50% reduction in average scan time.
-
+- **Dependencies:** Benefits from Age-Based ERA (✅ Complete) for comprehensive person modeling.
+- **Implementation Plan:** See [Hard Pose Handling & Context Propagation Plan](file:///j:\Projects\smart-photo-organizer\docs\plans\hard-pose-context-propagation-plan.md)
 ---
+
 
 ## 🔮 Feature Backlog
 
@@ -191,7 +79,6 @@
     - **Details:** Metrics per person (photo count), heatmaps for tags/years, and exportable format (PDF/HTML).
 - **Batch Renaming & Cleanup:** Template-based renaming (`{Date}_{Location}`), Deduplication via perceptual hash.
 - **Duplicate Photo Detection:** SHA-256 (exact) and pHash (visual) detection with "Safe Deduplication" UI.
-- **Saved Smart Searches:** Save active filters as "Smart Albums".
 - **Batch Tagging:** Multi-select context menu actions (Add/Remove Tags).
 - **Exif Metadata Injection:** Write application tags back to file headers (IPTC/XMP).
 - **Location Heatmap:** World map visualization with "Trip" clustering.
@@ -277,6 +164,24 @@
 
 ## v0.6.5 (Current Release)
 
+### Home Page Dashboard
+*Details: See [Dashboard Phase 4 Plan](file:///j:/Projects/smart-photo-organizer/docs/specs/dashboard-phase-4-plan.md)*
+
+- **Goal:** Replace Library as default startup page with an engaging, widget-based home experience.
+- **Core Features:**
+    - **Widget Grid System:** 12-column snap-to-grid layout with drag-and-drop reorder and resize.
+    - **On This Day Memories:** Surface photos from same date in previous years (±3 day tolerance).
+    - **Auto-Generated Collages:** Daily collage with "Save as PNG/JPG" export and "Regenerate" button (Grid 2x2/3x3, Feature, Mosaic layouts).
+    - **People Spotlight:** Carousel of named people with photo counts.
+    - **Library Stats:** Pie chart of processed/pending/corrupt files.
+    - **Photo Timeline:** Bar chart with year/month drill-down, click-to-Search navigation.
+    - **Library Health:** SVG ring gauge, error breakdown by stage, CSV export.
+    - **Location Heatmap:** SVG world map showing GPS photo clusters with density visualization.
+    - **Notification Badge:** Purple dot on Home nav when new memories are available.
+    - **Scan-Time Entertainment:** Live discovery feed, random flashback, live stats, fun facts.
+    - **Widget Customization:** Toggle widgets ON/OFF, drag-and-drop reorder, snap-to-grid resize, layout presets (Minimal, Balanced, Power User).
+- **Changelogs:** [Phase 90](aiChangeLog/phase-90-home-dashboard.md), [Phase 91](aiChangeLog/phase-91-dashboard-timeline-health.md), [Phase 92](aiChangeLog/phase-92-collage-widget.md), [Phase 93](aiChangeLog/phase-93-dashboard-final.md)
+
 ### Advanced Library Filtering
 *Details: See [Advanced Filtering Plan](file:///j:/Projects/smart-photo-organizer/docs/advanced_library_filtering_plan.md)*
 
@@ -289,6 +194,72 @@
 - **Files Created/Modified:** See [Changelog](aiChangeLog/phase-89-advanced-filtering.md)
 
 ## v0.5.5
+
+### Frontend Streamlining (UX Consolidation)
+*Details: See [Frontend Streamlining Plan](file:///j:/Projects/smart-photo-organizer/docs/frontend-streamlining-plan.md)*
+
+- **Goal:** Simplify the People management workflow by automating high-confidence assignments, reducing tabs from 4 to 3, and consolidating modal-heavy interactions.
+- **Core Features:**
+    - **Live Face Counts:** Polling mechanism for real-time unassigned face counts.
+    - **Performance Limits:** Enforced 150-face limit for Ignore/Group views to prevent UI lag.
+    - **UX Polish:** Removed AI suggestions from Move modal; improved Edge Case navigation.
+    - **Tab Consolidation:** 3 tabs (Identified People, Discoveries, Edge Cases) instead of 4.
+    - **Inline Filters:** Replace modals with filter pill toggles.
+
+### Age-Based ERA Categorization
+*Details: See [Changelog](aiChangeLog/phase-42-age-based-eras.md)*
+
+- **Goal:** Replace visual clustering with actual age estimation for ERA generation, enabling life-stage tracking (Newborn → Child → Teen → Adult).
+- **Core Features:**
+    - **Age Extraction:** InsightFace `genderage` module extracts `face.age` during all scans.
+    - **Age Buckets:** Newborn (0-1), Infant (1-2), Toddler (2-4), Child (5-12), Teen (13-19), Young Adult (20-35), Adult (36-55), Senior (56-69), Elderly (70+).
+    - **Background Backfill:** Resumable service to rescan existing photos for age data.
+    - **Auto-Generation:** Automatically generate ERAs for all named persons after backfill completes.
+    - **Progress UI:** Status updates during backfill with estimated time remaining.
+
+### AdaFace Integration
+*Details: See [Changelog](aiChangeLog/phase-59-adaface-integration.md)*
+
+- **Goal:** Improve recognition accuracy on low-quality (blurry) faces.
+- **Core Features:**
+    - Hybrid embedding selection based on face quality (blur_score < 50 uses AdaFace).
+    - `HybridEmbedder` class with automatic model switching.
+    - Config options: `ADAFACE_ENABLED`, `ADAFACE_BLUR_THRESHOLD`.
+    - Graceful fallback to ArcFace if AdaFace model unavailable.
+- **Performance:** AdaFace adds ~5-10ms overhead per low-quality face (one-time cost).
+
+### Vector Database Scaling (FAISS IVF)
+*Details: See [Changelog](aiChangeLog/phase-60-faiss-ivf.md)*
+
+- **Goal:** Prepare FAISS for 500K+ face libraries spanning decades of photos.
+- **Core Features:**
+    - Hybrid index strategy: `IndexFlatL2` for <2K faces, `IndexIVFFlat` for ≥2K.
+    - Automatic migration from FlatL2 to IVF on first use.
+    - Training step during index rebuild.
+    - ~10x faster search at 500K+ scale.
+    - Dynamic cluster calculation: `4 * sqrt(N)`, clamped 32-4096.
+
+### VLM Multi-Face Fix
+*Details: See [Changelog](aiChangeLog/phase-58-vlm-multiface-fix.md)*
+
+- **Goal:** Fix SmolVLM's inability to count faces in cropped regions.
+- **Core Features:**
+    - Replaced VLM face counting with detector-based verification.
+    - `detect_faces_in_region` command to re-run detection on cropped regions.
+    - VLM limited to semantic verification only ("Is this a face or a knee?").
+    - Automatic multi-face box splitting during background verification.
+    - Split faces tagged with `assignment_source='split_multiface'`.
+
+### Scan Performance Optimization
+*Details: See [Changelog](aiChangeLog/phase-61-scan-perf.md)*
+
+- **Goal:** Reduce scan time in MACRO/TTA modes by eliminating redundant AI model initializations.
+- **Core Features:**
+    - Implemented LRU-style model cache (`APP_CACHE`) storing up to 4 `FaceAnalysis` instances.
+    - Eliminated 500ms-1s model reload overhead that occurred 4-5 times per photo in Macro mode.
+    - Instant switching between standard (1280x1280), safe (640x640), and TTA instances.
+    - 40-60% reduction in scan time per photo in Macro/TTA modes.
+- **Trade-off:** Increased VRAM usage by holding 3-4 model instances instead of 1.
 
 ### Background Auto Face Bucketing
 *Details: See [Background Bucketing Plan](file:///j:/Projects/smart-photo-organizer/docs/background-bucketing-plan.md)*
@@ -354,6 +325,14 @@
     - **Custom Covers:** Manually "Pin" any face as the person's cover photo.
     - **Shuffle:** Instantly pick a random high-quality face as the cover.
     - **Smart Fallback:** Auto-reverts to the sharpest available face if unpinned.
+
+## v0.6.5 (Current)
+- **Error Export & Library Health (Phase 95):**
+    - **Export CSV:** Added "Export CSV" button to Scan Errors modal with RFC 4180 compliant formatting.
+    - **Retry All Fix:** Fixed bug where "Retry All" failed to queue photos (returned file paths instead of photo objects with IDs).
+    - **Clear List Fix:** Implemented `db:clearScanErrors` IPC handler (was previously stubbed).
+    - **CSV Format:** File Path, Error Type, Error Message, Scan Type, Timestamp.
+    - [See Changelog](aiChangeLog/phase-95-error-export.md)
 
 ## v0.4.0 (Stability Release)
 - **Architecture Refactor:** Modularized Main Process for better stability.

@@ -113,11 +113,44 @@ The "Create" view is a powerful workspace for building specific sets of photos.
 - **Staging Set:** Manually add specific photos from results to your "Current Set".
 - **Exporting Albums:** Once you've built your set, you can export the entire collection to a new folder on your computer.
 
-## 7. Privacy & Performance
+## 7. 🔧 File Repair (Photo Repair Shop Integration)
+
+SPO integrates with [Photo Repair Shop (PRS)](https://photo-repair-shop.app), a companion desktop
+app, to recover corrupt photo files directly from the Scan Warnings panel.
+
+### How it works
+1. Open **Settings → Scan Warnings**. If PRS is running, a "🔧 PRS ready" badge appears in the header.
+2. Click the 🔧 button on any corrupt file row.
+3. SPO sends the file to PRS for **analysis** — PRS identifies the corruption type and recommends a repair strategy.
+4. SPO automatically submits a **repair job** using the suggested strategy, along with healthy photos from your own library as reference files (for header-grafting repairs).
+5. A **progress bar** updates every 2 s as PRS reports percent complete and stage.
+6. On completion, SPO **verifies** the repaired file (Sharp decode + AI analysis) before committing it.
+7. If verification passes: the scan error is cleared, the corrupt record removed, and the repaired file re-ingested into the library (face detection, tagging, etc.).
+8. If verification fails: the row is marked **Unrepairable** (persistent badge) — no further repair attempts are made.
+
+### Security
+- PRS communicates over `localhost:3847` only — no network egress.
+- A per-session UUID token (written to `~/.photo-repair-shop/api-token` by PRS) is required for all authenticated calls.
+- SPO never logs the token value.
+
+### UI States per file
+| State | Display |
+|-------|---------|
+| `idle` | 🔧 button (enabled if PRS running) |
+| `checking_prs` | Checking PRS... |
+| `prs_unavailable` | Button disabled + tooltip |
+| `analyzing` | Progress bar — Analyzing... |
+| `repairing` | Progress bar with % |
+| `verifying` | Progress bar — Verifying... |
+| `done` | Row auto-removes after 1.5 s |
+| `failed` | Red error text + Retry button |
+| `unrepairable` | Orange 🚫 Unrepairable badge (persistent) |
+
+## 9. Privacy & Performance
 - **Local-First:** No photos are ever uploaded to the cloud. All AI runs on your GPU/CPU.
 - **Virtualization:** The gallery uses `react-window` to handle libraries with 100,000+ photos without lagging.
 
-## 8. Detailed Hardware Requirements
+## 10. Detailed Hardware Requirements
 
 | Feature | CPU Only (Minimum) | GPU (Recommended) | Notes |
 | :--- | :--- | :--- | :--- |

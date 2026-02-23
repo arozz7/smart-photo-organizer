@@ -78,11 +78,17 @@ class FaceDetector:
             current_size = scan_passes[pass_idx]
             pass_idx += 1
             
+            # [Phase 91] Fix: Use permissive threshold for Inference to allow "Large Face" exception to work
+            # If we filter at 0.30 here, the manual check for fw > 300 later never sees the face.
+            inference_thresh = det_thresh
+            if scan_mode == 'MACRO':
+                inference_thresh = 0.10
+
             # Init Model
             faces.init_insightface(providers=faces.CURRENT_PROVIDERS, 
                                  allowed_modules=faces.ALLOWED_MODULES, 
                                  det_size=current_size, 
-                                 det_thresh=det_thresh)
+                                 det_thresh=inference_thresh)
             
             # Inference
             f_results = faces.app.get(img)

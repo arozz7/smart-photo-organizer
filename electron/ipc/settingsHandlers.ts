@@ -166,4 +166,14 @@ export function registerSettingsHandlers() {
         ConfigService.updateSmartIgnoreSettings(settings);
         return { success: true };
     });
+
+    // Generic config access — used by integrations (e.g. PRS path)
+    ipcMain.handle('settings:get', () => {
+        return ConfigService.getSettings();
+    });
+
+    ipcMain.handle('settings:update', (_, partial: Record<string, unknown>) => {
+        ConfigService.updateSettings(partial as any);
+        return { success: true };
+    });
 }

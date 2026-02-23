@@ -10,7 +10,7 @@ from pathlib import Path
 DB_PATH = r"H:\DevWork\smart-photo-organizer\library.db"
 
 # Photo identifier (partial filename match)
-PHOTO_SEARCH = "kaboom"
+PHOTO_SEARCH = "vic_krop"
 
 def analyze_photo_faces():
     if not Path(DB_PATH).exists():

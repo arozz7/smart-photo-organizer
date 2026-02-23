@@ -58,9 +58,24 @@ flowchart LR
 3. **DBSCAN Clustering**
    - Density-based clustering that doesn't require specifying number of clusters
    - Naturally identifies "noise" points (singleton faces that don't belong to any group)
+
    - Works well with normalized cosine distances
 
+### 4. Detection Thresholds
+The system uses a multi-tier threshold strategy to balance recall and precision:
+
+| Tier | Score Range | Action | Notes |
+|------|-------------|--------|-------|
+| **Accept** | `≥ 0.70` | Mark as `human` | High confidence, processed normally |
+| **Verify** | `0.40 - 0.69` | Mark as `suspect` | Subject to VLM Verification |
+| **Reject** | `< 0.40` | Discard | Noise/False Positive filter |
+| **Large Face Exception** | `< 0.40` | Mark as `suspect` | **Exception:** If face width > 300px, keep even if score is low (Phase 91) |
+
+> [!NOTE]
+> The Python detector uses a permissive `0.10` threshold in `MACRO` mode to ensure large, low-confidence faces reach the application layer for this exception logic.
+
 ---
+
 
 ## Research: Libraries & Models Evaluated
 

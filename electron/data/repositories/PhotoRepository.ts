@@ -288,9 +288,30 @@ export class PhotoRepository {
 
     static retryScanErrors() {
         const db = getDB();
-        const errors = db.prepare('SELECT file_path FROM scan_errors').all() as { file_path: string }[];
+        // Return photo objects that the frontend can queue for AI processing.
+        // JOIN on photos table to get the photo ID needed by addToQueue().
+        // Errors without a matching photo (orphaned) are skipped.
+        const photos = db.prepare(`
+            SELECT DISTINCT p.id, p.file_path
+            FROM scan_errors se
+            JOIN photos p ON se.photo_id = p.id
+        `).all() as { id: number; file_path: string }[];
+        return photos;
+    }
+
+    static deletePhotoById(id: number): void {
+        getDB().prepare('DELETE FROM photos WHERE id = ?').run(id);
+    }
+
+    static markUnrepairable(id: number, reason: string): void {
+        getDB()
+            .prepare('UPDATE scan_errors SET is_unrepairable = 1, error_message = ? WHERE id = ?')
+            .run(`Repair attempted but verification failed: ${reason}`, id);
+    }
+
+    static clearScanErrors() {
+        const db = getDB();
         db.prepare('DELETE FROM scan_errors').run();
-        return errors.map(e => e.file_path);
     }
 
     static getFilePaths(ids: number[]) {

@@ -53,6 +53,10 @@ The **Library** allows you to browse and manage your entire photo collection.
 
 -   **Grid Navigation:** Scroll through your entire library smoothly. Use the **Date Filter** in the sidebar to jump to specific years or months.
 -   **Photo Details:** Click any photo to see a large preview, its EXIF metadata (camera, lens, ISO), and any AI-generated tags.
+-   **Scan Errors:** If photos fail to scan (corrupt files, unsupported formats, etc.), a red error badge appears in the Library header. Click it to open the **Scan Errors Modal**:
+    -   **Export CSV:** Download all errors as a CSV file (`scan-errors-YYYY-MM-DD.csv`) with columns for File Path, Error Type, Error Message, Scan Type, and Timestamp. Useful for diagnosing issues or sharing with support.
+    -   **Retry All:** Re-queue all failed photos for AI processing. The app will attempt to scan them again with the current settings.
+    -   **Clear List:** Remove all errors from the database. Use this after you've fixed the underlying issues (e.g., moved corrupt files, updated codecs).
 -   **Context Menu:** Right-click a photo to:
     -   **Enhance:** Open the photo in the AI Enhance Lab.
     -   **Delete:** Remove the photo from the database (does not delete the original file).

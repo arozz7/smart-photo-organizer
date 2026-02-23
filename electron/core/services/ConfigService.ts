@@ -115,6 +115,7 @@ export interface AppConfig {
     dashboard: DashboardConfig;
     ai_queue: any[]; // Queue items
     faissStaleCount?: number; // Tracks faces removed that need FAISS rebuild
+    prsExecutablePath?: string; // Path to the Photo Repair Shop executable
 }
 
 // Default Config

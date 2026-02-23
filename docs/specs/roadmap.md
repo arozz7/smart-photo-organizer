@@ -28,41 +28,56 @@ This document tracks planned features and ideas for the Smart Photo Organizer. U
 
 ## 🟡 Phase 2: Visualization & Search
 
-### 1. 🖼️ Collage Creator
+### 1. 🖼️ Collage Creator ✅ Complete (v0.6.5)
 **Goal:** Turn a set of photos into a single composition.
-- [ ] **Auto-Layout:** Automatically arrange selected photos in a grid or masonry layout.
-- [ ] **Face-Centric:** Use AI face bounding boxes to ensure faces aren't cropped out.
-- [ ] **Customization:** Adjust spacing, background color, and aspect ratio (e.g., Instagram Story vs Desktop Wallpaper).
-- [ ] **Export:** Save as a high-res JPG/PNG.
+- [x] **Auto-Layout:** Automatically arrange selected photos in a grid or masonry layout.
+- [x] **Face-Centric:** Use AI face bounding boxes to ensure faces aren't cropped out.
+- [x] **Customization:** Adjust spacing, background color, and aspect ratio (Grid 2x2/3x3, Feature, Mosaic).
+- [x] **Export:** Save as a high-res JPG/PNG.
 
-### 5. 🗺️ Location Heatmap
+### 5. 🗺️ Location Heatmap (Partial - v0.6.5)
 **Goal:** Visualize library on a map.
-- [ ] **Clustering:** Show clusters of photos on a world map.
+- [x] **Clustering:** Show clusters of photos on a world map (SVG-based heatmap widget).
 - [ ] **Trip Detection:** Auto-group photos into "Trips" based on location + date.
 - [ ] **Map View:** dedicated library view mode.
 
-### 8. 📊 Library Analytics
+### 8. 📊 Library Analytics ✅ Complete (v0.6.5)
 **Goal:** Visualize your data.
-- [ ] **Stats:** Graphs showing photos taken per year/month.
-- [ ] **Gear:** Most used Cameras and Lenses.
-- [ ] **Top People:** Who do you photograph the most?
+- [x] **Stats:** Graphs showing photos taken per year/month (Timeline widget with drill-down).
+- [x] **Gear:** Most used Cameras (Fun Facts widget).
+- [x] **Top People:** Who do you photograph the most? (People Spotlight widget).
 
 ---
 
 ## 🔵 Phase 3: Sharing & Retention
 
-### 4. 🧠 Saved Smart Searches (Smart Albums)
+### 4. 🧠 Saved Smart Searches (Smart Albums) ✅ Complete (v0.6.5)
 **Goal:** Make the "Create" view persistent.
 - [x] **Set Builder:** Basic search and export functionality implemented in v0.2.0.
-- [ ] **Save Query:** Save a complex filter (e.g., "Family in 2024") as a named "Smart Album".
-- [ ] **Auto-Update:** As new photos are scanned, they automatically appear in relevant Smart Albums.
+- [x] **Save Query:** Save a complex filter (e.g., "Family in 2024") as a named "Smart Album".
+- [x] **Auto-Update:** As new photos are scanned, they automatically appear in relevant Smart Albums.
 
-### 7. 📅 Memories & Timeline
+### 7. 📅 Memories & Timeline (Partial - v0.6.5)
 **Goal:** Rediscover forgotten moments.
-- [ ] **"On This Day":** Show photos from the same date in previous years.
+- [x] **"On This Day":** Show photos from the same date in previous years (Dashboard widget).
 - [ ] **Auto-Stories:** Generate thematic slideshows (e.g., "Summer 2023") with music syncing.
 
 ### 9. 🕸️ Static Gallery Generator
 **Goal:** Share without the cloud.
 - [ ] **HTML Export:** Generate a static website (HTML/JS) of a selected Set or Album.
 - [ ] **Self-Hostable:** Ready to upload to S3, GitHub Pages, or a Raspberry Pi.
+
+---
+
+## 🟣 Phase 4: File Health & Recovery
+
+### 1. 🔧 Photo Repair Shop Integration ✅ Complete (v0.6.5)
+**Goal:** Recover corrupt files without leaving SPO.
+- [x] **PRS Client:** Typed HTTP client with token auth, health check, analyze, repair, poll.
+- [x] **Scan Warnings UI:** Per-row repair button with live progress bar and state machine.
+- [x] **Reference Discovery:** Auto-supply healthy library photos as header-grafting candidates.
+- [x] **Two-Stage Verification:** Sharp decode + AI analysis before committing repaired file.
+- [x] **Auto Re-Ingest:** Repaired file enters full library pipeline (faces, tags) on success.
+- [x] **Unrepairable Tracking:** Files that fail verification are permanently flagged in the DB.
+- [ ] **PRS from Lightbox:** Right-click → "Repair with PRS" in the photo detail view.
+- [ ] **Configurable Output Dir:** User-selectable output folder for repaired files (vs. same dir).

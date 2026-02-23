@@ -1,4 +1,4 @@
-import { ipcMain, dialog } from 'electron';
+import { ipcMain, dialog, OpenDialogOptions } from 'electron';
 import { scanQueue } from '../scanQueue'; // Use Queue
 import logger from '../logger';
 
@@ -20,6 +20,14 @@ export function registerFileHandlers() {
         } else {
             return filePaths[0]
         }
+    });
+
+    ipcMain.handle('dialog:openFile', async (_, options: Partial<OpenDialogOptions> = {}) => {
+        const { canceled, filePaths } = await dialog.showOpenDialog({
+            properties: ['openFile'],
+            ...options,
+        });
+        return canceled ? null : filePaths[0];
     });
 
     ipcMain.handle('read-file-buffer', async (_, filePath: string) => {
