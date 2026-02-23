@@ -68,6 +68,7 @@ const TEST_SCHEMA = `
     confidence REAL,
     blur_score REAL,
     is_ignored INTEGER DEFAULT 0,
+    is_confirmed INTEGER DEFAULT 0,
     is_reference INTEGER DEFAULT 0,
     source TEXT DEFAULT 'auto',
     confidence_tier TEXT DEFAULT 'unknown',

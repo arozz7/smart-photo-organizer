@@ -24,7 +24,8 @@ vi.mock('../../../../electron/data/repositories/FaceRepository', () => ({
     FaceRepository: {
         getFacesForClustering: vi.fn(),
         updateFacePerson: vi.fn(),
-        getFacesByPhoto: vi.fn()
+        getFacesByPhoto: vi.fn(),
+        getFacesByPhotoIncludingIgnored: vi.fn(),
     }
 }));
 
@@ -54,7 +55,15 @@ vi.mock('../../../../electron/db', () => ({
 }));
 
 vi.mock('../../../../electron/store', () => ({
-    getAISettings: vi.fn(() => ({ faceSimilarityThreshold: 0.65 }))
+    getAISettings: vi.fn(() => ({ faceSimilarityThreshold: 0.65 })),
+    ConfigService: {
+        getAdvancedFaceSettings: vi.fn(() => ({
+            scoreThresholdReject: 0.40,
+            scoreThresholdAccept: 0.70,
+            highQualityFaceThreshold: 0.65,
+            largeFaceThreshold: 300,
+        }))
+    }
 }));
 
 import { FaceService } from '../../../../electron/core/services/FaceService';
@@ -216,7 +225,7 @@ describe('FaceService', () => {
             const detectedFaces = [
                 { box: { x: 0, y: 0, width: 10, height: 10 }, descriptor: [1.0], blurScore: 50 }
             ];
-            vi.mocked(FaceRepository.getFacesByPhoto).mockReturnValue([]);
+            vi.mocked(FaceRepository.getFacesByPhotoIncludingIgnored).mockReturnValue([]);
 
             const aiProvider = {
                 addToIndex: vi.fn(),
@@ -241,7 +250,7 @@ describe('FaceService', () => {
             const detectedFaces = [
                 { box: { x: 1, y: 1, width: 10, height: 10 }, descriptor: [1.0], blurScore: 50 }
             ];
-            vi.mocked(FaceRepository.getFacesByPhoto).mockReturnValue(existingFaces);
+            vi.mocked(FaceRepository.getFacesByPhotoIncludingIgnored).mockReturnValue(existingFaces);
 
             // Act
             await FaceService.processAnalysisResult(photoId, detectedFaces, 100, 100, null);
@@ -256,7 +265,7 @@ describe('FaceService', () => {
             const detectedFaces = [
                 { box: { x: 0, y: 0, width: 10, height: 10 }, descriptor: [1.0], blurScore: 50 }
             ];
-            vi.mocked(FaceRepository.getFacesByPhoto).mockReturnValue([]);
+            vi.mocked(FaceRepository.getFacesByPhotoIncludingIgnored).mockReturnValue([]);
 
             const aiProvider = {
                 addToIndex: vi.fn(),
@@ -304,7 +313,7 @@ describe('FaceService', () => {
             const detectedFaces = [
                 { box: { x: 0, y: 0, width: 10, height: 10 }, descriptor: [1.0], blurScore: 50 }
             ];
-            vi.mocked(FaceRepository.getFacesByPhoto).mockReturnValue([]);
+            vi.mocked(FaceRepository.getFacesByPhotoIncludingIgnored).mockReturnValue([]);
 
             const aiProvider = {
                 addToIndex: vi.fn(),

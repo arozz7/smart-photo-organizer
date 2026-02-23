@@ -49,8 +49,8 @@ describe('PersonService - Move and Unassign Faces', () => {
             expect(PersonRepository.getPersonByName).toHaveBeenCalledWith(targetName);
             expect(PersonRepository.createPerson).not.toHaveBeenCalled();
 
-            // 2. Check faces updated
-            expect(FaceRepository.updateFacePerson).toHaveBeenCalledWith(faceIds, targetPerson.id);
+            // 2. Check faces updated (true = setConfirmed)
+            expect(FaceRepository.updateFacePerson).toHaveBeenCalledWith(faceIds, targetPerson.id, true);
 
             // 3. Check means recalculated
             expect(recalcSpy).toHaveBeenCalledWith(targetPerson.id); // Target
@@ -78,7 +78,7 @@ describe('PersonService - Move and Unassign Faces', () => {
 
             // Assert
             expect(PersonRepository.createPerson).toHaveBeenCalledWith(targetName);
-            expect(FaceRepository.updateFacePerson).toHaveBeenCalledWith(faceIds, newPerson.id);
+            expect(FaceRepository.updateFacePerson).toHaveBeenCalledWith(faceIds, newPerson.id, true);
             expect(recalcSpy).toHaveBeenCalledWith(newPerson.id);
         });
     });
