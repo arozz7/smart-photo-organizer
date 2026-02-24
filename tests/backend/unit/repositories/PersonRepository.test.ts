@@ -38,12 +38,23 @@ describe('PersonRepository', () => {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             person_id INTEGER NOT NULL,
             era_name TEXT NOT NULL,
+            user_name TEXT,
             start_year INTEGER,
             end_year INTEGER,
             centroid_json TEXT,
             face_count INTEGER DEFAULT 0,
             is_auto_generated INTEGER DEFAULT 0,
             created_at INTEGER
+        )`);
+        db.exec(`CREATE TABLE IF NOT EXISTS person_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            person_id INTEGER NOT NULL,
+            alert_type TEXT NOT NULL,
+            message TEXT,
+            drift_distance REAL,
+            dismissed_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
         )`);
         db.exec('ALTER TABLE faces ADD COLUMN era_id INTEGER');
         // Make getDB return our test database

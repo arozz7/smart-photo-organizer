@@ -61,7 +61,8 @@ describe('ConfigService', () => {
             libraryPath: '/my/photos',
             aiSettings: { faceSimilarityThreshold: 0.8 }
         };
-        vi.mocked(fs.existsSync).mockReturnValue(true);
+        // Return true only for the user config, not ai-config.json (enterprise override must not interfere)
+        vi.mocked(fs.existsSync).mockImplementation((p) => !String(p).includes('ai-config'));
         vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockConfig));
 
         // Act
@@ -141,7 +142,8 @@ describe('ConfigService', () => {
                 enableTTA: true
             }
         };
-        vi.mocked(fs.existsSync).mockReturnValue(true);
+        // Return true only for the user config, not ai-config.json (enterprise override must not interfere)
+        vi.mocked(fs.existsSync).mockImplementation((p) => !String(p).includes('ai-config'));
         vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockConfig));
 
         // Act

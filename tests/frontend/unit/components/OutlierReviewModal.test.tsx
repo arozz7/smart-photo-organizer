@@ -20,11 +20,15 @@ vi.mock('../../../../src/context/PeopleContext', () => ({
     })
 }));
 
-// Fix for Radix UI Dialog
-global.ResizeObserver = vi.fn().mockImplementation(() => ({
-    observe: vi.fn(),
-    unobserve: vi.fn(),
-    disconnect: vi.fn(),
+// Mock react-virtuoso so VirtuosoGrid renders items directly (no layout measurement needed)
+vi.mock('react-virtuoso', () => ({
+    VirtuosoGrid: ({ totalCount, itemContent }: { totalCount: number; itemContent: (index: number) => React.ReactNode }) => (
+        <div data-testid="virtuoso-grid">
+            {Array.from({ length: totalCount }, (_, i) => (
+                <div key={i}>{itemContent(i)}</div>
+            ))}
+        </div>
+    )
 }));
 
 describe('OutlierReviewModal', () => {

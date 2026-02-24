@@ -24,7 +24,8 @@ vi.mock('electron', () => ({
 vi.mock('../../../../electron/data/repositories/FaceRepository', () => ({
     FaceRepository: {
         getFacesByPhoto: vi.fn().mockReturnValue([]),
-        getFacesByIds: vi.fn().mockReturnValue([]) // Add this if needed
+        getFacesByPhotoIncludingIgnored: vi.fn().mockReturnValue([]),
+        getFacesByIds: vi.fn().mockReturnValue([])
     }
 }));
 
@@ -33,7 +34,15 @@ vi.mock('../../../../electron/db', () => ({
 }));
 
 vi.mock('../../../../electron/store', () => ({
-    getAISettings: vi.fn(() => ({ faceSimilarityThreshold: 0.65 }))
+    getAISettings: vi.fn(() => ({ faceSimilarityThreshold: 0.65 })),
+    ConfigService: {
+        getAdvancedFaceSettings: vi.fn(() => ({
+            scoreThresholdReject: 0.40,
+            scoreThresholdAccept: 0.70,
+            highQualityFaceThreshold: 0.65,
+            largeFaceThreshold: 300,
+        }))
+    }
 }));
 
 // We need to mock FaceService methods if we want to spy on them, 

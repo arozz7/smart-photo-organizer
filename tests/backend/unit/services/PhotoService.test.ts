@@ -127,18 +127,18 @@ describe('PhotoService', () => {
 
             // Assert
             expect(result).not.toBeNull();
-            expect(sharp).toHaveBeenCalledWith(filePath);
+            expect(sharp).toHaveBeenCalledWith(filePath, { failOnError: false });
             expect(mockSharpInstance.toFile).toHaveBeenCalled();
         });
 
-        it('should use exiftool for RAW file extraction before sharp', async () => {
-            // Arrange
+        it('should use sharp for RAW file extraction (ExifTool path disabled)', async () => {
+            // Arrange — the ExifTool RAW extraction branch is intentionally disabled (&& false)
+            // so RAW files fall straight through to the Sharp step.
             const filePath = '/path/to/photo.ARW';
             const previewDir = '/previews';
 
-            // access(previewPath) fails
+            // access(previewPath) fails so extraction is triggered
             vi.mocked(fs.access).mockRejectedValueOnce(new Error('Missing'));
-            // access(tempPreviewPath) succeeds
             vi.mocked(fs.access).mockResolvedValue(undefined);
 
             mockExifToolInstance.read.mockResolvedValue({ Orientation: 1 });
@@ -146,10 +146,10 @@ describe('PhotoService', () => {
             // Act
             const result = await PhotoService.extractPreview(filePath, previewDir);
 
-            // Assert
-            // No need to check for ExifTool constructor, just the instance method
-            expect(mockExifToolInstance.extractPreview).toHaveBeenCalledWith(filePath, expect.stringContaining('.tmp'));
-            expect(sharp).toHaveBeenCalledWith(expect.stringContaining('.tmp'));
+            // Assert — ExifTool extractPreview is NOT called; sharp receives the RAW path
+            expect(mockExifToolInstance.extractPreview).not.toHaveBeenCalled();
+            expect(sharp).toHaveBeenCalledWith(filePath, { failOnError: false });
+            expect(result).not.toBeNull();
         });
 
         it('should fallback to Python if both ExifTool and Sharp fail', async () => {
@@ -180,17 +180,19 @@ describe('PhotoService', () => {
     // rotatePhoto
     // ==========================================
     describe('rotatePhoto', () => {
-        it('should call pythonProvider rotateImage', async () => {
-            // Arrange
+        it('should call pythonProvider.sendRequest with rotate_image for standard files', async () => {
+            // Arrange — non-RAW files use pythonProvider.sendRequest('rotate_image', ...)
             const filePath = '/path/to/photo.jpg';
-            vi.mocked(pythonProvider.rotateImage).mockResolvedValue({ success: true } as any);
+            vi.mocked(pythonProvider.sendRequest).mockResolvedValue({ success: true } as any);
 
             // Act
             await PhotoService.rotatePhoto(1, filePath, 90);
 
             // Assert
-            // Implementation calls pythonProvider.rotateImage at line 133
-            expect(pythonProvider.rotateImage).toHaveBeenCalledWith(filePath, 90);
+            expect(pythonProvider.sendRequest).toHaveBeenCalledWith(
+                'rotate_image',
+                expect.objectContaining({ filePath, rotation: 90 })
+            );
         });
     });
 

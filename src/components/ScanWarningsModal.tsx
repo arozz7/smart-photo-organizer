@@ -263,7 +263,7 @@ export default function ScanWarningsModal({ isOpen, onClose }: ScanWarningsModal
 
     const openFile = async (path: string) => {
         // @ts-ignore
-        await window.ipcRenderer.invoke('shell:showItemInFolder', path)
+        await window.ipcRenderer.invoke('os:showInFolder', path)
     }
 
     const startRepair = async (err: ScanError) => {

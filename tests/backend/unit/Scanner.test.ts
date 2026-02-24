@@ -20,7 +20,8 @@ const mockDB = {
 };
 
 vi.mock('../../../electron/db', () => ({
-    getDB: vi.fn(() => mockDB)
+    getDB: vi.fn(() => mockDB),
+    parseExifDate: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock('../../../electron/logger', () => ({

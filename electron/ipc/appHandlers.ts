@@ -23,4 +23,10 @@ export function registerAppHandlers(getMainWindow: () => BrowserWindow | null) {
     ipcMain.handle('os:openFolder', (_, path) => {
         shell.openPath(path);
     });
+
+    ipcMain.handle('os:openExternal', (_, url: string) => {
+        if (typeof url === 'string' && url.startsWith('https://')) {
+            return shell.openExternal(url);
+        }
+    });
 }

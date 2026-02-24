@@ -63,11 +63,7 @@ const ADDITIONAL_SCHEMA = `
     timestamp INTEGER DEFAULT CURRENT_TIMESTAMP
   );
 
-  -- Add blur_score column to photos
-  ALTER TABLE photos ADD COLUMN blur_score REAL;
-  
-  -- Add description column to photos
-  ALTER TABLE photos ADD COLUMN description TEXT;
+  -- blur_score and description are already included in the base schema (mockDatabase.ts)
 `;
 
 describe('PhotoRepository', () => {

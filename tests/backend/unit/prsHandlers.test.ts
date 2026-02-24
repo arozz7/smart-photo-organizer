@@ -4,6 +4,7 @@ import path from 'node:path';
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 vi.mock('electron', () => ({
+    app: { getPath: vi.fn(() => 'C:\\tmp') },
     ipcMain: { handle: vi.fn() },
 }));
 

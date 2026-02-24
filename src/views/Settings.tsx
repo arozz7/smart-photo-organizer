@@ -706,14 +706,24 @@ export default function Settings() {
                     <div>
                         <h4 className="font-medium text-white">Photo Repair Shop location</h4>
                         <p className="text-sm text-gray-400 mt-1 mb-3">
-                            Path to the Photo Repair Shop executable. Required to launch PRS automatically when repairing corrupt files.
+                            Path to the Photo Repair Shop executable. Required to launch PRS automatically when repairing corrupt files.{' '}
+                            Don't have it?{' '}
+                            <button
+                                onClick={() => {
+                                    // @ts-ignore
+                                    window.ipcRenderer.invoke('os:openExternal', 'https://github.com/arozz7/photo-repair-shop/releases/tag/v1.0.0');
+                                }}
+                                className="text-indigo-400 hover:text-indigo-300 underline bg-transparent border-0 p-0 cursor-pointer"
+                            >
+                                Download from GitHub
+                            </button>
                         </p>
                         <div className="flex gap-3 items-center">
                             <input
                                 type="text"
                                 readOnly
                                 value={prsExecutablePath}
-                                placeholder="Not configured"
+                                placeholder="e.g. C:\Users\you\Downloads\Photo Repair Shop-Windows-1.0.0-Portable.exe"
                                 className="flex-1 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 font-mono cursor-default"
                             />
                             <button
@@ -734,6 +744,9 @@ export default function Settings() {
                                 Browse...
                             </button>
                         </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                            Point to either the Portable .exe or the installed Photo Repair Shop.exe
+                        </p>
                     </div>
                 </div>
             </section>

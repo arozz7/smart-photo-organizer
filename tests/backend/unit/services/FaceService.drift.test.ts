@@ -8,17 +8,35 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock dependencies
+vi.mock('../../../../electron/store', () => ({
+    getAISettings: vi.fn(() => ({ faceBlurThreshold: 20 }))
+}));
+
+vi.mock('../../../../electron/db', () => ({
+    getDB: vi.fn(() => ({
+        transaction: vi.fn((fn: () => void) => () => fn())
+    }))
+}));
+
+vi.mock('../../../../electron/logger', () => ({
+    default: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }
+}));
+
 vi.mock('../../../../electron/data/repositories/FaceRepository', () => ({
     FaceRepository: {
         getAllFaces: vi.fn(),
+        getConfirmedFaces: vi.fn(),
         updateDescriptorMean: vi.fn()
     }
 }));
 
 vi.mock('../../../../electron/data/repositories/PersonRepository', () => ({
     PersonRepository: {
+        getPerson: vi.fn().mockReturnValue(null),
         updateDescriptorMean: vi.fn(),
-        addHistorySnapshot: vi.fn()
+        addHistorySnapshot: vi.fn(),
+        addAlert: vi.fn(),
+        refreshPersonCover: vi.fn()
     }
 }));
 
@@ -39,7 +57,7 @@ describe('FaceService - Drift Detection', () => {
                 { descriptor: [1.0, 0.0], blur_score: 50 },
                 { descriptor: [0.0, 1.0], blur_score: 50 }
             ];
-            vi.mocked(FaceRepository.getAllFaces).mockReturnValue(faces);
+            vi.mocked(FaceRepository.getConfirmedFaces).mockReturnValue(faces);
 
             // Act
             const result = await PersonService.recalculatePersonMean(personId);
@@ -62,7 +80,7 @@ describe('FaceService - Drift Detection', () => {
             const faces = [
                 { descriptor: [0.0, 1.0], blur_score: 50 }
             ];
-            vi.mocked(FaceRepository.getAllFaces).mockReturnValue(faces);
+            vi.mocked(FaceRepository.getConfirmedFaces).mockReturnValue(faces);
 
             // Simulating drift threshold logic inside recalculatePersonMean
             // Note: The service might need 'old mean' to compare. 
