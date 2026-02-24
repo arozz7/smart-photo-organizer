@@ -1,4 +1,6 @@
 import { spawn } from 'child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { PrsClient } from './PrsClient';
 import logger from '../../logger';
 
@@ -35,15 +37,19 @@ async function _doEnsurePrsRunning(executablePath?: string): Promise<PrsLaunchRe
         return { ok: true };
     }
 
-    if (!executablePath) {
+    // Resolution order: user-configured path → NSIS default probe → not_configured
+    const exePath = executablePath ?? probeNsisDefaultPath();
+    if (!exePath) {
         return { ok: false, reason: 'not_configured' };
     }
 
-    logger.info({ executablePath }, '[PrsLauncher] Launching PRS executable');
+    logger.info({ exePath }, '[PrsLauncher] Launching PRS executable');
     try {
-        // spawn with --headless so PRS starts its API server without a GUI window.
+        // HEADLESS env var works for all exe types (NSIS-installed, portable wrapper, unpacked).
+        // The --headless flag is NOT forwarded by the portable wrapper, so env var is used instead.
         // detached + stdio:'ignore' + unref() lets PRS outlive SPO's process tree.
-        const child = spawn(executablePath, ['--headless'], {
+        const child = spawn(exePath, [], {
+            env: { ...process.env, HEADLESS: 'true' },
             detached: true,
             stdio: 'ignore',
         });
@@ -68,4 +74,16 @@ async function _doEnsurePrsRunning(executablePath?: string): Promise<PrsLaunchRe
 
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Probe the NSIS default install path for Photo Repair Shop.
+ * Returns the path if the exe exists, or null if not installed there.
+ */
+export function probeNsisDefaultPath(): string | null {
+    const candidate = path.join(
+        process.env.LOCALAPPDATA ?? '',
+        'Programs', 'Photo Repair Shop', 'Photo Repair Shop.exe',
+    );
+    return existsSync(candidate) ? candidate : null;
 }
