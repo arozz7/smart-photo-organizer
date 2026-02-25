@@ -170,7 +170,7 @@ A dedicated Search view with a powerful filter sidebar for building precise quer
 
 <!-- GIF: Search view → adding filters → results updating live -->
 
-![Smart Tagging Details](docs/assets/ViewPictureDetailsLibrary.gif)
+<!-- GIF: Search view filters in action — pending new asset -->
 
 **Available Filters:**
 - Blur quality score (sharp / blurry)
@@ -194,7 +194,7 @@ Build custom photo collections by combining complex filter criteria, then export
 
 <!-- GIF: Create view → adding filter rules → staging photos → exporting to folder -->
 
-![Set Builder](docs/assets/CreateAlbumFromFilters.gif)
+<!-- GIF: Create view → adding filter rules → staging photos → exporting to folder — pending new asset -->
 
 - **Complex Multi-Person Filters:** Find photos containing multiple specific people (e.g., "Mom AND Dad, tagged 'birthday'").
 - **Staging Set:** Browse filter results and cherry-pick individual photos into your Current Set.
@@ -329,12 +329,12 @@ All settings are persisted automatically and applied on next launch.
 
    <!-- GIF: Clicking Scan Library → progress bar → photos appearing in Library grid -->
 
-   ![Scan Library](docs/assets/StartScanFolder.gif)
+   <!-- GIF: Clicking Scan Library → progress bar → photos appearing in Library grid — pending new asset -->
 
 3. **Detect Faces:** The AI starts processing photos for face detection automatically. Watch progress in the status bar at the bottom.
 4. **Organize People:** Go to the **People** tab. Click a group of unnamed faces, type a name, and press Enter — the AI auto-groups matching faces under that name across your library.
 
-   ![Name Faces](docs/assets/NameFaces.gif)
+   <!-- GIF: Naming a face group — pending new asset -->
 
 5. **Generate Tags:** Select photos in the Library and click **"Generate Smart Tags"** to have the AI describe them and make them searchable.
 
