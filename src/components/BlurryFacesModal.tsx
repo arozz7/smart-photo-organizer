@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import * as Dialog from '@radix-ui/react-dialog';
+import { useDynamicGrid } from '../hooks/useDynamicGrid';
 import * as Slider from '@radix-ui/react-slider';
 import { Cross2Icon, TrashIcon, MagnifyingGlassIcon, CheckIcon } from '@radix-ui/react-icons';
 import { useAlert } from '../context/AlertContext';
@@ -20,17 +21,6 @@ interface BlurryFacesModalProps {
 
 
 
-const BlurryGridList = React.forwardRef<HTMLDivElement, any>(({ style, children, ...props }, ref) => (
-    <div
-        ref={ref}
-        {...props}
-        style={{ ...style }}
-        className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 min-[2000px]:grid-cols-14 gap-2 pb-4 pr-2"
-    >
-        {children}
-    </div>
-));
-
 const BlurryGridItem = ({ children, ...props }: any) => (
     <div {...props} className="aspect-square w-full">
         {children}
@@ -41,6 +31,7 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
     const { calculateBlurScores, calculatingBlur } = useAI();
     const { people, autoNameFaces } = usePeople();
     const { showAlert, showConfirm } = useAlert();
+    const { containerRef, gridStyle } = useDynamicGrid({ storageKey: 'blurryFaces', default: 8 });
     const [threshold, setThreshold] = useState(25);
     const [faces, setFaces] = useState<BlurryFace[]>([]);
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -58,7 +49,11 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
     const [hasMore, setHasMore] = useState(true);
 
     const gridComponents = useMemo(() => ({
-        List: BlurryGridList,
+        List: React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ children, style, ...props }, ref) => (
+            <div ref={ref} {...props} style={{ ...style, ...gridStyle, paddingBottom: '1rem', paddingRight: '0.5rem' }}>
+                {children}
+            </div>
+        )),
         Item: BlurryGridItem,
         Footer: () => (
             loading && hasMore ? (
@@ -67,7 +62,7 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                 </div>
             ) : null
         )
-    }), [loading, hasMore]);
+    }), [loading, hasMore, gridStyle]);
     const [totalCount, setTotalCount] = useState(0);
     const BATCH_SIZE = 1000;
 
@@ -389,7 +384,7 @@ const BlurryFacesModal: React.FC<BlurryFacesModalProps> = ({ open, onOpenChange,
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto min-h-0 bg-gray-950/50 rounded-lg p-4 border border-gray-800">
+                        <div ref={containerRef} className="flex-1 overflow-y-auto min-h-0 bg-gray-950/50 rounded-lg p-4 border border-gray-800">
                             {faces.length === 0 && !loading ? (
                                 <div className="flex items-center justify-center h-full text-gray-500">No faces found below this threshold.</div>
                             ) : (

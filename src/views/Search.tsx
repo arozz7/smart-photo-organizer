@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { VirtuosoGrid } from 'react-virtuoso'
+import { useFlexZoom } from '../hooks/useFlexZoom'
 import { useSearch } from '../hooks/useSearch'
 import FilterPanel from '../components/FilterPanel'
 import FilterBuilder from '../components/FilterBuilder'
@@ -30,6 +31,7 @@ export default function Search() {
         applySmartAlbum,
     } = useSearch()
 
+    const { containerRef, itemStyle } = useFlexZoom({ storageKey: 'search', default: 150 })
     const [showCompound, setShowCompound] = useState(false)
     const [viewingPhoto, setViewingPhoto] = useState<any>(null)
     const urlParamsApplied = useRef(false)
@@ -111,11 +113,11 @@ export default function Search() {
 
     const GridItem = useMemo(() => React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
         ({ children, ...props }, ref) => (
-            <div ref={ref} {...props} style={{ width: '150px', height: '150px', flex: '0 0 auto' }}>
+            <div ref={ref} {...props} style={{ ...itemStyle, flex: '0 0 auto' }}>
                 {children}
             </div>
         )
-    ), [])
+    ), [itemStyle])
 
     return (
         <div className="flex h-full bg-gray-900">
@@ -180,7 +182,7 @@ export default function Search() {
                 </header>
 
                 {/* Photo grid */}
-                <div className="flex-1 overflow-hidden">
+                <div ref={containerRef} className="flex-1 overflow-hidden">
                     {!hasActiveFilter && photos.length === 0 ? (
                         <div className="flex items-center justify-center h-full text-gray-500">
                             <div className="text-center max-w-sm">

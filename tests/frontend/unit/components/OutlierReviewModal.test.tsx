@@ -20,6 +20,14 @@ vi.mock('../../../../src/context/PeopleContext', () => ({
     })
 }));
 
+// Mock useDynamicGrid to avoid ToastProvider/useToast dependency in unit tests
+vi.mock('../../../../src/hooks/useDynamicGrid', () => ({
+    useDynamicGrid: () => ({
+        containerRef: { current: null },
+        gridStyle: { gridTemplateColumns: 'repeat(8, 1fr)' }
+    })
+}));
+
 // Mock react-virtuoso so VirtuosoGrid renders items directly (no layout measurement needed)
 vi.mock('react-virtuoso', () => ({
     VirtuosoGrid: ({ totalCount, itemContent }: { totalCount: number; itemContent: (index: number) => React.ReactNode }) => (

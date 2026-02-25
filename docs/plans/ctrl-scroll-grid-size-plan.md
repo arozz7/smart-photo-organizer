@@ -24,18 +24,18 @@ These use Tailwind `grid grid-cols-N` classes. Ctrl+Scroll changes the column co
 
 | Component | File | Current Columns | viewId |
 |-----------|------|-----------------|--------|
-| AllFacesModal | `src/components/AllFacesModal.tsx` (318L) | 3→4→6→8→10→12→14 (VirtuosoGrid) | `allFaces` |
-| OutlierReviewModal | `src/components/OutlierReviewModal.tsx` (428L) | 3→4→6→8→10→12→14 (VirtuosoGrid) | `outlierReview` |
-| BlurryFacesModal | `src/components/BlurryFacesModal.tsx` (720L) | 3→4→6→8→10→12→14 (VirtuosoGrid) | `blurryFaces` |
+| AllFacesModal | `src/components/AllFacesModal.tsx` (318L, grid@L148) | 3→4→6→8→10→12→14 (VirtuosoGrid) | `allFaces` |
+| OutlierReviewModal | `src/components/OutlierReviewModal.tsx` (428L, grid@L34) | 3→4→6→8→10→12→14 (VirtuosoGrid) | `outlierReview` |
+| BlurryFacesModal | `src/components/BlurryFacesModal.tsx` (720L, grid@L28) | 3→4→6→8→10→12→14 (VirtuosoGrid) | `blurryFaces` |
 | People: Identified | `src/views/People.tsx` (1326L) | 2→3→4→5→6 (PersonCards) | `peopleIdentified` |
-| People: Singles | `src/views/People.tsx` | 6→8→10→12 | `peopleSingles` |
-| People: Ignored | `src/views/People.tsx` | 4→6→8→10 | `peopleIgnored` |
-| People: Background | `src/views/People.tsx` | 4→6→8→10 | `peopleBackground` |
-| People: Ungroupable | `src/views/People.tsx` | 6→8→10 | `peopleUngroupable` |
-| ClusterRow | `src/components/ClusterRow.tsx` (346L) | 6→8→10 | `clusterRow` |
-| FaceGrid | `src/components/FaceGrid.tsx` (148L) | 2→4→6→8 | `faceGrid` |
-| GroupNamingModal | `src/components/GroupNamingModal.tsx` (145L) | 4→5→6 | `groupNaming` |
-| PersonDetail | `src/views/PersonDetail.tsx` (534L) | 2→3→4→6 | `personDetail` |
+| People: Singles | `src/views/People.tsx` (~L887) | 6→8→10→12 | `peopleSingles` |
+| People: Ignored | `src/views/People.tsx` (~L1055) | 4→6→8→10 | `peopleIgnored` |
+| People: Background | `src/views/People.tsx` (~L1104) | 4→6→8→10 | `peopleBackground` |
+| People: Ungroupable | `src/views/People.tsx` (~L1184) | 6→8→10 | `peopleUngroupable` |
+| ClusterRow | `src/components/ClusterRow.tsx` (346L, grid@L271) | 6→8→10 | `clusterRow` |
+| FaceGrid | `src/components/FaceGrid.tsx` (148L, grid@L66) | 2→4→6→8 | `faceGrid` |
+| GroupNamingModal | `src/components/GroupNamingModal.tsx` (145L, grid@L72) | 4→5→6 | `groupNaming` |
+| PersonDetail | `src/views/PersonDetail.tsx` (534L) | TBD — read before Phase 4 | `personDetail` |
 
 ### Type B: Flex-Wrap (photo thumbnails — item size control)
 
@@ -82,7 +82,7 @@ Create `src/context/GridSizeContext.tsx`:
 - `GridSizeProvider` wrapping the app
 - `useGridSize(viewId: string, defaultColumns: number)` → `{ columns, setColumns, zoomIn, zoomOut }`
 - localStorage read/write with key `gridSize:<viewId>`
-- Clamp to `[4, 14]` range for face grids
+- Clamp to `[4, 12]` range for face grids (per spec)
 
 ### Task 1.2: useCtrlScroll hook
 Create `src/hooks/useCtrlScroll.ts`:
@@ -91,6 +91,7 @@ Create `src/hooks/useCtrlScroll.ts`:
 - Call `event.preventDefault()` to suppress browser zoom
 - Debounce 50ms via `useRef` timer
 - Call `onZoomIn`/`onZoomOut` based on `deltaY` sign
+- **VirtuosoGrid note:** Use `{ capture: true, passive: false }` on the listener so it intercepts before VirtuosoGrid's own scroll handler. The `containerRef` must be on the **outer wrapper div**, not on `<VirtuosoGrid>` itself.
 
 ### Task 1.3: useDynamicGrid hook
 Create `src/hooks/useDynamicGrid.ts`:
@@ -247,7 +248,7 @@ Create `src/hooks/usePeopleGridSize.ts`:
 - [ ] AllFacesModal with 5000+ faces — no lag on zoom
 - [ ] Each People.tsx sub-view zooms independently
 - [ ] VirtuosoGrid virtualization works correctly after column change
-- [ ] Bounds enforced (4–14 for face grids, 80–300px for photo grids)
+- [ ] Bounds enforced (4–12 for face grids, 80–300px for photo grids)
 - [ ] Toast appears and auto-dismisses
 - [ ] Settings persist across page navigation and app restart
 - [ ] Different views remember different sizes

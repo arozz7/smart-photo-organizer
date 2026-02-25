@@ -2,20 +2,7 @@
 
 ## 🚀 Priority Roadmap
 
-
-
-### 1. Ctrl+Scroll Grid Size Control
-- **Goal:** Allow users to dynamically adjust face thumbnail grid density using Ctrl+scroll wheel.
-- **Core Features:**
-    - **Ctrl+Scroll Zoom:** Increase/decrease grid columns (4-12 range).
-    - **Per-View Persistence:** Each modal/page remembers its own setting (localStorage).
-    - **Visual Feedback:** Brief toast showing "Grid: X columns" on change.
-    - **Performance Optimized:** CSS-only changes, debounced events, VirtuosoGrid-safe.
-- **Affected Components:** AllFacesModal, OutlierReviewModal, BlurryFacesModal, People.tsx (4 sub-views), ClusterRow, PersonDetail, GroupNamingModal, FaceGrid.
-- **Modularization:** All logic in new hooks (`useCtrlScroll`, `useDynamicGrid`, `GridSizeContext`) to avoid bloating existing large files.
-- **Implementation Plan:** See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/plans/ctrl-scroll-grid-size-plan.md)
-
-### 2. UX Modernization (UI Polish)
+### 1. UX Modernization (UI Polish)
 - **Goal:** Elevate the UI from functional to polished product quality through systematic improvements to navigation, controls, typography, accessibility, and first-run experience.
 - **Core Features:**
     - **Sidebar Navigation:** Add Radix icons to all nav links, group items by category (Core/Tools/System) with subtle dividers, extract reusable `SidebarLink` component.
@@ -161,6 +148,21 @@
 ---
 
 # ✅ Implemented Features
+
+## v0.7.0 (In Progress)
+
+### Ctrl+Scroll Grid Size Control
+*Details: See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/plans/ctrl-scroll-grid-size-plan.md)*
+
+- **Goal:** Allow users to dynamically adjust face/photo thumbnail grid density using Ctrl+scroll wheel.
+- **Core Features:**
+    - **Ctrl+Scroll Zoom:** Increase/decrease grid columns (4–12 range) or item size (80–300px for photo grids).
+    - **Per-View Persistence:** Each modal/page remembers its own setting via localStorage (`spo:grid:<key>`).
+    - **Visual Feedback:** 1-second `info` toast showing "Grid: N columns" on every change.
+    - **VirtuosoGrid-Safe:** Uses `capture:true` + `preventDefault()` to intercept before VirtuosoGrid's scroll handler.
+- **Affected Components:** AllFacesModal, OutlierReviewModal, BlurryFacesModal, People.tsx (4 sub-views), ClusterRow, PersonDetail, GroupNamingModal, FaceGrid, Library, Search.
+- **New Hooks:** `useCtrlScroll`, `useDynamicGrid`, `useFlexZoom`, `usePeopleGridSize`; new context: `GridSizeContext`.
+- [See Changelog](aiChangeLog/phase-97-ctrl-scroll-grid-size.md)
 
 ## v0.6.5 (Current Release)
 

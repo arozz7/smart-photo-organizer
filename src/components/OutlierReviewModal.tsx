@@ -5,13 +5,14 @@
  * distance-from-centroid analysis (Phase 1: Misassigned Face Detection).
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { VirtuosoGrid } from 'react-virtuoso';
 import * as Dialog from '@radix-ui/react-dialog';
 import FaceThumbnail from './FaceThumbnail';
 import RenameModal from './modals/RenameModal';
 import { OutlierResult } from '../hooks/usePersonDetail';
 import { useScan } from '../context/ScanContext';
+import { useDynamicGrid } from '../hooks/useDynamicGrid';
 
 interface OutlierReviewModalProps {
     isOpen: boolean;
@@ -26,24 +27,11 @@ interface OutlierReviewModalProps {
     onIgnoreFaces?: (faceIds: number[]) => Promise<void>;
 }
 
-const GridList = React.forwardRef<HTMLDivElement, any>(({ style, children, ...props }, ref) => (
-    <div
-        ref={ref}
-        {...props}
-        style={style}
-        className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 min-[2000px]:grid-cols-14 gap-2 p-2"
-    >
-        {children}
-    </div>
-));
-
 const GridItem = ({ children, ...props }: any) => (
     <div {...props} className="aspect-square">
         {children}
     </div>
 );
-
-const gridComponents = { List: GridList, Item: GridItem };
 
 export default function OutlierReviewModal({
     isOpen,
@@ -60,6 +48,16 @@ export default function OutlierReviewModal({
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [isProcessing, setIsProcessing] = useState(false);
     const { viewPhoto, viewingPhoto } = useScan();
+    const { containerRef, gridStyle } = useDynamicGrid({ storageKey: 'outlierReview', default: 8 });
+
+    const gridComponents = useMemo(() => ({
+        List: React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ children, style, ...props }, ref) => (
+            <div ref={ref} {...props} style={{ ...style, ...gridStyle, padding: '0.5rem' }}>
+                {children}
+            </div>
+        )),
+        Item: GridItem,
+    }), [gridStyle]) as any;
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     // Local copy of outliers so we can filter out removed faces without closing
     const [localOutliers, setLocalOutliers] = useState<OutlierResult[]>(initialOutliers);
@@ -255,8 +253,8 @@ export default function OutlierReviewModal({
                             <div className="flex-1" />
                         </div>
 
-                        {/* Content */}
-                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                        {/* Content — containerRef captures Ctrl+scroll for grid zoom */}
+                        <div ref={containerRef} className="flex-1 overflow-y-auto p-4 custom-scrollbar">
                             {displayedOutliers.length === 0 && !isProcessing ? (
                                 <div className="flex flex-col items-center justify-center h-full text-gray-500">
                                     <span className="text-4xl mb-4">✓</span>
