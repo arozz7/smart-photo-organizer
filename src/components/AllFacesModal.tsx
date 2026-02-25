@@ -5,6 +5,7 @@ import PersonFaceItem from './PersonFaceItem';
 import { Face } from '../types';
 import { useAlert } from '../context/AlertContext';
 import { useToast } from '../context/ToastContext';
+import { useDynamicGrid } from '../hooks/useDynamicGrid';
 
 
 import RenameModal from './modals/RenameModal';
@@ -23,6 +24,7 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
     const [selectedFaces, setSelectedFaces] = useState<Set<number>>(new Set());
     const { showAlert, showConfirm } = useAlert();
     const { addToast } = useToast();
+    const { containerRef, gridStyle } = useDynamicGrid({ storageKey: 'allFaces', default: 8 });
     const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
     // Snapshot for stable modal props
     const [facesToMove, setFacesToMove] = useState<number[]>([]);
@@ -144,13 +146,12 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
             <div
                 ref={ref}
                 {...props}
-                style={style}
-                className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 min-[2000px]:grid-cols-14 gap-2 p-2"
+                style={{ ...style, ...gridStyle, padding: '0.5rem' }}
             >
                 {children}
             </div>
         ))
-    }), []) as any;
+    }), [gridStyle]) as any;
 
     if (!isOpen) return null;
 
@@ -215,8 +216,8 @@ export default function AllFacesModal({ isOpen, onClose, personId, personName, o
                     </div>
                 </div>
 
-                {/* Content */}
-                <div className="flex-1 overflow-hidden bg-gray-950 relative">
+                {/* Content — containerRef captures Ctrl+scroll for grid zoom */}
+                <div ref={containerRef} className="flex-1 overflow-hidden bg-gray-950 relative">
                     <VirtuosoGrid
                         style={{ height: '100%' }}
                         totalCount={filteredFaces.length}

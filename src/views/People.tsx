@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { usePeopleGridSize } from '../hooks/usePeopleGridSize'
 import { usePeople } from '../context/PeopleContext'
 import { useAI } from '../context/AIContext'
 import { useScan } from '../context/ScanContext'
@@ -44,6 +45,7 @@ export default function People() {
     const { showConfirm } = useAlert()
     const { addToast } = useToast()
     const { viewPhoto } = useScan()
+    const gridSizes = usePeopleGridSize()
 
     // Existing hook for "Unnamed Faces" tab (Legacy + Controller internal)
     const {
@@ -884,7 +886,7 @@ export default function People() {
                                                         </button>
                                                     )}
                                                 </div>
-                                                <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 gap-2">
+                                                <div ref={gridSizes.singles.containerRef} style={gridSizes.singles.gridStyle}>
                                                     {visibleSingleFaces.map(face => (
                                                         <div
                                                             key={face.id}
@@ -1052,7 +1054,7 @@ export default function People() {
                                                 focusedIndex={ignoredCtrl.controller.focusedClusterIndex}
                                             />
                                         ) : (
-                                            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
+                                            <div ref={gridSizes.ignored.containerRef} style={gridSizes.ignored.gridStyle}>
                                                 {ignoredFaces.map(face => (
                                                     <div key={face.id} className={`aspect-square rounded-lg overflow-hidden border-2 cursor-pointer relative group ${ignoredCtrl.controller.selectedFaceIds.has(face.id) ? 'border-green-500' : 'border-transparent hover:border-gray-700'}`} onClick={() => ignoredCtrl.controller.toggleFace(face.id)}>
                                                         <FaceThumbnail
@@ -1101,7 +1103,7 @@ export default function People() {
                                     </div>
                                     {/* Ignore button removed from here, moved to FAB */}
                                 </div>
-                                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
+                                <div ref={gridSizes.background.containerRef} style={gridSizes.background.gridStyle}>
                                     {backgroundFaces.map(c => (
                                         <div key={c.faceId} className={`aspect-square rounded-lg overflow-hidden border-2 cursor-pointer relative group ${bgCtrl.selectedIds.has(c.faceId) ? 'border-red-500' : 'border-transparent hover:border-gray-700'}`} onClick={() => bgCtrl.toggleSelection(c.faceId)}>
                                             <FaceThumbnail
@@ -1181,7 +1183,7 @@ export default function People() {
                                         <button onClick={clearUngroupableSelection} className="text-xs text-gray-500 hover:text-gray-400">Deselect</button>
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-2">
+                                <div ref={gridSizes.ungroupable.containerRef} style={gridSizes.ungroupable.gridStyle}>
                                     {ungroupableFetched.map(face => (
                                         <div
                                             key={face.id}

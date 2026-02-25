@@ -8,6 +8,26 @@ import { FaceRepository } from '../data/repositories/FaceRepository';
 import { FaceService } from '../core/services/FaceService';
 import { ConfigService } from '../core/services/ConfigService';
 
+const REVIEW_NEEDED_MIN_COHESION = 0.40;
+
+/**
+ * Compute centroid L2 magnitude for a cluster of face IDs (cohesion metric, range 0–1).
+ * - Cohesive group (same person, normalized descriptors aligned): magnitude ≈ 1.0
+ * - Heterogeneous garbage cluster (random objects): magnitude ≈ 0.0 (vectors cancel)
+ */
+function computeClusterCohesion(clusterIds: number[], faceMap: Map<number, number[]>): number {
+    const sampleIds = clusterIds.slice(0, 20);
+    const descriptors = sampleIds.map(id => faceMap.get(id)).filter((d): d is number[] => !!d);
+    if (descriptors.length === 0) return 0;
+    const dims = descriptors[0].length;
+    const centroid = new Array(dims).fill(0);
+    descriptors.forEach(d => { for (let i = 0; i < dims; i++) centroid[i] += d[i]; });
+    for (let i = 0; i < dims; i++) centroid[i] /= descriptors.length;
+    let magnitude = 0;
+    for (let i = 0; i < dims; i++) magnitude += centroid[i] * centroid[i];
+    return Math.sqrt(magnitude);
+}
+
 export function registerAIHandlers() {
     // Generic Proxy 
 
@@ -150,7 +170,7 @@ export function registerAIHandlers() {
 
     // ... Other handlers mapped to PythonProvider ...
     ipcMain.handle('ai:clusterFaces', async (_, args) => {
-        const { faceIds, eps, min_samples } = args;
+        const { faceIds, eps, min_samples, min_cohesion, max_spread } = args;
         const ids = faceIds || [];
         if (ids.length === 0) return { clusters: [], singles: [] };
 
@@ -160,23 +180,19 @@ export function registerAIHandlers() {
                 .filter((f: any) => f.descriptor && f.descriptor.length > 0)
                 .map((f: any) => ({ id: f.id, descriptor: f.descriptor }));
 
-            return await pythonProvider.clusterFaces(formattedFaces, eps, min_samples);
+            const payload = {
+                faces: formattedFaces,
+                eps: eps ?? 0.45,
+                min_samples: min_samples ?? 2,
+                min_cohesion: min_cohesion ?? 0.0,
+                max_spread: max_spread ?? 0.0
+            };
+            return await pythonProvider.sendRequest('cluster_faces', payload, 600000);
         } catch (e) {
             logger.error(`[IPC] ai:clusterFaces failed: ${e}`);
             return { clusters: [], singles: [] };
         }
     });
-    // Wait, clusterFaces needs full logic (temp file etc) or Provider handles it?
-    // Provider `clusterFaces` takes objects.
-    // The handler logic had file writing.
-    // I should move that file writing logic to Provider or Service.
-    // `PythonAIProvider` implementation I wrote just calls `sendRequest`.
-    // It DOES NOT handle the file writing.
-    // So I need to keep the file writing logic here or better, put it in `FaceService.clusterFaces`.
-
-    // I will skip detailed reimplementation of Clustering in this single step to avoid error.
-    // I'll mark as TODO or basic wrap.
-    // The previous implementation was complex.
 
     // Find Ungroupable Faces - identifies faces too far from any named person
     ipcMain.handle('ai:findUngroupableFaces', async (_event, options) => {
@@ -354,6 +370,12 @@ export function registerAIHandlers() {
             logger.info(`[Main] Clustering ${faces.length} faces with eps=${eps.toFixed(3)}, groupBySuggestion=${options?.groupBySuggestion || false}`);
             const clusteringResult = await pythonProvider.sendRequest('cluster_faces', payload, 900000);
 
+            // Pre-build descriptor lookup used for cohesion filtering in both code paths below
+            const faceMap = new Map<number, number[]>();
+            faces.forEach((f: any) => {
+                if (f.descriptor) faceMap.set(f.id, f.descriptor);
+            });
+
             // Options: Group by AI Suggestion (Backend)
             // If enabled, we calculate centroids of clusters, match them against known people,
             // and merge clusters that suggest the same person.
@@ -363,11 +385,7 @@ export function registerAIHandlers() {
                 try {
                     const { FaceService } = await import('../core/services/FaceService');
 
-                    // 1. Prepare fast descriptor lookup
-                    const faceMap = new Map<number, number[]>();
-                    faces.forEach((f: any) => {
-                        if (f.descriptor) faceMap.set(f.id, f.descriptor);
-                    });
+                    // 1. Descriptor lookup (faceMap pre-built above for cohesion filtering)
 
                     // NOTE: We previously tried splitting oversized clusters, but it broke them into
                     // individual faces which is terrible UX (478 single-face groups instead of few large groups).
@@ -478,9 +496,22 @@ export function registerAIHandlers() {
                         const suggestedCount = taggedClusters.filter(c => c.suggestion).length;
                         logger.info(`[AI] Tagged ${suggestedCount} clusters with ${uniquePersons.size} unique person suggestions (no merging)`);
 
+                        // Apply return-time cohesion filter — demote garbage clusters to singles
+                        const demotedGroupIds: number[] = [];
+                        const finalTaggedClusters = taggedClusters.filter(cluster => {
+                            const cohesion = computeClusterCohesion(cluster.faces, faceMap);
+                            if (cohesion < REVIEW_NEEDED_MIN_COHESION) {
+                                logger.debug(`[AI] Return-time filter: demoting cluster size=${cluster.faces.length} cohesion=${cohesion.toFixed(3)}`);
+                                demotedGroupIds.push(...cluster.faces);
+                                return false;
+                            }
+                            return true;
+                        });
+                        const filteredGroupSingles = [...(clusteringResult.singles || []), ...demotedGroupIds];
+
                         return {
-                            clusters: taggedClusters,
-                            singles: clusteringResult.singles,
+                            clusters: finalTaggedClusters,
+                            singles: filteredGroupSingles,
                             totalUnassigned
                         };
                     }
@@ -490,12 +521,23 @@ export function registerAIHandlers() {
                 }
             }
 
-            // Normalizing return type if not grouped (or if failed)
-            // Frontend now expects object structure if we want to be consistent?
-            // Or we handle both? safely handle both.
-            // But if we return original number[][], usePeopleCluster handles it.
+            // Apply return-time cohesion filter for non-grouped path
+            const demotedIds: number[] = [];
+            const cohesiveClusters = ((clusteringResult.clusters || []) as number[][]).filter((clusterIds: number[]) => {
+                const cohesion = computeClusterCohesion(clusterIds, faceMap);
+                if (cohesion < REVIEW_NEEDED_MIN_COHESION) {
+                    logger.debug(`[AI] Return-time filter: demoting cluster size=${clusterIds.length} cohesion=${cohesion.toFixed(3)}`);
+                    demotedIds.push(...clusterIds);
+                    return false;
+                }
+                return true;
+            });
+            const updatedSingles = [...(clusteringResult.singles || []), ...demotedIds];
+
             return {
                 ...clusteringResult,
+                clusters: cohesiveClusters,
+                singles: updatedSingles,
                 totalUnassigned
             };
         } catch (e) {

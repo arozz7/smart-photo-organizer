@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useDynamicGrid } from '../hooks/useDynamicGrid';
 import PersonFaceItem from '../components/PersonFaceItem';
 import BlurryFacesModal from '../components/BlurryFacesModal';
 import AllFacesModal from '../components/AllFacesModal';
@@ -16,6 +17,7 @@ const PersonDetail = () => {
     const { personId } = useParams();
     const navigate = useNavigate();
     const { setThrottled } = useAI();
+    const { containerRef, gridStyle } = useDynamicGrid({ storageKey: 'personDetail', default: 6 });
 
     // UI State for Modals
     const [isBlurryModalOpen, setIsBlurryModalOpen] = useState(false);
@@ -460,8 +462,8 @@ const PersonDetail = () => {
             )}
 
             {/* Faces Grid */}
-            <div className="flex-1 overflow-y-auto pr-2">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            <div ref={containerRef} className="flex-1 overflow-y-auto pr-2">
+                <div style={{ ...gridStyle, gap: '1rem' }}>
                     {faces.map(face => (
                         <PersonFaceItem
                             key={face.id}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { usePeople } from '../context/PeopleContext'
 import FaceGridItem from './FaceGridItem'
 import FaceThumbnail from './FaceThumbnail'
+import { useDynamicGrid } from '../hooks/useDynamicGrid'
 
 interface FaceGridProps {
     faces: any[]
@@ -12,6 +13,7 @@ interface FaceGridProps {
 export default function FaceGrid({ faces, selectedIds, onToggleSelection }: FaceGridProps) {
     const { assignPerson, autoNameFaces } = usePeople()
     const [selectedFace, setSelectedFace] = useState<number | null>(null)
+    const { containerRef, gridStyle } = useDynamicGrid({ storageKey: 'faceGrid', default: 6 })
 
     // Smart Naming State
     const [smartNaming, setSmartNaming] = useState<{ count: number, matchIds: number[], name: string } | null>(null)
@@ -63,7 +65,7 @@ export default function FaceGrid({ faces, selectedIds, onToggleSelection }: Face
 
     return (
         <>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4 p-4">
+            <div ref={containerRef} style={{ padding: '1rem', gap: '1rem', ...gridStyle }}>
                 {faces.map(face => (
                     <FaceGridItem
                         key={face.id}

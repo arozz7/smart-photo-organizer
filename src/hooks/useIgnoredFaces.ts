@@ -24,17 +24,13 @@ export function useIgnoredFaces({ enabled }: UseIgnoredFacesOptions) {
     // Controller Integration
     const controllerData = useMemo(() => {
         if (isGrouping) {
-            const groupClusters = clusters.map(c => ({
+            // Only show actual DBSCAN clusters — singles are faces DBSCAN correctly
+            // identified as not belonging to any group. Lumping them into a single
+            // mega-row is misleading (they're unrelated). Use flat view to see them.
+            return clusters.map(c => ({
                 faces: c.faces.map(f => Number(f.id)),
                 data: c
             }));
-            if (singles.length > 0) {
-                groupClusters.push({
-                    faces: singles.map(f => Number(f.id)),
-                    data: { id: 'singles', faces: singles }
-                });
-            }
-            return groupClusters;
         } else {
             if (faces.length === 0) return [];
             return [{
@@ -140,8 +136,10 @@ export function useIgnoredFaces({ enabled }: UseIgnoredFacesOptions) {
                 // @ts-ignore
                 const res = await window.ipcRenderer.invoke('ai:clusterFaces', {
                     faceIds,
-                    eps: 0.45,
-                    min_samples: 2
+                    eps: 0.35,
+                    min_samples: 2,
+                    min_cohesion: 0.65,
+                    max_spread: 0.7
                 })
 
                 if (res.clusters) {

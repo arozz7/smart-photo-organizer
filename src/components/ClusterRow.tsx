@@ -3,6 +3,7 @@ import { Face } from '../types'
 import FaceThumbnail from './FaceThumbnail'
 import { useScan } from '../context/ScanContext'
 import { usePeople } from '../context/PeopleContext'
+import { useDynamicGrid } from '../hooks/useDynamicGrid'
 
 interface ClusterRowProps {
     faceIds: number[]
@@ -42,6 +43,7 @@ const ClusterRow = memo(({
     const [suggestion, setSuggestion] = useState<any>(null)
     const { viewPhoto } = useScan()
     const { matchBatch } = usePeople()
+    const { containerRef, gridStyle } = useDynamicGrid({ storageKey: 'clusterRow', default: 8 })
 
     useEffect(() => {
         let mounted = true;
@@ -268,7 +270,7 @@ const ClusterRow = memo(({
             </div>
 
             {/* Faces Grid */}
-            <div className="p-3 grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-2">
+            <div ref={containerRef} style={{ padding: '0.75rem', ...gridStyle }}>
                 {loaded ? (
                     clusterFaces.map((face) => (
                         <div

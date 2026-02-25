@@ -45,6 +45,7 @@ def cluster_faces(payload, req_id=None):
         min_samples = int(payload.get('min_samples', 2))
         max_size = int(payload.get('max_size', 200)) # Default to 200
         debug = bool(payload.get('debug', False))
+        min_cohesion = float(payload.get('min_cohesion', 0.0))
         
         result = faces.cluster_faces_dbscan(descriptors, ids, eps, min_samples, debug=debug)
         
@@ -74,9 +75,51 @@ def cluster_faces(payload, req_id=None):
             else:
                 final_clusters.append(cluster)
         
-        cluster_list = final_clusters 
+        cluster_list = final_clusters
 
-        
+        max_spread = float(payload.get('max_spread', 0.0))
+
+        # Cohesion + spread filter: demote garbage/chain-linked clusters to singles.
+        # For L2-normalized descriptors:
+        #   - Cohesion (centroid magnitude): same-person cluster ≈ 1.0, random garbage ≈ 0.0
+        #   - Spread (max member-to-centroid distance): tight cluster ≈ 0.3-0.6, chain-linked ≈ 1.0+
+        # Either failing check demotes the whole cluster to singles.
+        if min_cohesion > 0.0 or max_spread > 0.0:
+            logger.info(
+                f"Cluster quality filter: {len(cluster_list)} clusters, "
+                f"min_cohesion={min_cohesion}, max_spread={max_spread}"
+            )
+            cohesive_clusters = []
+            for idx, cluster in enumerate(cluster_list):
+                member_idxs = [id_to_idx[fid] for fid in cluster if fid in id_to_idx]
+                if not member_idxs:
+                    continue
+                cluster_descriptors = X_normalized[member_idxs]
+                centroid = np.mean(cluster_descriptors, axis=0)
+                magnitude = float(np.linalg.norm(centroid))
+
+                # Spread: max euclidean distance from any member to the centroid
+                distances = np.linalg.norm(cluster_descriptors - centroid, axis=1)
+                spread = float(np.max(distances))
+
+                logger.info(
+                    f"  Cluster {idx}: size={len(cluster)}, "
+                    f"magnitude={magnitude:.3f}, spread={spread:.3f}"
+                )
+
+                if min_cohesion > 0.0 and magnitude < min_cohesion:
+                    logger.info(
+                        f"  -> DEMOTED (magnitude {magnitude:.3f} < {min_cohesion})"
+                    )
+                    continue
+                if max_spread > 0.0 and spread > max_spread:
+                    logger.info(
+                        f"  -> DEMOTED (spread {spread:.3f} > {max_spread})"
+                    )
+                    continue
+                cohesive_clusters.append(cluster)
+            cluster_list = cohesive_clusters
+
         # Identify singles (all IDs not in flattened cluster list)
         clustered_ids = set([i for c in cluster_list for i in c])
         singles = [i for i in ids if i not in clustered_ids]

@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { Cross2Icon } from '@radix-ui/react-icons';
 import FaceThumbnail from './FaceThumbnail';
 import { PersonNameInput } from './PersonNameInput';
+import { useDynamicGrid } from '../hooks/useDynamicGrid';
 
 interface GroupNamingModalProps {
     open: boolean;
@@ -16,6 +17,7 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [name, setName] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const { containerRef, gridStyle } = useDynamicGrid({ storageKey: 'groupNaming', default: 5, max: 10 });
 
     // Reset selection when opening
     useEffect(() => {
@@ -68,8 +70,8 @@ const GroupNamingModal: React.FC<GroupNamingModalProps> = ({ open, onOpenChange,
                         Assign a name to the selected faces.
                     </Dialog.Description>
 
-                    <div className="flex-1 overflow-y-auto mb-6 custom-scrollbar pr-2">
-                        <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-4">
+                    <div ref={containerRef} className="flex-1 overflow-y-auto mb-6 custom-scrollbar pr-2">
+                        <div style={{ ...gridStyle, gap: '1rem' }}>
                             {faces.map(face => (
                                 <div
                                     key={face.id}

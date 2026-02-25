@@ -3,6 +3,7 @@ import { useScan } from '../context/ScanContext'
 import { useAI } from '../context/AIContext'
 import { useAlert } from '../context/AlertContext'
 import { VirtuosoGrid } from 'react-virtuoso'
+import { useFlexZoom } from '../hooks/useFlexZoom'
 
 // import AIStatus from '../components/AIStatus'
 import ScanErrorsModal from '../components/ScanErrorsModal'
@@ -13,6 +14,7 @@ export default function Library() {
     const { scanning, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, availableFolders, availablePeople, scanErrors, loadScanErrors, setViewingPhoto, rescanFiles } = useScan()
     const { setThrottled } = useAI()
     const { showAlert, showConfirm } = useAlert()
+    const { containerRef, itemStyle } = useFlexZoom({ storageKey: 'library', default: 150 })
     const [localPath, setLocalPath] = useState(scanPath || 'D:\\Photos')
     const [isSelectionMode, setIsSelectionMode] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -141,14 +143,13 @@ export default function Library() {
             ref={ref}
             {...props}
             style={{
-                width: '150px',
-                height: '150px',
+                ...itemStyle,
                 flex: '0 0 auto'
             }}
         >
             {children}
         </div>
-    )), [])
+    )), [itemStyle])
 
     // Local state for search to allow debouncing
     const [searchQuery, setSearchQuery] = useState('')
@@ -419,8 +420,8 @@ export default function Library() {
                 onOpenChange={setShowSettings}
             />
 
-            {/* Grid Content */}
-            <div className="flex-1 p-4 content-start h-full">
+            {/* Grid Content — containerRef captures Ctrl+scroll for photo size zoom */}
+            <div ref={containerRef} className="flex-1 p-4 content-start h-full">
                 {photos.length === 0 && !hasMore ? (
                     <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-4">
                         {('tag' in filter && !filter.tag) ? (

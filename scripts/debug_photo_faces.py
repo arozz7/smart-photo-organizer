@@ -73,59 +73,30 @@ def analyze_photo_faces():
         conn.close()
         return
     
-    print(f"Found {len(faces)} face detection(s):\n")
+    # Valid/Invalid Lists
+    results = []
     
-    for i, face in enumerate(faces, 1):
-        status = "🚫 IGNORED" if face['is_ignored'] else "✅ ACTIVE"
-        entity = face['entity_type'] or 'unknown'
-        
-        # Parse box_json
+    for face in faces:
         box = json.loads(face['box_json']) if face['box_json'] else {}
+        width = box.get('width', 0)
+        height = box.get('height', 0)
         
-        print(f"Face #{i} [{status}] (Entity: {entity})")
-        print(f"  ID: {face['id']}")
-        print(f"  BBox: {box}")
-        print(f"  Detection Score: {face['score']:.3f}" if face['score'] else "  Detection Score: None")
-        print(f"  Face Quality: {face['face_quality']:.3f}" if face['face_quality'] else "  Face Quality: None")
-        print(f"  Confidence Tier: {face['confidence_tier']}")
-        print(f"  Verification Attempts: {face['verification_attempts']}")
-        
-        if face['pose_yaw'] is not None:
-            print(f"  Pose: yaw={face['pose_yaw']:.1f}°, pitch={face['pose_pitch']:.1f}°")
-        
-        if face['estimated_age']:
-            print(f"  Age: {face['estimated_age']}, Gender: {face['gender']}")  # noqa - debug script, ML-estimated demographics not PII
-        
-        print("\n" + "-"*80 + "\n")
-    
-    # Summary
-    active_faces = [f for f in faces if not f['is_ignored']]
-    ignored_faces = [f for f in faces if f['is_ignored']]
-    
-    print("="*80)
-    print(f"📊 SUMMARY:")
-    print(f"   Total Detections: {len(faces)}")
-    print(f"   Active Faces: {len(active_faces)}")
-    print(f"   Ignored Faces: {len(ignored_faces)}")
-    
-    if ignored_faces:
-        print(f"\n⚠️  IGNORED FACES (should not reappear on rescan):")
-        for face in ignored_faces:
-            entity = face['entity_type'] or 'unknown'
-            print(f"   - Face {face['id']}: Entity={entity}, Tier={face['confidence_tier']}")
-    
-    if len(active_faces) > 2:
-        print(f"\n🚨 PROBLEM DETECTED: {len(active_faces)} active faces (expected 2 valid faces)")
-        print(f"   This suggests non-face boxes are still present!")
-        print(f"\n   Active faces breakdown:")
-        for face in active_faces:
-            entity = face['entity_type'] or 'unknown'
-            tier = face['confidence_tier'] or 'unknown'
-            score = face['score'] if face['score'] else 0
-            print(f"   - Face {face['id']}: Entity={entity}, Tier={tier}, Score={score:.3f}")
-    
+        results.append({
+            'id': face['id'],
+            'score': face['score'],
+            'quality': face['face_quality'],
+            'width': width,
+            'height': height,
+            'is_ignored': face['is_ignored']
+        })
+
+    with open('debug_faces.json', 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=2)
+
+    print(f"Dumped {len(faces)} faces to debug_faces.json")
     conn.close()
 
 if __name__ == "__main__":
     analyze_photo_faces()
+
 

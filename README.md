@@ -2,130 +2,399 @@
 
 > A local-first, AI-powered photo management tool. Organize your memories without leaving your hard drive.
 
-![License](https://img.shields.io/badge/license-GPL3+-blue.svg) ![Electron](https://img.shields.io/badge/electron-v28+-blue) ![React](https://img.shields.io/badge/react-v18-blue)
+![License](https://img.shields.io/badge/license-GPL3+-blue.svg) ![Electron](https://img.shields.io/badge/electron-v28+-blue) ![React](https://img.shields.io/badge/react-v18-blue) ![Python](https://img.shields.io/badge/python-3.12-blue)
 
 ## Overview
 
-Smart Photo Organizer uses advanced AI (InsightFace for people, SmolVLM for objects) to classify and organize your photo library. Unlike cloud services, **all processing happens locally** on your machine, ensuring your privacy.
+Smart Photo Organizer uses advanced AI — **InsightFace** for people, **SmolVLM** for scene understanding — to automatically classify and organize your photo library. Unlike cloud services, **all processing happens locally** on your machine, ensuring your photos never leave your hard drive.
 
-> **Extreme Slim Installer:** The v0.3.5 release features a lightweight (~400MB) installer. While it works on CPU out-of-box, you can download the optional 5GB GPU Runtime for massive performance gains.
+> **Slim Installer:** The installer is a lightweight (~400MB) package. Download the optional 5GB GPU Runtime separately for a 10–20x performance boost on face scanning and upscaling.
 
-## Features at a Glance
+---
 
-*   **🕵️ Local AI Face Recognition:** Automatically detects and groups faces. **Smart Confidence Tiers** classify matches as High, Review (Amber Ring), or Unknown. Learns as you name them. Uses FAISS for lightning-fast similarity search across millions of faces.
-    
-    ![People Interactions](docs/assets/PeopleSectionInteractions.gif)
-*   **🏠 Home Dashboard:** Your personal command center. View "On This Day" memories, library statistics, recent activity, people spotlights, fun facts, a **Photo Timeline** chart (with year/month drill-down that links to Search), a **Library Health** gauge with error breakdown and CSV export, an auto-generated **Photo Collage** with multiple layout modes (Grid, Feature, Mosaic) and PNG/JPG export, and a **Location Heatmap** visualizing GPS photo clusters on an SVG world map. **Drag-and-drop** reorder and **snap-to-grid resize** for all widgets. Fully customizable with widget toggles and layout presets.
-*   **📐 Challenging Face Recognition:** Robust matching for side profiles (>30° yaw) and partial faces using multi-sample voting and dynamic, quality-based confidence thresholds.
-*   **⚙️ Configurable AI & Storage:** Fine-tune face detection, blur sensitivity, and tagging creativity settings. Choose where your library data (DB, previews, indices) is stored.
-*   **🧼 Blur Detection & Cleanup:** Automatically filters out blurry faces and provides tools to bulk-cleanup low-quality captures.
-*   **🚫 Smart Background Filter:** One-click tool to automatically detect and ignore unwanted background faces (crowds, strangers) using advanced clustering.
-*   **⏳ Configurable Era Generation:** Automatically clusters faces into distinct time periods (Reference Eras) for people who age significantly. Tweaking settings for merge thresholds gives you full control.
-*   **🏷️ Smart Tagging:** "Reads" your photos using vision models (VLM) to generate searchable tags and descriptions.
-    
-    ![Smart Tagging Details](docs/assets/ViewPictureDetailsLibrary.gif)
-*   **✨ AI Enhancement Lab:** Upscale old photos (x4) and restore grainy or blurry faces using state-of-the-art models (Real-ESRGAN, GFPGAN).
-*   **📷 RAW Support:** Native support for professional formats (Sony ARW, Canon CR2, Nikon NEF, etc.) with fast preview extraction.
-*   **⚡ High Performance:** Virtualized grid and optimized backend handles libraries with 100,000+ photos smoothly.
-*   **📅 Accurate Photo Dates:** All date-based features use actual photo capture dates from EXIF metadata (`DateTimeOriginal`), with file creation date as fallback — not the database import timestamp.
-*   **🔍 Semantic Search:** Search your photos by content, date, or person using AI-generated descriptions and tags.
-*   **🔎 Advanced Search & Filtering:** Dedicated Search view with a powerful filter sidebar — filter by blur quality, date range, camera model, file type, face attributes, and more. Build compound AND/OR/NOT queries and save filter presets as **Smart Albums**.
-*   **🎨 Set Builder (Create View):** Build custom collections by combining complex filters (e.g., "Person A AND Person B in 2024"). Export your sets to organized folders on disk.
-    
-    ![Set Builder](docs/assets/CreateAlbumFromFilters.gif)
+## Features
+
+### 🏠 Home Dashboard
+
+Your personal command center for your entire photo library.
+
+<!-- GIF: Home dashboard overview — widgets, on-this-day memories, and the collage widget -->
+![Home Dashboard Interactions](docs/assets/HomeDashboardSettings.gif)
+
+- **On This Day:** Relive memories from this exact date in previous years using actual photo capture dates from EXIF metadata — not the import date.
+- **Photo Collage:** Auto-generated daily collage from your "On This Day" photos. Choose between **Grid** (2×2 / 3×3), **Feature** (hero + supporting photos), or **Mosaic** (variable-height masonry) layouts. Regenerate with one click or export as PNG/JPG.
+- **Photo Timeline:** Interactive bar chart of your library by year. Click a year to drill into monthly counts, then click a month to jump to the Search view filtered to that period.
+- **Library Health:** Visual ring gauge showing processing completeness with an error breakdown by stage and one-click **CSV export** for diagnostics.
+- **Location Heatmap:** World map showing GPS clusters from your photos' EXIF data. Hover over any cluster to see photo counts and coordinates.
+- **People Spotlight:** Quick carousel of your most-photographed people.
+- **Fun Facts:** Insights about your library — peak year, busiest day, most-used camera, and more.
+- **Scan Entertainment:** Live discovery feed and memory flashbacks to watch while the AI works in the background.
+
+**Fully Customizable Layout:** Drag and drop widgets to reorder them. Resize stat widgets by dragging the corner handle — they snap to a 4/8/12 column grid. Toggle individual widgets or choose from layout presets: **Minimal**, **Balanced**, and **Power User**. Your layout is saved automatically.
+
+<!-- SCREENSHOT: Dashboard customize panel — widget toggles and layout presets -->
+
+---
+
+### 🖼️ Library
+
+Browse and manage your entire photo collection with a high-performance virtualized grid that handles libraries of 100,000+ photos without lag.
+
+<!-- GIF: Library grid → clicking a photo → photo detail panel with EXIF and AI tags -->
+![Library Interactions](docs/assets/LibraryNavPhotoDetailNameFace.gif)
+
+- **Photo Details:** Click any photo to view a large preview alongside EXIF metadata (camera model, lens, ISO, shutter speed, GPS) and AI-generated tags and descriptions.
+- **Date Navigation:** Filter by year or month using the sidebar date picker.
+- **Smart Orientation:** RAW files and mixed-orientation JPGs are automatically corrected — no manual rotation needed.
+- **Context Menu:** Right-click any photo to re-scan it, remove it from the library, or open it in the AI Enhance Lab.
+- **Force Face Scan:** Inside any photo detail view, trigger a high-sensitivity MACRO scan to find small or difficult faces the standard scan may have missed.
+- **Ctrl+Scroll Grid Density:** Hold Ctrl and scroll to dynamically increase or decrease the grid column count. Each view remembers its own setting.
+
+**Scan Errors Panel:** A badge in the Library header indicates corrupt or unreadable files found during scanning. Click it to open the Scan Errors panel — retry failed photos, export a full CSV error report, or clear resolved errors.
+
+<!-- SCREENSHOT: Scan errors panel with export CSV button -->
+
+---
+
+### 👤 People & Face Recognition
+
+The core of Smart Photo Organizer is its local, privacy-focused face recognition pipeline. All processing runs on your hardware — no cloud upload, ever.
+
+<!-- GIF: People tab → unnamed face group → typing a name → faces auto-assigned -->
+
+![People Interactions](docs/assets/PeoplePageNameFaceGroup.gif)
+
+#### Detection & Recognition
+
+- **Model:** InsightFace (Buffalo_L) — state-of-the-art face detection and 512-dimensional embedding extraction.
+- **FAISS Index:** All face vectors are indexed with FAISS (Facebook AI Similarity Search), enabling near-instant similarity lookups even in libraries with millions of faces. Automatically upgrades to an IVF index at 2,000+ faces for ~10× search speed at scale.
+- **Smart Cropping:** Portrait crops use facial landmark positions (eyes, nose, mouth) to center the head and neck naturally — not just a tight bounding box.
+
+#### Confidence Tiers & Visual Indicators
+
+| Ring | Meaning |
+|------|---------|
+| 🟢 Green | High-confidence auto-assignment (75%+ similarity). The AI is certain. |
+| 🟡 Amber | Review suggestion (60–75% similarity). Click **Accept** to confirm. |
+| **?** Badge | Weak match or challenging angle. Requires manual verification. |
+| No Ring | Unknown face — no close match found in your library. |
+
+<!-- SCREENSHOT: People view showing faces with green, amber, and unknown rings side by side -->
+![People Unnamed Suggestions](docs/assets/PeopleUnnamedSuggestion.png)
+
+#### Naming & Management
+
+- **Name a Face:** Click any unnamed group, type a name, and press Enter. The AI immediately learns the new identity and begins auto-assigning matching faces.
+- **Merge People:** Rename one person to match another and the app merges all photos and faces into the target — useful when you accidentally create duplicates.
+- **Ignore Background Faces:** Hide faces that aren't relevant (crowds, strangers, poster art). One-click bulk-ignore with the **Smart Background Filter**.
+
+#### Unnamed Faces Workflow
+
+<!-- GIF: Unnamed faces list → naming a group → keyboard shortcuts A/X/N in action -->
+![People Unamed Faces Workflow Interactions](docs/assets/PeopleUnnamedKeyNav.gif)
+
+- **AI Suggestion Groups:** The AI clusters visually similar faces and annotates each group with its best identity suggestion. Accepting a group assigns all faces at once.
+- **Ungroup:** Break apart a suggested group if it contains mixed faces — the faces return to the unmatched pool for individual sorting.
+- **Keyboard Navigation (Power Users):**
+  | Key | Action |
+  |-----|--------|
+  | `A` | Accept suggestion — name and advance |
+  | `N` | Open naming modal — manual assignment |
+  | `X` | Ignore group — hide from view |
+  | `↑` / `↓` or `J` / `K` | Move between groups |
+  | `/` | Start keyboard focus |
+- **Cluster Size Filters:** Toggle buttons to focus on Large (10+), Medium (5–9), or Small (2–4) groups — useful when clearing thousands of unknowns.
+- **Progressive Loading:** Scroll-triggered loading keeps the interface fast with 10,000+ face groups.
+
+#### Background Face Bucketing
+
+During idle time (between scans), a background service automatically processes unassigned faces:
+
+- **Suggestions:** Groups of faces that closely match a known person — confirm or reject as a batch.
+- **Discoveries:** New unknown clusters found by the AI — name or ignore them.
+- **Re-check Ignored:** Periodically re-evaluates the ignored pool against your growing people database.
+- **Zero Overhead:** The service pauses immediately when an active AI scan is running.
+
+<!-- SCREENSHOT: Suggestions tab with a batch of faces matched to a named person -->
+
+#### Smart Ignore Manager
+
+A dedicated panel for managing all hidden faces:
+
+- **Paginated View:** Browse thousands of ignored faces with fast pagination.
+- **Group Similar:** Cluster your ignored pile to spot accidentally hidden important photos.
+- **Sensitivity Slider:** Tune the matching threshold (0.1–0.95) to surface identity suggestions even for low-quality captures.
+- **Restore & Assign:** Restore individual faces or entire groups with one click, optionally assigning them to a person immediately.
+
+<!-- SCREENSHOT: Ignored faces manager with "Group Similar" clusters visible -->
+![People Ignored Faces Groups](docs/assets/IgnoredFacesGrouping.gif)
+#### Age-Based Eras
+
+For people who appear across many years, the app automatically tracks **life stages** — Newborn, Infant, Toddler, Child, Teen, Young Adult, Adult, Senior, Elderly — and builds separate recognition models per era. This dramatically improves matching accuracy when a person's appearance changes significantly over time.
+
+<!-- SCREENSHOT: Person detail showing eras (e.g., "Child 2010–2014", "Teen 2015–2019") -->
+
+#### Challenging Face Recognition
+
+Robust matching for difficult conditions using multi-sample voting and pose-aware thresholds:
+
+- Side profiles (yaw > 30°)
+- Partial faces and occlusions
+- Low-quality or small face crops
+
+#### Misassignment Detection
+
+The app continuously analyzes each person's face collection for outliers — faces that don't match the person's embedding model. Suspected misassignments are flagged for review. You can also **confirm** correct faces to exclude them from future outlier checks.
+
+#### Person Thumbnail Management
+
+- **Pin a Cover:** Manually set any face crop as a person's cover photo.
+- **Shuffle:** Pick a new high-quality random face as the cover.
+- **Smart Fallback:** Automatically reverts to the sharpest available face if unpinned.
+
+---
+
+### 🧹 Blur Detection & Cleanup
+
+- **Automatic Quality Scoring:** Every detected face is scored for sharpness (Laplacian variance). Extremely blurry faces are discarded during scanning based on your configurable threshold.
+- **Cleanup Tool:** A dedicated high-performance virtualized grid shows all low-quality face captures across your library. Bulk-delete to keep your People view clean.
+- **AdaFace Hybrid:** For faces that fall below the quality threshold but aren't discarded, the app switches to an AdaFace embedding model optimized for low-quality inputs — improving recognition accuracy for difficult captures with ~5–10ms overhead.
+
+<!-- GIF: Blurry faces cleanup modal → selecting faces → bulk delete -->
+
+---
+
+### 🔍 Search & Advanced Filtering
+
+A dedicated Search view with a powerful filter sidebar for building precise queries.
+
+<!-- GIF: Search view → adding filters → results updating live -->
+
+<!-- GIF: Search view filters in action — pending new asset -->
+
+**Available Filters:**
+- Blur quality score (sharp / blurry)
+- Date range — by file date or EXIF capture date
+- Camera model
+- File type (JPG, PNG, RAW formats)
+- Face attributes and person names
+- AI-generated tags and descriptions
+
+**Compound Logic:** Combine multiple filters using AND / OR / NOT operators with a visual filter builder. Mix person filters ("Person A AND Person B in the same photo from 2022") with tag filters for surgical precision.
+
+**Smart Albums:** Save any filter combination as a named Smart Album. Smart Albums auto-update as your library grows — no manual curation needed.
+
+<!-- SCREENSHOT: Filter builder with compound AND/OR logic and a saved Smart Album in the sidebar -->
+
+---
+
+### 🎨 Set Builder (Create View)
+
+Build custom photo collections by combining complex filter criteria, then export them to a folder on disk.
+
+<!-- GIF: Create view → adding filter rules → staging photos → exporting to folder -->
+
+<!-- GIF: Create view → adding filter rules → staging photos → exporting to folder — pending new asset -->
+
+- **Complex Multi-Person Filters:** Find photos containing multiple specific people (e.g., "Mom AND Dad, tagged 'birthday'").
+- **Staging Set:** Browse filter results and cherry-pick individual photos into your Current Set.
+- **Export Album:** Export the entire set to an organized folder on your computer — ready for printing, sharing, or archiving.
+
+---
+
+### 🏷️ Smart Tagging
+
+The app uses **SmolVLM** (a lightweight Vision-Language Model) to "read" your photos and generate searchable content.
+
+<!-- GIF: Selecting photos → triggering Smart Tag generation → tags appearing in detail panel -->
+
+- **Auto-Captioning:** The AI generates a natural-language description of each photo (e.g., "A golden retriever running through a park on a sunny day").
+- **Tag Extraction:** Keywords are parsed from the caption and stored as searchable tags (`dog`, `park`, `running`, `sunny`).
+- **Semantic Search:** Search your library by content — type "beach sunset" to find photos even if those words never appeared in a filename or folder name.
+- **Configurable Creativity:** Adjust the VLM temperature (0.1 = factual and deterministic, 0.8+ = diverse vocabulary with occasional hallucinations). Choose from Low / Medium / High presets.
+- **Tag Normalization:** All tags are enforced as lowercase and single-word by default. A cleanup utility in Settings migrates any existing tags to this format.
+
+> **Note:** Smart Tagging requires the AI GPU Runtime to be installed and an NVIDIA GPU with 4GB+ VRAM. It is not available in CPU-only mode due to memory bandwidth constraints.
+
+---
+
+### ✨ AI Enhancement Lab
+
+Restore and upgrade low-quality or old photos using state-of-the-art generative AI models.
+
+<!-- GIF: Enhancement lab → before/after slider → upscaling result -->
+
+- **Upscaling (×4):** Powered by **Real-ESRGAN** — quadruples image resolution while intelligently reconstructing fine details. Ideal for old digital photos or small crops.
+- **Face Restoration:** Powered by **GFPGAN** — targets human faces specifically to remove noise, blur, and compression artifacts, restoring crisp detail.
+- **Hybrid Mode:** Upscale the full image and restore all faces in a single pass for the best combined result.
+- **Before / After Slider:** Compare the original and enhanced version side-by-side with a draggable divider.
+- **Non-Destructive:** Enhanced images are saved alongside the original with a suffix (e.g., `photo_upscaled.jpg`). Your originals are never modified.
+
+<!-- SCREENSHOT: Enhancement lab showing before/after slider on a restored portrait -->
+
+---
+
+### 🔧 File Repair (Photo Repair Shop Integration)
+
+SPO integrates with [Photo Repair Shop](https://photo-repair-shop.app), a companion desktop app, to recover corrupt photo files directly from the Scan Errors panel.
+
+<!-- GIF: Scan errors panel → clicking repair button → progress bar → file re-ingested -->
+
+1. Open **Settings → Scan Warnings**. If Photo Repair Shop is running, a **"🔧 PRS ready"** badge appears in the header.
+2. Click the 🔧 button on any corrupt file row.
+3. SPO sends the file to PRS for **analysis** — PRS identifies the corruption type and recommends a repair strategy.
+4. SPO automatically submits a **repair job** using the suggested strategy, including healthy photos from your library as reference files for header-grafting repairs.
+5. A **progress bar** updates every 2 seconds as PRS reports completion percentage and stage.
+6. On completion, SPO **verifies** the repaired file (Sharp decode + AI analysis) before committing it to the library.
+7. If verification passes: the scan error is cleared, the corrupt record removed, and the repaired file is re-ingested (face detection, tagging, etc.).
+8. If verification fails: the row is marked **Unrepairable** with a persistent badge — no further repair attempts are made automatically.
+
+All communication happens over `localhost:3847` only — no network egress. A per-session UUID token is required for all calls; SPO never logs the token value.
+
+---
+
+### 📷 RAW & Format Support
+
+Native support for professional RAW formats with fast preview extraction:
+
+| Type | Formats |
+|------|---------|
+| Standard | JPG, JPEG, PNG, WEBP |
+| RAW | ARW (Sony), CR2 (Canon), NEF (Nikon), DNG, ORF (Olympus), RW2 (Panasonic), TIF/TIFF |
+
+The app first attempts to extract the embedded JPEG preview from RAW files (fast). If that fails, it decodes the RAW directly using `sharp` as a reliable fallback. Previews are cached locally at up to 2560px for sharp face crops.
+
+---
+
+### ⚙️ Settings & Configuration
+
+All settings are persisted automatically and applied on next launch.
+
+<!-- SCREENSHOT: Settings modal open to AI Configuration tab -->
+
+**Library Storage:**
+- Choose where the database, previews, and AI indices are stored — any local drive or NAS path.
+- **Move Library:** Safely relocate your library to a new path without data loss. A blocking modal prevents interference during the move.
+
+**AI Configuration:**
+- **Detection Threshold:** How strictly the AI looks for faces. Lower = more faces (more false positives). Higher = fewer, more confident detections.
+- **Blur Threshold:** Minimum face sharpness score. Raise this to exclude soft or motion-blurred faces from your People view.
+- **VLM Creativity (Temperature):** Controls Smart Tag diversity. Low = factual, High = expressive.
+- **VLM Max Tokens:** Controls the length of AI-generated descriptions.
+
+**Model Management:**
+- Download the AI GPU Runtime (~5.8GB) directly from within the app.
+- View which AI models are loaded and their current status.
+
+---
 
 ## Hardware Requirements
 
-| Component | Minimum (Basic) | Recommended (Enhanced) | Notes |
-| :--- | :--- | :--- | :--- |
-| **Processor** | Modern CPU (Intel i5/i7 8th Gen+, M1/M2) | CPU with AVX2 Support | Required for all operations. |
-| **Graphics** | Integrated Graphics | **NVIDIA RTX 2060 (6GB)+** | **Crucial for AI Speed.** <br> • Face Scan: 10x faster <br> • Tagging: Required for VLM <br> • Upscaling: 20x faster |
-| **RAM** | 8 GB System RAM | 16 GB System RAM | AI Models need ~4GB dedicated memory. |
-| **Storage** | 1 GB Free Space | 10 GB Free Space | For AI Runtime (~6GB) and Database/Previews. |
+| Component | Minimum | Recommended | Notes |
+|:----------|:--------|:------------|:------|
+| **CPU** | Intel i5/i7 8th Gen+ or Apple M1/M2 | Any modern CPU with AVX2 | Required for all operations |
+| **GPU** | Integrated graphics | **NVIDIA RTX 2060 (6GB+ VRAM)+** | Face scan: 10× faster. Upscaling: 20× faster. Required for Smart Tagging. |
+| **RAM** | 8 GB | 16 GB | AI models use ~4 GB during scanning |
+| **Storage** | 1 GB free | 10 GB free | AI Runtime (~6 GB) + database + preview cache |
 
+**Performance Reference:**
 
-## Documentation
+| Feature | CPU Only | GPU (Recommended) |
+|:--------|:---------|:------------------|
+| Face Detection | ~2–5s per photo | < 0.2s per photo |
+| Smart Tagging | **Not Available** | Required — 4GB+ VRAM |
+| Photo Upscaling (×4) | ~30–60s per photo | ~2–5s per photo |
+| Face Restoration | ~10–20s per photo | ~1–2s per photo |
 
-For detailed examples of how the application works, logic flows, and architecture, please see the `docs/` folder:
-
-*   **[User Instruction Manual](docs/guides/user_manual.md):** The comprehensive guide to using every part of the app.
-*   **[Features Guide](docs/features.md):** Detailed breakdown of technical capabilities and AI models.
-*   **[Create & Set Builder](docs/create_feature.md):** Deep dive into the advanced search and album creation tools.
-*   **[System Architecture](docs/architecture.md):** Diagrams of how Electron, React, and Python communicate.
-*   **[Logic Examples & Flows](docs/logic_examples.md):** Detailed look at the Scanning, AI, and Enhancement logic.
-
-## Usage Guide
-
-### 1. Installation (Binaries)
-
-The easiest way to get started is to download the latest release:
-
-1.  **Download:** Grab the `Smart Photo Organizer-Windows-v0.3.5-Setup.7z` from the [Releases](https://github.com/arozz7/smart-photo-organizer/releases) page.
-2.  **Unpack:** Extract the archive using [7-Zip](https://www.7-zip.org/) or WinRAR.
-3.  **Run:** Open `Smart Photo Organizer.exe`.
-4.  **GPU Setup (Automatic):** 
-    *   Go to **Settings > Manage Models**.
-    *   Click **"Download AI GPU Runtime"**. The app will automatically download and install it into your library folder (typically `%APPDATA%\smart-photo-organizer\library\ai-runtime`).
-5.  **GPU Setup (Manual):**
-    *   If you have the `ai-runtime-win-x64.zip` already, **do not** put it in the application folder.
-    *   Instead, unzip its contents into the **`ai-runtime`** folder inside your **Library Path** (found in Settings). The final structure should be `[Library Path]\ai-runtime\lib\site-packages\...`
+> **Smart Tagging** currently requires the AI GPU Runtime and an NVIDIA GPU. CPU-only mode is not supported due to memory bandwidth constraints.
 
 ---
 
-### 3. Releasing (Maintainers)
+## Getting Started
 
-To create a new release for distribution:
+### Installation (Recommended)
 
-1.  **Build App**: Run `npm run build`. This creates the application installer (e.g., `release/0.3.5/...-Setup.7z`).
-2.  **GPU Runtime (Separate Asset)**: 
-    *   The GPU Runtime is **NOT** bundled inside the Setup package (to keep it slim).
-    *   You must create or reference a separate `ai-runtime-win-x64.zip` containing the `bin` and `lib` directories.
-3.  **GitHub Release**: 
-    *   Create a release on GitHub (e.g., `v0.3.5`).
-    *   Upload the Setup package (`...-Setup.7z`).
-    *   **CRITICAL:** Upload `ai-runtime-win-x64.zip` as a **separate standalone asset** to the same release. The application's downloader specifically looks for this filename in your GitHub releases to enable GPU support.
+1. **Download:** Grab the latest `Smart Photo Organizer-Windows-vX.X.X-Setup.7z` from the [Releases](https://github.com/arozz7/smart-photo-organizer/releases) page.
+2. **Unpack:** Extract using [7-Zip](https://www.7-zip.org/) or WinRAR.
+3. **Run:** Open `Smart Photo Organizer.exe`.
+4. **GPU Runtime (In-App):** Go to **Settings → Manage Models** and click **"Download AI GPU Runtime"**. The app downloads and installs it automatically to your library folder.
+5. **GPU Runtime (Manual):** If you already have `ai-runtime-win-x64.zip`, unzip its contents into the `ai-runtime` folder inside your Library Path (shown in Settings). The final structure should be `[Library Path]\ai-runtime\lib\site-packages\...`
+
+<!-- GIF: First launch → Settings → selecting library path → downloading GPU runtime -->
+
+### First Steps After Installation
+
+1. **Select Library:** Go to **Settings** and choose where your photos are stored. The app creates a `photos.db` and `previews/` folder in the Library Path you choose (or defaults to `%APPDATA%\smart-photo-organizer`).
+2. **Scan Photos:** Click **"Scan Library"**. The app recursively finds all images, generates previews, and extracts EXIF metadata.
+
+   <!-- GIF: Clicking Scan Library → progress bar → photos appearing in Library grid -->
+
+   <!-- GIF: Clicking Scan Library → progress bar → photos appearing in Library grid — pending new asset -->
+
+3. **Detect Faces:** The AI starts processing photos for face detection automatically. Watch progress in the status bar at the bottom.
+4. **Organize People:** Go to the **People** tab. Click a group of unnamed faces, type a name, and press Enter — the AI auto-groups matching faces under that name across your library.
+
+   <!-- GIF: Naming a face group — pending new asset -->
+
+5. **Generate Tags:** Select photos in the Library and click **"Generate Smart Tags"** to have the AI describe them and make them searchable.
 
 ---
 
-### 2. Running from Source (Development)
+## Running from Source (Development)
 
 ```bash
-# 1. Install Dependencies
+# 1. Install Node dependencies
 npm install
 
-# 2. Setup Python Environment
+# 2. Setup Python environment
 cd src/python
 python -m venv .venv
-# Activate venv: .venv\Scripts\activate
+# Activate: .venv\Scripts\activate  (Windows) or source .venv/bin/activate (Mac/Linux)
 pip install -r requirements.txt
 
-# 3. Start Development Server
+# 3. Start the development server
 cd ../..
 npm run dev
 ```
 
-> [!NOTE]
-> If running from source, you will need to manually install the GPU requirements: `pip install -r requirements-gpu.txt`.
+> For GPU acceleration when running from source, install the GPU requirements: `pip install -r requirements-gpu.txt`
 
-### 2. Getting Started
+---
 
-1.  **Select Library:** On first launch, go to **Settings** and choose your photo folder. The app will creating a `photos.db` and `previews/` folder in a location you choose (or default to AppData).
-2.  **Scan Photos:** Click **"Scan Library"**. The app will recursively find all images, generate previews, and extract metadata.
-    
-    ![Scan Library](docs/assets/StartScanFolder.gif)
-3.  **Detect Faces:** The AI will automatically start processing photos to find faces. You can watch the progress in the status bar.
-4.  **Organize People:** Go to the **"People"** tab. You will see groups of "Unnamed Faces". Click one, type a name (e.g., "Mom"), and the AI will auto-group similar faces under that name.
-    
-    ![Name Faces](docs/assets/NameFaces.gif)
-5.  **Generate Tags:** Select photos and click **"Generate Smart Tags"** to have the AI describe them.
+## Releasing (Maintainers)
 
-## Development
+1. **Build:** Run `npm run build`. This produces the installer (e.g., `release/0.7.0/...-Setup.7z`).
+2. **GPU Runtime:** The GPU Runtime is **not** bundled in the installer to keep it slim. Reference or create a separate `ai-runtime-win-x64.zip` containing the `bin` and `lib` directories.
+3. **GitHub Release:**
+   - Create a release tagged `vX.X.X`.
+   - Upload the Setup package (`...-Setup.7z`).
+   - **Critical:** Upload `ai-runtime-win-x64.zip` as a **separate standalone asset** to the same release. The in-app downloader specifically looks for this filename.
+
+---
+
+## Architecture
 
 This project uses a hybrid architecture:
--   **Frontend:** React + TypeScript + Vite
--   **Backend:** Electron (Main Process) + Python (Subprocess)
 
-See [Architecture](docs/architecture.md) for more details.
+- **Frontend:** React 18 + TypeScript + Vite
+- **Main Process:** Electron (TypeScript) — file I/O, SQLite (better-sqlite3), image processing (sharp), IPC
+- **AI Backend:** Python 3.12 subprocess — InsightFace, FAISS, SmolVLM, Real-ESRGAN, GFPGAN
+
+See [System Architecture](docs/specs/architecture.md) and [Logic Examples](docs/specs/logic_examples.md) for detailed diagrams and flow documentation.
+
+---
+
+## Documentation
+
+| Document | Description |
+|:---------|:------------|
+| [User Manual](docs/guides/user_manual.md) | Comprehensive guide to every feature |
+| [Features Guide](docs/specs/features.md) | Technical breakdown of AI models and capabilities |
+| [Create & Set Builder](docs/specs/create_feature.md) | Deep dive into advanced search and album creation |
+| [System Architecture](docs/specs/architecture.md) | Diagrams of Electron ↔ React ↔ Python communication |
+| [Logic Examples](docs/specs/logic_examples.md) | Scanning, AI, and enhancement logic flows |
+
+---
 
 ## License
 
