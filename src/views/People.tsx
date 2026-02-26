@@ -614,29 +614,31 @@ export default function People() {
                             </div>
                         )}
 
-                        {loading && people.length === 0 ? (
-                            <div className="flex items-center justify-center h-full p-20">
-                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
-                            </div>
-                        ) : people.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center p-20 text-gray-500 border border-dashed border-gray-800 rounded-2xl">
-                                <span className="text-6xl mb-4">👥</span>
-                                <h3 className="text-xl font-medium mb-2">No people identified yet</h3>
-                                <p className="max-w-md text-center">
-                                    Start by naming faces in the "Unnamed Faces" tab.
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
-                                {people.map(person => (
-                                    <PersonCard
-                                        key={person.id}
-                                        person={person}
-                                        onClick={() => handlePersonClick(String(person.id))}
-                                    />
-                                ))}
-                            </div>
-                        )}
+                        <div ref={gridSizes.identified.containerRef}>
+                            {loading && people.length === 0 ? (
+                                <div className="flex items-center justify-center h-full p-20">
+                                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
+                                </div>
+                            ) : people.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center p-20 text-gray-500 border border-dashed border-gray-800 rounded-2xl">
+                                    <span className="text-6xl mb-4">👥</span>
+                                    <h3 className="text-xl font-medium mb-2">No people identified yet</h3>
+                                    <p className="max-w-md text-center">
+                                        Start by naming faces in the "Unnamed Faces" tab.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div style={{ ...gridSizes.identified.gridStyle, gap: '1.5rem' }}>
+                                    {people.map(person => (
+                                        <PersonCard
+                                            key={person.id}
+                                            person={person}
+                                            onClick={() => handlePersonClick(String(person.id))}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
 

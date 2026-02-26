@@ -60,10 +60,10 @@ describe('useDynamicGrid', () => {
         expect(result.current.cols).toBe(4);
     });
 
-    it('returns a containerRef object', () => {
+    it('returns a containerRef callback function', () => {
         const { result } = render('testView', 8);
         expect(result.current.containerRef).toBeDefined();
-        expect(result.current.containerRef).toHaveProperty('current');
+        expect(typeof result.current.containerRef).toBe('function');
     });
 
     it('returns gridStyle with display:grid and correct gridTemplateColumns', () => {
