@@ -1313,7 +1313,8 @@ export default function People() {
                             threshold: settings.threshold,
                             min_samples: settings.min_samples,
                             excludeBackground: settings.excludeBackground,
-                            groupBySuggestion: settings.groupBySuggestion
+                            groupBySuggestion: settings.groupBySuggestion,
+                            max_spread: settings.max_spread
                         })
                     }}
                 />

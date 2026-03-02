@@ -7,11 +7,12 @@ import { Cross2Icon, UpdateIcon } from '@radix-ui/react-icons';
 interface ClusteringSettingsModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onRecluster: (options: { threshold: number, min_samples: number, excludeBackground?: boolean, groupBySuggestion?: boolean }) => void;
+    onRecluster: (options: { threshold: number, min_samples: number, excludeBackground?: boolean, groupBySuggestion?: boolean, max_spread?: number }) => void;
 }
 
 const ClusteringSettingsModal: React.FC<ClusteringSettingsModalProps> = ({ open, onOpenChange, onRecluster }) => {
     const [threshold, setThreshold] = useState(0.65);
+    const [maxSpread, setMaxSpread] = useState(0.75);
     const [excludeBackground, setExcludeBackground] = useState(false);
     const [groupBySuggestion, setGroupBySuggestion] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -34,6 +35,8 @@ const ClusteringSettingsModal: React.FC<ClusteringSettingsModalProps> = ({ open,
             // Load advanced settings
             setExcludeBackground(localStorage.getItem('excludeBackground') === 'true');
             setGroupBySuggestion(localStorage.getItem('groupBySuggestion') === 'true');
+            const savedSpread = localStorage.getItem('maxSpread');
+            if (savedSpread) setMaxSpread(parseFloat(savedSpread));
         }
     }, [open]);
 
@@ -43,9 +46,10 @@ const ClusteringSettingsModal: React.FC<ClusteringSettingsModalProps> = ({ open,
         localStorage.setItem('regroupThreshold', threshold.toString());
         localStorage.setItem('excludeBackground', excludeBackground.toString());
         localStorage.setItem('groupBySuggestion', groupBySuggestion.toString());
+        localStorage.setItem('maxSpread', maxSpread.toString());
 
         // Call parent recluster logic with new options
-        await onRecluster({ threshold, min_samples: 2, excludeBackground, groupBySuggestion });
+        await onRecluster({ threshold, min_samples: 2, excludeBackground, groupBySuggestion, max_spread: maxSpread });
         setLoading(false);
         onOpenChange(false);
     };
@@ -83,6 +87,32 @@ const ClusteringSettingsModal: React.FC<ClusteringSettingsModalProps> = ({ open,
                                 <span>Loose (More Groups)</span>
                                 <span>Strict (Fewer Groups)</span>
                             </div>
+                        </div>
+
+                        {/* Cluster Purity (Max Spread) */}
+                        <div className="space-y-3">
+                            <div className="flex justify-between items-center">
+                                <label className="text-sm font-medium text-gray-300">Cluster Purity</label>
+                                <span className="text-xs font-mono bg-gray-800 px-2 py-1 rounded text-indigo-400">{maxSpread.toFixed(2)}</span>
+                            </div>
+                            <Slider.Root
+                                className="relative flex items-center select-none touch-none w-full h-5"
+                                value={[maxSpread]}
+                                max={1.0}
+                                min={0.4}
+                                step={0.05}
+                                onValueChange={(v) => setMaxSpread(v[0])}
+                            >
+                                <Slider.Track className="bg-gray-700 relative grow rounded-full h-[3px]">
+                                    <Slider.Range className="absolute bg-indigo-500 rounded-full h-full" />
+                                </Slider.Track>
+                                <Slider.Thumb className="block w-4 h-4 bg-white rounded-full shadow hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" />
+                            </Slider.Root>
+                            <div className="flex justify-between text-[10px] text-gray-500 uppercase tracking-wider font-semibold">
+                                <span>Strict (Purer Groups)</span>
+                                <span>Loose (Larger Groups)</span>
+                            </div>
+                            <p className="text-[10px] text-gray-500">Breaks up chain-linked clusters where members are too spread out to be the same person</p>
                         </div>
 
                         {/* Advanced Options */}

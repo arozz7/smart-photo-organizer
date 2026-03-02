@@ -360,14 +360,17 @@ export function registerAIHandlers() {
                 eps = 1 - options.threshold;
             }
 
+            const maxSpread = options?.max_spread ?? 0.75;
             const payload = {
                 faces: faces, // [{id, descriptor}, ...]
                 eps: eps,
                 min_samples: options?.min_samples || 2,
-                max_size: 200 // Enforce max cluster size
+                max_size: 200, // Enforce max cluster size
+                min_cohesion: 0.6, // Safety floor: reject incoherent garbage clusters
+                max_spread: maxSpread // Purity filter: break up chain-linked clusters
             };
 
-            logger.info(`[Main] Clustering ${faces.length} faces with eps=${eps.toFixed(3)}, groupBySuggestion=${options?.groupBySuggestion || false}`);
+            logger.info(`[Main] Clustering ${faces.length} faces with eps=${eps.toFixed(3)}, max_spread=${maxSpread}, groupBySuggestion=${options?.groupBySuggestion || false}`);
             const clusteringResult = await pythonProvider.sendRequest('cluster_faces', payload, 900000);
 
             // Pre-build descriptor lookup used for cohesion filtering in both code paths below

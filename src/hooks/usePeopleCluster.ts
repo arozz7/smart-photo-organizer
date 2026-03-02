@@ -32,10 +32,10 @@ export function usePeopleCluster() {
     // Group Naming Modal State
     const [namingGroup, setNamingGroup] = useState<{ faces: Face[], name: string } | null>(null)
 
-    const loadClusteredFaces = useCallback(async (options?: { threshold?: number, min_samples?: number, excludeBackground?: boolean, groupBySuggestion?: boolean }) => {
+    const loadClusteredFaces = useCallback(async (options?: { threshold?: number, min_samples?: number, excludeBackground?: boolean, groupBySuggestion?: boolean, max_spread?: number }) => {
         setIsClustering(true)
         try {
-            // Contextual Merge: 
+            // Contextual Merge:
             // 1. passed options (highest priority)
             // 2. localStorage persistence
             // 3. undefined (falls back to backend defaults)
@@ -55,12 +55,18 @@ export function usePeopleCluster() {
             if (groupBySuggestion === undefined) {
                 groupBySuggestion = localStorage.getItem('groupBySuggestion') === 'true';
             }
+            let maxSpread = options?.max_spread;
+            if (maxSpread === undefined) {
+                const saved = localStorage.getItem('maxSpread');
+                if (saved) maxSpread = parseFloat(saved);
+            }
 
             const finalOptions = {
                 ...options,
                 threshold: finalThreshold,
                 excludeBackground,
-                groupBySuggestion
+                groupBySuggestion,
+                max_spread: maxSpread
             };
 
             const res = await loadUnnamedFaces(finalOptions)
