@@ -57,6 +57,22 @@
     - **Model:** YOLO-World (~4GB VRAM) with text prompts.
     - **Features:** Custom tag detection without re-training.
 
+- **Upstream False Positive Reduction (Cartoon/Object Detections):**
+    - **Problem:** Non-face objects (cartoon characters, snowmen, hands, cow faces) can pass InsightFace's detector and appear as face groups in Discoveries. The Phase 90 VLM verify band (det_score 0.40–0.70) catches many, but high-confidence false positives (score ≥ 0.70) bypass VLM entirely and become "accepted" detections.
+    - **Current mitigations:** Phase 90 3-tier detection scoring, Phase 98–101 `max_spread`/`min_cohesion` cluster quality filters. These reduce the damage post-detection but don't prevent the false positive from entering the database.
+    - **Proposed approach (two separate levers — do NOT conflate):**
+        1. **VLM verify band calibration:** Lower the `score_threshold_accept` from `0.70` → `0.75` or `0.80` to route more borderline detections through VLM verification. Low risk — keeps all faces in the DB, VLM acts as gatekeeper. Most cartoon/object false positives score in the 0.60–0.80 range.
+        2. **Pose-weighted clustering (NOT scan-time rejection):** High-yaw faces (`pose_yaw > 55°`) are kept in the database and remain assignable, but are de-weighted as cluster *anchors* in DBSCAN. Concretely: before clustering, filter the "seed" face pool to frontal/near-frontal faces; high-yaw faces can still *join* a cluster but cannot *start* one. Pose data (`pose_yaw/pitch/roll`) is already stored in the `faces` table (Phase 46).
+    - **⚠️ What NOT to do — hard pose rejection at scan time:**
+        - A blanket `yaw > 60°` scan-time deletion permanently removes legitimate faces: candid party shots, people looking at children, group photo edges, birthday-candle blowouts, and faces partially obscured by hands. These are common in real family libraries.
+        - Cartoon/object false positives tend to have *near-frontal* synthetic poses (cartoon faces are symmetric) — so yaw filtering would not even solve the actual problem while deleting real faces.
+        - Similarly, a hard `det_score < 0.6` scan-time reject is risky for legitimate partial/occluded faces. The 3-tier VLM system already handles the 0.40–0.69 band correctly; the gap is only scores ≥ 0.70 (which a VLM ceiling adjustment fixes better).
+    - **Implementation phases:**
+        1. Raise `score_threshold_accept` (0.70 → 0.75) in `config.py` and `ConfigService.ts`. Re-route 0.70–0.75 detections to VLM verify. Monitor false positive rate in `face_tuning_log.md`.
+        2. In `clustering.py`, add `anchor_only_frontal` option: build DBSCAN `min_samples` neighborhoods only from faces with `|pose_yaw| < 55°`. Pass `pose_yaw` values with each face descriptor to the clustering payload.
+        3. Expose "Strict False Positive Mode" toggle in Advanced AI Settings — enables both calibrations above. Off by default to avoid breaking existing workflows.
+    - **Prerequisites:** Phase 46 (pose data in DB) ✅ Complete. Phase 90 (3-tier scoring) ✅ Complete.
+
 ### Organization & Metadata
 - **Blurry Photo List Export:**
     - **Goal:** Generate and export lists of photos with blur scores below a threshold.
