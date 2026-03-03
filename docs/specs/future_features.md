@@ -60,18 +60,26 @@
 - **Upstream False Positive Reduction (Cartoon/Object Detections):**
     - **Problem:** Non-face objects (cartoon characters, snowmen, hands, cow faces) can pass InsightFace's detector and appear as face groups in Discoveries. The Phase 90 VLM verify band (det_score 0.40–0.70) catches many, but high-confidence false positives (score ≥ 0.70) bypass VLM entirely and become "accepted" detections.
     - **Current mitigations:** Phase 90 3-tier detection scoring, Phase 98–101 `max_spread`/`min_cohesion` cluster quality filters. These reduce the damage post-detection but don't prevent the false positive from entering the database.
-    - **Proposed approach (two separate levers — do NOT conflate):**
-        1. **VLM verify band calibration:** Lower the `score_threshold_accept` from `0.70` → `0.75` or `0.80` to route more borderline detections through VLM verification. Low risk — keeps all faces in the DB, VLM acts as gatekeeper. Most cartoon/object false positives score in the 0.60–0.80 range.
+    - **Proposed approach (three separate levers — do NOT conflate):**
+        1. **VLM verify band calibration:** Raise `score_threshold_accept` from `0.70` → `0.75` or `0.80` to route more borderline detections through VLM verification. Low risk — keeps all faces in the DB, VLM acts as gatekeeper. Most cartoon/object false positives score in the 0.60–0.80 range.
         2. **Pose-weighted clustering (NOT scan-time rejection):** High-yaw faces (`pose_yaw > 55°`) are kept in the database and remain assignable, but are de-weighted as cluster *anchors* in DBSCAN. Concretely: before clustering, filter the "seed" face pool to frontal/near-frontal faces; high-yaw faces can still *join* a cluster but cannot *start* one. Pose data (`pose_yaw/pitch/roll`) is already stored in the `faces` table (Phase 46).
+        3. **Background VLM Re-Verification of Orphaned Accepted Faces (confirmed approach):** Faces with `confidence_tier = 'human'` (score ≥ 0.70) bypass VLM entirely at scan-time. After the background bucketing pass, any face that has `needs_bucketing = 0 AND bucket_id IS NULL AND person_id IS NULL` is an "orphaned accepted face" — accepted by InsightFace at high confidence but never matched any known person and never formed a cluster. This is the strongest false-positive signal available post-scan. `BackgroundVerificationService` will batch these faces through VLM during idle time and, on rejection, set `is_ignored = 1, ignore_source = 'background_verification'`. A new `ignore_source` column (`'user'` | `'background_verification'` | NULL) separates auto-flagged faces from user-chosen ignores, following the existing `assignment_source` pattern. Recovery is built-in: the existing "Re-Check Ignored Faces" button (`db:startIgnoredRecheck` → `processRecheckBatch()`) already queries all `is_ignored = 1` faces and matches them against named-person centroids — no changes needed for the recovery path. If a face was wrongly soft-ignored (e.g., a real but unrecognized person who later gets named), Re-Check surfaces it as a suggestion bucket.
     - **⚠️ What NOT to do — hard pose rejection at scan time:**
         - A blanket `yaw > 60°` scan-time deletion permanently removes legitimate faces: candid party shots, people looking at children, group photo edges, birthday-candle blowouts, and faces partially obscured by hands. These are common in real family libraries.
         - Cartoon/object false positives tend to have *near-frontal* synthetic poses (cartoon faces are symmetric) — so yaw filtering would not even solve the actual problem while deleting real faces.
         - Similarly, a hard `det_score < 0.6` scan-time reject is risky for legitimate partial/occluded faces. The 3-tier VLM system already handles the 0.40–0.69 band correctly; the gap is only scores ≥ 0.70 (which a VLM ceiling adjustment fixes better).
+    - **DB migration required for Lever 3:**
+        - Add `ignore_source TEXT DEFAULT NULL CHECK(ignore_source IN ('user', 'background_verification'))` to `faces` table.
+        - Update `FaceRepository.ignoreFaces()` to accept an optional `source` parameter (default `'user'`); all existing call sites keep their current behavior.
+        - New `BackgroundVerificationService.processOrphanedFaces()` method: selects the orphan criteria above, processes in batches of 10 with 5s sleeps and `isAIProcessingActive()` guard (same pattern as `processSuspectBatch()`), marks VLM rejections as `is_ignored = 1, ignore_source = 'background_verification'`.
     - **Implementation phases:**
-        1. Raise `score_threshold_accept` (0.70 → 0.75) in `config.py` and `ConfigService.ts`. Re-route 0.70–0.75 detections to VLM verify. Monitor false positive rate in `face_tuning_log.md`.
-        2. In `clustering.py`, add `anchor_only_frontal` option: build DBSCAN `min_samples` neighborhoods only from faces with `|pose_yaw| < 55°`. Pass `pose_yaw` values with each face descriptor to the clustering payload.
-        3. Expose "Strict False Positive Mode" toggle in Advanced AI Settings — enables both calibrations above. Off by default to avoid breaking existing workflows.
-    - **Prerequisites:** Phase 46 (pose data in DB) ✅ Complete. Phase 90 (3-tier scoring) ✅ Complete.
+        1. DB migration: add `ignore_source` column to `faces` table. Update `FaceRepository.ignoreFaces()` to accept optional `source` param (default `'user'`).
+        2. Add `BackgroundVerificationService.processOrphanedFaces()`: queries orphaned accepted faces, batches them through VLM, marks rejects with `ignore_source = 'background_verification'`.
+        3. Verify existing `processRecheckBatch()` correctly surfaces auto-ignored faces (no code changes expected — it already queries all `is_ignored = 1`). Add a tooltip near "Re-Check Ignored Faces" button noting that auto-flagged faces may appear here.
+        4. Raise `score_threshold_accept` (0.70 → 0.75) in `config.py` and `ConfigService.ts` (Lever 1). Monitor false positive rate in `face_tuning_log.md`.
+        5. In `clustering.py`, add `anchor_only_frontal` option (Lever 2): build DBSCAN `min_samples` neighborhoods only from faces with `|pose_yaw| < 55°`.
+        6. Expose "Strict False Positive Mode" toggle in Advanced AI Settings — enables all three levers above. Off by default.
+    - **Prerequisites:** Phase 46 (pose data in DB) ✅. Phase 90 (3-tier scoring) ✅. Phase 101 (cluster purity filters) ✅.
 
 ### Organization & Metadata
 - **Blurry Photo List Export:**
