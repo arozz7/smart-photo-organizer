@@ -23,7 +23,7 @@ vi.mock('../../../../src/context/PeopleContext', () => ({
 // Mock useDynamicGrid to avoid ToastProvider/useToast dependency in unit tests
 vi.mock('../../../../src/hooks/useDynamicGrid', () => ({
     useDynamicGrid: () => ({
-        containerRef: { current: null },
+        containerRef: () => {},
         gridStyle: { gridTemplateColumns: 'repeat(8, 1fr)' }
     })
 }));

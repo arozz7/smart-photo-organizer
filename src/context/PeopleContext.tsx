@@ -27,7 +27,7 @@ interface PeopleContextType {
     loading: boolean
     loadPeople: () => Promise<void>
     loadFaces: (filter?: any) => Promise<void>
-    loadUnnamedFaces: (options?: { threshold?: number, min_samples?: number, excludeBackground?: boolean, groupBySuggestion?: boolean }) => Promise<{ clusters: number[][], singles: number[], totalUnassigned?: number, clusterSuggestions?: Map<number, number> }>
+    loadUnnamedFaces: (options?: { threshold?: number, min_samples?: number, excludeBackground?: boolean, groupBySuggestion?: boolean, max_spread?: number }) => Promise<{ clusters: number[][], singles: number[], totalUnassigned?: number, clusterSuggestions?: Map<number, number> }>
     fetchFacesByIds: (ids: number[]) => Promise<Face[]>
     assignPerson: (faceId: number, name: string) => Promise<any>
     ignoreFace: (faceId: number) => Promise<void>
@@ -180,7 +180,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         }
     }, [])
 
-    const loadUnnamedFaces = useCallback(async (options?: { threshold?: number, min_samples?: number, excludeBackground?: boolean, groupBySuggestion?: boolean }) => {
+    const loadUnnamedFaces = useCallback(async (options?: { threshold?: number, min_samples?: number, excludeBackground?: boolean, groupBySuggestion?: boolean, max_spread?: number }) => {
         try {
             // New Architecture: fetch CLUSTERS (IDs only)
             // @ts-ignore

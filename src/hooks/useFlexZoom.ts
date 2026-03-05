@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 import { useCtrlScroll } from './useCtrlScroll';
 import { useToast } from '../context/ToastContext';
 
@@ -44,7 +44,7 @@ export interface FlexZoomResult {
   /** Current item size in pixels */
   itemSize: number;
   /** Attach to the outermost scrollable wrapper — captures Ctrl+scroll events */
-  containerRef: RefObject<HTMLDivElement>;
+  containerRef: (node: HTMLDivElement | null) => void;
   /**
    * Apply to each thumbnail item.
    * Sets width + height to itemSize.
@@ -79,7 +79,11 @@ export function useFlexZoom(options: FlexZoomOptions): FlexZoomResult {
     step = ITEM_STEP,
   } = options;
   const { addToast } = useToast();
-  const containerRef = useRef<HTMLDivElement>(null);
+
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    setContainerEl(node);
+  }, []);
 
   const [itemSize, setItemSize] = useState<number>(() => readStorage(storageKey, defaultSize));
 
@@ -103,7 +107,7 @@ export function useFlexZoom(options: FlexZoomOptions): FlexZoomResult {
     });
   }, [storageKey, min, step, addToast]);
 
-  useCtrlScroll(containerRef, zoomIn, zoomOut);
+  useCtrlScroll(containerEl, zoomIn, zoomOut);
 
   const itemStyle = useMemo<CSSProperties>(
     () => ({ width: `${itemSize}px`, height: `${itemSize}px` }),

@@ -302,6 +302,109 @@ The NMS stage applies multiple filters to prevent incorrect merges:
 
 ---
 
+## Face Grouping (Clustering) Parameters
+
+Clustering runs *after* detection, on the unnamed faces in your library. These parameters control how faces are grouped in the **Discoveries** tab (the Regroup pipeline).
+
+### DBSCAN Algorithm
+
+The app uses DBSCAN (Density-Based Spatial Clustering) on L2-normalized ArcFace embeddings. All distances are euclidean on normalized vectors (equivalent to cosine similarity).
+
+**Key concept — chain-linking:** DBSCAN only requires each member to be within epsilon of *at least one* other member. This can cause A → B → C chains where A and C are completely different people. The spread and cohesion filters below break these up.
+
+---
+
+### Parameter Reference
+
+#### `eps` (Similarity Threshold in UI)
+
+Converted: `eps_cosine = 1 - threshold`, then `eps_euclidean = √(2 × eps_cosine)`.
+
+| Threshold (UI) | eps cosine | eps euclidean | Character |
+|----------------|-----------|---------------|-----------|
+| 0.55 | 0.45 | 0.949 | Permissive — catches weak matches |
+| 0.65 | 0.35 | 0.837 | Balanced default |
+| 0.68 | 0.32 | 0.800 | Slightly strict |
+| 0.80 | 0.20 | 0.632 | Strict — only near-identical faces |
+
+Lowering the threshold → fewer but purer groups (faces must be more similar to cluster).
+Raising the threshold → more groups, looser matching.
+
+---
+
+#### `max_spread` (Cluster Purity in UI)
+
+**What it measures:** After DBSCAN, for each cluster, compute the centroid (mean of L2-normalized members), then measure the maximum euclidean distance from any member to the centroid. If `spread > max_spread`, the cluster is demoted to singles.
+
+**Typical values:**
+| Cluster type | Spread |
+|---|---|
+| Tight same-person cluster | 0.3 – 0.5 |
+| Same person, diverse poses/ages | 0.5 – 0.7 |
+| Chain-linked mixed-person cluster | 0.7 – 1.3+ |
+
+**Default:** `0.75` — eliminates obvious chains, preserves same-person diversity.
+
+**Tuning:**
+- Mixed faces still appearing in groups → lower to `0.60–0.65`
+- Genuine large groups being split too aggressively → raise to `0.85–0.95`
+
+**Log signal to watch:**
+```
+Cluster 0: size=42, magnitude=0.705, spread=0.869 -> DEMOTED (spread 0.869 > 0.75)
+Cluster 1: size=7,  magnitude=0.810, spread=0.510   <- kept
+```
+
+---
+
+#### `min_cohesion` (hardcoded, not exposed in UI)
+
+**What it measures:** The L2 magnitude of the cluster centroid vector.
+- Same-person cluster (all vectors point the same direction): magnitude ≈ 0.7–1.0
+- Garbage cluster (random objects, vectors cancel): magnitude ≈ 0.0–0.4
+
+**Hardcoded default:** `0.6` for the main Regroup path. Rarely needs adjustment — this catches pure non-face object clusters (hands, objects, cartoon characters) that somehow formed a DBSCAN cluster.
+
+---
+
+### Scenario: Mixed Faces in Groups (Chain-Linking)
+
+**Symptom:** A Discoveries group contains clearly different people or non-face objects.
+
+**Diagnosis in Python logs:**
+```
+Cluster 0: size=12, magnitude=0.721, spread=0.834
+```
+High spread (> 0.75) with moderate magnitude = chain-linked cluster.
+
+**Fix:** Lower Cluster Purity slider (e.g., `0.75` → `0.65`) and run Regroup.
+
+---
+
+### Scenario: Too Many Singles (Over-Splitting)
+
+**Symptom:** After Regroup, most faces appear as singles instead of groups.
+
+**Diagnosis:** `max_spread` or Similarity Threshold may be too strict.
+
+**Fix sequence:**
+1. Raise Cluster Purity toward `0.85` — allows more intra-cluster variation
+2. If still too many singles, lower Similarity Threshold (`0.68` → `0.60`) — widens the neighborhood
+
+---
+
+### Current Default Values (Regroup Pipeline)
+
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| Similarity Threshold | `0.68` (localStorage) | User-adjustable |
+| Cluster Purity (`max_spread`) | `0.75` (localStorage) | User-adjustable |
+| Min Cohesion | `0.60` | Hardcoded in `aiHandlers.ts` |
+| Min Samples | `2` | Hardcoded |
+| Max Cluster Size | `200` | Hardcoded |
+
+---
+
 ## Performance Considerations
 
 ### VLM Verification Impact
@@ -336,6 +439,11 @@ The NMS stage applies multiple filters to prevent incorrect merges:
 ---
 
 ## Changelog
+
+**Phase 101** (2026-03-02):
+- Added "Face Grouping (Clustering) Parameters" section: `max_spread`, `min_cohesion`, `eps` reference table
+- Documented chain-linking problem and spread/cohesion filter mechanics
+- Added two troubleshooting scenarios: mixed faces in groups, over-splitting into singles
 
 **Phase 57** (2026-02-01):
 - Added VLM threshold tuning recommendations

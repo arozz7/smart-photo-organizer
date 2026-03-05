@@ -107,9 +107,10 @@ sequenceDiagram
     Main->>DB: Fetch ALL unnamed face descriptors
     DB-->>Main: [Face objects with BLOBs]
     
-    Main->>Py: { type: "cluster_faces", faces: [...] }
+    Main->>Py: { type: "cluster_faces", faces: [...], eps: 0.800, min_samples: 2, max_spread: 0.75, min_cohesion: 0.6 }
     activate Py
-    Py->>Py: DBSCAN (eps=0.4, min_samples=3)
+    Py->>Py: DBSCAN (threshold=0.68 → eps=0.800, min_samples=2)
+    Py->>Py: Quality filters: spread check (max_spread=0.75), cohesion check (min_cohesion=0.6)
     Py-->>Main: { clusters: { "-1": [], "0": [...], "1": [...] } }
     deactivate Py
 
@@ -206,11 +207,54 @@ sequenceDiagram
     Note over UI: Row removed; repaired photo enters library
 ```
 
+## Data Flow: Background False Positive Re-Verification
+
+Runs during idle time after the main background bucketing pass. Targets `confidence_tier = 'human'` faces that scored ≥ 0.70 (bypassed VLM at scan-time) but never matched any known person and never formed a cluster — the strongest false-positive signal post-scan.
+
+```mermaid
+sequenceDiagram
+    participant BGV as BackgroundVerificationService
+    participant DB as SQLite
+    participant Py as Python AI (SmolVLM)
+    participant UI as React UI
+
+    Note over BGV: Idle-time loop (after suspect batch)
+
+    BGV->>DB: SELECT faces WHERE confidence_tier='human'<br/>AND needs_bucketing=0<br/>AND bucket_id IS NULL<br/>AND person_id IS NULL<br/>AND is_ignored=0<br/>(orphaned accepted faces)
+    DB-->>BGV: [Face batch, up to 10]
+
+    loop For each face in batch
+        BGV->>Py: VLM verify: is this a real face?
+        Py-->>BGV: { is_face: bool, reason: string }
+
+        alt VLM rejects (is_face = false)
+            BGV->>DB: UPDATE faces SET is_ignored=1,<br/>ignore_source='background_verification'<br/>WHERE id = face.id
+        else VLM confirms (is_face = true)
+            Note over BGV: Face remains in pool — kept for future<br/>person additions or manual review
+        end
+    end
+
+    Note over BGV: Sleep 5s, check isAIProcessingActive(), repeat
+
+    Note over UI,DB: --- Recovery path (user-triggered) ---
+
+    UI->>DB: db:startIgnoredRecheck (Re-Check Ignored Faces button)
+    DB->>DB: processRecheckBatch(): SELECT all is_ignored=1 faces<br/>(includes both ignore_source values)
+    DB->>DB: FaceService.matchAgainstCentroids()<br/>for each ignored face
+    DB-->>UI: Suggestion buckets created for matches
+    Note over UI: Auto-flagged false positives that match<br/>a named person surface as suggestions
+```
+
+**Key design decisions:**
+- `ignore_source = 'background_verification'` separates auto-flagged from user-chosen ignores. The UI can filter or badge these differently.
+- Recovery requires **zero new code** — `processRecheckBatch()` already queries all `is_ignored = 1` faces regardless of source.
+- Faces rejected by VLM are soft-ignored, not deleted. The user can always recover them via Re-Check Ignored Faces.
+
 ## Data Schema
 
 ### SQLite Tables
 - **photos:** `id`, `file_path`, `preview_cache_path`, `metadata_json`, `created_at`
-- **faces:** `id`, `photo_id`, `box_json`, `descriptor` (BLOB), `person_id`, `is_reference`, `blur_score`
+- **faces:** `id`, `photo_id`, `box_json`, `descriptor` (BLOB), `person_id`, `is_reference`, `blur_score`, `score` (InsightFace det_score 0–1), `entity_type` ('human'|'pet'|'suspect'), `confidence_tier` ('human'|'suspect' — Phase 90 3-tier scoring), `pose_yaw`, `pose_pitch`, `pose_roll` (Phase 46), `age` (InsightFace estimate), `is_ignored` (boolean), `ignore_source` ('user'|'background_verification'|NULL — planned Lever 3), `needs_bucketing` (background bucketing flag), `bucket_id` (suggestion/discovery bucket FK), `assignment_source` ('user'|'auto'|'split_multiface'|NULL), `is_confirmed` (centroid stability flag)
 - **people:** `id`, `name`, `descriptor_mean_json`
 - **tags:** `id`, `name`
 - **photo_tags:** `photo_id`, `tag_id`, `source` ('AI' or 'User')

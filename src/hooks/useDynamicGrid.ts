@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 import { useCtrlScroll } from './useCtrlScroll';
 import { useToast } from '../context/ToastContext';
 
@@ -40,8 +40,12 @@ export interface DynamicGridOptions {
 export interface DynamicGridResult {
   /** Current column count */
   cols: number;
-  /** Attach to the outermost scrollable wrapper — captures Ctrl+scroll events */
-  containerRef: RefObject<HTMLDivElement>;
+  /**
+   * Callback ref — attach to the element that should capture Ctrl+scroll events.
+   * Using a callback ref (instead of useRef) ensures the wheel listener is attached
+   * even when the element is conditionally rendered or behind an async data load.
+   */
+  containerRef: (node: HTMLDivElement | null) => void;
   /**
    * Apply directly to the grid element.
    * Sets display:grid + gridTemplateColumns + gap.
@@ -65,13 +69,21 @@ export interface DynamicGridResult {
 export function useDynamicGrid(options: DynamicGridOptions): DynamicGridResult {
   const { storageKey, default: defaultCols, min = GRID_MIN, max = GRID_MAX } = options;
   const { addToast } = useToast();
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const [cols, setCols] = useState<number>(() => {
     const stored = readStorage(storageKey, defaultCols);
     // Apply custom min/max on top of the global-constant clamp in readStorage
     return Math.min(max, Math.max(min, stored));
   });
+
+  // Callback ref: when React attaches/detaches the DOM node it calls this function,
+  // which updates containerEl state. That state change re-runs the useCtrlScroll
+  // effect with the real element — fixing the "ref was null on first render" problem
+  // that occurs with early returns (loading states) and conditional rendering.
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    setContainerEl(node);
+  }, []);
 
   const zoomIn = useCallback(() => {
     setCols(prev => {
@@ -93,7 +105,7 @@ export function useDynamicGrid(options: DynamicGridOptions): DynamicGridResult {
     });
   }, [storageKey, min, addToast]);
 
-  useCtrlScroll(containerRef, zoomIn, zoomOut);
+  useCtrlScroll(containerEl, zoomIn, zoomOut);
 
   const gridStyle = useMemo<CSSProperties>(
     () => ({

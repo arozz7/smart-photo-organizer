@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef } from 'react';
 
 const DEBOUNCE_MS = 80;
 
@@ -7,9 +7,12 @@ const DEBOUNCE_MS = 80;
  * Calls onZoomIn (scroll up) or onZoomOut (scroll down) only when Ctrl is held.
  * Uses capture phase to intercept before VirtuosoGrid's own scroll handler.
  * Debounced to DEBOUNCE_MS to prevent skipping multiple columns per scroll tick.
+ *
+ * Accepts the raw element (not a ref object) so the effect re-runs when the
+ * element actually mounts — works correctly with callback refs and conditional rendering.
  */
 export function useCtrlScroll(
-  containerRef: RefObject<HTMLDivElement>,
+  el: HTMLDivElement | null,
   onZoomIn: () => void,
   onZoomOut: () => void,
 ): void {
@@ -22,7 +25,6 @@ export function useCtrlScroll(
   onZoomOutRef.current = onZoomOut;
 
   useEffect(() => {
-    const el = containerRef.current;
     if (!el) return;
 
     const handler = (event: WheelEvent) => {
@@ -43,7 +45,7 @@ export function useCtrlScroll(
       }, DEBOUNCE_MS);
     };
 
-    // capture:true — fires before VirtuosoGrid's wheel handler
+    // capture:true — fires before VirtuosoGrid's own scroll handler
     // passive:false — required to call preventDefault()
     el.addEventListener('wheel', handler, { capture: true, passive: false });
 
@@ -54,5 +56,5 @@ export function useCtrlScroll(
         timerRef.current = null;
       }
     };
-  }, [containerRef]);
+  }, [el]);
 }

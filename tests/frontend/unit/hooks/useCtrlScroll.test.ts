@@ -3,7 +3,6 @@
  */
 import { renderHook } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useRef } from 'react';
 import { useCtrlScroll } from '../../../../src/hooks/useCtrlScroll';
 
 describe('useCtrlScroll', () => {
@@ -25,9 +24,7 @@ describe('useCtrlScroll', () => {
 
     function renderAndAttach() {
         const { result } = renderHook(() => {
-            const ref = useRef<HTMLDivElement | null>(null);
-            (ref as any).current = container;
-            useCtrlScroll(ref, onZoomIn, onZoomOut);
+            useCtrlScroll(container, onZoomIn, onZoomOut);
         });
         return result;
     }

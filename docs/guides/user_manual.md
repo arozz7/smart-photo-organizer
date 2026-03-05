@@ -124,6 +124,44 @@ The app works in the background to organize your photos even when you aren't nam
     - **Stale Index Alert:** If you see an amber "Face Index Needs Update" banner on the "Identified People" tab, it means faces have been removed or reassigned, and the search index is out of date.
     - **Rebuild Index:** Click the **"Rebuild Index"** button on the banner to refresh the AI search index. This is quick (usually < 10 seconds) and ensures accurate duplicate detection.
 
+### 🔧 4.2.1 Clustering Settings (Regroup)
+
+The **Regroup** button in the Discoveries toolbar opens the Clustering Settings modal, which lets you control how the AI groups unnamed faces together.
+
+#### Similarity Threshold
+Controls how similar two faces must be to be placed in the same group.
+
+| Value | Effect |
+|-------|--------|
+| **Low (0.40–0.55)** | More groups, looser matching — catches similar faces even across lighting/pose variation |
+| **Medium (0.60–0.70)** | Balanced default — good for most libraries |
+| **High (0.75–0.95)** | Fewer, stricter groups — only the most visually identical faces cluster together |
+
+> Internally, this maps to DBSCAN's epsilon (neighborhood radius). A threshold of `0.68` means faces must have ≥ 68% similarity to be considered neighbors.
+
+#### Cluster Purity
+Controls how internally consistent a group must be to survive. This catches "chain-linked" clusters where face A looks like face B, face B looks like face C, but A and C are actually different people.
+
+| Value | Effect |
+|-------|--------|
+| **Low (0.40–0.55)** | Strict purity — breaks up groups with any outlier members. More singles. |
+| **Medium (0.60–0.80)** | Balanced default (0.75) — eliminates obvious mixed groups |
+| **High (0.85–1.00)** | Loose — allows more spread within a group. Use if same-person groups are being over-split. |
+
+> If you see groups that contain faces of clearly different people, lower the Cluster Purity value and run Regroup again.
+
+#### Advanced Options
+
+| Option | Description |
+|--------|-------------|
+| **Exclude Background Noise** | Before clustering, filters out faces that appear very infrequently and don't match any named person. Reduces crowd-extra/stranger faces from polluting groups. |
+| **Group by AI Suggestion** | After clustering, merges groups that the AI believes belong to the same already-named person. Useful for quickly assigning many faces at once. |
+
+#### Troubleshooting: Rebuild Face Search Index
+If the "Group by AI Suggestion" mode returns no suggestions, use **Rebuild Face Search Index** in the Troubleshooting section of this modal. This refreshes the FAISS vector index used for person matching.
+
+---
+
 ## ⏳ 4.3 Era Generation (Advanced)
 Some people change significantly over time (e.g., from child to adult). A single facial model might struggle to match both "Baby Nick" and "Adult Nick" accurately.
 

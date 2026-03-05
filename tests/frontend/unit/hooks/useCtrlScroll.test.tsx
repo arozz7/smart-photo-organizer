@@ -1,12 +1,12 @@
 /**
  * @vitest-environment happy-dom
  */
-import React, { useRef } from 'react';
+import React, { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useCtrlScroll } from '../../../../src/hooks/useCtrlScroll';
 
-// A minimal test component that attaches the hook to a real div via JSX ref
+// A minimal test component that attaches the hook to a real div via callback ref
 function HookHarness({
     onZoomIn,
     onZoomOut,
@@ -14,9 +14,9 @@ function HookHarness({
     onZoomIn: () => void;
     onZoomOut: () => void;
 }) {
-    const ref = useRef<HTMLDivElement>(null);
-    useCtrlScroll(ref, onZoomIn, onZoomOut);
-    return <div ref={ref} data-testid="container" />;
+    const [el, setEl] = useState<HTMLDivElement | null>(null);
+    useCtrlScroll(el, onZoomIn, onZoomOut);
+    return <div ref={setEl} data-testid="container" />;
 }
 
 describe('useCtrlScroll', () => {
