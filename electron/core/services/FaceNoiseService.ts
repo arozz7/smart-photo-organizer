@@ -115,6 +115,8 @@ export class FaceNoiseService {
 
         if (facesPayload.length > LARGE_PAYLOAD_THRESHOLD) {
             // File-based transfer to avoid IPC timeout
+            // Use streaming write — JSON.stringify on 50K+ faces exceeds V8's string length limit
+            const fsSync = await import('fs');
             const fs = await import('fs/promises');
             const os = await import('os');
             const path = await import('path');
@@ -125,7 +127,19 @@ export class FaceNoiseService {
             console.log(`[FaceNoise] Large payload (${facesPayload.length} faces), using file-based transfer: ${dataPath}`);
 
             try {
-                await fs.writeFile(dataPath, JSON.stringify({ faces: facesPayload, centroids }), 'utf-8');
+                const writeStream = fsSync.createWriteStream(dataPath, { encoding: 'utf-8' });
+                await new Promise<void>((resolve, reject) => {
+                    writeStream.on('error', reject);
+                    writeStream.write('{"faces":[');
+                    for (let i = 0; i < facesPayload.length; i++) {
+                        if (i > 0) writeStream.write(',');
+                        writeStream.write(JSON.stringify(facesPayload[i]));
+                    }
+                    writeStream.write('],"centroids":');
+                    writeStream.write(JSON.stringify(centroids));
+                    writeStream.write('}');
+                    writeStream.end(() => resolve());
+                });
 
                 result = await pythonProvider.sendRequest('detect_background_faces', {
                     dataPath,

@@ -218,12 +218,46 @@ export function registerAIHandlers() {
 
             logger.info(`[Main] Finding ungroupable faces: ${faces.length} faces, ${centroids.length} centroids, threshold=${distanceThreshold}`);
 
-            // Call Python
-            const result = await pythonProvider.sendRequest('find_ungroupable_faces', {
-                faces: faces.map((f: any) => ({ id: f.id, descriptor: f.descriptor })),
-                centroids,
-                distanceThreshold
-            }, 600000); // 10 min timeout
+            // Call Python (file-based transfer for large payloads to avoid RangeError)
+            const LARGE_PAYLOAD_THRESHOLD = 5000;
+            const facesPayload = faces.map((f: any) => ({ id: f.id, descriptor: f.descriptor }));
+            let result: any;
+
+            if (facesPayload.length > LARGE_PAYLOAD_THRESHOLD) {
+                const fsSync = await import('fs');
+                const fsPromises = await import('fs/promises');
+                const os = await import('os');
+                const path = await import('path');
+
+                const dataPath = path.join(os.tmpdir(), `spo_ungroupable_${Date.now()}.json`);
+                try {
+                    const writeStream = fsSync.createWriteStream(dataPath, { encoding: 'utf-8' });
+                    await new Promise<void>((resolve, reject) => {
+                        writeStream.on('error', reject);
+                        writeStream.write('{"faces":[');
+                        for (let i = 0; i < facesPayload.length; i++) {
+                            if (i > 0) writeStream.write(',');
+                            writeStream.write(JSON.stringify(facesPayload[i]));
+                        }
+                        writeStream.write('],"centroids":');
+                        writeStream.write(JSON.stringify(centroids));
+                        writeStream.write('}');
+                        writeStream.end(() => resolve());
+                    });
+                    result = await pythonProvider.sendRequest('find_ungroupable_faces', {
+                        dataPath,
+                        distanceThreshold
+                    }, 600000);
+                } finally {
+                    try { await fsPromises.unlink(dataPath); } catch { /* ignore */ }
+                }
+            } else {
+                result = await pythonProvider.sendRequest('find_ungroupable_faces', {
+                    faces: facesPayload,
+                    centroids,
+                    distanceThreshold
+                }, 600000);
+            }
 
             return result;
         } catch (e) {
@@ -361,17 +395,53 @@ export function registerAIHandlers() {
             }
 
             const maxSpread = options?.max_spread ?? 0.75;
-            const payload = {
-                faces: faces, // [{id, descriptor}, ...]
-                eps: eps,
-                min_samples: options?.min_samples || 2,
-                max_size: 200, // Enforce max cluster size
-                min_cohesion: 0.6, // Safety floor: reject incoherent garbage clusters
-                max_spread: maxSpread // Purity filter: break up chain-linked clusters
-            };
 
             logger.info(`[Main] Clustering ${faces.length} faces with eps=${eps.toFixed(3)}, max_spread=${maxSpread}, groupBySuggestion=${options?.groupBySuggestion || false}`);
-            const clusteringResult = await pythonProvider.sendRequest('cluster_faces', payload, 900000);
+
+            // File-based transfer for large payloads to avoid RangeError: Invalid string length
+            const LARGE_CLUSTER_THRESHOLD = 5000;
+            let clusteringResult: any;
+
+            if (faces.length > LARGE_CLUSTER_THRESHOLD) {
+                const fsSync = await import('fs');
+                const fsPromises = await import('fs/promises');
+                const os = await import('os');
+                const path = await import('path');
+
+                const dataPath = path.join(os.tmpdir(), `spo_cluster_${Date.now()}.json`);
+                try {
+                    const writeStream = fsSync.createWriteStream(dataPath, { encoding: 'utf-8' });
+                    await new Promise<void>((resolve, reject) => {
+                        writeStream.on('error', reject);
+                        writeStream.write('{"faces":[');
+                        for (let i = 0; i < faces.length; i++) {
+                            if (i > 0) writeStream.write(',');
+                            writeStream.write(JSON.stringify(faces[i]));
+                        }
+                        writeStream.write(']}');
+                        writeStream.end(() => resolve());
+                    });
+                    clusteringResult = await pythonProvider.sendRequest('cluster_faces', {
+                        dataPath,
+                        eps,
+                        min_samples: options?.min_samples || 2,
+                        max_size: 200,
+                        min_cohesion: 0.6,
+                        max_spread: maxSpread
+                    }, 900000);
+                } finally {
+                    try { await fsPromises.unlink(dataPath); } catch { /* ignore */ }
+                }
+            } else {
+                clusteringResult = await pythonProvider.sendRequest('cluster_faces', {
+                    faces,
+                    eps,
+                    min_samples: options?.min_samples || 2,
+                    max_size: 200,
+                    min_cohesion: 0.6,
+                    max_spread: maxSpread
+                }, 900000);
+            }
 
             // Pre-build descriptor lookup used for cohesion filtering in both code paths below
             const faceMap = new Map<number, number[]>();
