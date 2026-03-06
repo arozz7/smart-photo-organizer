@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Slider from '@radix-ui/react-slider';
+import * as Switch from '@radix-ui/react-switch';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import * as Tabs from '@radix-ui/react-tabs';
 import { InfoCircledIcon, DownloadIcon, Cross2Icon } from '@radix-ui/react-icons';
@@ -252,12 +253,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                             </div>
                                             <p className="text-xs text-gray-500">Hide anonymous face crops by default in the photo detail view.</p>
                                         </div>
-                                        <input
-                                            type="checkbox"
+                                        <Switch.Root
                                             checked={settings.hideUnnamedFacesByDefault}
-                                            onChange={(e) => setSettings(prev => ({ ...prev, hideUnnamedFacesByDefault: e.target.checked }))}
-                                            className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-900"
-                                        />
+                                            onCheckedChange={(checked) => setSettings(prev => ({ ...prev, hideUnnamedFacesByDefault: checked }))}
+                                            className="w-10 h-5 bg-gray-600 rounded-full relative data-[state=checked]:bg-indigo-600 transition-colors flex-shrink-0"
+                                        >
+                                            <Switch.Thumb className="block w-4 h-4 bg-white rounded-full shadow transition-transform translate-x-0.5 data-[state=checked]:translate-x-[22px]" />
+                                        </Switch.Root>
                                     </div>
 
                                     {/* Smart Tiering Section */}
@@ -338,12 +340,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                                     <InfoTooltip text="In Macro Mode, adds an extra scan pass at 160px resolution. Essential for detecting very large faces that fill the entire frame, but adds processing time." />
                                                 </div>
                                             </div>
-                                            <input
-                                                type="checkbox"
+                                            <Switch.Root
                                                 checked={advancedSettings.enableMacroLowRes}
-                                                onChange={(e) => setAdvancedSettings(prev => ({ ...prev, enableMacroLowRes: e.target.checked }))}
-                                                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
-                                            />
+                                                onCheckedChange={(checked) => setAdvancedSettings(prev => ({ ...prev, enableMacroLowRes: checked }))}
+                                                className="w-10 h-5 bg-gray-600 rounded-full relative data-[state=checked]:bg-indigo-600 transition-colors flex-shrink-0"
+                                            >
+                                                <Switch.Thumb className="block w-4 h-4 bg-white rounded-full shadow transition-transform translate-x-0.5 data-[state=checked]:translate-x-[22px]" />
+                                            </Switch.Root>
                                         </div>
 
                                         <div className="flex items-center justify-between p-3 mt-2 bg-gray-800/50 rounded-lg border border-gray-700/50">
@@ -353,12 +356,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                                     <InfoTooltip text="Test Time Augmentation. In Macro Mode, rotates the image 90, 180, and 270 degrees to find sideways or upside-down faces. Significantly increases scan time." />
                                                 </div>
                                             </div>
-                                            <input
-                                                type="checkbox"
+                                            <Switch.Root
                                                 checked={advancedSettings.enableTTA}
-                                                onChange={(e) => setAdvancedSettings(prev => ({ ...prev, enableTTA: e.target.checked }))}
-                                                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
-                                            />
+                                                onCheckedChange={(checked) => setAdvancedSettings(prev => ({ ...prev, enableTTA: checked }))}
+                                                className="w-10 h-5 bg-gray-600 rounded-full relative data-[state=checked]:bg-indigo-600 transition-colors flex-shrink-0"
+                                            >
+                                                <Switch.Thumb className="block w-4 h-4 bg-white rounded-full shadow transition-transform translate-x-0.5 data-[state=checked]:translate-x-[22px]" />
+                                            </Switch.Root>
                                         </div>
 
                                         {/* [Phase 57] VLM Verification Threshold */}

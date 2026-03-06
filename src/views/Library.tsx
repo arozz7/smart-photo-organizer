@@ -8,7 +8,22 @@ import { useFlexZoom } from '../hooks/useFlexZoom'
 // import AIStatus from '../components/AIStatus'
 import ScanErrorsModal from '../components/ScanErrorsModal'
 import SettingsModal from '../components/SettingsModal'
-import { GearIcon, ChevronDownIcon } from '@radix-ui/react-icons'
+import { GearIcon, ChevronDownIcon, Cross2Icon } from '@radix-ui/react-icons'
+
+function FilterPill({ value, onRemove }: { value: string; onRemove: () => void }) {
+    return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600/20 text-indigo-300 rounded-full text-xs font-medium border border-indigo-500/30">
+            {value}
+            <button
+                onClick={onRemove}
+                className="ml-0.5 text-indigo-400 hover:text-white transition-colors"
+                aria-label={`Remove ${value} filter`}
+            >
+                <Cross2Icon className="w-3 h-3" />
+            </button>
+        </span>
+    )
+}
 
 export default function Library() {
     const { scanning, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, availableFolders, availablePeople, scanErrors, loadScanErrors, setViewingPhoto, rescanFiles } = useScan()
@@ -174,6 +189,25 @@ export default function Library() {
         return () => clearTimeout(timeout)
     }, [searchQuery])
 
+    const activeFilterPill = useMemo(() => {
+        if (filter.initial) return null
+        if ('untagged' in filter) return { label: 'Untagged (Review)', clear: () => setFilter({}) }
+        if ('tag' in filter && filter.tag) return { label: `Tag: ${filter.tag}`, clear: () => setFilter({}) }
+        if ('search' in filter && filter.search) return { label: `Search: ${filter.search}`, clear: () => { setFilter({}); setSearchQuery('') } }
+        if ('folder' in filter && filter.folder) {
+            const parts = filter.folder.split(/[\\/]/).filter(Boolean)
+            const display = parts.length > 2
+                ? `${parts[parts.length - 2]} / ${parts[parts.length - 1]}`
+                : parts[parts.length - 1] ?? filter.folder
+            return { label: `Folder: ${display}`, clear: () => setFilter({}) }
+        }
+        if ('people' in filter && filter.people && filter.people.length > 0) {
+            const person = availablePeople.find((p: any) => p.id === filter.people![0])
+            return { label: `Person: ${person ? person.name : `#${filter.people![0]}`}`, clear: () => setFilter({}) }
+        }
+        return null
+    }, [filter, availablePeople])
+
     return (
         <div className="flex flex-col h-full bg-gray-900">
             {/* Top Bar */}
@@ -267,7 +301,12 @@ export default function Library() {
                             {availableFolders.map((t: any) => (
                                 t && t.folder ? (
                                     <option className="bg-gray-800 text-white" key={t.folder} value={t.folder} title={t.folder}>
-                                        {t.folder.split(/[\\/]/).pop()}
+                                        {(() => {
+                                            const parts = t.folder.split(/[\\/]/).filter(Boolean)
+                                            return parts.length > 2
+                                                ? `${parts[parts.length - 2]} / ${parts[parts.length - 1]}`
+                                                : parts[parts.length - 1] ?? t.folder
+                                        })()}
                                     </option>
                                 ) : null
                             ))}
@@ -414,6 +453,13 @@ export default function Library() {
                     </button>
                 </div>
             </header >
+
+            {activeFilterPill && (
+                <div className="px-4 py-2 border-b border-gray-700/50 flex items-center gap-2 bg-gray-800/30 shrink-0">
+                    <span className="text-xs text-gray-400">Active filter:</span>
+                    <FilterPill value={activeFilterPill.label} onRemove={activeFilterPill.clear} />
+                </div>
+            )}
 
             <SettingsModal
                 open={showSettings}
