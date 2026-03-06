@@ -700,4 +700,142 @@ describe('FaceRepository', () => {
             expect(updated).toBe(0);
         });
     });
+
+    // ==========================================
+    // getOrphanedFaces
+    // ==========================================
+    describe('getOrphanedFaces', () => {
+        it('should return faces matching all orphan criteria', () => {
+            // Arrange: face that is entity_type=human, confidence_tier=human,
+            // needs_bucketing=0, bucket_id=null, person_id=null, is_ignored=0, descriptor set
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, {
+                entity_type: 'human',
+                confidence_tier: 'human',
+                needs_bucketing: 0,
+                is_ignored: 0,
+                descriptor: createTestDescriptor(1)
+            });
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(10);
+
+            // Assert
+            expect(result).toHaveLength(1);
+        });
+
+        it('should not return faces with a person_id', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const personId = seedPerson(db, 'Known Person');
+            seedFace(db, photoId, {
+                entity_type: 'human',
+                confidence_tier: 'human',
+                needs_bucketing: 0,
+                is_ignored: 0,
+                person_id: personId,
+                descriptor: createTestDescriptor(1)
+            });
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(10);
+
+            // Assert
+            expect(result).toHaveLength(0);
+        });
+
+        it('should not return faces with no descriptor', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, {
+                entity_type: 'human',
+                confidence_tier: 'human',
+                needs_bucketing: 0,
+                is_ignored: 0,
+                descriptor: null
+            });
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(10);
+
+            // Assert
+            expect(result).toHaveLength(0);
+        });
+
+        it('should not return ignored faces', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, {
+                entity_type: 'human',
+                confidence_tier: 'human',
+                needs_bucketing: 0,
+                is_ignored: 1,
+                descriptor: createTestDescriptor(1)
+            });
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(10);
+
+            // Assert
+            expect(result).toHaveLength(0);
+        });
+
+        it('should respect the limit parameter', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            for (let i = 0; i < 5; i++) {
+                seedFace(db, photoId, {
+                    entity_type: 'human',
+                    confidence_tier: 'human',
+                    needs_bucketing: 0,
+                    is_ignored: 0,
+                    descriptor: createTestDescriptor(i)
+                });
+            }
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(3);
+
+            // Assert
+            expect(result).toHaveLength(3);
+        });
+    });
+
+    // ==========================================
+    // countOrphanedFaces
+    // ==========================================
+    describe('countOrphanedFaces', () => {
+        it('should return 0 when no orphan faces exist', () => {
+            // Act
+            const result = FaceRepository.countOrphanedFaces();
+
+            // Assert
+            expect(result).toBe(0);
+        });
+
+        it('should count only orphan faces', () => {
+            // Arrange: 2 orphans + 1 assigned face
+            const photoId = seedPhoto(db);
+            const personId = seedPerson(db, 'Known Person');
+            seedFace(db, photoId, {
+                entity_type: 'human', confidence_tier: 'human',
+                needs_bucketing: 0, is_ignored: 0, descriptor: createTestDescriptor(1)
+            });
+            seedFace(db, photoId, {
+                entity_type: 'human', confidence_tier: 'human',
+                needs_bucketing: 0, is_ignored: 0, descriptor: createTestDescriptor(2)
+            });
+            seedFace(db, photoId, {
+                entity_type: 'human', confidence_tier: 'human',
+                needs_bucketing: 0, is_ignored: 0, person_id: personId,
+                descriptor: createTestDescriptor(3)
+            });
+
+            // Act
+            const result = FaceRepository.countOrphanedFaces();
+
+            // Assert
+            expect(result).toBe(2);
+        });
+    });
 });

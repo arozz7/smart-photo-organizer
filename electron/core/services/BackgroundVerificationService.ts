@@ -50,8 +50,11 @@ export class BackgroundVerificationService implements IService {
                     continue;
                 }
 
-                // Process next batch
+                // Process suspect faces (primary pipeline)
                 await this.processNextBatch();
+
+                // Process orphaned faces (secondary pass — catch false positives that slipped bucketing)
+                await this.processOrphanedFaces();
 
                 // Sleep between batches
                 await this.sleep(5000);
@@ -223,6 +226,53 @@ export class BackgroundVerificationService implements IService {
                     FaceRepository.markFaceAsRejected(face.id);
                     logger.warn(`[BackgroundVerificationService] Face ${face.id} auto-ignored after exception (${attempts} attempts)`);
                 }
+            }
+        }
+    }
+
+    /**
+     * Phase 104: Re-verify orphaned faces using VLM as a negative filter.
+     * Orphans are human-confirmed faces that completed bucketing but were never
+     * matched to any person or bucket — potential cartoon/object false positives.
+     * Rejects are marked with ignore_source='background_verification'.
+     */
+    private async processOrphanedFaces(): Promise<void> {
+        const BATCH_SIZE = 10;
+
+        const orphans = FaceRepository.getOrphanedFaces(BATCH_SIZE);
+        const totalOrphans = FaceRepository.countOrphanedFaces();
+
+        if (orphans.length === 0) {
+            return;
+        }
+
+        logger.info(`[BackgroundVerificationService] Verifying ${orphans.length} orphaned faces (${totalOrphans} total orphans)`);
+
+        for (const face of orphans) {
+            if (this.shouldStop) break;
+
+            try {
+                const box = JSON.parse(face.box_json);
+                const boxCoords = {
+                    x1: box.x,
+                    y1: box.y,
+                    x2: box.x + box.width,
+                    y2: box.y + box.height
+                };
+
+                const result = await pythonProvider.verifyFace(face.file_path, boxCoords);
+
+                if (result.is_face === false) {
+                    FaceRepository.ignoreFaces([face.id], 'background_verification');
+                    this.notifyPhotoChanged(face.photo_id);
+                    logger.info(`[BackgroundVerificationService] Orphan face ${face.id} auto-ignored (VLM: ${result.reason})`);
+                } else {
+                    logger.debug(`[BackgroundVerificationService] Orphan face ${face.id} confirmed by VLM, no action needed`);
+                }
+
+                await this.sleep(100);
+            } catch (e) {
+                logger.error(`[BackgroundVerificationService] Error processing orphan face ${face.id}:`, e);
             }
         }
     }
