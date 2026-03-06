@@ -124,6 +124,32 @@ describe('FaceRepository', () => {
             expect(face2.is_ignored).toBe(1);
             expect(face3.is_ignored).toBe(0); // Not affected
         });
+
+        it('should set ignore_source to "user" when no source provided', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { is_ignored: 0 });
+
+            // Act
+            FaceRepository.ignoreFaces([faceId]);
+
+            // Assert
+            const face = db.prepare('SELECT ignore_source FROM faces WHERE id = ?').get(faceId) as any;
+            expect(face.ignore_source).toBe('user');
+        });
+
+        it('should set ignore_source to "background_verification" when source provided', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { is_ignored: 0 });
+
+            // Act
+            FaceRepository.ignoreFaces([faceId], 'background_verification');
+
+            // Assert
+            const face = db.prepare('SELECT ignore_source FROM faces WHERE id = ?').get(faceId) as any;
+            expect(face.ignore_source).toBe('background_verification');
+        });
     });
 
     // ==========================================

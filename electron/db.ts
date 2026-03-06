@@ -780,6 +780,11 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     db.exec('ALTER TABLE scan_errors ADD COLUMN is_unrepairable BOOLEAN DEFAULT 0');
   } catch { /* column already exists */ }
 
+  // --- MIGRATION: Ignore Source Tracking (Phase 104) ---
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN ignore_source TEXT DEFAULT NULL CHECK(ignore_source IN ('user', 'background_verification'))");
+  } catch { /* column already exists */ }
+
   logger.info('Database schema ensured.');
 }
 

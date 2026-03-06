@@ -85,6 +85,7 @@ const TEST_SCHEMA = `
     score REAL,
     needs_bucketing INTEGER DEFAULT 0,
     bucket_id INTEGER,
+    ignore_source TEXT DEFAULT NULL CHECK(ignore_source IN ('user', 'background_verification')),
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
     FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL

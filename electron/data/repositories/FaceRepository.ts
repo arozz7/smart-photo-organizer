@@ -81,13 +81,13 @@ export class FaceRepository {
         return rows.map((r: any) => this.parseFace(r));
     }
 
-    static ignoreFaces(ids: number[]) {
+    static ignoreFaces(ids: number[], source: 'user' | 'background_verification' = 'user') {
         const db = getDB();
         if (ids.length === 0) return;
         const placeholders = ids.map(() => '?').join(',');
         // CRITICAL: Unassign from person when ignoring so they are removed from FAISS index logic
-        const query = `UPDATE faces SET is_ignored = 1, person_id = NULL WHERE id IN (${placeholders})`;
-        db.prepare(query).run(...ids);
+        const query = `UPDATE faces SET is_ignored = 1, person_id = NULL, ignore_source = ? WHERE id IN (${placeholders})`;
+        db.prepare(query).run(source, ...ids);
     }
 
     static restoreFaces(ids: number[], personId?: number | null) {
@@ -1066,8 +1066,8 @@ export class FaceRepository {
     static markFaceAsRejected(id: number): void {
         const db = getDB();
         db.prepare(`
-            UPDATE faces 
-            SET is_ignored = 1 
+            UPDATE faces
+            SET is_ignored = 1, ignore_source = 'user'
             WHERE id = ?
         `).run(id);
     }
