@@ -7,9 +7,9 @@
   --z-navigation: 10;
   --z-sticky: 20;
   --z-overlay: 30;
-  --z-modal: 40;
-  --z-toast: 50;
-  --z-tooltip: 60;
+  --z-modal: 100;
+  --z-toast: 200;
+  --z-tooltip: 300;
 }
 
 @layer base {

@@ -125,12 +125,14 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
         <div className="fixed inset-0 z-modal flex bg-black/95 backdrop-blur-sm pointer-events-auto">
             <button
                 onClick={onClose}
-                className="absolute top-4 left-4 z-overlay p-2 text-white/70 hover:text-white bg-black/50 hover:bg-black/70 rounded-full transition-colors"
+                className="absolute top-4 left-4 z-overlay flex items-center gap-1.5 px-3 py-2 text-white/80 hover:text-white bg-black/60 hover:bg-black/80 rounded-full border border-white/10 hover:border-white/30 transition-all backdrop-blur-sm"
                 aria-label="Close photo detail"
             >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
+                <span className="text-xs font-medium">Close</span>
+                <span className="text-[10px] text-white/40 font-mono">ESC</span>
             </button>
 
             <PhotoViewer

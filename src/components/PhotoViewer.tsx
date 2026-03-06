@@ -80,11 +80,13 @@ export function PhotoViewer({
         <div className="flex-1 relative flex items-center justify-center p-4 min-w-0 min-h-0">
             <button
                 onClick={onPrev}
-                className="absolute left-4 p-4 text-white/50 hover:text-white transition-colors hover:scale-110 transform z-10"
+                className="absolute left-4 z-10 flex flex-col items-center gap-1 p-3 text-white/50 hover:text-white bg-black/30 hover:bg-black/60 rounded-xl border border-white/5 hover:border-white/20 transition-all backdrop-blur-sm"
+                aria-label="Previous photo"
             >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
+                <span className="text-[10px] font-mono text-white/30">←</span>
             </button>
 
             <div
@@ -196,11 +198,13 @@ export function PhotoViewer({
 
             <button
                 onClick={onNext}
-                className="absolute right-4 p-4 text-white/50 hover:text-white transition-colors hover:scale-110 transform"
+                className="absolute right-4 flex flex-col items-center gap-1 p-3 text-white/50 hover:text-white bg-black/30 hover:bg-black/60 rounded-xl border border-white/5 hover:border-white/20 transition-all backdrop-blur-sm"
+                aria-label="Next photo"
             >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
+                <span className="text-[10px] font-mono text-white/30">→</span>
             </button>
         </div>
     )
