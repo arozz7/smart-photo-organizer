@@ -1,5 +1,29 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", "system-ui", "sans-serif";
+  --font-sans: "Inter Variable", "Inter", "system-ui", "sans-serif";
+
+  /* Semantic z-index scale */
+  --z-navigation: 10;
+  --z-sticky: 20;
+  --z-overlay: 30;
+  --z-modal: 100;
+  --z-toast: 200;
+  --z-tooltip: 300;
+}
+
+@layer utilities {
+  .z-navigation { z-index: var(--z-navigation); }
+  .z-sticky     { z-index: var(--z-sticky); }
+  .z-overlay    { z-index: var(--z-overlay); }
+  .z-modal      { z-index: var(--z-modal); }
+  .z-toast      { z-index: var(--z-toast); }
+  .z-tooltip    { z-index: var(--z-tooltip); }
+}
+
+@layer base {
+  *:focus-visible {
+    outline: 2px solid var(--color-indigo-500);
+    outline-offset: 2px;
+  }
 }

@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
 import { useAI } from '../context/AIContext'
 import { useScan } from '../context/ScanContext'
 import { usePeople } from '../context/PeopleContext'
-import { useAlert } from '../context/AlertContext'
-import { PersonNameInput } from './PersonNameInput'
+import { PhotoViewer } from './PhotoViewer'
+import { PhotoActions } from './PhotoActions'
+import { FaceOverlay } from './FaceOverlay'
+import { PhotoMetadata } from './PhotoMetadata'
 
 interface PhotoDetailProps {
     photo: any
@@ -15,97 +16,89 @@ interface PhotoDetailProps {
 }
 
 export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDetailProps) {
-    const navigate = useNavigate()
-    const { loadTags, setFilter, refreshPhoto } = useScan()
-    const { onPhotoProcessed, addToQueue } = useAI()
-    const { assignPerson, people, loadPeople } = usePeople()
-    const { showConfirm, showAlert } = useAlert()
+    const { loadTags, setFilter } = useScan()
+    const { onPhotoProcessed } = useAI()
+    const { people, loadPeople } = usePeople()
 
     const [metadata, setMetadata] = useState<any>(null)
-    const [imagePath, setImagePath] = useState<string>('')
+    const [imagePath, setImagePath] = useState('')
     const [imageRetryCount, setImageRetryCount] = useState(0)
     const [visualRotation, setVisualRotation] = useState(0)
     const [tags, setTags] = useState<string[]>([])
     const [faces, setFaces] = useState<any[]>([])
     const [newTag, setNewTag] = useState('')
-    // Face Naming State
     const [namingFaceId, setNamingFaceId] = useState<number | null>(null)
     const [nameFilter, setNameFilter] = useState('')
-
-
-    // Ensure people list is loaded for type-ahead
-    useEffect(() => {
-        if (people.length === 0) {
-            loadPeople();
-        }
-    }, [people.length, loadPeople]);
-
-
     const [isRotating, setIsRotating] = useState(false)
     const [showFaceBoxes, setShowFaceBoxes] = useState(true)
     const [showUnnamedFaces, setShowUnnamedFaces] = useState(true)
-    const [reassigningGroup, setReassigningGroup] = useState<{ id: number, name: string, faceIds: number[] } | null>(null);
-    const [reassignName, setReassignName] = useState('');
-    const [imgRect, setImgRect] = useState<{ width: number, height: number, left: number, top: number } | null>(null)
-    const [isImageLoaded, setIsImageLoaded] = useState(false)
     const [isScanning, setIsScanning] = useState(false)
-    const imgRef = useRef<HTMLImageElement>(null)
-    const photoAreaRef = useRef<HTMLDivElement>(null)
+
+    // Ensure people list is loaded for PersonNameInput typeahead
+    useEffect(() => {
+        if (people.length === 0) loadPeople()
+    }, [people.length, loadPeople])
 
     useEffect(() => {
         if (photo) {
-            console.log("[UI] Photo Detail Object:", photo);
-            // Parse metadata if it exists
+            console.log('[UI] Photo Detail Object:', photo)
             if (photo.metadata_json) {
-                console.debug("[UI] Raw metadata:", photo.metadata_json);
-                try {
-                    setMetadata(JSON.parse(photo.metadata_json))
-                } catch (e) {
-                    setMetadata(null)
-                }
+                try { setMetadata(JSON.parse(photo.metadata_json)) } catch { setMetadata(null) }
             } else {
                 setMetadata(null)
             }
-
-            // Determine image path
-            // Always use the original file_path - the backend ImageService will handle:
-            // - Web-friendly files: serve directly
-            // - RAW files: use cached preview or generate on-the-fly
-            // This avoids issues with stale/missing preview_cache_path entries
             console.log(`[UI] Loading image from file_path: ${photo.file_path}`)
-            // [Phase 53] Add cache-busting timestamp to force browser to reload the image
             setImagePath(`local-resource://${encodeURIComponent(photo.file_path)}?t=${Date.now()}`)
-
-            // Fetch tags
-            // Fetch tags
+            setImageRetryCount(0)
             fetchTags()
-            setIsImageLoaded(false)
         } else {
             setTags([])
             setFaces([])
-            setIsImageLoaded(false)
         }
     }, [photo])
 
-    // Auto-refresh when AI finishes this photo
+    // Auto-refresh when AI finishes processing this photo
     useEffect(() => {
-        if (!photo) return;
+        if (!photo) return
         return onPhotoProcessed((id) => {
             if (id === photo.id) {
-                console.log("[UI] AI finished processing this photo, refreshing tags...");
-                fetchTags();
-                loadTags(); // Refresh global list too
+                console.log('[UI] AI finished processing this photo, refreshing tags...')
+                fetchTags()
+                loadTags()
             }
-        });
+        })
     }, [photo, onPhotoProcessed])
+
+    // Keyboard navigation
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose()
+            if (e.key === 'ArrowRight') onNext()
+            if (e.key === 'ArrowLeft') onPrev()
+        }
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [onClose, onNext, onPrev])
+
+    // Load the "hide unnamed faces" setting on mount
+    useEffect(() => {
+        const loadDefaultHide = async () => {
+            try {
+                // @ts-ignore
+                const settings = await window.ipcRenderer.invoke('ai:getSettings')
+                if (settings?.hideUnnamedFacesByDefault === true) setShowUnnamedFaces(false)
+            } catch (e) {
+                console.error('Failed to load default hide setting:', e)
+            }
+        }
+        loadDefaultHide()
+    }, [])
 
     const fetchTags = async () => {
         try {
             // @ts-ignore
             const t = await window.ipcRenderer.invoke('db:getTags', photo.id)
             setTags(t)
-
-            // Also fetch faces
             // @ts-ignore
             const f = await window.ipcRenderer.invoke('db:getFaces', photo.id)
             setFaces(f.map((face: any) => ({ ...face, width: photo.width, height: photo.height })))
@@ -119,890 +112,83 @@ export default function PhotoDetail({ photo, onClose, onNext, onPrev }: PhotoDet
         onClose()
     }
 
-    const handleAddTag = async () => {
-        if (!newTag.trim()) return
-        try {
-            // @ts-ignore
-            await window.ipcRenderer.invoke('db:addTags', { photoId: photo.id, tags: [newTag.trim()] })
-            setNewTag('')
-            fetchTags()
-            loadTags()
-        } catch (e) {
-            console.error(e)
-        }
-    }
-
-    const handleRemoveTag = async (tag: string) => {
-        try {
-            // @ts-ignore
-            await window.ipcRenderer.invoke('db:removeTag', { photoId: photo.id, tag })
-            fetchTags()
-            loadTags()
-        } catch (e) {
-            console.error(e)
-        }
-    }
-
-    const handleUnassign = async (faceIds: number[]) => {
-        showConfirm({
-            title: 'Unassign Faces',
-            description: `Are you sure you want to remove the name association for ${faceIds.length} face(s)? They will become unnamed.`,
-            confirmLabel: 'Unassign',
-            onConfirm: async () => {
-                try {
-                    // @ts-ignore
-                    await window.ipcRenderer.invoke('db:unassignFaces', faceIds);
-                    fetchTags();
-                } catch (e) {
-                    console.error(e);
-                }
-            }
-        });
-    }
-
-    const handleIgnore = async (faceIds: number[]) => {
-        showConfirm({
-            title: 'Ignore Faces',
-            description: `Are you sure you want to ignore ${faceIds.length} face(s)? They will no longer appear in scan results.`,
-            confirmLabel: 'Ignore',
-            variant: 'danger',
-            onConfirm: async () => {
-                try {
-                    // @ts-ignore
-                    await window.ipcRenderer.invoke('db:ignoreFaces', faceIds);
-                    fetchTags();
-                } catch (e) {
-                    console.error(e);
-                }
-            }
-        });
-    }
-
-    const handleReassign = async () => {
-        if (!reassigningGroup || !reassignName.trim()) return;
-        try {
-            // @ts-ignore
-            await window.ipcRenderer.invoke('db:reassignFaces', {
-                faceIds: reassigningGroup.faceIds,
-                personName: reassignName.trim()
-            });
-            setReassigningGroup(null);
-            setReassignName('');
-            fetchTags();
-        } catch (e) {
-            console.error(e);
-        }
-    }
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose()
-            if (e.key === 'ArrowRight') onNext()
-            if (e.key === 'ArrowLeft') onPrev()
-        }
-        window.addEventListener('keydown', handleKeyDown)
-
-        // Handle window resize to update box positions
-        const handleResize = () => {
-            if (imgRef.current) {
-                updateImgRect(imgRef.current);
-            }
-        };
-        window.addEventListener('resize', handleResize);
-
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown)
-            window.removeEventListener('resize', handleResize);
-        }
-    }, [onClose, onNext, onPrev])
-
-    useEffect(() => {
-        const loadDefaultHide = async () => {
-            try {
-                // @ts-ignore
-                const settings = await window.ipcRenderer.invoke('ai:getSettings');
-                if (settings && settings.hideUnnamedFacesByDefault === true) {
-                    setShowUnnamedFaces(false);
-                }
-            } catch (e) {
-                console.error("Failed to load default hide setting:", e);
-            }
-        };
-        loadDefaultHide();
-    }, []);
-
-    useEffect(() => {
-        if (imgRef.current) {
-            updateImgRect(imgRef.current);
-        }
-    }, [visualRotation]);
-
-    const updateImgRect = (img: HTMLImageElement) => {
-        const area = photoAreaRef.current;
-        if (!area) return;
-
-        const cw = area.clientWidth;
-        const ch = area.clientHeight;
-
-        const isRotated = (visualRotation / 90) % 2 !== 0;
-        const maxW = isRotated ? ch : cw;
-        const maxH = isRotated ? cw : ch;
-
-        const iw = img.naturalWidth;
-        const ih = img.naturalHeight;
-
-        if (!iw || !ih) return;
-
-        const aspect = iw / ih;
-        const containerAspect = maxW / maxH;
-
-        let renderedW, renderedH;
-
-        if (aspect > containerAspect) {
-            renderedW = maxW;
-            renderedH = maxW / aspect;
-        } else {
-            renderedH = maxH;
-            renderedW = maxH * aspect;
-        }
-
-        setImgRect({ width: renderedW, height: renderedH, left: 0, top: 0 });
-    }
-
-    const handleImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
-        updateImgRect(e.currentTarget);
-        setIsImageLoaded(true);
-    }
-
     const handleGoToFolder = () => {
-        const path = photo.file_path;
-        const folder = path.substring(0, Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/')));
-        setFilter({ folder });
-        onClose();
+        const path = photo.file_path
+        const folder = path.substring(0, Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/')))
+        setFilter({ folder })
+        onClose()
     }
 
     if (!photo) return null
 
-    // Portal the detail view to body to escape inert containers
     return createPortal(
-        <div className="fixed inset-0 z-[100] flex bg-black/95 backdrop-blur-sm pointer-events-auto">
-            {/* Close Button */}
+        <div className="fixed inset-0 z-modal flex bg-black/95 backdrop-blur-sm pointer-events-auto">
             <button
                 onClick={onClose}
-                className="absolute top-4 left-4 z-50 p-2 text-white/70 hover:text-white bg-black/50 hover:bg-black/70 rounded-full transition-colors"
+                className="absolute top-4 left-4 z-overlay flex items-center gap-1.5 px-3 py-2 text-white/80 hover:text-white bg-black/60 hover:bg-black/80 rounded-full border border-white/10 hover:border-white/30 transition-all backdrop-blur-sm"
+                aria-label="Close photo detail"
             >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
+                <span className="text-xs font-medium">Close</span>
+                <span className="text-[10px] text-white/40 font-mono">ESC</span>
             </button>
 
-            {/* Main Image Area */}
-            <div className="flex-1 relative flex items-center justify-center p-4 min-w-0 min-h-0">
-                {/* Navigation Buttons (Overlay) */}
-                <button
-                    onClick={onPrev}
-                    className="absolute left-4 p-4 text-white/50 hover:text-white transition-colors hover:scale-110 transform z-10"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                </button>
+            <PhotoViewer
+                key={photo.id}
+                photo={photo}
+                imagePath={imagePath}
+                imageRetryCount={imageRetryCount}
+                setImageRetryCount={setImageRetryCount}
+                setImagePath={setImagePath}
+                visualRotation={visualRotation}
+                faces={faces}
+                showFaceBoxes={showFaceBoxes}
+                showUnnamedFaces={showUnnamedFaces}
+                onPrev={onPrev}
+                onNext={onNext}
+                onFaceClick={(faceId) => { setNamingFaceId(faceId); setNameFilter('') }}
+            />
 
-                <div
-                    ref={photoAreaRef}
-                    className="flex-1 bg-black flex items-center justify-center overflow-hidden relative group min-w-0 min-h-0 w-full h-full"
-                >
-                    {(() => {
-                        const ext = photo.file_path.split('.').pop()?.toLowerCase() || ''
-                        const isWebFriendly = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)
-                        const hasPreview = !!photo.preview_cache_path
-
-                        if (!isWebFriendly && !hasPreview) {
-                            return (
-                                <div className="text-gray-400 flex flex-col items-center gap-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                    </svg>
-                                    <span>Preview Unavailable</span>
-                                    <span className="text-xs text-gray-500">Run 'Scan Folder' to generate previews for RAW files.</span>
-                                </div>
-                            )
-                        }
-
-                        return (
-                            <div
-                                className="relative transition-transform duration-300 ease-in-out"
-                                style={{
-                                    transform: `rotate(${visualRotation}deg)`,
-                                    width: imgRect ? imgRect.width : 'auto',
-                                    height: imgRect ? imgRect.height : 'auto'
-                                }}
-                            >
-                                <img
-                                    ref={imgRef}
-                                    src={imagePath}
-                                    alt={photo.file_path.split(/[\\/]/).pop()}
-                                    className="w-full h-full object-contain shadow-2xl"
-                                    onLoad={handleImgLoad}
-                                    onError={(e) => {
-                                        console.warn(`[PhotoDetail] Image failed to load (attempt ${imageRetryCount + 1}): ${imagePath}`);
-                                        // Retry up to 2 times with cache-bust to handle race conditions with Python fallback
-                                        if (imageRetryCount < 2) {
-                                            console.log(`[PhotoDetail] Retrying image load...`);
-                                            setImageRetryCount(prev => prev + 1);
-                                            // Add cache-bust timestamp to force new request
-                                            const baseUrl = `local-resource://${encodeURIComponent(photo.file_path)}`;
-                                            setImagePath(`${baseUrl}?retry=${Date.now()}`);
-                                            return;
-                                        }
-                                        console.error(`[PhotoDetail] All retry attempts failed for:`, {
-                                            id: photo.id,
-                                            file_path: photo.file_path,
-                                            preview_cache_path: photo.preview_cache_path
-                                        });
-                                        // Show fallback message after all retries exhausted
-                                        const target = e.currentTarget;
-                                        target.style.display = 'none';
-                                        const fallback = target.parentElement?.querySelector('.image-error-fallback');
-                                        if (fallback) {
-                                            (fallback as HTMLElement).style.display = 'flex';
-                                        }
-                                    }}
-                                />
-                                <div className="image-error-fallback hidden text-gray-400 flex-col items-center gap-2 absolute inset-0 justify-center bg-gray-900">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                    </svg>
-                                    <span>Failed to load preview</span>
-                                    <span className="text-xs text-gray-500">{photo.file_path.split(/[\\/]/).pop()}</span>
-                                    <span className="text-xs text-gray-600">Try re-scanning the library to regenerate previews</span>
-                                </div>
-                                {imgRect && (
-                                    <div
-                                        className="absolute top-0 left-0 w-full h-full pointer-events-none"
-                                    >
-                                        {faces
-                                            .filter(f => showFaceBoxes && (showUnnamedFaces || f.person_name))
-                                            .map((face) => {
-                                                const scaleX = imgRect.width / (photo.width || 1);
-                                                const scaleY = imgRect.height / (photo.height || 1);
-                                                const { x, y, width, height } = face.box;
-
-                                                return (
-                                                    <div
-                                                        key={face.id}
-                                                        onClick={(e) => {
-                                                            if (!face.person_name) {
-                                                                e.stopPropagation();
-                                                                setNamingFaceId(face.id);
-                                                                setNameFilter('');
-                                                            }
-                                                        }}
-                                                        className={`absolute border-2 ${face.person_name ? 'border-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]' : 'border-indigo-500/50 shadow-[0_0_8px_rgba(79,70,229,0.3)] cursor-pointer hover:border-white hover:bg-white/10 pointer-events-auto'} rounded-sm`}
-                                                        style={{
-                                                            left: x * scaleX,
-                                                            top: y * scaleY,
-                                                            width: width * scaleX,
-                                                            height: height * scaleY
-                                                        }}
-                                                        title={face.person_name || "Click to name"}
-                                                    >
-                                                        {face.person_name && (
-                                                            <div className="absolute -top-5 left-0 bg-purple-600 text-white text-[9px] px-1 py-0.5 rounded-t whitespace-nowrap font-bold">
-                                                                {face.person_name}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
-                                    </div>
-                                )}
-                            </div>
-                        )
-                    })()}
-
-                    {/* Loading Indicator */}
-                    {!isImageLoaded && (photo.preview_cache_path || ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(photo.file_path.split('.').pop()?.toLowerCase() || '')) && (
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-                            <div className="flex flex-col items-center gap-3">
-                                <div className="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin backdrop-blur-sm"></div>
-                                <span className="text-indigo-400 text-sm font-medium bg-black/50 px-3 py-1 rounded-full backdrop-blur-md">Loading Photo...</span>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <button
-                    onClick={onNext}
-                    className="absolute right-4 p-4 text-white/50 hover:text-white transition-colors hover:scale-110 transform"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                </button>
-            </div>
-
-            {/* Right Sidebar - Metadata */}
             <div className="w-80 bg-gray-900 border-l border-gray-800 p-6 flex flex-col gap-6 overflow-y-auto shrink-0">
-                <div>
-                    <h3 className="text-white font-semibold text-lg mb-1 truncate" title={photo.file_path.split(/[\\/]/).pop()}>
-                        {photo.file_path.split(/[\\/]/).pop()}
-                    </h3>
-                    <div className="flex flex-col gap-1">
-                        <p className="text-gray-400 text-xs break-all leading-relaxed">{photo.file_path}</p>
-                        <button
-                            onClick={handleGoToFolder}
-                            className="text-indigo-400 hover:text-indigo-300 text-[10px] font-bold flex items-center gap-1 mt-1 transition-colors self-start"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                            </svg>
-                            Go to Folder
-                        </button>
-                    </div>
-                </div>
-
-                {/* Enhance Button */}
-                <div className="pb-4 border-b border-gray-800 space-y-3">
-                    <button
-                        onClick={() => {
-                            onClose();
-                            navigate(`/enhance/${photo.id}`, { state: { photo } });
-                        }}
-                        className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded font-bold shadow-lg flex items-center justify-center gap-2"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /></svg>
-                        Enhance Photo
-                    </button>
-
-                    <div className="grid grid-cols-2 gap-2">
-                        <button
-                            onClick={() => setVisualRotation(prev => prev - 90)}
-                            className="py-2 bg-gray-800 hover:bg-gray-700 text-white rounded text-sm font-medium flex items-center justify-center gap-2"
-                            title="Rotate Left (Preview)"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                            </svg>
-                            Left
-                        </button>
-                        <button
-                            onClick={() => setVisualRotation(prev => prev + 90)}
-                            className="py-2 bg-gray-800 hover:bg-gray-700 text-white rounded text-sm font-medium flex items-center justify-center gap-2"
-                            title="Rotate Right (Preview)"
-                        >
-                            Right
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6" />
-                            </svg>
-                        </button>
-                        {visualRotation % 360 !== 0 && (
-                            <button
-                                onClick={() => {
-                                    showConfirm({
-                                        title: 'Save Rotation',
-                                        description: `Save rotation of ${visualRotation} degrees? This will modify the original file and re-scan for faces.`,
-                                        confirmLabel: 'Save & Re-Scan',
-                                        onConfirm: async () => {
-                                            try {
-                                                setIsRotating(true);
-                                                await window.ipcRenderer.invoke('ai:rotateImage', { photoId: photo.id, rotation: visualRotation });
-                                                await refreshPhoto(photo.id);
-                                                onClose();
-                                            } catch (e) {
-                                                showAlert({
-                                                    title: 'Rotation Failed',
-                                                    description: String(e),
-                                                    variant: 'danger'
-                                                });
-                                            } finally {
-                                                setIsRotating(false);
-                                            }
-                                        }
-                                    });
-                                }}
-                                disabled={isRotating}
-                                className={`col-span-2 w-full py-2 ${isRotating ? 'bg-gray-600 cursor-not-allowed' : 'bg-green-600 hover:bg-green-500 animate-pulse'} text-white rounded font-bold shadow-lg flex items-center justify-center gap-2`}
-                            >
-                                {isRotating ? (
-                                    <>
-                                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                        Saving & Re-Scanning...
-                                    </>
-                                ) : (
-                                    <>
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        Save Rotation
-                                    </>
-                                )}
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                {metadata && (
-                    <div className="space-y-4">
-                        <h4 className="text-gray-500 text-xs font-bold uppercase tracking-wider">EXIF Data</h4>
-                        <div className="grid grid-cols-2 gap-4">
-                            {metadata.Model && (
-                                <div className="col-span-2">
-                                    <p className="text-gray-500 text-xs">Camera</p>
-                                    <p className="text-gray-200 text-sm">{metadata.Model}</p>
-                                </div>
-                            )}
-                            {metadata.ISO && (
-                                <div>
-                                    <p className="text-gray-500 text-xs">ISO</p>
-                                    <p className="text-gray-200 text-sm">{metadata.ISO}</p>
-                                </div>
-                            )}
-                            {metadata.FNumber && (
-                                <div>
-                                    <p className="text-gray-500 text-xs">Aperture</p>
-                                    <p className="text-gray-200 text-sm">f/{metadata.FNumber}</p>
-                                </div>
-                            )}
-                            {metadata.ExposureTime && (
-                                <div>
-                                    <p className="text-gray-500 text-xs">Shutter</p>
-                                    <p className="text-gray-200 text-sm">{metadata.ExposureTime}s</p>
-                                </div>
-                            )}
-                            {metadata.FocalLength && (
-                                <div>
-                                    <p className="text-gray-500 text-xs">Focal Length</p>
-                                    <p className="text-gray-200 text-sm">{metadata.FocalLength}</p>
-                                </div>
-                            )}
-                            {metadata.DateTimeOriginal && (
-                                <div className="col-span-2">
-                                    <p className="text-gray-500 text-xs">Taken</p>
-                                    <p className="text-gray-200 text-sm">
-                                        {metadata.DateTimeOriginal?.rawValue ? metadata.DateTimeOriginal.rawValue : metadata.DateTimeOriginal.toString()}
-                                    </p>
-                                </div>
-                            )}
-                            {photo.blur_score !== undefined && photo.blur_score !== null && (
-                                <div className="col-span-2">
-                                    <p className="text-gray-500 text-xs">Sharpness Score</p>
-                                    <div className="flex items-center gap-2">
-                                        <p className="text-gray-200 text-sm">{photo.blur_score.toFixed(1)}</p>
-                                        <div className="h-1.5 w-24 bg-gray-700 rounded-full overflow-hidden">
-                                            <div
-                                                className={`h-full ${photo.blur_score < 20 ? 'bg-red-500' : photo.blur_score < 50 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                                                style={{ width: `${Math.min(100, Math.max(0, photo.blur_score))}%` }}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {/* People Section */}
-                <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                        <h4 className="text-gray-500 text-xs font-bold uppercase tracking-wider">People</h4>
-                        <div className="flex gap-1">
-                            <button
-                                onClick={() => setShowFaceBoxes(!showFaceBoxes)}
-                                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showFaceBoxes ? 'bg-indigo-900/30 text-indigo-300 border-indigo-500/30' : 'bg-gray-800 text-gray-400 border-gray-700'}`}
-                                title={showFaceBoxes ? 'Hide all face boxes' : 'Show face boxes'}
-                            >
-                                {showFaceBoxes ? 'Boxes' : 'No Boxes'}
-                            </button>
-                            {showFaceBoxes && (
-                                <button
-                                    onClick={() => setShowUnnamedFaces(!showUnnamedFaces)}
-                                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showUnnamedFaces ? 'bg-indigo-900/30 text-indigo-300 border-indigo-500/30' : 'bg-gray-800 text-gray-400 border-gray-700'}`}
-                                    title={showUnnamedFaces ? 'Hide unnamed face boxes' : 'Show all face boxes'}
-                                >
-                                    {showUnnamedFaces ? 'Show All' : 'Named Only'}
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                    {faces.length === 0 ? (
-                        <div className="flex items-center gap-2">
-                            <p className="text-gray-500 text-sm italic">No people detected</p>
-                            <button
-                                onClick={async () => {
-                                    try {
-                                        setIsScanning(true);
-                                        console.log("[UI] User clicked Force Rescan (No Faces)");
-                                        // @ts-ignore
-                                        await window.ipcRenderer.invoke('ai:forceRescan', { photoId: photo.id, filePath: photo.file_path })
-                                        await refreshPhoto(photo.id);
-                                    } catch (e) {
-                                        console.error(e)
-                                    } finally {
-                                        setIsScanning(false);
-                                    }
-                                }}
-                                disabled={isScanning}
-                                className={`px-2 py-1 ${isScanning ? 'bg-indigo-900/50 cursor-wait' : 'bg-indigo-900/30 hover:bg-indigo-900/50'} text-indigo-300 text-xs rounded border border-indigo-500/30 transition-colors flex items-center gap-2`}
-                                title="Force deep scan for faces (Macro Mode)"
-                            >
-                                {isScanning ? (
-                                    <>
-                                        <svg className="animate-spin h-3 w-3 text-indigo-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                        Scanning...
-                                    </>
-                                ) : (
-                                    'Force Face Scan'
-                                )}
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="flex flex-wrap gap-2">
-                            <div className="flex flex-wrap gap-2 items-center">
-                                {(() => {
-                                    const groups: Record<number, { id: number, name: string, faceIds: number[] }> = {};
-                                    faces.forEach(f => {
-                                        if (f.person_id) {
-                                            if (!groups[f.person_id]) {
-                                                groups[f.person_id] = { id: f.person_id, name: f.person_name, faceIds: [] };
-                                            }
-                                            groups[f.person_id].faceIds.push(f.id);
-                                        }
-                                    });
-                                    const faceGroups = Object.values(groups);
-
-                                    return faceGroups.map((group) => {
-                                        const isEditing = reassigningGroup?.id === group.id;
-
-                                        return (
-                                            <div key={group.id} className="relative group inline-flex items-center justify-center">
-                                                {isEditing ? (
-                                                    <div className="flex items-center gap-1 bg-gray-800 p-1 rounded-full border border-indigo-500/50 relative z-10">
-                                                        <PersonNameInput
-                                                            autoFocus
-                                                            value={reassignName}
-                                                            onChange={setReassignName}
-                                                            onCommit={handleReassign}
-                                                            onSelect={(_id, name) => {
-
-                                                                setReassignName(name);
-                                                                // We need to trigger save after state update, but React state might not be ready.
-                                                                // Actually onSelect already sets name.
-                                                                // We can just set state. The user can hit enter or click save.
-                                                                // Or we can auto-save? The inline editor usually requires explicit save or Enter.
-                                                            }}
-                                                            className="min-w-[12rem]"
-                                                            placeholder="New name..."
-                                                            showSuggestions={false} // Too cramped for AI suggestions probably
-                                                        />
-                                                        <button
-                                                            onClick={handleReassign}
-                                                            className="text-green-400 hover:text-green-300 p-1"
-                                                            title="Save"
-                                                        >
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                                            </svg>
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setReassigningGroup(null)}
-                                                            className="text-red-400 hover:text-red-300 p-1"
-                                                            title="Cancel"
-                                                        >
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
-                                                            </svg>
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <>
-                                                        <button
-                                                            onClick={() => handlePersonClick(group.id)}
-                                                            className="px-2 py-1 bg-purple-900/50 text-purple-200 text-xs rounded-full border border-purple-700/50 hover:bg-purple-800/50 transition-colors flex items-center gap-1"
-                                                        >
-                                                            <span className="text-xs">👤</span> {group.name} {group.faceIds.length > 1 && <span className="opacity-50 text-[10px]">x{group.faceIds.length}</span>}
-                                                        </button>
-
-                                                        {/* Actions on Hover */}
-                                                        <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 pb-1 z-30">
-                                                            <div className="flex items-center gap-1 bg-gray-900 border border-gray-700 p-1.5 rounded-lg shadow-xl whitespace-nowrap relative">
-                                                                <div className="absolute bottom-[-5px] left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-900 border-r border-b border-gray-700 rotate-45"></div>
-                                                                <button
-                                                                    onClick={() => { setReassigningGroup(group); setReassignName(group.name); }}
-                                                                    className="p-1 text-gray-400 hover:text-indigo-400 transition-colors"
-                                                                    title="Correct Name"
-                                                                >
-                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                                    </svg>
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => handleUnassign(group.faceIds)}
-                                                                    className="p-1 text-gray-400 hover:text-yellow-400 transition-colors"
-                                                                    title="Unassign (Make Unnamed)"
-                                                                >
-                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                                                                    </svg>
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => handleIgnore(group.faceIds)}
-                                                                    className="p-1 text-gray-400 hover:text-red-400 transition-colors"
-                                                                    title="Ignore Face"
-                                                                >
-                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.046m4.596-1.596A9.964 9.964 0 0112 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18" />
-                                                                    </svg>
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    </>
-                                                )}
-                                            </div>
-                                        );
-                                    });
-                                })()}
-                                <button
-                                    onClick={async () => {
-                                        try {
-                                            setIsScanning(true);
-                                            console.log("[UI] User clicked Force Rescan (Magnifying Glass)");
-                                            // @ts-ignore
-                                            await window.ipcRenderer.invoke('ai:forceRescan', { photoId: photo.id, filePath: photo.file_path })
-                                            await refreshPhoto(photo.id);
-                                        } catch (e) {
-                                            console.error(e)
-                                        } finally {
-                                            setIsScanning(false);
-                                        }
-                                    }}
-                                    disabled={isScanning}
-                                    className={`px-2 py-1 ${isScanning ? 'bg-gray-800 cursor-wait' : 'bg-gray-800 hover:bg-gray-700'} text-gray-400 text-xs rounded-full border border-gray-700 hover:text-gray-200 transition-colors flex items-center gap-1`}
-                                    title="Force deep scan for missed faces"
-                                >
-                                    {isScanning ? (
-                                        <svg className="animate-spin h-3 w-3 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                    ) : (
-                                        <span className="text-xs">🔍</span>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Tags Section */}
-                <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                        <h4 className="text-gray-500 text-xs font-bold uppercase tracking-wider">Tags</h4>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                        {tags.map(tag => (
-                            <span key={tag} className="px-2 py-1 bg-indigo-900/50 text-indigo-200 text-xs rounded-full border border-indigo-700/50 flex items-center gap-1 group">
-                                {tag}
-                                <button
-                                    onClick={() => handleRemoveTag(tag)}
-                                    className="hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                                >
-                                    &times;
-                                </button>
-                            </span>
-                        ))}
-                    </div>
-
-                    {/* Add Tag Input */}
-                    <div className="flex gap-2 mt-2">
-                        <input
-                            type="text"
-                            className="bg-gray-800 text-gray-200 text-xs px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-indigo-500 flex-1"
-                            placeholder="Add tag..."
-                            value={newTag}
-                            onChange={(e) => setNewTag(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
-                        />
-                        <button
-                            onClick={handleAddTag}
-                            className="bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded text-xs"
-                        >
-                            +
-                        </button>
-                    </div>
-
-                    {/* Rescan Button */}
-                    <div className="mt-4 text-right border-t border-gray-800 pt-3">
-                        <button
-                            onClick={async () => {
-                                console.log("[PhotoDetail] Force Rescan Clicked! Initiating scan-files...");
-                                try {
-                                    // Use the shared rescanFiles from context if available, or invoke directly?
-                                    // PhotoDetail is usually used inside ScanProvider?
-                                    // Let's assume we can use a simpler approach if context isn't handy:
-                                    // But ScanContext manages the Queue nicely.
-                                    // Let's use window.ipcRenderer directly for now to be safe about deps, 
-                                    // mirrors what we did in ScanContext but manual triggers are safer via ScanContext usually.
-                                    // Actually, let's just trigger the context function if possible.
-                                    // But I need to modify imports.
-                                    // Simpler: Just invoke scan-files with forceRescan=true AND add to queue manually via IPC?
-                                    // No, duplication of logic.
-                                    // I'll emit an event or assume ScanContext is wrapper.
-
-                                    // Best approach: Invoke Scan Context.
-                                    // But I need to verify if I can import useScan here.
-                                    // Checking file...
-                                    // It does NOT import useScan.
-
-                                    // FALLBACK: IPC Only (Manual implementation of what ScanContext does)
-                                    // 1. Scan File
-                                    const scanned = await window.ipcRenderer.invoke('scan-files', [photo.file_path], { forceRescan: true });
-                                    // 2. Add to Queue with cleanRescan (This is the critical part)
-                                    if (scanned && scanned.length > 0) {
-                                        // Use context function
-                                        const items = scanned.map((p: any) => ({ ...p, cleanRescan: true }));
-                                        console.log("[PhotoDetail] Manually adding to AI Queue:", items);
-                                        addToQueue(items, true);
-
-                                        refreshPhoto(photo.id);
-                                    }
-                                } catch (e) {
-                                    console.error(e)
-                                }
-                            }}
-                            className="text-xs text-orange-400 hover:text-orange-300 flex items-center justify-end gap-1 w-full"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                            </svg>
-                            Force Rescan Faces (Debug)
-                        </button>
-                    </div>
-
-                    {/* Smart Tags Button */}
-                    <div className="mt-2 text-right">
-                        <button
-                            onClick={async () => {
-                                try {
-                                    // @ts-ignore
-                                    const res = await window.ipcRenderer.invoke('ai:generateTags', { photoId: photo.id })
-                                    if (res && (res.tags || res.description)) {
-                                        refreshPhoto(photo.id);
-                                    }
-                                } catch (e) {
-                                    console.error(e)
-                                }
-                            }}
-                            className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center justify-end gap-1 w-full"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                            </svg>
-                            Generate Smart Tags {photo.description ? '(Regenerate)' : ''}
-                        </button>
-                    </div>
-
-                    {/* AI Description */}
-                    {photo.description && (
-                        <div className="space-y-1 mt-4 border-t border-gray-800 pt-3">
-                            <h4 className="text-gray-500 text-xs font-bold uppercase tracking-wider flex items-center gap-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                </svg>
-                                AI Description
-                            </h4>
-                            <p className="text-gray-300 text-xs leading-relaxed italic bg-gray-800/50 p-2 rounded">
-                                {photo.description}
-                            </p>
-                        </div>
-                    )}
-
-
-                </div>
-
-                {/* Fallback if no metadata */}
-                {!metadata && (
-                    <div className="p-4 bg-gray-800 rounded text-center">
-                        <p className="text-gray-400 text-sm">No EXIF data available</p>
-                    </div>
-                )}
+                <PhotoActions
+                    photo={photo}
+                    visualRotation={visualRotation}
+                    setVisualRotation={setVisualRotation}
+                    isRotating={isRotating}
+                    setIsRotating={setIsRotating}
+                    onClose={onClose}
+                />
+                <FaceOverlay
+                    photo={photo}
+                    faces={faces}
+                    showFaceBoxes={showFaceBoxes}
+                    setShowFaceBoxes={setShowFaceBoxes}
+                    showUnnamedFaces={showUnnamedFaces}
+                    setShowUnnamedFaces={setShowUnnamedFaces}
+                    namingFaceId={namingFaceId}
+                    setNamingFaceId={setNamingFaceId}
+                    nameFilter={nameFilter}
+                    setNameFilter={setNameFilter}
+                    isScanning={isScanning}
+                    setIsScanning={setIsScanning}
+                    onFacesChanged={fetchTags}
+                    onPersonClick={handlePersonClick}
+                />
+                <PhotoMetadata
+                    photo={photo}
+                    metadata={metadata}
+                    tags={tags}
+                    newTag={newTag}
+                    setNewTag={setNewTag}
+                    isScanning={isScanning}
+                    setIsScanning={setIsScanning}
+                    onGoToFolder={handleGoToFolder}
+                    onTagsChanged={fetchTags}
+                />
             </div>
-
-            {/* Naming Modal */}
-            {namingFaceId && (
-                <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center" onClick={() => setNamingFaceId(null)}>
-                    <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-96 border border-gray-700" onClick={e => e.stopPropagation()}>
-                        <h3 className="text-white font-bold mb-4">Name this person</h3>
-
-                        <div className="space-y-4">
-                            <div>
-                                <div className="relative">
-                                    <PersonNameInput
-                                        autoFocus
-                                        value={nameFilter}
-                                        onChange={setNameFilter}
-                                        onSelect={(_id, name) => {
-
-                                            // Handle immediate selection
-                                            assignPerson(namingFaceId, name);
-                                            setNamingFaceId(null);
-                                            setTimeout(fetchTags, 500);
-                                        }}
-                                        onCommit={() => {
-                                            if (nameFilter.trim()) {
-                                                assignPerson(namingFaceId, nameFilter.trim());
-                                                setNamingFaceId(null);
-                                                setTimeout(fetchTags, 500);
-                                            }
-                                        }}
-                                        // Pass filtered descriptors for AI suggestions
-                                        descriptors={
-                                            // Find the face being named
-                                            faces.find(f => f.id === namingFaceId)?.descriptor ?
-                                                [faces.find(f => f.id === namingFaceId).descriptor] :
-                                                undefined
-                                        }
-                                        placeholder="Search or enter name..."
-                                        className="w-full"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-gray-700">
-                                <button
-                                    onClick={() => setNamingFaceId(null)}
-                                    className="px-3 py-1 text-gray-400 hover:text-white"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        if (nameFilter.trim()) {
-                                            assignPerson(namingFaceId, nameFilter.trim());
-                                            setNamingFaceId(null);
-                                            setTimeout(fetchTags, 500);
-                                        }
-                                    }}
-                                    className="px-4 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                                    disabled={!nameFilter.trim()}
-                                >
-                                    Save
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div >,
+        </div>,
         document.body
     )
 }

@@ -10,7 +10,7 @@ export function FloatingActionBar({ selectedCount, onClearSelection, children }:
     if (selectedCount === 0) return null;
 
     return (
-        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-gray-900/95 border border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200 backdrop-blur-md">
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-gray-900/95 border border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 z-sticky animate-in slide-in-from-bottom-4 fade-in duration-200 backdrop-blur-md">
             <div className="text-sm font-medium text-white border-r border-gray-700 pr-4 whitespace-nowrap">
                 {selectedCount} selected
             </div>

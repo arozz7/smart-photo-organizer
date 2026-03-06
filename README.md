@@ -363,7 +363,7 @@ npm run dev
 
 ## Releasing (Maintainers)
 
-1. **Build:** Run `npm run build`. This produces the installer (e.g., `release/0.7.0/...-Setup.7z`).
+1. **Build:** Run `npm run build`. This produces the installer (e.g., `release/0.7.5/...-Setup.7z`).
 2. **GPU Runtime:** The GPU Runtime is **not** bundled in the installer to keep it slim. Reference or create a separate `ai-runtime-win-x64.zip` containing the `bin` and `lib` directories.
 3. **GitHub Release:**
    - Create a release tagged `vX.X.X`.

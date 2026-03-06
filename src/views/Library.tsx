@@ -8,7 +8,23 @@ import { useFlexZoom } from '../hooks/useFlexZoom'
 // import AIStatus from '../components/AIStatus'
 import ScanErrorsModal from '../components/ScanErrorsModal'
 import SettingsModal from '../components/SettingsModal'
-import { GearIcon, ChevronDownIcon } from '@radix-ui/react-icons'
+import { GearIcon, ChevronDownIcon, Cross2Icon, ImageIcon, MagnifyingGlassIcon, MixerHorizontalIcon } from '@radix-ui/react-icons'
+import { EmptyState } from '../components/ui/EmptyState'
+
+function FilterPill({ value, onRemove }: { value: string; onRemove: () => void }) {
+    return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600/20 text-indigo-300 rounded-full text-xs font-medium border border-indigo-500/30">
+            {value}
+            <button
+                onClick={onRemove}
+                className="ml-0.5 text-indigo-400 hover:text-white transition-colors"
+                aria-label={`Remove ${value} filter`}
+            >
+                <Cross2Icon className="w-3 h-3" />
+            </button>
+        </span>
+    )
+}
 
 export default function Library() {
     const { scanning, startScan, scanPath, photos, loadMorePhotos, hasMore, filter, setFilter, availableTags, availableFolders, availablePeople, scanErrors, loadScanErrors, setViewingPhoto, rescanFiles } = useScan()
@@ -174,6 +190,25 @@ export default function Library() {
         return () => clearTimeout(timeout)
     }, [searchQuery])
 
+    const activeFilterPill = useMemo(() => {
+        if (filter.initial) return null
+        if ('untagged' in filter) return { label: 'Untagged (Review)', clear: () => setFilter({}) }
+        if ('tag' in filter && filter.tag) return { label: `Tag: ${filter.tag}`, clear: () => setFilter({}) }
+        if ('search' in filter && filter.search) return { label: `Search: ${filter.search}`, clear: () => { setFilter({}); setSearchQuery('') } }
+        if ('folder' in filter && filter.folder) {
+            const parts = filter.folder.split(/[\\/]/).filter(Boolean)
+            const display = parts.length > 2
+                ? `${parts[parts.length - 2]} / ${parts[parts.length - 1]}`
+                : parts[parts.length - 1] ?? filter.folder
+            return { label: `Folder: ${display}`, clear: () => setFilter({}) }
+        }
+        if ('people' in filter && filter.people && filter.people.length > 0) {
+            const person = availablePeople.find((p: any) => p.id === filter.people![0])
+            return { label: `Person: ${person ? person.name : `#${filter.people![0]}`}`, clear: () => setFilter({}) }
+        }
+        return null
+    }, [filter, availablePeople])
+
     return (
         <div className="flex flex-col h-full bg-gray-900">
             {/* Top Bar */}
@@ -267,7 +302,12 @@ export default function Library() {
                             {availableFolders.map((t: any) => (
                                 t && t.folder ? (
                                     <option className="bg-gray-800 text-white" key={t.folder} value={t.folder} title={t.folder}>
-                                        {t.folder.split(/[\\/]/).pop()}
+                                        {(() => {
+                                            const parts = t.folder.split(/[\\/]/).filter(Boolean)
+                                            return parts.length > 2
+                                                ? `${parts[parts.length - 2]} / ${parts[parts.length - 1]}`
+                                                : parts[parts.length - 1] ?? t.folder
+                                        })()}
                                     </option>
                                 ) : null
                             ))}
@@ -415,6 +455,13 @@ export default function Library() {
                 </div>
             </header >
 
+            {activeFilterPill && (
+                <div className="px-4 py-2 border-b border-gray-700/50 flex items-center gap-2 bg-gray-800/30 shrink-0">
+                    <span className="text-xs text-gray-400">Active filter:</span>
+                    <FilterPill value={activeFilterPill.label} onRemove={activeFilterPill.clear} />
+                </div>
+            )}
+
             <SettingsModal
                 open={showSettings}
                 onOpenChange={setShowSettings}
@@ -423,35 +470,46 @@ export default function Library() {
             {/* Grid Content — containerRef captures Ctrl+scroll for photo size zoom */}
             <div ref={containerRef} className="flex-1 p-4 content-start h-full">
                 {photos.length === 0 && !hasMore ? (
-                    <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-4">
+                    <>
+                        {/* Awaiting sub-filter selection — simple inline prompts */}
                         {('tag' in filter && !filter.tag) ? (
-                            <p className="text-lg">Select a tag from the dropdown above to view photos.</p>
+                            <div className="h-full flex items-center justify-center text-gray-500">
+                                <p className="text-lg">Select a tag from the dropdown above to view photos.</p>
+                            </div>
                         ) : ('folder' in filter && !filter.folder) ? (
-                            <p className="text-lg">Select a folder from the dropdown above to view photos.</p>
+                            <div className="h-full flex items-center justify-center text-gray-500">
+                                <p className="text-lg">Select a folder from the dropdown above to view photos.</p>
+                            </div>
                         ) : ('people' in filter && (!filter.people || filter.people.length === 0)) ? (
-                            <p className="text-lg">Select a person from the dropdown above to view photos.</p>
+                            <div className="h-full flex items-center justify-center text-gray-500">
+                                <p className="text-lg">Select a person from the dropdown above to view photos.</p>
+                            </div>
                         ) : ('search' in filter && !filter.search) ? (
-                            <p className="text-lg">Start typing to search for photos via AI.</p>
+                            <div className="h-full flex items-center justify-center text-gray-500">
+                                <p className="text-lg">Start typing to search for photos via AI.</p>
+                            </div>
+                        ) : ('search' in filter && filter.search) ? (
+                            <EmptyState
+                                icon={<MagnifyingGlassIcon className="w-12 h-12" />}
+                                title={`No results for "${filter.search}"`}
+                                description="Try different search terms. Smart Tags searches across AI-generated descriptions."
+                            />
+                        ) : (filter.initial || Object.keys(filter).length === 0) ? (
+                            <EmptyState
+                                icon={<ImageIcon className="w-12 h-12" />}
+                                title="Your library is empty"
+                                description="Scan a folder to start organizing your photos with AI-powered face detection and smart tags."
+                                action={{ label: 'Scan Folder', onClick: handleBrowse }}
+                            />
                         ) : (
-                            <>
-                                <p>No photos loaded.</p>
-                                <div className="flex gap-4">
-                                    <button
-                                        onClick={() => setFilter({})}
-                                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded font-medium transition-colors"
-                                    >
-                                        Load All Photos
-                                    </button>
-                                    <button
-                                        onClick={handleBrowse}
-                                        className="bg-gray-700 hover:bg-gray-600 text-white px-6 py-2 rounded font-medium transition-colors"
-                                    >
-                                        Scan Folder
-                                    </button>
-                                </div>
-                            </>
+                            <EmptyState
+                                icon={<MixerHorizontalIcon className="w-12 h-12" />}
+                                title="No photos match this filter"
+                                description="Try adjusting your filter criteria or clearing filters to see all photos."
+                                action={{ label: 'Clear Filters', onClick: () => setFilter({}) }}
+                            />
                         )}
-                    </div>
+                    </>
                 ) : (
                     <VirtuosoGrid
                         style={{ height: '100%' }}

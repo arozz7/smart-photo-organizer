@@ -52,7 +52,11 @@ Your personal command center for your photo library.
 The **Library** allows you to browse and manage your entire photo collection. 
 
 -   **Grid Navigation:** Scroll through your entire library smoothly. Use the **Date Filter** in the sidebar to jump to specific years or months.
--   **Photo Details:** Click any photo to see a large preview, its EXIF metadata (camera, lens, ISO), and any AI-generated tags.
+-   **Active Filter Chips:** When filters are applied (folder, person, date, tag), they appear as removable pills in the Library header. Click the **×** on any chip to remove that individual filter without clearing the rest.
+-   **Folder Disambiguation:** Folder filter pills show the last two path segments (e.g., `2024 / Birthday`) rather than just the leaf name, so duplicate folder names are distinguishable.
+-   **Photo Details:** Click any photo to open the full-screen detail view, showing a large preview, EXIF metadata (camera, lens, ISO), people detected, and AI-generated tags.
+    -   **Navigation:** Use the **← / →** arrow buttons on the sides of the photo, or press `←` / `→` arrow keys to move between photos.
+    -   **Closing:** Click the **✕ Close** button in the top-left corner, or press `ESC`.
 -   **Scan Errors:** If photos fail to scan (corrupt files, unsupported formats, etc.), a red error badge appears in the Library header. Click it to open the **Scan Errors Modal**:
     -   **Export CSV:** Download all errors as a CSV file (`scan-errors-YYYY-MM-DD.csv`) with columns for File Path, Error Type, Error Message, Scan Type, and Timestamp. Useful for diagnosing issues or sharing with support.
     -   **Retry All:** Re-queue all failed photos for AI processing. The app will attempt to scan them again with the current settings.
@@ -98,6 +102,7 @@ When managing libraries with 10,000+ unnamed faces, use these tools to speed up 
 *   **Progressive Loading:** Scroll down to the bottom of the list and click **"Show More"** to load the next 100 groups. This keeps the interface fast while managing massive datasets.
 *   **Cluster Size Filters:** Toggle buttons in the toolbar to focus on **Large (10+)**, **Medium (5-9)**, or **Small (2-4)** groups.
 *   **Find Ungroupable Faces:** A specialized tool to find faces that definitely *don't* belong to your current people.
+*   **View Original Photo:** Hover over any face thumbnail — including ungrouped single faces — to reveal an eye icon button. Click it to open the full photo in the Photo Detail view.
 
 > [!IMPORTANT]
 > **Understanding Filters: Background vs. Ungroupable**

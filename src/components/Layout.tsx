@@ -1,9 +1,41 @@
 import { Outlet, NavLink } from 'react-router-dom'
+import {
+    HomeIcon, ImageIcon, PersonIcon, GlobeIcon,
+    ListBulletIcon, GearIcon, PlusCircledIcon, MagnifyingGlassIcon,
+} from '@radix-ui/react-icons'
 import StatusBar from './StatusBar'
 import { AIStatusIndicator } from './AIStatusIndicator'
 import { useScan } from '../context/ScanContext'
 import { useDashboard } from '../context/DashboardContext'
 import PhotoDetail from './PhotoDetail'
+
+interface SidebarLinkProps {
+    to: string
+    icon: React.ReactNode
+    children: React.ReactNode
+    end?: boolean
+    badge?: React.ReactNode
+}
+
+function SidebarLink({ to, icon, children, end, badge }: SidebarLinkProps) {
+    return (
+        <NavLink
+            to={to}
+            end={end}
+            className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive
+                        ? 'bg-indigo-600 text-white'
+                        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                }`
+            }
+        >
+            <span aria-hidden="true">{icon}</span>
+            {children}
+            {badge}
+        </NavLink>
+    )
+}
 
 export default function Layout() {
     const { viewingPhoto, setViewingPhoto, navigateToPhoto } = useScan()
@@ -17,87 +49,43 @@ export default function Layout() {
                 </div>
 
                 <nav className="flex-1 p-2 space-y-1">
-                    <NavLink
+                    {/* Core */}
+                    <SidebarLink
                         to="/"
                         end
-                        className={({ isActive }) =>
-                            `flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                            }`
-                        }
+                        icon={<HomeIcon className="w-4 h-4" />}
+                        badge={hasNewMemories ? (
+                            <span className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0 ml-auto" title="New memories available" />
+                        ) : null}
                     >
                         Home
-                        {hasNewMemories && (
-                            <span className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0" title="New memories available" />
-                        )}
-                    </NavLink>
-                    <NavLink
-                        to="/library"
-                        className={({ isActive }) =>
-                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                            }`
-                        }
-                    >
-                        Library
-                    </NavLink>
-                    <NavLink
-                        to="/search"
-                        className={({ isActive }) =>
-                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                            }`
-                        }
-                    >
-                        Search
-                    </NavLink>
-                    <NavLink
-                        to="/create"
-                        className={({ isActive }) =>
-                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                            }`
-                        }
-                    >
-                        Create
-                    </NavLink>
-                    <NavLink
-                        to="/people"
-                        className={({ isActive }) =>
-                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                            }`
-                        }
-                    >
-                        People
-                    </NavLink>
-                    <NavLink
-                        to="/locations"
-                        className={({ isActive }) =>
-                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                            }`
-                        }
-                    >
-                        Locations
-                    </NavLink>
-                    <NavLink
-                        to="/queues"
-                        className={({ isActive }) =>
-                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                            }`
-                        }
-                    >
-                        Queues
-                    </NavLink>
-                    <NavLink
-                        to="/settings"
-                        className={({ isActive }) =>
-                            `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                            }`
-                        }
-                    >
-                        Settings
-                    </NavLink>
+                    </SidebarLink>
+                    <SidebarLink to="/library" icon={<ImageIcon className="w-4 h-4" />}>Library</SidebarLink>
+                    <SidebarLink to="/search" icon={<MagnifyingGlassIcon className="w-4 h-4" />}>Search</SidebarLink>
+                    <SidebarLink to="/people" icon={<PersonIcon className="w-4 h-4" />}>People</SidebarLink>
+                    <SidebarLink to="/locations" icon={<GlobeIcon className="w-4 h-4" />}>Locations</SidebarLink>
+
+                    {/* Tools */}
+                    <div className="pt-3 mt-3 border-t border-gray-700/50 space-y-1">
+                        <SidebarLink to="/create" icon={<PlusCircledIcon className="w-4 h-4" />}>Create</SidebarLink>
+                        <SidebarLink to="/queues" icon={<ListBulletIcon className="w-4 h-4" />}>Queues</SidebarLink>
+                    </div>
+
+                    {/* System */}
+                    <div className="pt-3 mt-3 border-t border-gray-700/50 space-y-1">
+                        <SidebarLink to="/settings" icon={<GearIcon className="w-4 h-4" />}>Settings</SidebarLink>
+                    </div>
                 </nav>
 
                 <div className="p-4 border-t border-gray-700 space-y-2">
                     <AIStatusIndicator />
-                    <div className="text-xs text-gray-500">v0.7.0</div>
+                    <button
+                        onClick={() => { /* TODO: open About/changelog dialog */ }}
+                        className="text-xs text-gray-500 hover:text-gray-300 transition-colors cursor-pointer"
+                        title="View changelog"
+                    >
+                        v0.7.5
+                    </button>
                 </div>
             </aside>
 

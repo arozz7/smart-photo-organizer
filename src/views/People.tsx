@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { PersonIcon, MagnifyingGlassIcon } from '@radix-ui/react-icons'
+import { EmptyState } from '../components/ui/EmptyState'
 import { usePeopleGridSize } from '../hooks/usePeopleGridSize'
 import { usePeople } from '../context/PeopleContext'
 import { useAI } from '../context/AIContext'
@@ -620,13 +622,12 @@ export default function People() {
                                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
                                 </div>
                             ) : people.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center p-20 text-gray-500 border border-dashed border-gray-800 rounded-2xl">
-                                    <span className="text-6xl mb-4">👥</span>
-                                    <h3 className="text-xl font-medium mb-2">No people identified yet</h3>
-                                    <p className="max-w-md text-center">
-                                        Start by naming faces in the "Unnamed Faces" tab.
-                                    </p>
-                                </div>
+                                <EmptyState
+                                    icon={<PersonIcon className="w-12 h-12" />}
+                                    title="No people found yet"
+                                    description="Scan your photo library to detect faces. Once scanned, group and name the people in your photos."
+                                    action={{ label: 'Go to Library', onClick: () => navigate('/library') }}
+                                />
                             ) : (
                                 <div style={{ ...gridSizes.identified.gridStyle, gap: '1.5rem' }}>
                                     {people.map(person => (
@@ -696,10 +697,11 @@ export default function People() {
                                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
                             </div>
                         ) : totalDiscoveryCount === 0 ? (
-                            <div className="text-center py-20 text-gray-500">
-                                <span className="text-4xl mb-4 block">🔍</span>
-                                <p>No new discoveries yet.</p>
-                            </div>
+                            <EmptyState
+                                icon={<MagnifyingGlassIcon className="w-12 h-12" />}
+                                title="All caught up"
+                                description="No new face groups to review. New discoveries will appear here as more photos are scanned."
+                            />
                         ) : (
                             <ClusterList
                                 clusters={discoveriesController.displayedClusters}
@@ -916,6 +918,19 @@ export default function People() {
                                                                     </div>
                                                                 </div>
                                                             )}
+                                                            <button
+                                                                className="absolute bottom-1 right-1 p-1 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-all hover:bg-indigo-600 z-20 shadow-lg"
+                                                                title="View Original Photo"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    viewPhoto(face.photo_id);
+                                                                }}
+                                                            >
+                                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                </svg>
+                                                            </button>
                                                         </div>
                                                     ))}
                                                     {singles.length > 100 && (

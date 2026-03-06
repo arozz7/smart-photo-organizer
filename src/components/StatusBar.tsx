@@ -24,7 +24,12 @@ export default function StatusBar() {
     if (!isActive) return null;
 
     return (
-        <div className="fixed bottom-0 left-0 right-0 bg-gray-900/90 backdrop-blur-md border-t border-gray-800 px-4 py-1 text-xs flex items-center justify-between z-50 shadow-up text-gray-400 h-8 select-none">
+        <div
+            role="status"
+            aria-live="polite"
+            aria-label="AI processing status"
+            className="fixed bottom-0 left-0 right-0 bg-gray-900/90 backdrop-blur-md border-t border-gray-800 px-4 py-1 text-xs flex items-center justify-between z-sticky shadow-up text-gray-400 h-8 select-none"
+        >
             <div className="flex items-center gap-6">
                 {scanning && (
                     <span className="flex items-center gap-2 text-blue-400 font-medium animate-pulse">
@@ -93,6 +98,7 @@ export default function StatusBar() {
             <div className="flex items-center gap-4">
                 <button
                     onClick={() => setIsPaused(!isPaused)}
+                    aria-label={isPaused ? 'Resume AI processing' : 'Pause AI processing'}
                     className={`px-3 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-2 border ${isPaused
                         ? 'bg-amber-500/10 text-amber-500 border-amber-500/30 hover:bg-amber-500/20'
                         : 'bg-green-500/10 text-green-500 border-green-500/30 hover:bg-green-500/20'

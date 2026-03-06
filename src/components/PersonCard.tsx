@@ -6,10 +6,21 @@ export default function PersonCard({ person, onClick }: { person: any, onClick: 
     const hasUnconfirmed = person.unconfirmed_count > 0;
     const hasAlerts = person.alert_count > 0;
 
+    const ariaLabel = [
+        `View ${person.name}`,
+        `${person.face_count} photo${person.face_count !== 1 ? 's' : ''}`,
+        hasAlerts ? `${person.alert_count} alert${person.alert_count !== 1 ? 's' : ''}` : null,
+        hasUnconfirmed ? `${person.unconfirmed_count} unconfirmed` : null,
+    ].filter(Boolean).join(', ')
+
     return (
         <div
             onClick={onClick}
-            className="bg-gray-800 rounded-xl overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-500 transition-all group relative"
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
+            role="button"
+            tabIndex={0}
+            aria-label={ariaLabel}
+            className="bg-gray-800 rounded-xl overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-500 transition-all group relative focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
         >
             <div className="aspect-square bg-gray-900 overflow-hidden relative">
                 {person.cover_path ? (

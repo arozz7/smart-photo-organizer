@@ -2,7 +2,7 @@
 
 ## 🚀 Priority Roadmap
 
-### 1. UX Modernization (UI Polish)
+### 1. UX Modernization (UI Polish) ✅ Complete — v0.7.5
 - **Goal:** Elevate the UI from functional to polished product quality through systematic improvements to navigation, controls, typography, accessibility, and first-run experience.
 - **Core Features:**
     - **Sidebar Navigation:** Add Radix icons to all nav links, group items by category (Core/Tools/System) with subtle dividers, extract reusable `SidebarLink` component.
@@ -173,7 +173,19 @@
 
 # ✅ Implemented Features
 
-## v0.7.0 (In Progress)
+## v0.7.5 (In Progress)
+
+### UX Modernization
+- Navigation & Sidebar icons, grouped links, `SidebarLink` component
+- Form Control Theming (Radix Switch, styled selects)
+- Library Filter UX: active filter chips, folder disambiguation
+- Typography: Inter font via `@fontsource-variable/inter`
+- Empty States: `EmptyState` component for first-run and no-results
+- Accessibility: keyboard nav, aria labels, `role="status"` on StatusBar
+- Z-Index Scale: semantic tokens replacing ad-hoc values
+- PhotoDetail Decomposition: split into `PhotoViewer`, `FaceOverlay`, `PhotoMetadata`, `PhotoActions`
+
+## v0.7.0
 
 ### Ctrl+Scroll Grid Size Control
 *Details: See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/plans/ctrl-scroll-grid-size-plan.md)*
