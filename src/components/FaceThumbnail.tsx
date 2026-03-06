@@ -119,7 +119,7 @@ const FaceThumbnail = React.memo<FaceThumbnailProps & { fallbackSrc?: string }>(
 
                     return finalSrc;
                 })()}
-                alt={alt || "face"}
+                alt={alt || "Face thumbnail"}
                 onLoad={(e) => {
                     const img = e.currentTarget;
                     if (img.naturalWidth === 1 && img.naturalHeight === 1) {

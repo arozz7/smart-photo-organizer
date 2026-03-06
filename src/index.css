@@ -3,3 +3,10 @@
 @theme {
   --font-sans: "Inter Variable", "Inter", "system-ui", "sans-serif";
 }
+
+@layer base {
+  *:focus-visible {
+    outline: 2px solid var(--color-indigo-500);
+    outline-offset: 2px;
+  }
+}
