@@ -26,7 +26,7 @@ vi.mock('node:fs', () => ({
     writeFileSync: vi.fn()
 }));
 
-import { ConfigService } from '../../../../electron/core/services/ConfigService';
+import { ConfigService, STRICT_SCORE_THRESHOLD_ACCEPT } from '../../../../electron/core/services/ConfigService';
 
 describe('ConfigService', () => {
     let consoleErrorSpy: MockInstance;
@@ -166,5 +166,33 @@ describe('ConfigService', () => {
         expect(settings.advancedFace).toBeDefined();
         expect(settings.advancedFace.detThreshStandard).toBe(0.65);
         expect(settings.advancedFace.detThreshMacro).toBe(0.25);
+    });
+
+    // Phase 104: Strict False Positive Mode threshold constants
+    it('STRICT_SCORE_THRESHOLD_ACCEPT should be 0.75', () => {
+        expect(STRICT_SCORE_THRESHOLD_ACCEPT).toBe(0.75);
+    });
+
+    it('default scoreThresholdAccept should remain 0.70 (not affected by strict constant)', () => {
+        // Arrange
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+
+        // Act
+        const settings = ConfigService.getSettings();
+
+        // Assert — default must stay 0.70; strict mode only applies when toggled on
+        expect(settings.advancedFace.scoreThresholdAccept).toBe(0.70);
+    });
+
+    it('setAdvancedFaceSettings can raise scoreThresholdAccept to strict value', () => {
+        // Arrange
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+        ConfigService.getSettings(); // initialize
+
+        // Act
+        ConfigService.setAdvancedFaceSettings({ scoreThresholdAccept: STRICT_SCORE_THRESHOLD_ACCEPT });
+
+        // Assert
+        expect(ConfigService.getAdvancedFaceSettings().scoreThresholdAccept).toBe(0.75);
     });
 });

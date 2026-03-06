@@ -2,6 +2,11 @@ import { app } from 'electron';
 import path from 'node:path';
 import * as fs from 'node:fs';
 
+// Phase 104: Strict False Positive Mode — threshold constants
+// Default mode uses 0.70. When strictFalsePositiveMode is enabled (Phase 6 toggle),
+// scoreThresholdAccept is raised to this value to reduce cartoon/object false positives.
+export const STRICT_SCORE_THRESHOLD_ACCEPT = 0.75;
+
 // Define Schema Interfaces
 export interface AISettings {
     faceSimilarityThreshold: number;
