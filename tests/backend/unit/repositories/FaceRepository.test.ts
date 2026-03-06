@@ -125,6 +125,41 @@ describe('FaceRepository', () => {
             expect(face3.is_ignored).toBe(0); // Not affected
         });
 
+        it('backfill: pre-existing ignored faces (ignore_source=NULL) should be updated to "user"', () => {
+            // Arrange: simulate a pre-104 ignored face with no ignore_source
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { is_ignored: 1 });
+            // Verify the starting state has NULL ignore_source (as seeded)
+            const before = db.prepare('SELECT ignore_source FROM faces WHERE id = ?').get(faceId) as any;
+            expect(before.ignore_source).toBeNull();
+
+            // Act: run the Phase 104 backfill SQL (mirrors db.ts migration)
+            db.prepare(`
+                UPDATE faces SET ignore_source = 'user'
+                WHERE is_ignored = 1 AND ignore_source IS NULL
+            `).run();
+
+            // Assert
+            const after = db.prepare('SELECT ignore_source FROM faces WHERE id = ?').get(faceId) as any;
+            expect(after.ignore_source).toBe('user');
+        });
+
+        it('backfill: non-ignored faces (is_ignored=0) should not be touched', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { is_ignored: 0 });
+
+            // Act: run backfill
+            db.prepare(`
+                UPDATE faces SET ignore_source = 'user'
+                WHERE is_ignored = 1 AND ignore_source IS NULL
+            `).run();
+
+            // Assert: non-ignored face remains untouched
+            const after = db.prepare('SELECT ignore_source FROM faces WHERE id = ?').get(faceId) as any;
+            expect(after.ignore_source).toBeNull();
+        });
+
         it('should set ignore_source to "user" when no source provided', () => {
             // Arrange
             const photoId = seedPhoto(db);
