@@ -2,6 +2,14 @@
 
 @theme {
   --font-sans: "Inter Variable", "Inter", "system-ui", "sans-serif";
+
+  /* Semantic z-index scale */
+  --z-navigation: 10;
+  --z-sticky: 20;
+  --z-overlay: 30;
+  --z-modal: 40;
+  --z-toast: 50;
+  --z-tooltip: 60;
 }
 
 @layer base {

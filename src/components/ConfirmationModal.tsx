@@ -70,9 +70,9 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
             <Dialog.Portal>
-                <Dialog.Overlay className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[200]" />
+                <Dialog.Overlay className="fixed inset-0 bg-black/70 backdrop-blur-sm z-toast" />
                 <Dialog.Content
-                    className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-gray-900 border border-gray-700 p-6 rounded-xl shadow-2xl z-[201] animate-in fade-in zoom-in duration-200"
+                    className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-gray-900 border border-gray-700 p-6 rounded-xl shadow-2xl z-toast animate-in fade-in zoom-in duration-200"
                     onKeyDown={handleKeyDown}
                 >
                     <Dialog.Title className="text-xl font-bold text-white mb-2">

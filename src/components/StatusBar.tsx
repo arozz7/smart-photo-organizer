@@ -28,7 +28,7 @@ export default function StatusBar() {
             role="status"
             aria-live="polite"
             aria-label="AI processing status"
-            className="fixed bottom-0 left-0 right-0 bg-gray-900/90 backdrop-blur-md border-t border-gray-800 px-4 py-1 text-xs flex items-center justify-between z-50 shadow-up text-gray-400 h-8 select-none"
+            className="fixed bottom-0 left-0 right-0 bg-gray-900/90 backdrop-blur-md border-t border-gray-800 px-4 py-1 text-xs flex items-center justify-between z-sticky shadow-up text-gray-400 h-8 select-none"
         >
             <div className="flex items-center gap-6">
                 {scanning && (
