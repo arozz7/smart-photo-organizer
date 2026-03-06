@@ -55,6 +55,10 @@ export interface AdvancedFaceConfig {
     // [Phase 90] 3-Tier Detection Score System
     scoreThresholdReject?: number;  // Default 0.40 — below this, auto-reject
     scoreThresholdAccept?: number;  // Default 0.70 — above this, auto-accept as human
+
+    // [Phase 104] Strict False Positive Mode
+    // When true: scoreThresholdAccept=0.75, anchor_only_frontal=true in clustering
+    strictFalsePositiveMode?: boolean; // Default false
 }
 
 export interface WindowBounds {
@@ -138,7 +142,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         highQualityFaceThreshold: 0.65, // [Phase 74] Faces with quality > this bypass low detection score filter
         largeFaceThreshold: 300,        // [Phase 79] Default
         scoreThresholdReject: 0.40,     // [Phase 90] Below this → auto-reject
-        scoreThresholdAccept: 0.70      // [Phase 90] Above this → auto-accept as human
+        scoreThresholdAccept: 0.70,     // [Phase 90] Above this → auto-accept as human
+        strictFalsePositiveMode: false  // [Phase 104] Off by default
     },
     aiSettings: {
         faceSimilarityThreshold: 0.65,

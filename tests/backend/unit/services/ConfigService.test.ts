@@ -168,6 +168,30 @@ describe('ConfigService', () => {
         expect(settings.advancedFace.detThreshMacro).toBe(0.25);
     });
 
+    // Phase 104: Strict False Positive Mode — config field
+    it('strictFalsePositiveMode should default to false', () => {
+        // Arrange
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+
+        // Act
+        const settings = ConfigService.getSettings();
+
+        // Assert
+        expect(settings.advancedFace.strictFalsePositiveMode).toBe(false);
+    });
+
+    it('setAdvancedFaceSettings can enable strictFalsePositiveMode', () => {
+        // Arrange
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+        ConfigService.getSettings(); // initialize
+
+        // Act
+        ConfigService.setAdvancedFaceSettings({ strictFalsePositiveMode: true });
+
+        // Assert
+        expect(ConfigService.getAdvancedFaceSettings().strictFalsePositiveMode).toBe(true);
+    });
+
     // Phase 104: Strict False Positive Mode threshold constants
     it('STRICT_SCORE_THRESHOLD_ACCEPT should be 0.75', () => {
         expect(STRICT_SCORE_THRESHOLD_ACCEPT).toBe(0.75);

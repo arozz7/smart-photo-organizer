@@ -178,14 +178,16 @@ export function registerAIHandlers() {
             const faces = FaceRepository.getFacesByIds(ids);
             const formattedFaces = faces
                 .filter((f: any) => f.descriptor && f.descriptor.length > 0)
-                .map((f: any) => ({ id: f.id, descriptor: f.descriptor }));
+                .map((f: any) => ({ id: f.id, descriptor: f.descriptor, pose_yaw: f.pose_yaw ?? null }));
 
+            const { strictFalsePositiveMode } = ConfigService.getAdvancedFaceSettings();
             const payload = {
                 faces: formattedFaces,
                 eps: eps ?? 0.45,
                 min_samples: min_samples ?? 2,
                 min_cohesion: min_cohesion ?? 0.0,
-                max_spread: max_spread ?? 0.0
+                max_spread: max_spread ?? 0.0,
+                anchor_only_frontal: strictFalsePositiveMode ?? false
             };
             return await pythonProvider.sendRequest('cluster_faces', payload, 600000);
         } catch (e) {

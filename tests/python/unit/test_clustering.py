@@ -1,5 +1,6 @@
 """
-Unit tests for cluster_faces_dbscan pose-weighted anchor logic.
+Unit tests for cluster_faces_dbscan pose-weighted anchor logic and the
+cluster_faces command-layer integration of anchor_only_frontal.
 
 Phase 104 — Lever 2: Pose-weighted DBSCAN anchors
 When anchor_only_frontal=True, only faces with |pose_yaw| < 55° can anchor
@@ -8,6 +9,7 @@ When anchor_only_frontal=True, only faces with |pose_yaw| < 55° can anchor
 import pytest
 import numpy as np
 from facelib import faces
+from commands.clustering import cluster_faces
 
 
 # ---------------------------------------------------------------------------
@@ -136,3 +138,52 @@ class TestAnchorOnlyFrontalEnabled:
         # Should form 1 cluster (fallback: all treated as frontal)
         assert len(result) == 1
         assert set(result[0]) == {1, 2}
+
+
+# ---------------------------------------------------------------------------
+# Command-layer integration: cluster_faces payload wires anchor_only_frontal
+# ---------------------------------------------------------------------------
+
+class TestClusterFacesCommandAnchorFlag:
+
+    def _make_face(self, face_id: int, base: list, pose_yaw: float) -> dict:
+        desc = make_desc(base, 0.01)
+        return {'id': face_id, 'descriptor': desc, 'pose_yaw': pose_yaw}
+
+    def test_anchor_only_frontal_in_payload_dissolves_high_yaw_clusters(self):
+        """Command layer honours anchor_only_frontal=True via payload field."""
+        payload = {
+            'faces': [
+                self._make_face(1, CENTRE_A, 60.0),
+                self._make_face(2, CENTRE_A, 65.0),
+                self._make_face(3, CENTRE_B, 70.0),
+                self._make_face(4, CENTRE_B, 75.0),
+            ],
+            'eps': 0.2,
+            'min_samples': 2,
+            'anchor_only_frontal': True,
+        }
+
+        result = cluster_faces(payload)
+
+        assert result['clusters'] == [], (
+            f"Expected no clusters when all faces are high-yaw, got {result['clusters']}"
+        )
+
+    def test_anchor_only_frontal_false_allows_high_yaw_clusters(self):
+        """anchor_only_frontal=False (default) does not dissolve high-yaw clusters."""
+        payload = {
+            'faces': [
+                self._make_face(1, CENTRE_A, 60.0),
+                self._make_face(2, CENTRE_A, 65.0),
+            ],
+            'eps': 0.2,
+            'min_samples': 2,
+            'anchor_only_frontal': False,
+        }
+
+        result = cluster_faces(payload)
+
+        assert len(result['clusters']) == 1, (
+            f"Expected 1 cluster when anchor_only_frontal=False, got {result['clusters']}"
+        )
