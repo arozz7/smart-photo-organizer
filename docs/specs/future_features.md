@@ -2,7 +2,7 @@
 
 ## 🚀 Priority Roadmap
 
-### 1. UX Modernization (UI Polish)
+### 1. UX Modernization (UI Polish) ✅ Complete — v0.7.5
 - **Goal:** Elevate the UI from functional to polished product quality through systematic improvements to navigation, controls, typography, accessibility, and first-run experience.
 - **Core Features:**
     - **Sidebar Navigation:** Add Radix icons to all nav links, group items by category (Core/Tools/System) with subtle dividers, extract reusable `SidebarLink` component.
