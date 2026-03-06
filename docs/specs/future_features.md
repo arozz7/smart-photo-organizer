@@ -173,7 +173,19 @@
 
 # ✅ Implemented Features
 
-## v0.7.0 (In Progress)
+## v0.7.5 (In Progress)
+
+### UX Modernization
+- Navigation & Sidebar icons, grouped links, `SidebarLink` component
+- Form Control Theming (Radix Switch, styled selects)
+- Library Filter UX: active filter chips, folder disambiguation
+- Typography: Inter font via `@fontsource-variable/inter`
+- Empty States: `EmptyState` component for first-run and no-results
+- Accessibility: keyboard nav, aria labels, `role="status"` on StatusBar
+- Z-Index Scale: semantic tokens replacing ad-hoc values
+- PhotoDetail Decomposition: split into `PhotoViewer`, `FaceOverlay`, `PhotoMetadata`, `PhotoActions`
+
+## v0.7.0
 
 ### Ctrl+Scroll Grid Size Control
 *Details: See [Ctrl+Scroll Grid Size Plan](file:///j:/Projects/smart-photo-organizer/docs/plans/ctrl-scroll-grid-size-plan.md)*
