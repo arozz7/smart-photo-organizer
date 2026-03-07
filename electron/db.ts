@@ -780,6 +780,23 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     db.exec('ALTER TABLE scan_errors ADD COLUMN is_unrepairable BOOLEAN DEFAULT 0');
   } catch { /* column already exists */ }
 
+  // --- MIGRATION: Ignore Source Tracking (Phase 104) ---
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN ignore_source TEXT DEFAULT NULL CHECK(ignore_source IN ('user', 'background_verification'))");
+  } catch { /* column already exists */ }
+
+  // Backfill: all pre-104 ignored faces were user-initiated
+  const ignoreSourceBackfillKey = 'migration_ignore_source_backfill_v1';
+  const ignoreSourceCheck = db.prepare('SELECT value FROM app_state WHERE key = ?').get(ignoreSourceBackfillKey);
+  if (!ignoreSourceCheck) {
+    const result = db.prepare(`
+      UPDATE faces SET ignore_source = 'user'
+      WHERE is_ignored = 1 AND ignore_source IS NULL
+    `).run();
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(ignoreSourceBackfillKey, '1');
+    logger.info(`[DB Module] Backfilled ignore_source='user' for ${result.changes} pre-existing ignored faces.`);
+  }
+
   logger.info('Database schema ensured.');
 }
 

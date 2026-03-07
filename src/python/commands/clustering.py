@@ -46,8 +46,13 @@ def cluster_faces(payload, req_id=None):
         max_size = int(payload.get('max_size', 200)) # Default to 200
         debug = bool(payload.get('debug', False))
         min_cohesion = float(payload.get('min_cohesion', 0.0))
-        
-        result = faces.cluster_faces_dbscan(descriptors, ids, eps, min_samples, debug=debug)
+        anchor_only_frontal = bool(payload.get('anchor_only_frontal', False))
+        pose_yaws = [f.get('pose_yaw') for f in faces_data] if anchor_only_frontal else None
+
+        result = faces.cluster_faces_dbscan(
+            descriptors, ids, eps, min_samples, debug=debug,
+            anchor_only_frontal=anchor_only_frontal, pose_yaws=pose_yaws
+        )
         
         # Handle both debug (dict) and normal (list) return types
         if isinstance(result, dict):

@@ -81,13 +81,13 @@ export class FaceRepository {
         return rows.map((r: any) => this.parseFace(r));
     }
 
-    static ignoreFaces(ids: number[]) {
+    static ignoreFaces(ids: number[], source: 'user' | 'background_verification' = 'user') {
         const db = getDB();
         if (ids.length === 0) return;
         const placeholders = ids.map(() => '?').join(',');
         // CRITICAL: Unassign from person when ignoring so they are removed from FAISS index logic
-        const query = `UPDATE faces SET is_ignored = 1, person_id = NULL WHERE id IN (${placeholders})`;
-        db.prepare(query).run(...ids);
+        const query = `UPDATE faces SET is_ignored = 1, person_id = NULL, ignore_source = ? WHERE id IN (${placeholders})`;
+        db.prepare(query).run(source, ...ids);
     }
 
     static restoreFaces(ids: number[], personId?: number | null) {
@@ -1040,10 +1040,65 @@ export class FaceRepository {
     static countSuspectFaces(): number {
         const db = getDB();
         const result = db.prepare(`
-            SELECT COUNT(*) as count 
-            FROM faces 
-            WHERE entity_type = 'suspect' 
+            SELECT COUNT(*) as count
+            FROM faces
+            WHERE entity_type = 'suspect'
               AND (is_ignored = 0 OR is_ignored IS NULL)
+        `).get() as { count: number };
+        return result.count;
+    }
+
+    /**
+     * Return orphaned faces: confirmed-human faces that slipped through bucketing
+     * without being matched to any person or bucket.
+     * These are candidates for background VLM re-verification.
+     */
+    static getOrphanedFaces(limit = 10): Array<{
+        id: number;
+        photo_id: number;
+        box_json: string;
+        file_path: string;
+        preview_cache_path: string | null;
+    }> {
+        const db = getDB();
+        return db.prepare(`
+            SELECT f.id, f.photo_id, f.box_json,
+                   p.file_path, p.preview_cache_path
+            FROM faces f
+            JOIN photos p ON f.photo_id = p.id
+            WHERE f.entity_type = 'human'
+              AND f.confidence_tier = 'human'
+              AND f.needs_bucketing = 0
+              AND f.bucket_id IS NULL
+              AND f.person_id IS NULL
+              AND f.is_ignored = 0
+              AND f.descriptor IS NOT NULL
+            ORDER BY p.created_at DESC
+            LIMIT ?
+        `).all(limit) as Array<{
+            id: number;
+            photo_id: number;
+            box_json: string;
+            file_path: string;
+            preview_cache_path: string | null;
+        }>;
+    }
+
+    /**
+     * Count total orphaned faces eligible for background re-verification.
+     */
+    static countOrphanedFaces(): number {
+        const db = getDB();
+        const result = db.prepare(`
+            SELECT COUNT(*) as count
+            FROM faces
+            WHERE entity_type = 'human'
+              AND confidence_tier = 'human'
+              AND needs_bucketing = 0
+              AND bucket_id IS NULL
+              AND person_id IS NULL
+              AND is_ignored = 0
+              AND descriptor IS NOT NULL
         `).get() as { count: number };
         return result.count;
     }
@@ -1066,8 +1121,8 @@ export class FaceRepository {
     static markFaceAsRejected(id: number): void {
         const db = getDB();
         db.prepare(`
-            UPDATE faces 
-            SET is_ignored = 1 
+            UPDATE faces
+            SET is_ignored = 1, ignore_source = 'user'
             WHERE id = ?
         `).run(id);
     }

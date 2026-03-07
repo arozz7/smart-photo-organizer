@@ -207,12 +207,28 @@ def split_oversized_cluster(cluster_ids, X_normalized, id_to_idx, max_size=25):
     return final_clusters
 
 
-def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2, debug=False):
+def cluster_faces_dbscan(
+    descriptors,
+    ids,
+    eps=0.5,
+    min_samples=2,
+    debug=False,
+    anchor_only_frontal: bool = False,
+    pose_yaws=None,
+):
     """
     Clusters faces using DBSCAN.
+
     descriptors: List of embedding vectors.
     ids: List of corresponding face/photo IDs to return in clusters.
     debug: If True, return additional diagnostic info about distances.
+    anchor_only_frontal: When True, clusters that contain no frontal face
+        (|pose_yaw| < 55°) are dissolved. High-yaw faces can join a cluster
+        started by a frontal face but cannot anchor one on their own.
+        Requires pose_yaws to be provided; if None, all faces are treated as
+        frontal (safe fallback).
+    pose_yaws: List of yaw angles (degrees) parallel to ids/descriptors.
+        Only used when anchor_only_frontal=True.
     Returns: List of clusters, where each cluster is a list of ids.
              If debug=True, returns dict with 'clusters' and 'debug_info'.
     """
@@ -268,7 +284,18 @@ def cluster_faces_dbscan(descriptors, ids, eps=0.5, min_samples=2, debug=False):
         clusters[label].append(ids[idx])
     
     result_clusters = list(clusters.values())
-    
+
+    # Phase 104 — Pose-weighted anchor filter
+    # Dissolve any cluster whose members are all high-yaw (no frontal anchor).
+    if anchor_only_frontal:
+        FRONTAL_YAW_LIMIT = 55.0
+        if pose_yaws is not None:
+            id_to_yaw = {face_id: yaw for face_id, yaw in zip(ids, pose_yaws)}
+            def has_frontal_anchor(cluster):
+                return any(abs(id_to_yaw.get(fid, 0.0)) < FRONTAL_YAW_LIMIT for fid in cluster)
+            result_clusters = [c for c in result_clusters if has_frontal_anchor(c)]
+        # If pose_yaws is None, treat all faces as frontal → no filtering applied
+
     if debug:
         # Build face_to_cluster map (always fast)
         face_to_cluster = {}

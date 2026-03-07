@@ -39,6 +39,8 @@ vi.mock('../../../../electron/data/repositories/FaceRepository', () => ({
     FaceRepository: {
         getSuspectFaces: vi.fn(() => []),
         countSuspectFaces: vi.fn(() => 0),
+        getOrphanedFaces: vi.fn(() => []),
+        countOrphanedFaces: vi.fn(() => 0),
         ignoreFaces: vi.fn(),
         updateFaceEntityType: vi.fn(),
         updateFaceDemographics: vi.fn(),
@@ -97,6 +99,8 @@ describe('BackgroundVerificationService', () => {
         // Reset default mock returns
         vi.mocked(FaceRepository.getSuspectFaces).mockReturnValue([]);
         vi.mocked(FaceRepository.countSuspectFaces).mockReturnValue(0);
+        vi.mocked(FaceRepository.getOrphanedFaces).mockReturnValue([]);
+        vi.mocked(FaceRepository.countOrphanedFaces).mockReturnValue(0);
         vi.mocked(FaceRepository.incrementVerificationAttempts).mockReturnValue(1);
         vi.mocked(FaceRepository.getFacesByPhoto).mockReturnValue([]);
         vi.mocked(AppStateRepository.isAIProcessingActive).mockReturnValue(false);
@@ -356,6 +360,58 @@ describe('BackgroundVerificationService', () => {
             // Assert
             expect(FaceRepository.incrementVerificationAttempts).toHaveBeenCalledWith(face.id);
             expect(FaceRepository.markFaceAsRejected).toHaveBeenCalledWith(face.id);
+        });
+    });
+
+    describe('Orphaned Face Verification', () => {
+        it('orphan rejected by VLM → ignoreFaces called with background_verification source', async () => {
+            // Arrange
+            const face = createSuspectFace({ id: 42, photo_id: 200 });
+            vi.mocked(FaceRepository.getOrphanedFaces).mockReturnValue([face as any]);
+            vi.mocked(FaceRepository.countOrphanedFaces).mockReturnValue(1);
+            vi.mocked(pythonProvider.verifyFace).mockResolvedValue({
+                is_face: false,
+                confidence: 0.9,
+                reason: 'cartoon'
+            });
+
+            // Act
+            await (service as any).processOrphanedFaces();
+
+            // Assert
+            expect(FaceRepository.ignoreFaces).toHaveBeenCalledWith([face.id], 'background_verification');
+            expect(mockWindow.webContents.send).toHaveBeenCalledWith(
+                'background-verification-result',
+                { photoId: face.photo_id }
+            );
+        });
+
+        it('orphan confirmed by VLM → face unchanged (ignoreFaces not called)', async () => {
+            // Arrange
+            const face = createSuspectFace({ id: 43, photo_id: 201 });
+            vi.mocked(FaceRepository.getOrphanedFaces).mockReturnValue([face as any]);
+            vi.mocked(FaceRepository.countOrphanedFaces).mockReturnValue(1);
+            vi.mocked(pythonProvider.verifyFace).mockResolvedValue({
+                is_face: true,
+                confidence: 0.85
+            });
+
+            // Act
+            await (service as any).processOrphanedFaces();
+
+            // Assert
+            expect(FaceRepository.ignoreFaces).not.toHaveBeenCalled();
+        });
+
+        it('no orphaned faces → verifyFace not called', async () => {
+            // Arrange
+            vi.mocked(FaceRepository.getOrphanedFaces).mockReturnValue([]);
+
+            // Act
+            await (service as any).processOrphanedFaces();
+
+            // Assert
+            expect(pythonProvider.verifyFace).not.toHaveBeenCalled();
         });
     });
 

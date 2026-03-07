@@ -558,7 +558,7 @@ export default function People() {
                                 ? 'bg-indigo-600/10 text-indigo-400 border-indigo-500/30'
                                 : 'bg-gray-800/50 hover:bg-gray-700 text-gray-400 border-gray-700'
                                 }`}
-                            title={recheckStatus.active ? "Re-check in progress..." : "Re-check Ignored Faces"}
+                            title={recheckStatus.active ? "Re-check in progress..." : "Re-check Ignored Faces — Includes faces auto-flagged as false positives by background verification."}
                         >
                             {recheckStatus.active ? (
                                 <>

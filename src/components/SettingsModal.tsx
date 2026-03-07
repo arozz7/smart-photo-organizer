@@ -27,6 +27,10 @@ interface AISettings {
     reviewThreshold?: number;
 }
 
+// Mirrors STRICT_SCORE_THRESHOLD_ACCEPT from ConfigService (electron-side constant)
+const STRICT_ACCEPT_THRESHOLD = 0.75;
+const DEFAULT_ACCEPT_THRESHOLD = 0.70;
+
 interface AdvancedFaceConfig {
     detThreshStandard: number;
     detThreshMacro: number;
@@ -36,6 +40,8 @@ interface AdvancedFaceConfig {
     enableAreaBasedNMS: boolean;
     enableMacroLowRes: boolean;
     enableTTA: boolean;
+    scoreThresholdAccept?: number;
+    strictFalsePositiveMode?: boolean;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => {
@@ -59,7 +65,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
         nmsIoMinThresh: 0.65,
         enableAreaBasedNMS: true,
         enableMacroLowRes: true,
-        enableTTA: true
+        enableTTA: true,
+        scoreThresholdAccept: DEFAULT_ACCEPT_THRESHOLD,
+        strictFalsePositiveMode: false
     });
     const [pendingVerifications, setPendingVerifications] = useState<number>(0);
 
@@ -175,7 +183,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                     nmsIoMinThresh: 0.65,
                     enableAreaBasedNMS: true,
                     enableMacroLowRes: true,
-                    enableTTA: true
+                    enableTTA: true,
+                    scoreThresholdAccept: DEFAULT_ACCEPT_THRESHOLD,
+                    strictFalsePositiveMode: false
                 });
             }
         });
@@ -363,6 +373,31 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                             >
                                                 <Switch.Thumb className="block w-4 h-4 bg-white rounded-full shadow transition-transform translate-x-0.5 data-[state=checked]:translate-x-[22px]" />
                                             </Switch.Root>
+                                        </div>
+
+                                        {/* [Phase 104] Strict False Positive Mode */}
+                                        <div className="pt-4 border-t border-gray-800">
+                                            <h3 className="text-lg font-semibold text-yellow-400 mb-2">False Positive Reduction</h3>
+                                            <p className="text-xs text-gray-500 mb-4">
+                                                Raises the auto-accept threshold (0.70 → 0.75) and requires a frontal-face anchor for clustering. Reduces cartoon and object false positives at the cost of occasionally missing low-confidence real faces.
+                                            </p>
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-sm font-medium text-gray-200">Strict False Positive Mode</label>
+                                                    <InfoTooltip text="When enabled: detection score threshold raised to 0.75, and clustering requires at least one frontal face per group. Off by default. Re-scan your library after changing this setting." />
+                                                </div>
+                                                <Switch.Root
+                                                    checked={advancedSettings.strictFalsePositiveMode ?? false}
+                                                    onCheckedChange={(checked) => setAdvancedSettings(prev => ({
+                                                        ...prev,
+                                                        strictFalsePositiveMode: checked,
+                                                        scoreThresholdAccept: checked ? STRICT_ACCEPT_THRESHOLD : DEFAULT_ACCEPT_THRESHOLD
+                                                    }))}
+                                                    className="w-10 h-5 bg-gray-600 rounded-full relative data-[state=checked]:bg-yellow-600 transition-colors flex-shrink-0"
+                                                >
+                                                    <Switch.Thumb className="block w-4 h-4 bg-white rounded-full shadow transition-transform translate-x-0.5 data-[state=checked]:translate-x-[22px]" />
+                                                </Switch.Root>
+                                            </div>
                                         </div>
 
                                         {/* [Phase 57] VLM Verification Threshold */}

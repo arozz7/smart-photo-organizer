@@ -124,6 +124,67 @@ describe('FaceRepository', () => {
             expect(face2.is_ignored).toBe(1);
             expect(face3.is_ignored).toBe(0); // Not affected
         });
+
+        it('backfill: pre-existing ignored faces (ignore_source=NULL) should be updated to "user"', () => {
+            // Arrange: simulate a pre-104 ignored face with no ignore_source
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { is_ignored: 1 });
+            // Verify the starting state has NULL ignore_source (as seeded)
+            const before = db.prepare('SELECT ignore_source FROM faces WHERE id = ?').get(faceId) as any;
+            expect(before.ignore_source).toBeNull();
+
+            // Act: run the Phase 104 backfill SQL (mirrors db.ts migration)
+            db.prepare(`
+                UPDATE faces SET ignore_source = 'user'
+                WHERE is_ignored = 1 AND ignore_source IS NULL
+            `).run();
+
+            // Assert
+            const after = db.prepare('SELECT ignore_source FROM faces WHERE id = ?').get(faceId) as any;
+            expect(after.ignore_source).toBe('user');
+        });
+
+        it('backfill: non-ignored faces (is_ignored=0) should not be touched', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { is_ignored: 0 });
+
+            // Act: run backfill
+            db.prepare(`
+                UPDATE faces SET ignore_source = 'user'
+                WHERE is_ignored = 1 AND ignore_source IS NULL
+            `).run();
+
+            // Assert: non-ignored face remains untouched
+            const after = db.prepare('SELECT ignore_source FROM faces WHERE id = ?').get(faceId) as any;
+            expect(after.ignore_source).toBeNull();
+        });
+
+        it('should set ignore_source to "user" when no source provided', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { is_ignored: 0 });
+
+            // Act
+            FaceRepository.ignoreFaces([faceId]);
+
+            // Assert
+            const face = db.prepare('SELECT ignore_source FROM faces WHERE id = ?').get(faceId) as any;
+            expect(face.ignore_source).toBe('user');
+        });
+
+        it('should set ignore_source to "background_verification" when source provided', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const faceId = seedFace(db, photoId, { is_ignored: 0 });
+
+            // Act
+            FaceRepository.ignoreFaces([faceId], 'background_verification');
+
+            // Assert
+            const face = db.prepare('SELECT ignore_source FROM faces WHERE id = ?').get(faceId) as any;
+            expect(face.ignore_source).toBe('background_verification');
+        });
     });
 
     // ==========================================
@@ -672,6 +733,144 @@ describe('FaceRepository', () => {
 
             // Assert
             expect(updated).toBe(0);
+        });
+    });
+
+    // ==========================================
+    // getOrphanedFaces
+    // ==========================================
+    describe('getOrphanedFaces', () => {
+        it('should return faces matching all orphan criteria', () => {
+            // Arrange: face that is entity_type=human, confidence_tier=human,
+            // needs_bucketing=0, bucket_id=null, person_id=null, is_ignored=0, descriptor set
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, {
+                entity_type: 'human',
+                confidence_tier: 'human',
+                needs_bucketing: 0,
+                is_ignored: 0,
+                descriptor: createTestDescriptor(1)
+            });
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(10);
+
+            // Assert
+            expect(result).toHaveLength(1);
+        });
+
+        it('should not return faces with a person_id', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            const personId = seedPerson(db, 'Known Person');
+            seedFace(db, photoId, {
+                entity_type: 'human',
+                confidence_tier: 'human',
+                needs_bucketing: 0,
+                is_ignored: 0,
+                person_id: personId,
+                descriptor: createTestDescriptor(1)
+            });
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(10);
+
+            // Assert
+            expect(result).toHaveLength(0);
+        });
+
+        it('should not return faces with no descriptor', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, {
+                entity_type: 'human',
+                confidence_tier: 'human',
+                needs_bucketing: 0,
+                is_ignored: 0,
+                descriptor: null
+            });
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(10);
+
+            // Assert
+            expect(result).toHaveLength(0);
+        });
+
+        it('should not return ignored faces', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, {
+                entity_type: 'human',
+                confidence_tier: 'human',
+                needs_bucketing: 0,
+                is_ignored: 1,
+                descriptor: createTestDescriptor(1)
+            });
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(10);
+
+            // Assert
+            expect(result).toHaveLength(0);
+        });
+
+        it('should respect the limit parameter', () => {
+            // Arrange
+            const photoId = seedPhoto(db);
+            for (let i = 0; i < 5; i++) {
+                seedFace(db, photoId, {
+                    entity_type: 'human',
+                    confidence_tier: 'human',
+                    needs_bucketing: 0,
+                    is_ignored: 0,
+                    descriptor: createTestDescriptor(i)
+                });
+            }
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(3);
+
+            // Assert
+            expect(result).toHaveLength(3);
+        });
+    });
+
+    // ==========================================
+    // countOrphanedFaces
+    // ==========================================
+    describe('countOrphanedFaces', () => {
+        it('should return 0 when no orphan faces exist', () => {
+            // Act
+            const result = FaceRepository.countOrphanedFaces();
+
+            // Assert
+            expect(result).toBe(0);
+        });
+
+        it('should count only orphan faces', () => {
+            // Arrange: 2 orphans + 1 assigned face
+            const photoId = seedPhoto(db);
+            const personId = seedPerson(db, 'Known Person');
+            seedFace(db, photoId, {
+                entity_type: 'human', confidence_tier: 'human',
+                needs_bucketing: 0, is_ignored: 0, descriptor: createTestDescriptor(1)
+            });
+            seedFace(db, photoId, {
+                entity_type: 'human', confidence_tier: 'human',
+                needs_bucketing: 0, is_ignored: 0, descriptor: createTestDescriptor(2)
+            });
+            seedFace(db, photoId, {
+                entity_type: 'human', confidence_tier: 'human',
+                needs_bucketing: 0, is_ignored: 0, person_id: personId,
+                descriptor: createTestDescriptor(3)
+            });
+
+            // Act
+            const result = FaceRepository.countOrphanedFaces();
+
+            // Assert
+            expect(result).toBe(2);
         });
     });
 });
