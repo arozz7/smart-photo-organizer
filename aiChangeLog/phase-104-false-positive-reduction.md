@@ -89,9 +89,33 @@ dissolved. `pose_yaws=None` → safe fallback (treat all as frontal).
 
 ---
 
+## Hotfix — `confidence_tier=unknown` orphan query fix
+
+**Commit:** `fix(faces): include confidence_tier=unknown in orphaned face queries`
+
+**Files modified:**
+- `electron/data/repositories/FaceRepository.ts` — `getOrphanedFaces` and `countOrphanedFaces` now accept `(confidence_tier='human' OR confidence_tier='unknown')`
+- `tests/backend/unit/repositories/FaceRepository.test.ts` — 4 new tests
+
+**Root cause:** On a fresh database with no named people, all faces receive
+`confidence_tier='unknown'` (no FAISS reference vectors to compare against).
+The previous `confidence_tier='human'` filter made `processOrphanedFaces` a
+complete no-op, so high-score false positives (e.g. couch texture scoring ≥0.70)
+that bypassed the suspect queue were never VLM-re-checked and remained visible
+in cluster view as false positives.
+
+**Fix:** Including `'unknown'` tier allows `BackgroundVerificationService` to
+VLM-verify these faces post-bucketing and mark genuine false positives as
+`is_ignored=1` with `ignore_source='background_verification'`.
+
+**Safety:** `entity_type='human'` guard remains — suspect-typed faces are still
+excluded from the orphan queue.
+
+---
+
 ## Test Totals
 
 | Suite | Before | After |
 |---|---|---|
-| TypeScript (vitest) | 337 (45 files) | 352 (45 files) |
+| TypeScript (vitest) | 337 (45 files) | 357 (45 files) |
 | Python (pytest) | 36 (excl. api/vlm) | 7 new clustering tests |
