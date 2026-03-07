@@ -1052,6 +1052,9 @@ export class FaceRepository {
      * Return orphaned faces: confirmed-human faces that slipped through bucketing
      * without being matched to any person or bucket.
      * These are candidates for background VLM re-verification.
+     *
+     * confidence_tier includes 'unknown' because on fresh databases (no named people yet)
+     * all faces have confidence_tier='unknown' — requiring 'human' would make this a no-op.
      */
     static getOrphanedFaces(limit = 10): Array<{
         id: number;
@@ -1067,7 +1070,7 @@ export class FaceRepository {
             FROM faces f
             JOIN photos p ON f.photo_id = p.id
             WHERE f.entity_type = 'human'
-              AND f.confidence_tier = 'human'
+              AND (f.confidence_tier = 'human' OR f.confidence_tier = 'unknown')
               AND f.needs_bucketing = 0
               AND f.bucket_id IS NULL
               AND f.person_id IS NULL
@@ -1093,7 +1096,7 @@ export class FaceRepository {
             SELECT COUNT(*) as count
             FROM faces
             WHERE entity_type = 'human'
-              AND confidence_tier = 'human'
+              AND (confidence_tier = 'human' OR confidence_tier = 'unknown')
               AND needs_bucketing = 0
               AND bucket_id IS NULL
               AND person_id IS NULL
