@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { DownloadIcon } from '@radix-ui/react-icons'
 
 interface ErrorByStage {
@@ -11,6 +11,14 @@ interface LibraryHealth {
     errorsByStage: ErrorByStage[];
     recentErrorCount: number;
     totalErrors: number;
+}
+
+interface PoseStats {
+    frontal: number;
+    profile: number;
+    severe: number;
+    unknown: number;
+    total: number;
 }
 
 interface LibraryHealthWidgetProps {
@@ -37,6 +45,13 @@ function formatStageName(stage: string): string {
 
 export default function LibraryHealthWidget({ health }: LibraryHealthWidgetProps) {
     const { healthScore, errorsByStage, recentErrorCount, totalErrors } = health;
+    const [poseStats, setPoseStats] = useState<PoseStats | null>(null);
+
+    useEffect(() => {
+        window.ipcRenderer.invoke('db:getPoseStatistics').then((res: any) => {
+            if (res.success && res.total > 0) setPoseStats(res);
+        }).catch(() => { /* non-critical — widget renders without it */ });
+    }, []);
 
     const handleExportCsv = useCallback(async () => {
         try {
@@ -138,6 +153,38 @@ export default function LibraryHealthWidget({ health }: LibraryHealthWidgetProps
 
             {errorsByStage.length === 0 && totalErrors === 0 && (
                 <p className="text-sm text-green-400">No errors detected. Your library is healthy!</p>
+            )}
+
+            {poseStats && (
+                <div className="mt-4 pt-4 border-t border-gray-700">
+                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">Face Pose Distribution</label>
+                    <div className="mt-2 flex rounded overflow-hidden h-3" title={`Frontal: ${poseStats.frontal} · Profile: ${poseStats.profile} · Severe: ${poseStats.severe} · Unknown: ${poseStats.unknown}`}>
+                        {poseStats.frontal > 0 && (
+                            <div className="bg-green-500" style={{ width: `${(poseStats.frontal / poseStats.total) * 100}%` }} />
+                        )}
+                        {poseStats.profile > 0 && (
+                            <div className="bg-yellow-400" style={{ width: `${(poseStats.profile / poseStats.total) * 100}%` }} />
+                        )}
+                        {poseStats.severe > 0 && (
+                            <div className="bg-red-400" style={{ width: `${(poseStats.severe / poseStats.total) * 100}%` }} />
+                        )}
+                        {poseStats.unknown > 0 && (
+                            <div className="bg-gray-600" style={{ width: `${(poseStats.unknown / poseStats.total) * 100}%` }} />
+                        )}
+                    </div>
+                    <div className="flex gap-3 mt-1.5 flex-wrap">
+                        {[
+                            { label: 'Frontal', count: poseStats.frontal, color: 'text-green-400' },
+                            { label: 'Profile', count: poseStats.profile, color: 'text-yellow-400' },
+                            { label: 'Severe', count: poseStats.severe, color: 'text-red-400' },
+                            { label: 'Unknown', count: poseStats.unknown, color: 'text-gray-400' },
+                        ].filter(s => s.count > 0).map(({ label, count, color }) => (
+                            <span key={label} className="text-xs text-gray-500">
+                                <span className={`font-medium ${color}`}>{label}</span> {count.toLocaleString()}
+                            </span>
+                        ))}
+                    </div>
+                </div>
             )}
         </div>
     );

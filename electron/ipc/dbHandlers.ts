@@ -611,6 +611,17 @@ export function registerDBHandlers() {
         }
     });
 
+    // --- POSE STATISTICS (Phase 105) ---
+    ipcMain.handle('db:getPoseStatistics', async () => {
+        try {
+            const stats = FaceRepository.getPoseStatistics();
+            return { success: true, ...stats };
+        } catch (error) {
+            console.error('[Main] db:getPoseStatistics failed:', error);
+            return { success: false, error: String(error) };
+        }
+    });
+
     // --- FACE DATA UPGRADE SERVICE (Phase 5 + Embeddings) ---
     let faceUpgradeService: any = null;
 

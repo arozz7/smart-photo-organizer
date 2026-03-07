@@ -797,6 +797,51 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     logger.info(`[DB Module] Backfilled ignore_source='user' for ${result.changes} pre-existing ignored faces.`);
   }
 
+  // --- MIGRATION: Multi-Centroid Pose Support (Phase 105) ---
+  try {
+    db.exec("ALTER TABLE person_eras ADD COLUMN pose_type TEXT DEFAULT 'combined'");
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE person_eras ADD COLUMN pose_quality_score REAL DEFAULT 1.0');
+  } catch { /* column already exists */ }
+
+  // --- MIGRATION: GPS Cache Columns (Phase 105) ---
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN gps_lat REAL');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN gps_lon REAL');
+  } catch { /* column already exists */ }
+
+  // Backfill GPS coordinates from metadata_json for existing photos
+  const gpsBackfillKey = 'migration_gps_cache_backfill_v1';
+  const gpsCheck = db.prepare('SELECT value FROM app_state WHERE key = ?').get(gpsBackfillKey);
+  if (!gpsCheck) {
+    const photosWithMeta = db.prepare(
+      'SELECT id, metadata_json FROM photos WHERE gps_lat IS NULL AND metadata_json IS NOT NULL'
+    ).all() as Array<{ id: number; metadata_json: string }>;
+
+    const updateGps = db.prepare('UPDATE photos SET gps_lat = ?, gps_lon = ? WHERE id = ?');
+    let gpsBackfilled = 0;
+
+    for (const photo of photosWithMeta) {
+      try {
+        const meta = JSON.parse(photo.metadata_json);
+        const lat = meta.GPSLatitude ?? meta.gpsLatitude ?? null;
+        const lon = meta.GPSLongitude ?? meta.gpsLongitude ?? null;
+        if (lat !== null && lon !== null) {
+          updateGps.run(lat, lon, photo.id);
+          gpsBackfilled++;
+        }
+      } catch { /* skip malformed JSON */ }
+    }
+
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(gpsBackfillKey, '1');
+    logger.info(`[DB Module] GPS cache backfill complete: ${gpsBackfilled} photos updated.`);
+  }
+
   logger.info('Database schema ensured.');
 }
 

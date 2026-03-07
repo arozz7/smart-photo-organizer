@@ -1151,6 +1151,26 @@ export class FaceRepository {
     }
 
     /**
+     * Get pose distribution statistics across all active faces (Phase 105).
+     * Bins: frontal (|yaw| ≤ 30°), profile (30–60°), severe (>60°), unknown (null).
+     */
+    static getPoseStatistics(): { frontal: number; profile: number; severe: number; unknown: number; total: number } {
+        const db = getDB();
+        const row = db.prepare(`
+            SELECT
+                COUNT(CASE WHEN ABS(pose_yaw) <= 30 THEN 1 END) as frontal,
+                COUNT(CASE WHEN ABS(pose_yaw) > 30 AND ABS(pose_yaw) <= 60 THEN 1 END) as profile,
+                COUNT(CASE WHEN ABS(pose_yaw) > 60 THEN 1 END) as severe,
+                COUNT(CASE WHEN pose_yaw IS NULL THEN 1 END) as unknown,
+                COUNT(*) as total
+            FROM faces
+            WHERE (is_ignored = 0 OR is_ignored IS NULL)
+              AND descriptor IS NOT NULL
+        `).get() as { frontal: number; profile: number; severe: number; unknown: number; total: number };
+        return row;
+    }
+
+    /**
      * Mark existing low-confidence faces as 'suspect' for audit.
      * Returns count of updated faces.
      */
