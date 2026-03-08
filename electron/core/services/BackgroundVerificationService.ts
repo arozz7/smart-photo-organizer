@@ -267,7 +267,9 @@ export class BackgroundVerificationService implements IService {
                     this.notifyPhotoChanged(face.photo_id);
                     logger.info(`[BackgroundVerificationService] Orphan face ${face.id} auto-ignored (VLM: ${result.reason})`);
                 } else {
-                    logger.debug(`[BackgroundVerificationService] Orphan face ${face.id} confirmed by VLM, no action needed`);
+                    // Mark as checked so it doesn't re-enter the orphan queue next cycle
+                    FaceRepository.incrementVerificationAttempts(face.id);
+                    logger.debug(`[BackgroundVerificationService] Orphan face ${face.id} confirmed by VLM, marked as checked`);
                 }
 
                 await this.sleep(100);

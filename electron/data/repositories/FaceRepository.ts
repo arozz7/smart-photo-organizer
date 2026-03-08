@@ -1077,6 +1077,7 @@ export class FaceRepository {
               AND f.person_id IS NULL
               AND f.is_ignored = 0
               AND f.descriptor IS NOT NULL
+              AND f.verification_attempts = 0
             ORDER BY p.created_at DESC
             LIMIT ?
         `).all(limit) as Array<{
@@ -1103,6 +1104,7 @@ export class FaceRepository {
               AND person_id IS NULL
               AND is_ignored = 0
               AND descriptor IS NOT NULL
+              AND verification_attempts = 0
         `).get() as { count: number };
         return result.count;
     }
