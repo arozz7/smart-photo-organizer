@@ -199,6 +199,24 @@ export default function Settings() {
 
     const [showResetConfirm, setShowResetConfirm] = useState(false)
     const [resetInput, setResetInput] = useState('')
+    const [propagating, setPropagating] = useState(false)
+    const [propagateResult, setPropagateResult] = useState<{ propagated: number; skipped: number } | null>(null)
+
+    const handleBatchPropagate = async () => {
+        setPropagating(true);
+        setPropagateResult(null);
+        try {
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('db:batchPropagateLabels');
+            if (res.success) {
+                setPropagateResult({ propagated: res.propagated, skipped: res.skipped });
+            } else {
+                showAlert({ title: 'Propagation Failed', description: res.error, variant: 'danger' });
+            }
+        } finally {
+            setPropagating(false);
+        }
+    };
 
     const handleFactoryReset = async () => {
         if (resetInput !== 'RESET') return
@@ -530,6 +548,39 @@ export default function Settings() {
                                         className="w-full accent-indigo-500"
                                     />
                                     <span className="text-sm font-mono text-indigo-400 w-12 text-right">{eraConfig.minFaces}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Smart Assignment (Phase 105-4) */}
+                    <section className="space-y-4">
+                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Smart Assignment</h3>
+
+                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <div>
+                                <h4 className="font-medium text-white mb-1">Contextual Label Propagation</h4>
+                                <p className="text-sm text-gray-400 mb-3">
+                                    Assign unrecognised hard-pose or blurry faces by consensus — if ≥70% of
+                                    high-confidence frontal faces nearby (same session or GPS ≤100 m) agree on
+                                    one person, that person is assigned to the difficult face.
+                                </p>
+                                <div className="flex items-center gap-4 flex-wrap">
+                                    <button
+                                        onClick={handleBatchPropagate}
+                                        disabled={propagating}
+                                        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${propagating
+                                            ? 'bg-gray-600 cursor-not-allowed opacity-50 text-white'
+                                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                                        }`}
+                                    >
+                                        {propagating ? 'Propagating…' : 'Run for Entire Library'}
+                                    </button>
+                                    {propagateResult && (
+                                        <span className="text-sm text-green-400">
+                                            Done — {propagateResult.propagated} face{propagateResult.propagated !== 1 ? 's' : ''} assigned
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         </div>
