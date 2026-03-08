@@ -15,6 +15,8 @@ export interface Face {
     suggested_person_id?: number | null;
     match_distance?: number | null;
     era_id?: number | null;
+    pose_yaw?: number | null;
+    assignment_source?: string | null;
 }
 
 export interface Person {

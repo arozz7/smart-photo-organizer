@@ -72,6 +72,7 @@ export class FaceRepository {
         const placeholders = ids.map(() => '?').join(',');
         const query = `
             SELECT f.id, f.photo_id, f.blur_score, f.box_json, f.descriptor, f.confidence_tier, f.suggested_person_id, f.match_distance,
+                   f.pose_yaw, f.assignment_source,
                    p.file_path, p.preview_cache_path, p.metadata_json, p.width, p.height
             FROM faces f
             JOIN photos p ON f.photo_id = p.id
