@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 vi.mock('../../../../electron/data/repositories/PersonRepository', () => ({
     PersonRepository: {
         updateDescriptorMean: vi.fn(),
+        updatePoseCentroids: vi.fn(),
         deletePerson: vi.fn(),
         getPeople: vi.fn(),
         getPersonByName: vi.fn(),

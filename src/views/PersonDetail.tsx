@@ -439,6 +439,25 @@ const PersonDetail = () => {
                 onRefresh={refresh}
             />
 
+            {/* Pose Centroid Stats (Phase 105-3) */}
+            {(person.frontal_face_count > 0 || person.profile_face_count > 0) && (
+                <div className="mb-4 flex items-center gap-3 text-xs text-gray-500">
+                    <span className="font-medium text-gray-400">Pose centroids:</span>
+                    {person.frontal_face_count > 0 && (
+                        <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
+                            Frontal {person.frontal_face_count}
+                        </span>
+                    )}
+                    {person.profile_face_count > 0 && (
+                        <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-yellow-400 inline-block" />
+                            Profile {person.profile_face_count}
+                        </span>
+                    )}
+                </div>
+            )}
+
             {/* Eras List (if any) */}
             {eras && eras.length > 0 && (
                 <div className="mb-6 bg-gray-800/50 p-4 rounded-xl border border-gray-700">

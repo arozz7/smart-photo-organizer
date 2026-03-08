@@ -54,6 +54,10 @@ const TEST_SCHEMA = `
     face_count INTEGER DEFAULT 0,
     cover_face_id INTEGER,
     entity_type TEXT DEFAULT 'human',
+    frontal_centroid_json TEXT,
+    profile_centroid_json TEXT,
+    frontal_face_count INTEGER DEFAULT 0,
+    profile_face_count INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );

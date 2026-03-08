@@ -143,6 +143,34 @@ export class PersonService {
         console.timeEnd(`recalculatePersonMean-${personId}`);
         PersonRepository.updateDescriptorMean(personId, JSON.stringify(mean));
 
+        // --- Phase 105-3: Pose-Specific Centroids ---
+        const MIN_POSE_FACES = 3;
+        const facesWithPose = validFaces.filter(f => f.pose_yaw !== null && f.pose_yaw !== undefined);
+
+        const frontalFaces = facesWithPose.filter(f => Math.abs(f.pose_yaw as number) <= 30);
+        const profileFaces = facesWithPose.filter(f => {
+            const absYaw = Math.abs(f.pose_yaw as number);
+            return absYaw > 30 && absYaw <= 75;
+        });
+
+        const frontalCentroid = frontalFaces.length >= MIN_POSE_FACES
+            ? this.calculateCentroid(frontalFaces.map(f => f.descriptor as number[]))
+            : null;
+        const profileCentroid = profileFaces.length >= MIN_POSE_FACES
+            ? this.calculateCentroid(profileFaces.map(f => f.descriptor as number[]))
+            : null;
+
+        PersonRepository.updatePoseCentroids(personId, {
+            frontalCentroidJson: frontalCentroid ? JSON.stringify(frontalCentroid) : null,
+            profileCentroidJson: profileCentroid ? JSON.stringify(profileCentroid) : null,
+            frontalFaceCount: frontalFaces.length,
+            profileFaceCount: profileFaces.length
+        });
+
+        if (frontalCentroid || profileCentroid) {
+            console.log(`[PersonService] Pose centroids for ${personId}: frontal=${frontalFaces.length} faces, profile=${profileFaces.length} faces`);
+        }
+
         // Save History Snapshot
         try {
             // We need to access DB directly for history, or add repository method. 

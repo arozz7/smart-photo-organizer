@@ -245,6 +245,20 @@ export class FaceService {
                     }
                 }
             }
+
+            // Check pose-specific centroids (Phase 105-3)
+            // They compete alongside global centroid and eras — minimum distance wins
+            if ((person as any).poseCentroids?.length > 0) {
+                for (const poseCentroid of (person as any).poseCentroids) {
+                    if (poseCentroid && poseCentroid.length === normalized.length) {
+                        const dist = this.calculateL2Distance(normalized, poseCentroid);
+                        if (dist < minDist) {
+                            minDist = dist;
+                            bestMatch = person;
+                        }
+                    }
+                }
+            }
         }
 
         const similarity = 1 / (1 + minDist);

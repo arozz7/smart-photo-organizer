@@ -34,6 +34,7 @@ vi.mock('../../../../electron/data/repositories/PersonRepository', () => ({
     PersonRepository: {
         getPerson: vi.fn().mockReturnValue(null),
         updateDescriptorMean: vi.fn(),
+        updatePoseCentroids: vi.fn(),
         addHistorySnapshot: vi.fn(),
         addAlert: vi.fn(),
         refreshPersonCover: vi.fn()

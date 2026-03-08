@@ -806,6 +806,23 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
     db.exec('ALTER TABLE person_eras ADD COLUMN pose_quality_score REAL DEFAULT 1.0');
   } catch { /* column already exists */ }
 
+  // Store pose-specific centroids directly on people to avoid ERA system collision
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN frontal_centroid_json TEXT');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN profile_centroid_json TEXT');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN frontal_face_count INTEGER DEFAULT 0');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN profile_face_count INTEGER DEFAULT 0');
+  } catch { /* column already exists */ }
+
   // --- MIGRATION: GPS Cache Columns (Phase 105) ---
   try {
     db.exec('ALTER TABLE photos ADD COLUMN gps_lat REAL');
