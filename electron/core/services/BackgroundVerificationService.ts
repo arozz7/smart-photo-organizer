@@ -275,6 +275,8 @@ export class BackgroundVerificationService implements IService {
                 await this.sleep(100);
             } catch (e) {
                 logger.error(`[BackgroundVerificationService] Error processing orphan face ${face.id}:`, e);
+                // Increment so the face doesn't re-enter the orphan queue on the next cycle
+                FaceRepository.incrementVerificationAttempts(face.id);
             }
         }
     }

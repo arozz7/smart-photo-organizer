@@ -74,18 +74,23 @@ export class ContextualMatchingService {
             const db = getDB();
 
             const photo = db.prepare(
-                'SELECT id, session_folder, date_taken FROM photos WHERE id = ?'
-            ).get(photoId) as { id: number; session_folder: string | null; date_taken: string | null } | undefined;
+                'SELECT id, date_taken FROM photos WHERE id = ?'
+            ).get(photoId) as { id: number; date_taken: string | null } | undefined;
 
             if (!photo) return { success: false, propagated: 0, skipped: 0, error: 'Photo not found' };
+
+            // session_folder lives on faces, not photos
+            const sessionRow = db.prepare(
+                'SELECT session_folder FROM faces WHERE photo_id = ? AND session_folder IS NOT NULL LIMIT 1'
+            ).get(photoId) as { session_folder: string } | undefined;
 
             // Build temporal window clause
             const clauses: string[] = [];
             const params: (string | number)[] = [];
 
-            if (photo.session_folder) {
-                clauses.push('p.session_folder = ?');
-                params.push(photo.session_folder);
+            if (sessionRow?.session_folder) {
+                clauses.push('f.session_folder = ?');
+                params.push(sessionRow.session_folder);
             }
 
             if (photo.date_taken) {
