@@ -866,11 +866,12 @@ export class FaceRepository {
         suggested_person_id: number | null;
         match_distance: number | null;
         entity_type: string;
+        pose_yaw: number | null;
     }> {
         const db = getDB();
         try {
             return db.prepare(`
-                SELECT id, descriptor, session_folder, session_date, suggested_person_id, match_distance, entity_type
+                SELECT id, descriptor, session_folder, session_date, suggested_person_id, match_distance, entity_type, pose_yaw
                 FROM faces
                 WHERE needs_bucketing = 1
                   AND person_id IS NULL
@@ -886,6 +887,7 @@ export class FaceRepository {
                 suggested_person_id: number | null;
                 match_distance: number | null;
                 entity_type: string;
+                pose_yaw: number | null;
             }>;
         } catch (error) {
             throw new Error(`FaceRepository.getFacesNeedingBucketing failed: ${String(error)}`);

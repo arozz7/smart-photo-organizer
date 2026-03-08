@@ -329,6 +329,30 @@ export class ConfigService {
         this.load();
         this.config.advancedFace = { ...this.config.advancedFace, ...settings };
         this.save();
+
+        // [Phase 106] Sync score_threshold_accept to ai-config.json so Python reads
+        // the correct threshold when strictFalsePositiveMode changes.
+        if ('strictFalsePositiveMode' in settings) {
+            this.syncScoreThresholdToAiConfig(settings.strictFalsePositiveMode ?? false);
+        }
+    }
+
+    private static syncScoreThresholdToAiConfig(strictMode: boolean): void {
+        try {
+            const aiConfigPath = path.join(process.cwd(), 'ai-config.json');
+            let aiJson: Record<string, any> = {};
+            if (fs.existsSync(aiConfigPath)) {
+                aiJson = JSON.parse(fs.readFileSync(aiConfigPath, 'utf8'));
+            }
+            if (!aiJson.face_detection) aiJson.face_detection = {};
+            aiJson.face_detection.score_threshold_accept = strictMode
+                ? STRICT_SCORE_THRESHOLD_ACCEPT
+                : (this.config.advancedFace.scoreThresholdAccept ?? 0.70);
+            fs.writeFileSync(aiConfigPath, JSON.stringify(aiJson, null, 2), 'utf8');
+            console.log(`[ConfigService] Synced score_threshold_accept=${aiJson.face_detection.score_threshold_accept} to ai-config.json (strictMode=${strictMode})`);
+        } catch (e) {
+            console.error('[ConfigService] Failed to sync score_threshold_accept to ai-config.json:', e);
+        }
     }
 
     static getLibraryPath(): string {

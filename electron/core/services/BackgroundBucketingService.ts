@@ -5,6 +5,7 @@ import { PersonRepository } from '../../data/repositories/PersonRepository';
 import { AppStateRepository } from '../../data/repositories/AppStateRepository';
 import { BucketRepository } from '../../data/repositories/BucketRepository';
 import { FaceService } from './FaceService';
+import { ConfigService } from './ConfigService';
 import { PythonAIProvider } from '../../infrastructure/PythonAIProvider';
 import logger from '../../logger';
 
@@ -361,24 +362,28 @@ export class BackgroundBucketingService implements IService {
         }
     }
 
-    private async processDiscovery(faces: { id: number, descriptor: Buffer | null }[]) {
+    private async processDiscovery(faces: { id: number, descriptor: Buffer | null, pose_yaw?: number | null }[]) {
+        // [Phase 106] Lever 2: pass pose_yaw so Python can skip high-yaw cluster seeds
+        const { strictFalsePositiveMode } = ConfigService.getAdvancedFaceSettings();
+        const anchorOnlyFrontal = strictFalsePositiveMode ?? false;
+
         // Prepare for DBSCAN - CRITICAL: Must use Float32Array, not just Array.from
         const pyFaces = faces.map(f => ({
             id: f.id,
             descriptor: Array.from(
                 new Float32Array(f.descriptor!.buffer, f.descriptor!.byteOffset, f.descriptor!.byteLength / 4)
-            )
+            ),
+            pose_yaw: f.pose_yaw ?? null
         }));
 
         try {
             // Call Python DBSCAN
             // eps is cosine distance, converted to Euclidean in Python: L2 = sqrt(2 * cosine)
             // 0.17 cosine -> ~0.58 Euclidean - targeting just below min observed distance
-            // TODO: Implement Pass 1 (Suggestions) to match against named person centroids first
             const eps = 0.17;
             const minSamples = 2; // Low to catch small groups
 
-            const result = await this.aiProvider.clusterFaces(pyFaces, eps, minSamples);
+            const result = await this.aiProvider.clusterFaces(pyFaces, eps, minSamples, anchorOnlyFrontal);
 
             // Python returns { clusters: [[id1, id2], [id3, id4]], singles: [...] }
             if (!result || !result.clusters || result.clusters.length === 0) {

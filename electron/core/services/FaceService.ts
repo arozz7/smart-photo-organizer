@@ -753,9 +753,12 @@ export class FaceService {
                 } else {
                     // [Phase 90] 3-Tier Detection Score System
                     // Reject (<0.40), Verify/suspect (0.40-0.69), Accept/human (>=0.70)
+                    // [Phase 106] Lever 1: raise ceiling to 0.75 in Strict False Positive Mode
                     const advancedSettings = ConfigService.getAdvancedFaceSettings();
                     const REJECT_FLOOR = advancedSettings.scoreThresholdReject ?? 0.40;
-                    const ACCEPT_CEILING = advancedSettings.scoreThresholdAccept ?? 0.70;
+                    const ACCEPT_CEILING = advancedSettings.strictFalsePositiveMode
+                        ? STRICT_SCORE_THRESHOLD_ACCEPT
+                        : (advancedSettings.scoreThresholdAccept ?? 0.70);
 
 
                     const detectionScore = face.score ?? 0.95;

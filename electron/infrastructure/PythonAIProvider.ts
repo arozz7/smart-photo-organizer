@@ -344,8 +344,14 @@ export class PythonAIProvider implements IAIProvider, IService {
         return this.sendRequest('analyze_image', payload);
     }
 
-    async clusterFaces(faces: { id: number; descriptor: number[]; }[], eps?: number, minSamples?: number, timeoutMs = 900000): Promise<any> {
-        return this.sendRequest('cluster_faces', { faces, eps, minSamples }, timeoutMs);
+    async clusterFaces(
+        faces: { id: number; descriptor: number[]; pose_yaw?: number | null }[],
+        eps?: number,
+        minSamples?: number,
+        anchorOnlyFrontal = false,
+        timeoutMs = 900000
+    ): Promise<any> {
+        return this.sendRequest('cluster_faces', { faces, eps, minSamples, anchor_only_frontal: anchorOnlyFrontal }, timeoutMs);
     }
 
     async searchFaces(descriptors: number[][], k?: number, threshold?: number, timeoutMs = 300000): Promise<{ id: number; distance: number; }[][]> {
