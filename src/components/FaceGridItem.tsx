@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { usePeople } from '../context/PeopleContext'
 import FaceThumbnail from './FaceThumbnail'
 import { useScan } from '../context/ScanContext'
+import AssignmentBadge from './AssignmentBadge'
 
 interface FaceGridItemProps {
     face: any
@@ -141,6 +142,9 @@ export default function FaceGridItem({ face, isSelected, onSelect, onNameSubmit,
                         </svg>
                     </button>
                 )}
+
+                {/* Assignment Source Badge */}
+                <AssignmentBadge source={face.assignment_source} />
 
                 {/* View Original Button */}
                 {!isSelected && (
