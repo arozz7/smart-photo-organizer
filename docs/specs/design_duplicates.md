@@ -1,5 +1,11 @@
 # Feature Design: Duplicate Photo Detection & Management
 
+> **Status: ✅ Implemented — Phase 107**
+> See [phase-107-duplicate-detection.md](../../aiChangeLog/phase-107-duplicate-detection.md) for what was actually built.
+> This document is the original design spec and may differ from the final implementation.
+
+
+
 ## 1. Core Philosophy
 We distinguish between **Exact Duplicates** (waste of space) and **Visual Duplicates/Versions** (variations of the same shot). The system should enable users to *safely* delete the former and *organize* the latter.
 

@@ -23,6 +23,20 @@
 - **Synergies:** Phase 2 prepares Library header for Advanced Filtering (✅ Complete). Phase 1+4 prepare navigation for Home Page Dashboard (✅ Complete). Phase 6 makes PhotoDetail safer for future feature additions.
 - **Implementation Plan:** See [UX Modernization Plan](file:///j:/Projects/smart-photo-organizer/docs/plans/ux-modernization-plan.md)
 
+### 6. Duplicate Photo Detection ✅ Complete — Phase 107
+- **Goal:** Find and safely remove redundant photos — exact copies and visually similar near-duplicates.
+- **Delivered:**
+    - **SHA-256 exact matching:** Computed at scan time (streaming Node.js); groups byte-for-byte identical files.
+    - **pHash near-duplicate detection:** Computed during AI analysis (Python `imagehash`); Hamming distance ≤ 10 bits out of 64 bits.
+    - **BackgroundDuplicateCheckerService:** Idle-only service with automatic backfill for pre-existing photos (SHA-256: 100/batch, pHash: 20/batch); runs exact + near passes when signalled.
+    - **DuplicateGroupRepository:** Full CRUD for `duplicate_groups` table; `findExistingGroup` guard prevents re-creating groups on re-runs.
+    - **DB schema:** `sha256_hash`, `phash`, `duplicate_group_id` columns on `photos`; `duplicate_groups` table with `type` (exact/near), `status` (pending/resolved/dismissed), `winner_photo_id`.
+    - **Python:** `compute_phash_batch`, `group_near_duplicates` (Union-Find O(n²)) registered as AI commands.
+    - **Duplicates view:** Stats pills, HashingBanner (polls every 5 s), 3-tab layout (Pending/Resolved/Dismissed), paginated group cards (20/page).
+    - **DuplicateGroupCard:** N-photo filmstrip, auto-winner (best resolution → earliest date), click-to-switch winner, trash-on-resolve via `shell.trashItem` (recoverable).
+    - **Sidebar badge:** Yellow pending count (polls every 60 s).
+- **Change Log:** [phase-107-duplicate-detection.md](../../aiChangeLog/phase-107-duplicate-detection.md)
+
 ### 5. Upstream False Positive Reduction ✅ Complete — Phase 106
 - **Goal:** Prevent cartoon characters, objects, and non-human detections from polluting the face database.
 - **Problem:** High-confidence false positives (det_score ≥ 0.70) bypassed VLM verification and became permanent accepted detections.

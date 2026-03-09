@@ -22,7 +22,7 @@ This document tracks planned features and ideas for the Smart Photo Organizer. U
 **Goal:** Clean up the actual file system.
 - [ ] **Templates:** Rename files using patterns like `{YYYY}-{MM}-{DD}_{Location}_{OriginalName}`.
 - [ ] **AI-Based:** Rename based on primary subject (e.g., `Dog_Playing_2024.jpg`).
-- [ ] **Deduplication:** Find and remove duplicate files (using image hashing).
+- [x] **Deduplication:** Find and remove duplicate files (SHA-256 exact + pHash near-duplicate detection) — ✅ Complete (v0.7.5 / Phase 107).
 
 ---
 

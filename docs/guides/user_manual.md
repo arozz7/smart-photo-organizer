@@ -295,7 +295,63 @@ The **Create** view is for when you want to gather specific photos for a project
 
 ---
 
-## 🛠️ 8. Advanced Settings & Maintenance
+## 🔁 8. Duplicate Photos
+
+The **Duplicates** view helps you find and safely remove redundant copies of your photos — whether they are byte-for-byte identical files or visually similar versions of the same shot.
+
+### How Detection Works
+The system uses two complementary methods:
+
+| Method | What it finds | How |
+|--------|--------------|-----|
+| **Exact match** | 100% identical files | SHA-256 hash comparison |
+| **Near match** | Resized, re-saved, or format-converted copies | Perceptual hash (pHash) — Hamming distance ≤ 10 bits out of 64 |
+
+Hashes are computed **automatically in the background** during idle time:
+- SHA-256 is computed when a photo is first scanned (fast, Node.js).
+- pHash is computed during AI analysis (also fast, Python).
+- For pre-existing photos scanned before this feature was available, the app will **backfill** hashes automatically in the background — no action required. A progress banner appears while hashing is still in progress.
+
+### The Duplicates View
+
+Open the **Duplicates** tab in the sidebar (Tools section). You'll see:
+
+- **Stats pills:** Exact matches / Similar / Resolved counts at a glance.
+- **Hashing banner:** Spinning indicator while your library is still being hashed. Duplicates appear after hashing completes.
+- **3 tabs:** Pending · Resolved · Dismissed — each with a count badge.
+
+### Reviewing a Duplicate Group
+
+Each group shows a **horizontal filmstrip** of all N photos that were detected as duplicates.
+
+- The **auto-selected winner** is highlighted with a ✓ badge. The app picks the best photo automatically (highest resolution, then earliest date).
+- **Click any photo** to switch the winner to a different one.
+- Use the **"Move duplicates to trash" checkbox** (on by default) to send non-winners to your system Trash when resolving. Uncheck it to keep all files and just mark the group resolved.
+
+### Actions
+
+| Button | What it does |
+|--------|-------------|
+| **Keep selected & trash others** | Marks the group as Resolved. Moves all non-winner photos to system Trash (recoverable) if the checkbox is on. |
+| **Not duplicates** | Marks the group as Dismissed. No files are touched. |
+
+> [!IMPORTANT]
+> **Nothing is deleted automatically.** The system only takes action when you explicitly click "Keep selected & trash others". Dismissed groups are preserved and can be reviewed in the Dismissed tab.
+
+### Manual Check
+
+Click **"Check now"** (top-right) to immediately queue a duplicate detection run, without waiting for the background service. Useful after a fresh scan.
+
+### Tips
+
+- **Exact duplicates** are safe to resolve — they are byte-for-byte the same file.
+- **Near duplicates** may be intentionally different (e.g., burst shots, edited vs. original). Always review before resolving.
+- Files sent to Trash are **recoverable** from your system's Recycle Bin / Trash folder.
+- Large libraries are processed in pages of 20 groups. Use "Load more" to see additional groups.
+
+---
+
+## 🛠️ 9. Advanced Settings & Maintenance
 
 The **Settings** tab contains advanced controls to fine-tune the application's performance and manage your data.
 

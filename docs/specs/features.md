@@ -146,6 +146,37 @@ app, to recover corrupt photo files directly from the Scan Warnings panel.
 | `failed` | Red error text + Retry button |
 | `unrepairable` | Orange 🚫 Unrepairable badge (persistent) |
 
+## 8. 🔁 Duplicate Photo Detection
+
+The app automatically finds and groups redundant photos using a two-pass background system, with a dedicated UI for safe, user-controlled cleanup.
+
+### Detection Methods
+
+| Pass | Algorithm | What it catches |
+|------|-----------|----------------|
+| **Exact** | SHA-256 file hash | Byte-for-byte identical copies |
+| **Near** | pHash (64-bit) + Hamming distance ≤ 10 | Resized, re-saved, or format-converted versions |
+
+### Background Hashing
+- **SHA-256** is computed at scan time (streaming Node.js, negligible overhead).
+- **pHash** is computed during AI analysis via Python `imagehash` library.
+- A `BackgroundDuplicateCheckerService` handles **backfill** for pre-existing photos in batches (SHA-256: 100/batch, pHash: 20/batch) during idle time.
+- The service runs only when no scan or AI processing is active.
+
+### Duplicate Groups
+- Groups contain **N ≥ 2 photos** (not limited to pairs).
+- Near-duplicate clustering uses a **Union-Find** algorithm (O(n²) over integer pHashes, handles 100 K entries comfortably).
+- A `findExistingGroup` guard prevents duplicate group creation on re-runs.
+- Groups are typed (`exact` / `near`) and have a lifecycle status (`pending` → `resolved` / `dismissed`).
+
+### UI
+- **Stats pills:** Exact / Similar / Resolved counts.
+- **Hashing banner:** Live progress while the library is still being hashed (polls every 5 s).
+- **Group card:** Horizontal filmstrip of all N photos; auto-winner selection (best resolution → earliest date); click to change winner.
+- **Resolution:** "Keep selected & trash others" (uses `shell.trashItem` — recoverable) or "Not duplicates" (dismiss).
+- **Pagination:** 20 groups per page with "Load more".
+- **Sidebar badge:** Yellow count of pending groups, updated every 60 s.
+
 ## 9. Privacy & Performance
 - **Local-First:** No photos are ever uploaded to the cloud. All AI runs on your GPU/CPU.
 - **Virtualization:** The gallery uses `react-window` to handle libraries with 100,000+ photos without lagging.
