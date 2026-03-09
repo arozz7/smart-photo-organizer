@@ -1132,17 +1132,20 @@ export function registerDBHandlers() {
         }
     });
 
-    ipcMain.handle('db:resolveDuplicateGroup', async (_, { groupId, winnerPhotoId, trashLosers }: { groupId: number; winnerPhotoId: number; trashLosers: boolean }) => {
+    ipcMain.handle('db:resolveDuplicateGroup', async (_, { groupId, keepPhotoIds, trashLosers }: { groupId: number; keepPhotoIds: number[]; trashLosers: boolean }) => {
         try {
             const group = DuplicateGroupRepository.getGroupById(groupId);
             if (!group) return { success: false, error: 'Group not found' };
 
-            DuplicateGroupRepository.resolveGroup(groupId, winnerPhotoId);
+            // Primary winner is the first kept photo (for the DB column)
+            const primaryWinnerId = keepPhotoIds[0];
+            DuplicateGroupRepository.resolveGroup(groupId, primaryWinnerId);
 
             if (trashLosers) {
+                const keepSet = new Set(keepPhotoIds);
                 const loserIds = PhotoRepository.getPhotosByGroupId(groupId)
                     .map((p: any) => p.id)
-                    .filter((id: number) => id !== winnerPhotoId);
+                    .filter((id: number) => !keepSet.has(id));
 
                 const loserPaths = PhotoRepository.getFilePaths(loserIds);
                 for (const filePath of loserPaths) {
@@ -1159,8 +1162,8 @@ export function registerDBHandlers() {
                 }
             }
 
-            // Unlink winner from group (it's the keeper, no longer needs the group tag)
-            PhotoRepository.setDuplicateGroup([winnerPhotoId], null);
+            // Unlink all kept photos from the group
+            PhotoRepository.setDuplicateGroup(keepPhotoIds, null);
 
             return { success: true };
         } catch (e) {

@@ -54,10 +54,21 @@ function fileName(photo: Photo): string {
 
 export default function DuplicateGroupCard({ group, onResolved }: Props) {
     const suggestedWinnerId = useMemo(() => pickBestPhoto(group.photos), [group.photos])
-    const [selectedWinnerId, setSelectedWinnerId] = useState<number>(suggestedWinnerId)
+    const [keepIds, setKeepIds] = useState<Set<number>>(() => new Set([suggestedWinnerId]))
     const [trashLosers, setTrashLosers] = useState(true)
     const [resolving, setResolving] = useState(false)
     const [dismissing, setDismissing] = useState(false)
+
+    function toggleKeep(photoId: number) {
+        setKeepIds(prev => {
+            // Must keep at least one photo
+            if (prev.has(photoId) && prev.size === 1) return prev
+            const next = new Set(prev)
+            if (next.has(photoId)) next.delete(photoId)
+            else next.add(photoId)
+            return next
+        })
+    }
 
     async function handleResolve() {
         setResolving(true)
@@ -65,7 +76,7 @@ export default function DuplicateGroupCard({ group, onResolved }: Props) {
             // @ts-ignore
             await window.ipcRenderer.invoke('db:resolveDuplicateGroup', {
                 groupId: group.id,
-                winnerPhotoId: selectedWinnerId,
+                keepPhotoIds: Array.from(keepIds),
                 trashLosers,
             })
             onResolved()
@@ -117,19 +128,26 @@ export default function DuplicateGroupCard({ group, onResolved }: Props) {
             {/* Photo filmstrip */}
             <div className="flex gap-3 p-4 overflow-x-auto">
                 {group.photos.map(photo => {
-                    const isWinner = photo.id === selectedWinnerId
+                    const isKept = keepIds.has(photo.id)
                     const isSuggested = photo.id === suggestedWinnerId
+                    const isLastKept = isKept && keepIds.size === 1
                     return (
                         <div
                             key={photo.id}
                             className={`flex-shrink-0 flex flex-col gap-1 cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
-                                isWinner
+                                isKept
                                     ? 'border-indigo-500 shadow-lg shadow-indigo-900/50'
-                                    : 'border-gray-700 hover:border-gray-500'
+                                    : 'border-gray-700 hover:border-gray-500 opacity-60'
                             }`}
                             style={{ width: 180 }}
-                            onClick={() => setSelectedWinnerId(photo.id)}
-                            title={isWinner ? 'Selected to keep' : 'Click to keep this photo instead'}
+                            onClick={() => toggleKeep(photo.id)}
+                            title={
+                                isLastKept
+                                    ? 'At least one photo must be kept'
+                                    : isKept
+                                        ? 'Click to unselect (will be trashed)'
+                                        : 'Click to keep this photo too'
+                            }
                         >
                             {/* Thumbnail */}
                             <div className="relative bg-gray-900" style={{ height: 140 }}>
@@ -139,12 +157,18 @@ export default function DuplicateGroupCard({ group, onResolved }: Props) {
                                     className="w-full h-full object-cover"
                                     loading="lazy"
                                 />
-                                {isWinner && (
-                                    <div className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center shadow">
-                                        <CheckIcon className="w-3.5 h-3.5 text-white" />
-                                    </div>
-                                )}
-                                {isSuggested && !isWinner && (
+                                {/* Keep / trash indicator */}
+                                <div className={`absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center shadow border transition-colors ${
+                                    isKept
+                                        ? 'bg-indigo-600 border-indigo-500'
+                                        : 'bg-gray-800/80 border-gray-600'
+                                }`}>
+                                    {isKept
+                                        ? <CheckIcon className="w-3.5 h-3.5 text-white" />
+                                        : <TrashIcon className="w-3 h-3 text-gray-400" />
+                                    }
+                                </div>
+                                {isSuggested && (
                                     <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-900/80 text-gray-300">
                                         Best
                                     </div>
@@ -190,7 +214,7 @@ export default function DuplicateGroupCard({ group, onResolved }: Props) {
                     ) : (
                         trashLosers ? <TrashIcon className="w-3.5 h-3.5" /> : <CheckIcon className="w-3.5 h-3.5" />
                     )}
-                    Keep selected{trashLosers ? ' & trash others' : ''}
+                    Keep {keepIds.size === 1 ? 'selected' : `${keepIds.size} selected`}{trashLosers ? ' & trash others' : ''}
                 </button>
             </div>
         </div>
