@@ -54,6 +54,10 @@ const TEST_SCHEMA = `
     face_count INTEGER DEFAULT 0,
     cover_face_id INTEGER,
     entity_type TEXT DEFAULT 'human',
+    frontal_centroid_json TEXT,
+    profile_centroid_json TEXT,
+    frontal_face_count INTEGER DEFAULT 0,
+    profile_face_count INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
@@ -86,6 +90,7 @@ const TEST_SCHEMA = `
     needs_bucketing INTEGER DEFAULT 0,
     bucket_id INTEGER,
     ignore_source TEXT DEFAULT NULL CHECK(ignore_source IN ('user', 'background_verification')),
+    assignment_source TEXT DEFAULT 'manual',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
     FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL

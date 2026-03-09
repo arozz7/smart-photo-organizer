@@ -62,7 +62,11 @@ export class PersonRepository {
     static getPeopleWithDescriptors() {
         const db = getDB();
         try {
-            const people = db.prepare('SELECT id, name, descriptor_mean_json, entity_type FROM people WHERE descriptor_mean_json IS NOT NULL').all();
+            const people = db.prepare(`
+                SELECT id, name, descriptor_mean_json, entity_type,
+                       frontal_centroid_json, profile_centroid_json
+                FROM people WHERE descriptor_mean_json IS NOT NULL
+            `).all();
             const eras = db.prepare('SELECT * FROM person_eras').all(); // Fetch all eras
 
             // Map eras to personId
@@ -75,16 +79,49 @@ export class PersonRepository {
                 });
             }
 
-            return people.map((r: any) => ({
-                id: r.id,
-                name: r.name,
-                descriptor: JSON.parse(r.descriptor_mean_json),
-                entity_type: r.entity_type || 'human',
-                eras: erasMap.get(r.id) || []
-            }));
+            return people.map((r: any) => {
+                const poseCentroids: number[][] = [];
+                try { if (r.frontal_centroid_json) poseCentroids.push(JSON.parse(r.frontal_centroid_json)); } catch { /* skip */ }
+                try { if (r.profile_centroid_json) poseCentroids.push(JSON.parse(r.profile_centroid_json)); } catch { /* skip */ }
+
+                return {
+                    id: r.id,
+                    name: r.name,
+                    descriptor: JSON.parse(r.descriptor_mean_json),
+                    entity_type: r.entity_type || 'human',
+                    eras: erasMap.get(r.id) || [],
+                    poseCentroids
+                };
+            });
         } catch (error) {
             throw new Error(`PersonRepository.getPeopleWithDescriptors failed: ${String(error)}`);
         }
+    }
+
+    /**
+     * Update pose-specific centroids for a person (Phase 105-3).
+     */
+    static updatePoseCentroids(personId: number, data: {
+        frontalCentroidJson: string | null;
+        profileCentroidJson: string | null;
+        frontalFaceCount: number;
+        profileFaceCount: number;
+    }) {
+        const db = getDB();
+        db.prepare(`
+            UPDATE people
+            SET frontal_centroid_json = ?,
+                profile_centroid_json = ?,
+                frontal_face_count    = ?,
+                profile_face_count    = ?
+            WHERE id = ?
+        `).run(
+            data.frontalCentroidJson,
+            data.profileCentroidJson,
+            data.frontalFaceCount,
+            data.profileFaceCount,
+            personId
+        );
     }
 
     static getPersonById(personId: number) {

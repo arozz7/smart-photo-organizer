@@ -72,6 +72,7 @@ export class FaceRepository {
         const placeholders = ids.map(() => '?').join(',');
         const query = `
             SELECT f.id, f.photo_id, f.blur_score, f.box_json, f.descriptor, f.confidence_tier, f.suggested_person_id, f.match_distance,
+                   f.pose_yaw, f.assignment_source,
                    p.file_path, p.preview_cache_path, p.metadata_json, p.width, p.height
             FROM faces f
             JOIN photos p ON f.photo_id = p.id
@@ -865,11 +866,12 @@ export class FaceRepository {
         suggested_person_id: number | null;
         match_distance: number | null;
         entity_type: string;
+        pose_yaw: number | null;
     }> {
         const db = getDB();
         try {
             return db.prepare(`
-                SELECT id, descriptor, session_folder, session_date, suggested_person_id, match_distance, entity_type
+                SELECT id, descriptor, session_folder, session_date, suggested_person_id, match_distance, entity_type, pose_yaw
                 FROM faces
                 WHERE needs_bucketing = 1
                   AND person_id IS NULL
@@ -885,6 +887,7 @@ export class FaceRepository {
                 suggested_person_id: number | null;
                 match_distance: number | null;
                 entity_type: string;
+                pose_yaw: number | null;
             }>;
         } catch (error) {
             throw new Error(`FaceRepository.getFacesNeedingBucketing failed: ${String(error)}`);
@@ -1052,6 +1055,9 @@ export class FaceRepository {
      * Return orphaned faces: confirmed-human faces that slipped through bucketing
      * without being matched to any person or bucket.
      * These are candidates for background VLM re-verification.
+     *
+     * confidence_tier includes 'unknown' because on fresh databases (no named people yet)
+     * all faces have confidence_tier='unknown' — requiring 'human' would make this a no-op.
      */
     static getOrphanedFaces(limit = 10): Array<{
         id: number;
@@ -1067,12 +1073,13 @@ export class FaceRepository {
             FROM faces f
             JOIN photos p ON f.photo_id = p.id
             WHERE f.entity_type = 'human'
-              AND f.confidence_tier = 'human'
+              AND (f.confidence_tier = 'human' OR f.confidence_tier = 'unknown')
               AND f.needs_bucketing = 0
               AND f.bucket_id IS NULL
               AND f.person_id IS NULL
               AND f.is_ignored = 0
               AND f.descriptor IS NOT NULL
+              AND f.verification_attempts = 0
             ORDER BY p.created_at DESC
             LIMIT ?
         `).all(limit) as Array<{
@@ -1093,12 +1100,13 @@ export class FaceRepository {
             SELECT COUNT(*) as count
             FROM faces
             WHERE entity_type = 'human'
-              AND confidence_tier = 'human'
+              AND (confidence_tier = 'human' OR confidence_tier = 'unknown')
               AND needs_bucketing = 0
               AND bucket_id IS NULL
               AND person_id IS NULL
               AND is_ignored = 0
               AND descriptor IS NOT NULL
+              AND verification_attempts = 0
         `).get() as { count: number };
         return result.count;
     }
@@ -1145,6 +1153,26 @@ export class FaceRepository {
         `).get(id) as { verification_attempts: number } | undefined;
 
         return result?.verification_attempts ?? 0;
+    }
+
+    /**
+     * Get pose distribution statistics across all active faces (Phase 105).
+     * Bins: frontal (|yaw| ≤ 30°), profile (30–60°), severe (>60°), unknown (null).
+     */
+    static getPoseStatistics(): { frontal: number; profile: number; severe: number; unknown: number; total: number } {
+        const db = getDB();
+        const row = db.prepare(`
+            SELECT
+                COUNT(CASE WHEN ABS(pose_yaw) <= 30 THEN 1 END) as frontal,
+                COUNT(CASE WHEN ABS(pose_yaw) > 30 AND ABS(pose_yaw) <= 60 THEN 1 END) as profile,
+                COUNT(CASE WHEN ABS(pose_yaw) > 60 THEN 1 END) as severe,
+                COUNT(CASE WHEN pose_yaw IS NULL THEN 1 END) as unknown,
+                COUNT(*) as total
+            FROM faces
+            WHERE (is_ignored = 0 OR is_ignored IS NULL)
+              AND descriptor IS NOT NULL
+        `).get() as { frontal: number; profile: number; severe: number; unknown: number; total: number };
+        return row;
     }
 
     /**

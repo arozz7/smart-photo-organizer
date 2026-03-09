@@ -23,25 +23,18 @@
 - **Synergies:** Phase 2 prepares Library header for Advanced Filtering (✅ Complete). Phase 1+4 prepare navigation for Home Page Dashboard (✅ Complete). Phase 6 makes PhotoDetail safer for future feature additions.
 - **Implementation Plan:** See [UX Modernization Plan](file:///j:/Projects/smart-photo-organizer/docs/plans/ux-modernization-plan.md)
 
-### 4. Hard Pose Handling & Context Propagation
+### 4. Hard Pose Handling & Context Propagation ✅ Complete — Phase 105
 - **Goal:** Improve recognition accuracy for side profiles, top-down views, and other challenging face angles.
 - **Problem:** Standard embeddings from extreme angles (yaw > 45°) produce lower-quality matches, leading to missed identifications or false positives.
-- **Technical Reference:** See [Face Recognition Technology](file:///j:/Projects/smart-photo-organizer/docs/specs/face-recognition-technology.md) for detailed research.
-- **Core Features:**
-    - **Pose Scoring:** Store `face.pose` (yaw/pitch/roll) during scan for pose-aware processing.
-    - **Pose Filtering:** Enable UI filtering by face pose ("Show only frontal faces").
-    - **Centroid Quality Weighting:** Weight frontal, sharp faces higher in centroid calculation.
-    - **Contextual Label Propagation:** Use time/location proximity to assign labels to hard faces.
-    - **Multi-Centroid Matching:** Store separate embeddings for frontal vs. profile views per person.
-- **Implementation Phases:**
-    1. DB migration: Add `pose_yaw`, `pose_pitch`, `pose_roll` columns to faces table.
-    2. Extract and store pose data during scan (InsightFace already provides `face.pose`).
-    3. Modify `PersonService.calculateCentroid` to weight frontal faces higher.
-    4. New `ContextualMatchingService`: Propagate labels via temporal/GPS clustering.
-    5. UI: Add pose filter toggle to Unnamed Faces view.
-- **Performance:** Pose extraction is already included in InsightFace detection (no additional cost).
-- **Dependencies:** Benefits from Age-Based ERA (✅ Complete) for comprehensive person modeling.
-- **Implementation Plan:** See [Hard Pose Handling & Context Propagation Plan](file:///j:\Projects\smart-photo-organizer\docs\plans\hard-pose-context-propagation-plan.md)
+- **Delivered:**
+    - Pose distribution widget on Library Health dashboard (frontal/profile/severe counts).
+    - Pose filter toggle in People → Unnamed Faces (All / Frontal ≤30° / Profile >45°).
+    - Per-person frontal + profile centroids computed after every mean recalculation; checked in `matchAgainstCentroids`.
+    - `ContextualMatchingService` — temporal (±5 min / same session) + spatial (GPS ≤100 m) consensus voting assigns hard-pose / blurry faces (≥70% anchor agreement required).
+    - `BackgroundPropagationService` — idle-only hourly propagation pass.
+    - Assignment source badges ('T' / 'G') on face thumbnails.
+    - One-click library-wide propagation in Settings → Smart Assignment.
+- **Change Log:** [phase-105-pose-context-propagation.md](../../aiChangeLog/phase-105-pose-context-propagation.md)
 ---
 
 

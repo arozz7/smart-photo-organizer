@@ -27,6 +27,8 @@ import FaceDebugModal from '../components/FaceDebugModal'
 import FaceThumbnail from '../components/FaceThumbnail'
 import { Face, FaceBucket } from '../types'
 import { FloatingActionBar, FloatingActionButton } from '../components/FloatingActionBar'
+import { usePoseFilter } from '../hooks/usePoseFilter'
+import { PoseFilterToggle } from '../components/PoseFilterToggle'
 
 export default function People() {
     const navigate = useNavigate()
@@ -48,6 +50,7 @@ export default function People() {
     const { addToast } = useToast()
     const { viewPhoto } = useScan()
     const gridSizes = usePeopleGridSize()
+    const { mode: poseFilterMode, setMode: setPoseFilterMode, filterByPose } = usePoseFilter()
 
     // Existing hook for "Unnamed Faces" tab (Legacy + Controller internal)
     const {
@@ -843,6 +846,7 @@ export default function People() {
                                                     variant="danger"
                                                 />
                                             )}
+                                            <PoseFilterToggle mode={poseFilterMode} onModeChange={setPoseFilterMode} />
                                         </ClusterToolbar>
                                     </div>
                                 )}
@@ -879,7 +883,7 @@ export default function People() {
                                             <div className="mt-8">
                                                 <div className="flex items-center justify-between mb-4">
                                                     <h3 className="text-lg font-medium text-gray-400">
-                                                        Single Faces ({singles.length})
+                                                        Single Faces ({filterByPose(visibleSingleFaces).length}{poseFilterMode !== 'all' ? ` / ${singles.length}` : ''})
                                                     </h3>
                                                     {singles.length > 50 && (
                                                         <button
@@ -891,7 +895,7 @@ export default function People() {
                                                     )}
                                                 </div>
                                                 <div ref={gridSizes.singles.containerRef} style={gridSizes.singles.gridStyle}>
-                                                    {visibleSingleFaces.map(face => (
+                                                    {filterByPose(visibleSingleFaces).map(face => (
                                                         <div
                                                             key={face.id}
                                                             className={`aspect-square rounded-lg overflow-hidden border cursor-pointer relative group ${selectedFaceIds.has(face.id)

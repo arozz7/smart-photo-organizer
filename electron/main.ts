@@ -20,6 +20,7 @@ import logger from './logger';
 import { WindowManager } from './windows/windowManager';
 import { BackgroundBucketingService } from './core/services/BackgroundBucketingService';
 import { BackgroundVerificationService } from './core/services/BackgroundVerificationService';
+import { BackgroundPropagationService } from './core/services/BackgroundPropagationService';
 import { AppStateRepository } from './data/repositories/AppStateRepository';
 import { BucketRepository } from './data/repositories/BucketRepository';
 import { ServiceManager } from './core/services/ServiceManager';
@@ -114,11 +115,16 @@ app.whenReady().then(async () => {
   verificationService = new BackgroundVerificationService();
   verificationService.start();
 
+  // Start Background Propagation Service (Phase 105-6)
+  const propagationService = new BackgroundPropagationService();
+  propagationService.start();
+
   // Register Services
   const serviceManager = ServiceManager.getInstance();
   serviceManager.register('PythonAIProvider', pythonProvider);
   serviceManager.register('BackgroundBucketingService', bucketingService);
   serviceManager.register('BackgroundVerificationService', verificationService);
+  serviceManager.register('BackgroundPropagationService', propagationService);
   serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();

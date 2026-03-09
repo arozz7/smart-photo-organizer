@@ -834,6 +834,43 @@ describe('FaceRepository', () => {
             // Assert
             expect(result).toHaveLength(3);
         });
+
+        it('should return faces with confidence_tier=unknown (fresh DB / no FAISS matches yet)', () => {
+            // Arrange: high-confidence false positive that was directly accepted as 'human'
+            // at scan time — confidence_tier stays 'unknown' because no person was matched
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, {
+                entity_type: 'human',
+                confidence_tier: 'unknown',
+                needs_bucketing: 0,
+                is_ignored: 0,
+                descriptor: createTestDescriptor(1)
+            });
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(10);
+
+            // Assert: previously would have returned 0 (confidence_tier='human' filter)
+            expect(result).toHaveLength(1);
+        });
+
+        it('should not return faces with entity_type=suspect regardless of confidence_tier', () => {
+            // Arrange: suspect face that hasn't been VLM-processed yet
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, {
+                entity_type: 'suspect',
+                confidence_tier: 'unknown',
+                needs_bucketing: 0,
+                is_ignored: 0,
+                descriptor: createTestDescriptor(1)
+            });
+
+            // Act
+            const result = FaceRepository.getOrphanedFaces(10);
+
+            // Assert: orphan pass is only for confirmed-human faces; suspects have their own pipeline
+            expect(result).toHaveLength(0);
+        });
     });
 
     // ==========================================
@@ -864,6 +901,29 @@ describe('FaceRepository', () => {
                 entity_type: 'human', confidence_tier: 'human',
                 needs_bucketing: 0, is_ignored: 0, person_id: personId,
                 descriptor: createTestDescriptor(3)
+            });
+
+            // Act
+            const result = FaceRepository.countOrphanedFaces();
+
+            // Assert
+            expect(result).toBe(2);
+        });
+
+        it('should count faces with confidence_tier=unknown as orphans', () => {
+            // Arrange: 1 'human' tier + 1 'unknown' tier + 1 'suspect' (excluded)
+            const photoId = seedPhoto(db);
+            seedFace(db, photoId, {
+                entity_type: 'human', confidence_tier: 'human',
+                needs_bucketing: 0, is_ignored: 0, descriptor: createTestDescriptor(1)
+            });
+            seedFace(db, photoId, {
+                entity_type: 'human', confidence_tier: 'unknown',
+                needs_bucketing: 0, is_ignored: 0, descriptor: createTestDescriptor(2)
+            });
+            seedFace(db, photoId, {
+                entity_type: 'suspect', confidence_tier: 'unknown',
+                needs_bucketing: 0, is_ignored: 0, descriptor: createTestDescriptor(3)
             });
 
             // Act
