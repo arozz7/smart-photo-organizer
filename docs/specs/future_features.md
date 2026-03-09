@@ -33,7 +33,7 @@
     - **DB schema:** `sha256_hash`, `phash`, `duplicate_group_id` columns on `photos`; `duplicate_groups` table with `type` (exact/near), `status` (pending/resolved/dismissed), `winner_photo_id`.
     - **Python:** `compute_phash_batch`, `group_near_duplicates` (Union-Find O(n²)) registered as AI commands.
     - **Duplicates view:** Stats pills, HashingBanner (polls every 5 s), 3-tab layout (Pending/Resolved/Dismissed), paginated group cards (20/page).
-    - **DuplicateGroupCard:** N-photo filmstrip, auto-winner (best resolution → earliest date), click-to-switch winner, trash-on-resolve via `shell.trashItem` (recoverable).
+    - **DuplicateGroupCard:** N-photo filmstrip, auto-selects best photo (best resolution → earliest date); multi-select keep — click any photo to toggle keep/trash independently; at least one must remain selected; button label shows count ("Keep 2 selected & trash others"); `keepPhotoIds[]` passed to IPC.
     - **Sidebar badge:** Yellow pending count (polls every 60 s).
 - **Change Log:** [phase-107-duplicate-detection.md](../../aiChangeLog/phase-107-duplicate-detection.md)
 

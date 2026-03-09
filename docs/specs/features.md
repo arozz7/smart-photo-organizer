@@ -172,7 +172,8 @@ The app automatically finds and groups redundant photos using a two-pass backgro
 ### UI
 - **Stats pills:** Exact / Similar / Resolved counts.
 - **Hashing banner:** Live progress while the library is still being hashed (polls every 5 s).
-- **Group card:** Horizontal filmstrip of all N photos; auto-winner selection (best resolution → earliest date); click to change winner.
+- **Group card:** Horizontal filmstrip of all N photos; auto-selects best photo (highest resolution → earliest date); each photo toggles independently between keep (✓, full opacity) and trash (trash icon, dimmed); at least one must remain selected.
+- **Multi-keep:** Any number of photos can be kept; only unselected ones are trashed. Button label reflects the count ("Keep 2 selected & trash others"). `keepPhotoIds[]` sent to IPC; first ID stored as `winner_photo_id`.
 - **Resolution:** "Keep selected & trash others" (uses `shell.trashItem` — recoverable) or "Not duplicates" (dismiss).
 - **Pagination:** 20 groups per page with "Load more".
 - **Sidebar badge:** Yellow count of pending groups, updated every 60 s.

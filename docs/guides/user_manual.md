@@ -324,19 +324,20 @@ Open the **Duplicates** tab in the sidebar (Tools section). You'll see:
 
 Each group shows a **horizontal filmstrip** of all N photos that were detected as duplicates.
 
-- The **auto-selected winner** is highlighted with a ✓ badge. The app picks the best photo automatically (highest resolution, then earliest date).
-- **Click any photo** to switch the winner to a different one.
-- Use the **"Move duplicates to trash" checkbox** (on by default) to send non-winners to your system Trash when resolving. Uncheck it to keep all files and just mark the group resolved.
+- The **auto-selected best photo** starts with a ✓ badge (highest resolution, then earliest date). All others are initially marked for deletion.
+- **Click any photo** to toggle it between "keep" (✓ badge, full opacity) and "trash" (trash icon, dimmed). You can keep **as many photos as you like** — only the unselected ones will be trashed.
+- At least one photo must always remain selected; clicking the last kept photo is a no-op.
+- Use the **"Move duplicates to trash" checkbox** (on by default) to send unselected photos to your system Trash when resolving. Uncheck it to keep all files and just mark the group resolved.
 
 ### Actions
 
 | Button | What it does |
 |--------|-------------|
-| **Keep selected & trash others** | Marks the group as Resolved. Moves all non-winner photos to system Trash (recoverable) if the checkbox is on. |
+| **Keep selected & trash others** | Marks the group as Resolved. Moves all unselected photos to system Trash (recoverable) if the checkbox is on. Keeping multiple photos is allowed — the button label updates to reflect the count (e.g., "Keep 2 selected & trash others"). |
 | **Not duplicates** | Marks the group as Dismissed. No files are touched. |
 
 > [!IMPORTANT]
-> **Nothing is deleted automatically.** The system only takes action when you explicitly click "Keep selected & trash others". Dismissed groups are preserved and can be reviewed in the Dismissed tab.
+> **Nothing is deleted automatically.** The system only takes action when you explicitly click the resolve button. Dismissed groups are preserved and can be reviewed in the Dismissed tab.
 
 ### Manual Check
 
@@ -344,8 +345,8 @@ Click **"Check now"** (top-right) to immediately queue a duplicate detection run
 
 ### Tips
 
-- **Exact duplicates** are safe to resolve — they are byte-for-byte the same file.
-- **Near duplicates** may be intentionally different (e.g., burst shots, edited vs. original). Always review before resolving.
+- **Exact duplicates** are safe to resolve — they are byte-for-byte the same file. You rarely need more than one copy.
+- **Near duplicates** may be intentionally different (e.g., full-res original + web export, RAW + JPEG, two edits). Keep whichever versions you need.
 - Files sent to Trash are **recoverable** from your system's Recycle Bin / Trash folder.
 - Large libraries are processed in pages of 20 groups. Use "Load more" to see additional groups.
 
