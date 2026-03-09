@@ -1,10 +1,27 @@
-import { promises as fs, statSync } from 'node:fs';
+import { promises as fs, statSync, createReadStream } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { ExifTool } from 'exiftool-vendored';
 import logger from './logger';
 import { getDB, parseExifDate } from './db';
 
 import { PhotoService } from './core/services/PhotoService';
+
+/** Compute SHA-256 hash of a file, returned as hex string. */
+async function computeSHA256(filePath: string): Promise<string | null> {
+    try {
+        return await new Promise((resolve, reject) => {
+            const hash = createHash('sha256');
+            const stream = createReadStream(filePath);
+            stream.on('data', chunk => hash.update(chunk));
+            stream.on('end', () => resolve(hash.digest('hex')));
+            stream.on('error', reject);
+        });
+    } catch (e) {
+        logger.warn(`[Scanner] SHA-256 failed for ${path.basename(filePath)}:`, e);
+        return null;
+    }
+}
 
 // Helper to get ExifTool from service
 export async function getExifTool(): Promise<ExifTool | null> {
@@ -203,6 +220,8 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
                 }
             }
 
+            const sha256Hash = await computeSHA256(fullPath);
+
             const info = insertStmt.run({
                 file_path: fullPath,
                 preview_cache_path: previewPath, // Might be null
@@ -214,6 +233,11 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
             });
 
             const newPhotoId = info.lastInsertRowid;
+
+            if (sha256Hash) {
+                db.prepare('UPDATE photos SET sha256_hash = ? WHERE id = ?').run(sha256Hash, newPhotoId);
+            }
+
             photo = selectStmt.get(fullPath); // Retrieve full object
             isNew = true;
 

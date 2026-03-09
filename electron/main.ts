@@ -21,6 +21,7 @@ import { WindowManager } from './windows/windowManager';
 import { BackgroundBucketingService } from './core/services/BackgroundBucketingService';
 import { BackgroundVerificationService } from './core/services/BackgroundVerificationService';
 import { BackgroundPropagationService } from './core/services/BackgroundPropagationService';
+import { BackgroundDuplicateCheckerService } from './core/services/BackgroundDuplicateCheckerService';
 import { AppStateRepository } from './data/repositories/AppStateRepository';
 import { BucketRepository } from './data/repositories/BucketRepository';
 import { ServiceManager } from './core/services/ServiceManager';
@@ -119,12 +120,17 @@ app.whenReady().then(async () => {
   const propagationService = new BackgroundPropagationService();
   propagationService.start();
 
+  // Start Background Duplicate Checker Service (Phase 107)
+  const duplicateCheckerService = new BackgroundDuplicateCheckerService(pythonProvider);
+  duplicateCheckerService.start();
+
   // Register Services
   const serviceManager = ServiceManager.getInstance();
   serviceManager.register('PythonAIProvider', pythonProvider);
   serviceManager.register('BackgroundBucketingService', bucketingService);
   serviceManager.register('BackgroundVerificationService', verificationService);
   serviceManager.register('BackgroundPropagationService', propagationService);
+  serviceManager.register('BackgroundDuplicateCheckerService', duplicateCheckerService);
   serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();

@@ -171,7 +171,7 @@ export class PhotoRepository {
         return db.prepare('SELECT * FROM photos WHERE id = ?').get(id);
     }
 
-    static updatePhoto(id: number, updates: { description?: string, blur_score?: number }) {
+    static updatePhoto(id: number, updates: { description?: string; blur_score?: number; phash?: string }) {
         const db = getDB();
         const sets: string[] = [];
         const params: any[] = [];
@@ -184,11 +184,73 @@ export class PhotoRepository {
             sets.push('blur_score = ?');
             params.push(updates.blur_score);
         }
+        if (updates.phash !== undefined) {
+            sets.push('phash = ?');
+            params.push(updates.phash);
+        }
 
         if (sets.length > 0) {
             params.push(id);
             db.prepare(`UPDATE photos SET ${sets.join(', ')} WHERE id = ?`).run(...params);
         }
+    }
+
+    static getPhotosNeedingSha256(limit: number): { id: number; file_path: string }[] {
+        return getDB().prepare(
+            'SELECT id, file_path FROM photos WHERE sha256_hash IS NULL LIMIT ?'
+        ).all(limit) as { id: number; file_path: string }[];
+    }
+
+    static getPhotosNeedingPhash(limit: number): { id: number; file_path: string; preview_cache_path: string | null }[] {
+        return getDB().prepare(
+            'SELECT id, file_path, preview_cache_path FROM photos WHERE phash IS NULL LIMIT ?'
+        ).all(limit) as { id: number; file_path: string; preview_cache_path: string | null }[];
+    }
+
+    static countPhotosNeedingHash(): { needsSha256: number; needsPhash: number } {
+        const db = getDB();
+        const sha256Row = db.prepare('SELECT COUNT(*) as c FROM photos WHERE sha256_hash IS NULL').get() as { c: number };
+        const phashRow  = db.prepare('SELECT COUNT(*) as c FROM photos WHERE phash IS NULL').get()  as { c: number };
+        return { needsSha256: sha256Row.c, needsPhash: phashRow.c };
+    }
+
+    static updatePhotoSha256(id: number, hash: string): void {
+        getDB().prepare('UPDATE photos SET sha256_hash = ? WHERE id = ?').run(hash, id);
+    }
+
+    static updatePhotoPhash(id: number, hash: string): void {
+        getDB().prepare('UPDATE photos SET phash = ? WHERE id = ?').run(hash, id);
+    }
+
+    static getPhotosWithPhash(): { id: number; phash: string }[] {
+        return getDB().prepare(
+            'SELECT id, phash FROM photos WHERE phash IS NOT NULL'
+        ).all() as { id: number; phash: string }[];
+    }
+
+    static findExactDuplicateGroups(): { sha256_hash: string; photo_ids: string }[] {
+        return getDB().prepare(`
+            SELECT sha256_hash, GROUP_CONCAT(id) AS photo_ids
+            FROM photos
+            WHERE sha256_hash IS NOT NULL
+            GROUP BY sha256_hash
+            HAVING COUNT(*) > 1
+        `).all() as { sha256_hash: string; photo_ids: string }[];
+    }
+
+    static getPhotosByGroupId(groupId: number) {
+        return getDB().prepare(
+            'SELECT * FROM photos WHERE duplicate_group_id = ?'
+        ).all(groupId);
+    }
+
+    static setDuplicateGroup(photoIds: number[], groupId: number | null) {
+        const db = getDB();
+        const stmt = db.prepare('UPDATE photos SET duplicate_group_id = ? WHERE id = ?');
+        const tx = db.transaction(() => {
+            for (const id of photoIds) stmt.run(groupId, id);
+        });
+        tx();
     }
 
     static getMetricsHistory(limit = 1000) {

@@ -490,6 +490,29 @@ def handle_command(command):
         from commands import scan
         response = scan.detect_faces_in_region(payload, load_image_cv2, req_id)
 
+    elif cmd_type == 'compute_phash_batch':
+        # [Phase 107] Batch pHash computation for backfilling existing photos
+        from duplicate_detection import compute_phash_batch
+        entries = payload.get('entries', [])
+        try:
+            results = compute_phash_batch(entries)
+            response = {"type": "compute_phash_batch_result", "results": results}
+        except Exception as e:
+            logger.error(f"[compute_phash_batch] Error: {e}")
+            response = {"type": "compute_phash_batch_result", "results": [], "error": str(e)}
+
+    elif cmd_type == 'group_near_duplicates':
+        # [Phase 107] Cluster pre-computed pHashes by Hamming distance
+        from duplicate_detection import group_near_duplicates
+        entries = payload.get('entries', [])
+        threshold = int(payload.get('threshold', 10))
+        try:
+            groups = group_near_duplicates(entries, threshold)
+            response = {"type": "group_near_duplicates_result", "groups": groups}
+        except Exception as e:
+            logger.error(f"[group_near_duplicates] Error: {e}")
+            response = {"type": "group_near_duplicates_result", "groups": [], "error": str(e)}
+
 
     elif cmd_type == 'generate_tags':
         photo_id = payload.get('photoId')
