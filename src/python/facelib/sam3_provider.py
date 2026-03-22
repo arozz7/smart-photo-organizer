@@ -318,51 +318,58 @@ class Sam3Provider(SegmentationProvider):
         labels: list[int],
     ) -> dict[str, Any]:
         """
-        Run segmentation using both a bounding box and click-point prompts simultaneously.
+        Run segmentation using both a bounding box and click-point prompts.
 
-        The Sam3Processor accepts input_boxes and input_points/input_labels together.
-        Falls back to box-only if the combined call fails (e.g. processor version mismatch).
+        Strategy: run the tracker-based point segmentation first (which correctly
+        handles point prompts), then apply the box as a hard ROI constraint —
+        zeroing out any mask pixels that fall outside the box bounds.
+
+        This avoids trying to pass both input types to Sam3Processor at once
+        (it only supports box prompts and silently ignores point inputs).
+        Falls back to box-only if the point segmentation returns no masks.
         """
         self._ensure_initialized()
         if self._failed:
             return {"masks": [], "error": self._fail_reason}
 
-        image = self._get_session(session_id)["image"]
+        # Run point-based segmentation via the tracker
+        points_result = self.predict_from_points(session_id, points, labels)
 
-        import torch
-
-        try:
-            inputs = self._processor(
-                images=image,
-                input_boxes=[[box]],
-                input_boxes_labels=[[1]],
-                input_points=[[[p for p in points]]],
-                input_labels=[[labels]],
-                return_tensors="pt",
-            ).to(self._device)
-
-            with torch.no_grad():
-                outputs = self._model(**inputs)
-
-            original_sizes = inputs.get("original_sizes")
-            target_sizes = (
-                original_sizes.tolist()
-                if original_sizes is not None
-                else [[image.height, image.width]]
-            )
-
-            results = self._processor.post_process_instance_segmentation(
-                outputs,
-                threshold=0.5,
-                mask_threshold=0.5,
-                target_sizes=target_sizes,
-            )[0]
-            return self._format_box_output(results)
-        except Exception as e:
-            logger.warning(
-                "predict_from_box_and_points failed (%s) — falling back to box-only", e
+        if not points_result.get("masks"):
+            logger.info(
+                "predict_from_box_and_points: tracker returned no masks — falling back to box-only"
             )
             return self.predict_from_box(session_id, box)
+
+        # Apply box as a hard spatial constraint: zero mask pixels outside the box
+        x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+        constrained: list[dict] = []
+
+        for entry in points_result["masks"]:
+            mask_bytes = base64.b64decode(entry["mask_b64"])
+            mask_np = np.array(Image.open(io.BytesIO(mask_bytes)).convert("L")) > 128
+
+            roi = np.zeros_like(mask_np)
+            roi[y1:y2, x1:x2] = mask_np[y1:y2, x1:x2]
+
+            area = int(roi.sum())
+            if area > 0:
+                constrained.append({
+                    "mask_b64": self._mask_to_b64(roi),
+                    "score": entry["score"],
+                    "area": area,
+                })
+
+        if not constrained:
+            logger.info(
+                "predict_from_box_and_points: ROI constraint removed all mask pixels — falling back to box-only"
+            )
+            return self.predict_from_box(session_id, box)
+
+        logger.info(
+            "predict_from_box_and_points: %d mask(s) after box ROI constraint", len(constrained)
+        )
+        return {"masks": constrained}
 
     def get_capabilities(self) -> dict[str, Any]:
         # Check SAM 3 import availability without triggering a full model load
