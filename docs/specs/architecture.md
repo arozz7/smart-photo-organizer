@@ -22,6 +22,7 @@ graph TD
         Python -- InsightFace --> FD[Face Detection]
         Python -- SmolVLM --> VLM[Smart Tagging]
         Python -- FAISS --> VectorDB[(Vector DB)]
+        Python -- SAM3 --> SEG[Segmentation / Creative Tools]
     end
 
     subgraph External Services
@@ -58,7 +59,7 @@ graph TD
 - **Integration point:** `electron/ipc/prsHandlers.ts` registered in `main.ts`.
 
 ### 3. AI Engine (Python)
-- **Tech Stack:** Python 3.10+, PyTorch, InsightFace, FAISS, Transformers.
+- **Tech Stack:** Python 3.12, PyTorch, InsightFace, FAISS, Transformers (HuggingFace).
 - **Responsibilities:**
   - **Face Detection:** Uses `RetinaFace` (via `buffalo_l` model) to detect faces with pose invariance.
   - **Face Recognition:** Uses `ArcFace` to generate 512-D embeddings with angular margin loss.
@@ -66,6 +67,7 @@ graph TD
   - **Vector Search:** Uses `FAISS IndexFlatL2` to search face embeddings for identity matching.
   - **Clustering:** Uses `DBSCAN` (scikit-learn) to group unnamed faces by embedding distance.
   - **Smart Tagging:** Uses `SmolVLM` (Vision-Language Model) to caption images and generate tags.
+  - **Segmentation:** Uses `SAM 3` (`Sam3Model` + `Sam3Processor` via HuggingFace `transformers`) for interactive image segmentation in Creative Tools. Supports box prompts, point prompts, text prompts, and combined box+points prompts.
 - **Technical Deep-Dive:** See [Face Recognition Technology](file:///j:/Projects/smart-photo-organizer/docs/face-recognition-technology.md) for detailed stack analysis.
 
 ## Data Flow: AI Scanning
@@ -250,12 +252,64 @@ sequenceDiagram
 - Recovery requires **zero new code** — `processRecheckBatch()` already queries all `is_ignored = 1` faces regardless of source.
 - Faces rejected by VLM are soft-ignored, not deleted. The user can always recover them via Re-Check Ignored Faces.
 
+## Data Flow: SAM 3 Segmentation (Creative Tools)
+
+```mermaid
+sequenceDiagram
+    participant UI as CreativeToolsPanel
+    participant Main as Electron Main
+    participant Py as Python AI (SAM 3)
+
+    UI->>Main: ai:segment:startSession { photoPath }
+    Main->>Py: { type: "segment_start_session", payload: { image_path } }
+    Py->>Py: Load image, pre-encode with Sam3Processor
+    Py-->>Main: { type: "segment_session_started", session_id }
+    Main-->>UI: { sessionId }
+
+    alt Box prompt
+        UI->>Main: ai:segment:predict { sessionId, box: [x1,y1,x2,y2] }
+        Main->>Py: { type: "segment_predict", payload: { session_id, box } }
+        Py->>Py: Sam3Model.forward(input_boxes)
+        Py-->>Main: { masks: [...], scores: [...] }
+        Main-->>UI: { maskBase64, score }
+    else Points prompt
+        UI->>Main: ai:segment:predict { sessionId, points, point_labels }
+        Main->>Py: { type: "segment_predict", payload: { session_id, points, point_labels } }
+        Py-->>Main: { masks, scores }
+        Main-->>UI: { maskBase64, score }
+    else Box + Points (combined)
+        UI->>Main: ai:segment:predict { sessionId, box, points, point_labels }
+        Main->>Py: { type: "segment_predict", payload: { session_id, box, points, point_labels } }
+        Py->>Py: predict_from_box_and_points() — combined Sam3Processor call
+        Py-->>Main: { masks, scores }
+        Main-->>UI: { maskBase64, score }
+    end
+
+    UI->>Main: ai:segment:applyOperation { sessionId, maskBase64, operation, params }
+    Main->>Py: { type: "segment_apply", payload: { session_id, mask_b64, operation, params } }
+    Py->>Py: Apply operation (cv2 / PIL)
+    Py-->>Main: { result_b64: "data:image/png;base64,..." }
+    Main-->>UI: result image
+
+    UI->>Main: ai:segment:endSession { sessionId }
+    Main->>Py: { type: "segment_end_session", payload: { session_id } }
+    Py->>Py: Free cached tensors
+    Py-->>Main: { ok: true }
+```
+
+**IPC channels:** `ai:segment:startSession`, `ai:segment:predict`, `ai:segment:applyOperation`, `ai:segment:endSession`
+
+**Session model:** Each canvas photo load creates a server-side session that caches the encoded image tensor. Predictions within that session reuse the cached encoding, avoiding re-loading the image on every prompt change. Sessions are cleaned up explicitly on panel close or photo change.
+
+---
+
 ## Data Schema
 
 ### SQLite Tables
-- **photos:** `id`, `file_path`, `preview_cache_path`, `metadata_json`, `created_at`
-- **faces:** `id`, `photo_id`, `box_json`, `descriptor` (BLOB), `person_id`, `is_reference`, `blur_score`, `score` (InsightFace det_score 0–1), `entity_type` ('human'|'pet'|'suspect'), `confidence_tier` ('human'|'suspect' — Phase 90 3-tier scoring), `pose_yaw`, `pose_pitch`, `pose_roll` (Phase 46), `age` (InsightFace estimate), `is_ignored` (boolean), `ignore_source` ('user'|'background_verification'|NULL — planned Lever 3), `needs_bucketing` (background bucketing flag), `bucket_id` (suggestion/discovery bucket FK), `assignment_source` ('user'|'auto'|'split_multiface'|NULL), `is_confirmed` (centroid stability flag)
-- **people:** `id`, `name`, `descriptor_mean_json`
+- **photos:** `id`, `file_path`, `preview_cache_path`, `metadata_json`, `created_at`, `sha256_hash` (Phase 107 — exact duplicate detection), `phash` (Phase 107 — perceptual hash for near-duplicate detection, integer), `duplicate_group_id` (FK → `duplicate_groups`, nullable), `gps_lat`, `gps_lon` (Phase 105 — backfilled from `metadata_json`)
+- **faces:** `id`, `photo_id`, `box_json`, `descriptor` (BLOB), `person_id`, `is_reference`, `blur_score`, `score` (InsightFace det_score 0–1), `entity_type` ('human'|'pet'|'suspect'), `confidence_tier` ('human'|'suspect' — Phase 90 3-tier scoring), `pose_yaw`, `pose_pitch`, `pose_roll` (Phase 46), `age` (InsightFace estimate), `is_ignored` (boolean), `ignore_source` ('user'|'background_verification'|NULL), `needs_bucketing` (background bucketing flag), `bucket_id` (suggestion/discovery bucket FK), `assignment_source` ('user'|'auto'|'split_multiface'|NULL), `is_confirmed` (centroid stability flag)
+- **people:** `id`, `name`, `descriptor_mean_json`, `frontal_centroid_json`, `profile_centroid_json`, `frontal_face_count`, `profile_face_count` (Phase 105 — pose-aware centroids)
+- **duplicate_groups:** `id`, `type` ('exact'|'near'), `status` ('pending'|'resolved'|'dismissed'), `winner_photo_id` (FK → photos, nullable), `created_at`, `updated_at` — Phase 107
 - **tags:** `id`, `name`
 - **photo_tags:** `photo_id`, `tag_id`, `source` ('AI' or 'User')
 - **scan_history:** `id`, `photo_id`, `timestamp`, `scan_ms`, `tag_ms`, `face_count`, `status`, `error`

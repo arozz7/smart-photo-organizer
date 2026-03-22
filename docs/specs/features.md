@@ -182,7 +182,64 @@ The app automatically finds and groups redundant photos using a two-pass backgro
 - **Local-First:** No photos are ever uploaded to the cloud. All AI runs on your GPU/CPU.
 - **Virtualization:** The gallery uses `react-window` to handle libraries with 100,000+ photos without lagging.
 
-## 10. Detailed Hardware Requirements
+## 10. 🎨 Creative Tools (SAM 3 Segmentation)
+
+An interactive AI segmentation canvas that lets users isolate subjects and apply non-destructive creative operations to any photo in the library.
+
+### Model Stack
+- **SAM 3 (Segment Anything Model 3):** `Sam3Model` + `Sam3Processor` via HuggingFace `transformers 5.3.0.dev0`. The tracker variant (`Sam3TrackerModel`) handles point prompts.
+- **Session-based architecture:** Each photo opens a server-side session that caches the pre-encoded image tensor. Predictions within the session reuse the cache, keeping per-prompt latency low.
+- **Checkpoint:** Downloaded on-demand via HuggingFace Hub (`huggingface_hub.snapshot_download`). Stored in `models/sam3/`.
+
+### Prompt Modes
+
+| Mode | Input | Python entry point |
+|------|-------|--------------------|
+| **Box** | `[x1, y1, x2, y2]` in image coords | `predict_from_box()` |
+| **Points** | `[[x, y], ...]` + `[label, ...]` (1=fg, 0=bg) | `predict_from_points()` |
+| **Text** | Natural-language string | `predict_from_text()` |
+| **Box + Points** | Box + point arrays simultaneously | `predict_from_box_and_points()` |
+
+Combined box+points passes both `input_boxes`/`input_boxes_labels` and `input_points`/`input_labels` to `Sam3Processor` in a single forward pass. Falls back to `predict_from_box()` if combined call raises an exception.
+
+### Operations
+
+| Operation | Implementation |
+|-----------|----------------|
+| **Remove Background** | NumPy mask inversion — pixels outside mask set to alpha=0 |
+| **Isolate Subject** | Copy masked pixels onto transparent canvas |
+| **Blur Background** | `cv2.GaussianBlur` on outside-mask region, composited back |
+| **Sharpen Subject** | `PIL.ImageFilter.UnsharpMask` on masked region |
+| **Save to Library** | Write result PNG to same directory as original, trigger library re-ingest |
+
+### Canvas Interaction (Frontend)
+- **Drag state machine:** Discriminated union `DragAction` (`draw-box` | `move-box` | `resize-box` | `move-point` | `none`) held in a ref to avoid stale closures.
+- **Box handles:** 8 handles (4 corners + 4 edge midpoints) drawn on canvas; hit-tested within 10px radius.
+- **Hover refs:** `hoveredHandleRef`, `hoveredPointIdxRef` — refs (not state) to avoid re-renders on every `mousemove`.
+- **`stateRef` pattern:** All mouse handlers read `stateRef.current` (mirrored via `useEffect`) to avoid stale closure without listing state in `useCallback` deps.
+- **Responsive layout:** Canvas `max-width/max-height: 100%` fills parent flex container while preserving intrinsic 680:480 aspect ratio. Mask overlay uses `%`-based positioning relative to canvas dimensions so it tracks correctly at any CSS display scale.
+
+### IPC Channels
+| Channel | Direction | Purpose |
+|---------|-----------|---------|
+| `ai:segment:startSession` | Renderer → Main → Python | Open session, load + encode image |
+| `ai:segment:predict` | Renderer → Main → Python | Run segmentation with current prompts |
+| `ai:segment:applyOperation` | Renderer → Main → Python | Apply creative operation to mask |
+| `ai:segment:endSession` | Renderer → Main → Python | Free session cache |
+
+### Key Files
+| File | Role |
+|------|------|
+| `src/python/facelib/sam3_provider.py` | SAM 3 model wrapper — session management, all predict variants |
+| `src/python/commands/segmentation.py` | IPC dispatcher — routes predict/apply/session commands |
+| `src/python/api/routes/segment.py` | Flask route layer |
+| `src/components/CreativeToolsPanel.tsx` | Canvas UI, drag state machine, prompt management |
+| `src/components/canvasHelpers.ts` | Pure geometry helpers (transforms, hit-testing, handle positions) |
+| `src/components/CreativeOperationsBar.tsx` | Operations toolbar (extracted for file-size compliance) |
+| `src/hooks/useSegmentation.ts` | Segmentation state — sessions, prompts, predictions, operations |
+| `src/views/Tools.tsx` | Tools view shell — routes to Creative Tools / Blurry Photos panels |
+
+## 11. Detailed Hardware Requirements
 
 | Feature | CPU Only (Minimum) | GPU (Recommended) | Notes |
 | :--- | :--- | :--- | :--- |

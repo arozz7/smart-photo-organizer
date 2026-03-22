@@ -218,6 +218,47 @@ The app uses **SmolVLM** (a lightweight Vision-Language Model) to "read" your ph
 
 ---
 
+### 📤 Blurry Photos Export
+
+Export low-quality face crops directly for external review or training datasets.
+
+- **Quality Grid:** A dedicated high-performance virtualized grid shows all blurry face captures across your library, sorted by sharpness score.
+- **Bulk Export:** Select individual faces or all below a threshold and export as a ZIP archive with original filenames preserved.
+- **Non-Destructive:** Exporting does not remove faces or photos from your library.
+
+---
+
+### 🎨 Creative Tools (SAM 3 Segmentation)
+
+Apply AI-powered creative edits to any photo using an interactive canvas powered by **SAM 3 (Segment Anything Model 3)**.
+
+<!-- SCREENSHOT: Creative Tools canvas with a subject selected and the Remove Background result -->
+
+Open **Tools → Creative Tools** and pick any photo from your library:
+
+#### Interactive Prompt Modes
+
+| Mode | How to use |
+|------|------------|
+| **Box** | Click and drag to draw a bounding box. Drag the box to reposition; drag any of 8 corner/edge handles to resize. Press `Delete` to clear. |
+| **Points** | Click to add foreground (+) or background (−) points. Drag a point to move it. Click a point to remove it. |
+| **Text** | Type a natural-language description (e.g., `"person"`, `"sky"`) to locate the subject. |
+| **Box + Points** | Switch to Points mode while a box is active — both prompts are combined for higher precision. |
+
+#### Available Operations
+
+| Operation | Description |
+|-----------|-------------|
+| **Remove Background** | Erases everything outside the selected region, saving a transparent PNG. |
+| **Isolate Subject** | Extracts the selected subject onto a transparent background. |
+| **Blur Background** | Gaussian blur on everything outside the mask — adjustable radius. |
+| **Sharpen Subject** | Unsharp-mask sharpening on the selected region. |
+| **Save to Library** | Saves the edited result alongside the original as a new file. |
+
+> **Note:** Creative Tools requires the AI GPU Runtime for best performance. CPU inference is supported but significantly slower.
+
+---
+
 ### ✨ AI Enhancement Lab
 
 Restore and upgrade low-quality or old photos using state-of-the-art generative AI models.
@@ -378,7 +419,7 @@ This project uses a hybrid architecture:
 
 - **Frontend:** React 18 + TypeScript + Vite
 - **Main Process:** Electron (TypeScript) — file I/O, SQLite (better-sqlite3), image processing (sharp), IPC
-- **AI Backend:** Python 3.12 subprocess — InsightFace, FAISS, SmolVLM, Real-ESRGAN, GFPGAN
+- **AI Backend:** Python 3.12 subprocess — InsightFace, FAISS, SmolVLM, Real-ESRGAN, GFPGAN, SAM 3
 
 See [System Architecture](docs/specs/architecture.md) and [Logic Examples](docs/specs/logic_examples.md) for detailed diagrams and flow documentation.
 
