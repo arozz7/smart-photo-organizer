@@ -2,7 +2,7 @@ import { Outlet, NavLink } from 'react-router-dom'
 import {
     HomeIcon, ImageIcon, PersonIcon, GlobeIcon,
     ListBulletIcon, GearIcon, PlusCircledIcon, MagnifyingGlassIcon,
-    CopyIcon,
+    CopyIcon, MixerHorizontalIcon,
 } from '@radix-ui/react-icons'
 import { useState, useEffect } from 'react'
 import StatusBar from './StatusBar'
@@ -92,6 +92,7 @@ export default function Layout() {
                     <div className="pt-3 mt-3 border-t border-gray-700/50 space-y-1">
                         <SidebarLink to="/create" icon={<PlusCircledIcon className="w-4 h-4" />}>Create</SidebarLink>
                         <SidebarLink to="/queues" icon={<ListBulletIcon className="w-4 h-4" />}>Queues</SidebarLink>
+                        <SidebarLink to="/tools" icon={<MixerHorizontalIcon className="w-4 h-4" />}>Tools</SidebarLink>
                         <SidebarLink
                             to="/duplicates"
                             icon={<CopyIcon className="w-4 h-4" />}

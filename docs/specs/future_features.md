@@ -2,7 +2,7 @@
 
 ## 🚀 Priority Roadmap
 
-### 1. UX Modernization (UI Polish) ✅ Complete — v0.7.5
+### 1. UX Modernization (UI Polish) ✅ Complete — v0.8.0
 - **Goal:** Elevate the UI from functional to polished product quality through systematic improvements to navigation, controls, typography, accessibility, and first-run experience.
 - **Core Features:**
     - **Sidebar Navigation:** Add Radix icons to all nav links, group items by category (Core/Tools/System) with subtle dividers, extract reusable `SidebarLink` component.
@@ -66,6 +66,9 @@
 ## 🔮 Feature Backlog
 
 ### AI & Computer Vision
+- **Enhanced CLIP Tagging:** ✅ Complete — Phase 109. Dropped Coco-SSD; replaced flat label list with structured `LABEL_TAXONOMY` (10 categories, ~90 labels); two-pass classification (broad scene → domain-specific). See [Changelog](../../aiChangeLog/phase-109-clip-tagging.md)
+- **SAM 3 Creative Tools Service:** ✅ Complete — Phase 110. Model-agnostic `SegmentationProvider` ABC + `Sam3Provider` (text/box/point prompts via HuggingFace Transformers). 7 FastAPI endpoints (`/capabilities`, `/set-image`, `/predict`, `/apply/background-remove`, `/apply/isolate`, `/apply/blur`, `/apply/enhance`). See [Changelog](../../aiChangeLog/phase-110-sam3-creative-tools.md)
+    - **Frontend Creative Tools UI:** ✅ Complete — Phase 111. Interactive canvas UI with text/box/point prompt modes, mask overlay, operations bar (Remove BG, Isolate, Blur, Sharpen), result preview with checkerboard transparency, and download. See [Changelog](../../aiChangeLog/phase-111-creative-tools-ui.md)
 - **Hardware Compatibility:** Force Mode Selection (GPU/CPU), Multi-GPU support, OpenVINO/ONNX runtime.
 - **Face Restoration Config:** Expose GFPGAN blending weight, Restoration Strength slider.
 - **Custom AI Models:** Load user-provided `.pth` models from a `models/` directory.
@@ -78,7 +81,7 @@
 - **Upstream False Positive Reduction (Cartoon/Object Detections):** ✅ Complete — Phase 106. Three-lever Strict Mode (VLM band calibration, pose-weighted DBSCAN, background orphan re-verification). See Priority Roadmap §5.
 
 ### Organization & Metadata
-- **Blurry Photo List Export:**
+- **Blurry Photo List Export:** ✅ Complete — Phase 108. Tools view with threshold slider, folder/location/none grouping, paginated table, CSV export.
     - **Goal:** Generate and export lists of photos with blur scores below a threshold.
     - **Features:** Group by location/folder, filter by file type, usage for manual review/deletion.
 - **Person Portfolio Export:**
@@ -169,7 +172,7 @@
 
 # ✅ Implemented Features
 
-## v0.7.5 (In Progress)
+## v0.8.0 (Current)
 
 ### Upstream False Positive Reduction — Phase 106
 - **Strict False Positive Mode** toggle in Advanced AI Settings (off by default).

@@ -3,6 +3,15 @@ import { promises as fs } from 'node:fs';
 import { getDB } from '../../db';
 import type { CompoundFilter, FilterCondition } from '../../types/filterTypes';
 
+export interface BlurryPhotoRow {
+    id: number;
+    file_path: string;
+    blur_score: number;
+    date_taken: string | null;
+    metadata_json: string | null;
+    folder: string;
+}
+
 export class PhotoRepository {
     /** Ensure custom SQLite functions are registered */
     private static ensureFunctions(db: any) {
@@ -157,6 +166,42 @@ export class PhotoRepository {
         // Return photos that don't have a blur score, implying they haven't been successfully scanned.
         // Limit to 1000 to avoid overwhelming the queue if it's a huge init.
         return db.prepare('SELECT * FROM photos WHERE blur_score IS NULL LIMIT 1000').all();
+    }
+
+    static getBlurryPhotos(options: {
+        threshold: number;
+        groupBy: 'folder' | 'location' | 'none';
+        limit?: number;
+        offset?: number;
+    }): { photos: BlurryPhotoRow[]; total: number } {
+        const db = getDB();
+        PhotoRepository.ensureFunctions(db);
+        const { threshold, groupBy, limit = 100, offset = 0 } = options;
+
+        const orderBy = groupBy === 'folder'
+            ? 'DIRNAME(file_path) ASC, blur_score ASC'
+            : groupBy === 'location'
+            ? "json_extract(metadata_json, '$.GPSLatitude') ASC, blur_score ASC"
+            : 'blur_score ASC';
+
+        try {
+            const baseWhere = 'WHERE blur_score IS NOT NULL AND blur_score < ?';
+            const rows = db.prepare(`
+                SELECT id, file_path, blur_score, date_taken, metadata_json,
+                       DIRNAME(file_path) AS folder
+                FROM photos
+                ${baseWhere}
+                ORDER BY ${orderBy}
+                LIMIT ? OFFSET ?
+            `).all(threshold, limit, offset) as BlurryPhotoRow[];
+
+            const { total } = db.prepare(`SELECT COUNT(*) AS total FROM photos ${baseWhere}`)
+                .get(threshold) as { total: number };
+
+            return { photos: rows, total };
+        } catch (e) {
+            throw new Error(`PhotoRepository.getBlurryPhotos failed: ${String(e)}`);
+        }
     }
 
     static getFolders() {

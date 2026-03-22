@@ -9,6 +9,12 @@ import logging
 def load_ai_config():
     config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'ai-config.json'))
     defaults = {
+         'segmentation': {
+             'provider': 'sam3',
+             'model_checkpoint': 'models/sam3',
+             'device': 'auto',
+             'max_cached_sessions': 5,
+         },
          'face_detection': {
              'score_threshold_strict': 0.60,
              'score_threshold_vlm_verification': 0.85, 
@@ -34,6 +40,8 @@ def load_ai_config():
             with open(config_path, 'r') as f:
                 loaded = json.load(f)
                 # Shallow merge for now, can drive deeper if needed
+                if 'segmentation' in loaded:
+                    defaults['segmentation'].update(loaded['segmentation'])
                 if 'face_detection' in loaded:
                     defaults['face_detection'].update(loaded['face_detection'])
                 if 'vlm' in loaded:

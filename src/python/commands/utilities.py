@@ -49,7 +49,64 @@ def download_model(payload, req_id=None):
                 }))
                 sys.stdout.flush()
 
-        if "AI GPU Runtime" in model_name:
+        url = payload.get('url', '')
+
+        if 'AdaFace' in model_name:
+            # AdaFace ONNX model — direct file download to models/ directory.
+            # The large-model format uses a companion .onnx.data file; download both.
+            import urllib.request
+            models_dir = os.path.normpath(
+                os.path.join(os.path.dirname(__file__), '..', 'models')
+            )
+            os.makedirs(models_dir, exist_ok=True)
+            onnx_url = url or 'https://huggingface.co/mk-minchul/adaface/resolve/main/adaface_ir50_webface4m.onnx'
+            data_url = onnx_url + '.data'
+            for dl_url in [onnx_url, data_url]:
+                filename = os.path.basename(dl_url)
+                dest = os.path.join(models_dir, filename)
+                logger.info(f"Downloading AdaFace file: {dl_url} → {dest}")
+                enhance.enhancer.download_model_at_url(dl_url, dest, progress_callback)
+            return {
+                "type": "download_result",
+                "success": True,
+                "modelName": model_name,
+                "savePath": models_dir,
+                "reqId": req_id,
+            }
+
+        elif url and url.startswith('hf://'):
+            # HuggingFace model download via huggingface_hub.
+            # Requires prior authentication: huggingface-cli login
+            repo_id = url[len('hf://'):]  # e.g. "facebook/sam3"
+            from config import AI_CONFIG
+            checkpoint_dir = AI_CONFIG.get('segmentation', {}).get(
+                'model_checkpoint', 'models/sam3'
+            )
+            import huggingface_hub
+            logger.info(f"Downloading HuggingFace model '{repo_id}' → '{checkpoint_dir}'")
+            print(json.dumps({
+                "type": "download_progress",
+                "modelName": model_name,
+                "status": "downloading",
+                "message": f"Fetching {repo_id} from HuggingFace...",
+                "reqId": req_id
+            }))
+            sys.stdout.flush()
+            huggingface_hub.snapshot_download(
+                repo_id=repo_id,
+                local_dir=checkpoint_dir,
+            )
+            # Return early — the unconditional response assignment below
+            # is for the AI-Runtime / enhance-model paths only.
+            return {
+                "type": "download_result",
+                "success": True,
+                "modelName": model_name,
+                "savePath": checkpoint_dir,
+                "reqId": req_id,
+            }
+
+        elif "AI GPU Runtime" in model_name:
             import zipfile
             temp_zip = os.path.join(tempfile.gettempdir(), "ai-runtime.zip")
             if os.path.exists(temp_zip):
@@ -61,7 +118,7 @@ def download_model(payload, req_id=None):
             if not base_url:
                 # Fallback default if not provided (should accept version from IPC though)
                 # Note: We expect IPC to provide versioned URL now.
-                base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.6.5/ai-runtime-win-x64.zip"
+                base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.8.0/ai-runtime-win-x64.zip"
 
             # Check if this is a custom override (likely single file) or standard release (multi-part)
             # Heuristic: Try .001 first. If 404, fallback to single file.
@@ -162,13 +219,15 @@ def download_model(payload, req_id=None):
     return response
 
 
-def get_system_status(req_id=None):
+def get_system_status(req_id=None, runtime_url: str | None = None):
     """
     Get comprehensive system status including models, InsightFace, FAISS, VLM, and system info.
-    
+
     Args:
-        req_id: Request ID for response tracking
-    
+        req_id:      Request ID for response tracking.
+        runtime_url: Version-correct AI Runtime download URL forwarded from Electron so that
+                     the displayed URL in ModelDownloader always matches the running app version.
+
     Returns:
         dict: System status with all component information
     """
@@ -176,7 +235,9 @@ def get_system_status(req_id=None):
     try:
         # Check Models (Robustly)
         try:
-            status['models'] = utils.get_model_status(enhance.MODEL_URLS, enhance.WEIGHTS_DIR)
+            status['models'] = utils.get_model_status(
+                enhance.MODEL_URLS, enhance.WEIGHTS_DIR, runtime_url=runtime_url
+            )
         except Exception as e:
             logger.error(f"Status Check (Models) failed: {e}")
             status['models'] = {"error": str(e)}

@@ -127,6 +127,19 @@ export function registerDBHandlers() {
         } catch (e) { return []; }
     });
 
+    ipcMain.handle('photo:getBlurryPhotos', async (_, args: {
+        threshold: number;
+        groupBy: 'folder' | 'location' | 'none';
+        limit?: number;
+        offset?: number;
+    }) => {
+        try {
+            return { success: true, ...PhotoRepository.getBlurryPhotos(args) };
+        } catch (e) {
+            return { success: false, photos: [], total: 0, error: String(e) };
+        }
+    });
+
     ipcMain.handle('db:getPhotosMissingBlurScores', async () => {
         try {
             const db = getDB();

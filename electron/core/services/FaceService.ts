@@ -4,6 +4,7 @@ import { PersonService } from './PersonService';
 import logger from '../../logger';
 import { getDB } from '../../db';
 import { getAISettings, ConfigService } from '../../store';
+import { STRICT_SCORE_THRESHOLD_ACCEPT } from './ConfigService';
 import { FaceAnalysisService } from './FaceAnalysisService';
 
 /**

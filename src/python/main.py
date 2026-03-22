@@ -193,7 +193,7 @@ def handle_command(command):
             runtime_exists = os.path.exists(os.path.join(os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer')), 'ai-runtime'))
             
             # Use dynamic URL if provided, otherwise default (though default might be outdated if version mismatch)
-            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.6.5/ai-runtime-win-x64.zip")
+            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.8.0/ai-runtime-win-x64.zip")
             
             models_info["AI GPU Runtime (Torch/CUDA)"] = {
                 "exists": runtime_exists,
@@ -595,6 +595,26 @@ def handle_command(command):
             logger.exception("Enhancement Error")
             response = {"type": "enhance_result", "success": False, "error": str(e), "reqId": req_id}
 
+    elif cmd_type == 'segment_capabilities':
+        # [Phase 111] SAM 3 Creative Tools
+        from commands import segmentation
+        response = segmentation.get_capabilities(payload, req_id)
+
+    elif cmd_type == 'segment_set_image':
+        # [Phase 111] SAM 3 Creative Tools
+        from commands import segmentation
+        response = segmentation.set_image(payload, req_id)
+
+    elif cmd_type == 'segment_predict':
+        # [Phase 111] SAM 3 Creative Tools
+        from commands import segmentation
+        response = segmentation.predict(payload, req_id)
+
+    elif cmd_type == 'segment_apply':
+        # [Phase 111] SAM 3 Creative Tools
+        from commands import segmentation
+        response = segmentation.apply_operation(payload, req_id)
+
     elif cmd_type == 'download_model':
         # [Phase 57.5] Refactored to commands/utilities.py
         from commands import utilities
@@ -618,7 +638,7 @@ def handle_command(command):
     elif cmd_type == 'get_system_status':
         # [Phase 57.5] Refactored to commands/utilities.py
         from commands import utilities
-        response = utilities.get_system_status(req_id)
+        response = utilities.get_system_status(req_id, runtime_url=payload.get('runtimeUrl'))
 
     elif cmd_type == 'get_index_status':
         # [Phase 57.5] Refactored to commands/utilities.py

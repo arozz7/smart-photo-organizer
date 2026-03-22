@@ -14,6 +14,7 @@ import StatusBar from './components/StatusBar'
 import Search from './views/Search'
 import EnhanceLab from './views/EnhanceLab'
 import Duplicates from './views/Duplicates'
+import Tools from './views/Tools'
 
 function App() {
   const [isReady, setIsReady] = useState(false)
@@ -36,6 +37,7 @@ function App() {
           <Route path="locations" element={<Locations />} />
           <Route path="queues" element={<Queues />} />
           <Route path="duplicates" element={<Duplicates />} />
+          <Route path="tools" element={<Tools />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

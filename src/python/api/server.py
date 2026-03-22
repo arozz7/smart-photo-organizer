@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import debug, status
+from .routes import debug, status, segment
 from .middleware.auth import ApiKeyMiddleware
 
 logger = logging.getLogger("smart-photo-ai")
@@ -78,6 +78,7 @@ def create_app() -> FastAPI:
     # Register routes
     app.include_router(debug.router, prefix="/api/v1/debug", tags=["Debug"])
     app.include_router(status.router, prefix="/api/v1", tags=["Status"])
+    app.include_router(segment.router, prefix="/api/v1/segment", tags=["Segmentation"])
     
     return app
 

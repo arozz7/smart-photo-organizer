@@ -22,10 +22,6 @@ interface ContextFace {
     pose_yaw: number | null;
 }
 
-interface AnchorVote {
-    person_id: number;
-    count: number;
-}
 
 /**
  * ContextualMatchingService
