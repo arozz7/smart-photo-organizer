@@ -1,3 +1,6 @@
+# Test artifacts
+vitest_env.txt
+
 # Logs
 logs
 *.log
