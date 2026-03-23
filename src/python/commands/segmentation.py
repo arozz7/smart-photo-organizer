@@ -93,18 +93,29 @@ def predict(payload: dict[str, Any], req_id: str | None = None) -> dict[str, Any
         return {"success": False, "error": str(e), "reqId": req_id}
 
 
+def _parse_hex_color(hex_str: str) -> tuple[int, int, int]:
+    """Parse a CSS hex color string (#rrggbb) to an (R, G, B) int tuple."""
+    h = hex_str.lstrip("#")
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
 def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[str, Any]:
     """
     Apply a mask operation to the session image.
 
-    payload.operation: "background-remove" | "isolate" | "blur" | "enhance"
-    payload.mask_b64:  base64 grayscale PNG mask from a predict call
-    payload.radius:    (blur only) Gaussian radius, default 15
+    payload.operation:     "background-remove" | "isolate" | "blur" | "enhance"
+                           | "desaturate-bg" | "fill-bg"
+    payload.mask_b64:      base64 grayscale PNG mask from a predict call
+    payload.radius:        (blur only) Gaussian radius, default 15
+    payload.feather_radius: soft-edge feathering radius applied before any op, default 0
+    payload.color:         (fill-bg only) CSS hex color string, default "#ffffff"
     """
     session_id = payload.get("session_id", "")
     operation = payload.get("operation", "background-remove")
     mask_b64 = payload.get("mask_b64", "")
     radius = int(payload.get("radius", 15))
+    feather_radius = int(payload.get("feather_radius", 0))
+    hex_color = str(payload.get("color", "#ffffff"))
 
     try:
         provider = _get_provider()
@@ -113,22 +124,31 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
         from facelib.segmentation_ops import (
             decode_mask,
             encode_image,
+            feather_mask,
             apply_background_remove,
             apply_isolate,
-            apply_blur,
+            apply_blur_background,
             apply_enhance,
+            apply_desaturate_background,
+            apply_fill_background,
         )
 
+        # Decode boolean mask then optionally feather edges to float alpha
         mask = decode_mask(mask_b64)
+        alpha = feather_mask(mask, feather_radius)
 
         if operation == "background-remove":
-            result_image = apply_background_remove(image, mask)
+            result_image = apply_background_remove(image, alpha)
         elif operation == "isolate":
-            result_image = apply_isolate(image, mask)
+            result_image = apply_isolate(image, alpha)
         elif operation == "blur":
-            result_image = apply_blur(image, mask, radius)
+            result_image = apply_blur_background(image, alpha, radius)
         elif operation == "enhance":
-            result_image = apply_enhance(image, mask)
+            result_image = apply_enhance(image, alpha)
+        elif operation == "desaturate-bg":
+            result_image = apply_desaturate_background(image, alpha)
+        elif operation == "fill-bg":
+            result_image = apply_fill_background(image, alpha, _parse_hex_color(hex_color))
         else:
             return {"success": False, "error": f"Unknown operation: {operation}", "reqId": req_id}
 

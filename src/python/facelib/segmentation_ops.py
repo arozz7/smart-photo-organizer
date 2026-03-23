@@ -13,11 +13,30 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 
+# ---------------------------------------------------------------------------
+# Mask helpers
+# ---------------------------------------------------------------------------
+
 def decode_mask(mask_b64: str) -> np.ndarray:
     """Decode a base64 grayscale PNG mask to a boolean numpy array [H, W]."""
     mask_bytes = base64.b64decode(mask_b64)
     mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")
     return np.array(mask_img) > 127
+
+
+def feather_mask(mask: np.ndarray, radius: int) -> np.ndarray:
+    """
+    Return a float [0, 1] alpha mask with Gaussian-feathered edges.
+
+    When radius == 0 the input boolean mask is returned as float unchanged.
+    Higher radii produce softer, more gradual subject/background transitions —
+    ideal for hair, fur, and foliage.
+    """
+    if radius <= 0:
+        return mask.astype(np.float32)
+    mask_img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L")
+    blurred = mask_img.filter(ImageFilter.GaussianBlur(radius=radius))
+    return np.array(blurred, dtype=np.float32) / 255.0
 
 
 def encode_image(image: Image.Image) -> str:
@@ -27,21 +46,41 @@ def encode_image(image: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
+def _alpha3(alpha: np.ndarray) -> np.ndarray:
+    """Expand [H, W] float alpha to [H, W, 3] for RGB compositing."""
+    return alpha[:, :, np.newaxis]
+
+
+def _to_alpha(mask: np.ndarray) -> np.ndarray:
+    """Ensure mask is float32 [H, W] in range [0, 1]."""
+    return mask if mask.dtype == np.float32 else mask.astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# Operations
+# ---------------------------------------------------------------------------
+
 def apply_background_remove(image: Image.Image, mask: np.ndarray) -> Image.Image:
-    """Set non-masked pixels to fully transparent. Returns RGBA PNG."""
+    """
+    Make the background fully transparent.  Subject pixels keep their alpha.
+    Returns RGBA PNG.
+    """
     rgba = image.convert("RGBA")
-    data = np.array(rgba)
-    data[:, :, 3] = np.where(mask, 255, 0)
-    return Image.fromarray(data, "RGBA")
+    data = np.array(rgba, dtype=np.float32)
+    alpha = _to_alpha(mask)
+    data[:, :, 3] = (alpha * 255).clip(0, 255)
+    return Image.fromarray(data.astype(np.uint8), "RGBA")
 
 
 def apply_isolate(image: Image.Image, mask: np.ndarray) -> Image.Image:
-    """Extract masked subject, crop to its bounding box, transparent background."""
+    """Extract the masked subject, crop to its bounding box, transparent background."""
     rgba = image.convert("RGBA")
-    data = np.array(rgba)
-    data[:, :, 3] = np.where(mask, 255, 0)
-    result = Image.fromarray(data, "RGBA")
-    rows, cols = np.where(mask)
+    data = np.array(rgba, dtype=np.float32)
+    alpha = _to_alpha(mask)
+    data[:, :, 3] = (alpha * 255).clip(0, 255)
+    result = Image.fromarray(data.astype(np.uint8), "RGBA")
+    bool_mask = alpha > 0.1
+    rows, cols = np.where(bool_mask)
     if len(rows) == 0:
         return result
     y1, y2 = int(rows.min()), int(rows.max())
@@ -49,19 +88,58 @@ def apply_isolate(image: Image.Image, mask: np.ndarray) -> Image.Image:
     return result.crop((x1, y1, x2 + 1, y2 + 1))
 
 
-def apply_blur(image: Image.Image, mask: np.ndarray, radius: int = 15) -> Image.Image:
-    """Apply Gaussian blur to the masked region; leave the rest untouched."""
+def apply_blur_background(image: Image.Image, mask: np.ndarray, radius: int = 15) -> Image.Image:
+    """
+    Gaussian-blur the background; keep the subject sharp.
+
+    mask == 1 → subject (kept sharp).
+    mask == 0 → background (blurred).
+    """
     blurred = image.filter(ImageFilter.GaussianBlur(radius=radius))
-    result = np.array(image.convert("RGB"))
-    blurred_arr = np.array(blurred.convert("RGB"))
-    result[mask] = blurred_arr[mask]
+    orig = np.array(image.convert("RGB"), dtype=np.float32)
+    blurred_arr = np.array(blurred.convert("RGB"), dtype=np.float32)
+    a3 = _alpha3(_to_alpha(mask))
+    result = (orig * a3 + blurred_arr * (1.0 - a3)).clip(0, 255).astype(np.uint8)
     return Image.fromarray(result)
 
 
 def apply_enhance(image: Image.Image, mask: np.ndarray) -> Image.Image:
-    """Apply unsharp-mask sharpening to the masked region only."""
+    """Apply unsharp-mask sharpening to the subject only (masked region)."""
     sharpened = image.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
-    result = np.array(image.convert("RGB"))
-    sharpened_arr = np.array(sharpened.convert("RGB"))
-    result[mask] = sharpened_arr[mask]
+    orig = np.array(image.convert("RGB"), dtype=np.float32)
+    sharp_arr = np.array(sharpened.convert("RGB"), dtype=np.float32)
+    a3 = _alpha3(_to_alpha(mask))
+    result = (orig * (1.0 - a3) + sharp_arr * a3).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(result)
+
+
+def apply_desaturate_background(image: Image.Image, mask: np.ndarray) -> Image.Image:
+    """
+    Keep the subject in full color; convert the background to grayscale.
+
+    Creates the classic "color-pop" portrait effect without any additional models.
+    """
+    gray_rgb = image.convert("L").convert("RGB")
+    orig = np.array(image.convert("RGB"), dtype=np.float32)
+    gray_arr = np.array(gray_rgb, dtype=np.float32)
+    a3 = _alpha3(_to_alpha(mask))
+    result = (orig * a3 + gray_arr * (1.0 - a3)).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(result)
+
+
+def apply_fill_background(
+    image: Image.Image,
+    mask: np.ndarray,
+    color: tuple[int, int, int] = (255, 255, 255),
+) -> Image.Image:
+    """
+    Replace the background with a solid color.
+
+    color: RGB tuple (0–255 each).  Defaults to white.
+    """
+    orig = np.array(image.convert("RGB"), dtype=np.float32)
+    fill = np.full_like(orig, fill_value=0, dtype=np.float32)
+    fill[:] = color
+    a3 = _alpha3(_to_alpha(mask))
+    result = (orig * a3 + fill * (1.0 - a3)).clip(0, 255).astype(np.uint8)
     return Image.fromarray(result)

@@ -5,7 +5,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 // ---------------------------------------------------------------------------
 
 export type PromptMode = 'text' | 'box' | 'points'
-export type Operation = 'background-remove' | 'isolate' | 'blur' | 'enhance'
+export type Operation = 'background-remove' | 'isolate' | 'blur' | 'enhance' | 'desaturate-bg' | 'fill-bg'
 
 export interface MaskResult {
     mask_b64: string
@@ -273,7 +273,11 @@ export function useSegmentation() {
     // Apply operation
     // ------------------------------------------------------------------
 
-    const applyOperation = useCallback(async (operation: Operation, params?: { radius?: number }) => {
+    const applyOperation = useCallback(async (operation: Operation, params?: {
+        radius?: number
+        featherRadius?: number
+        color?: string
+    }) => {
         // Read current values synchronously from refs — avoids the setState-as-read anti-pattern
         const sessionId = sessionRef.current
         const masks = masksRef.current
@@ -294,6 +298,8 @@ export function useSegmentation() {
                 operation,
                 mask_b64: maskB64,
                 ...(params?.radius !== undefined ? { radius: params.radius } : {}),
+                ...(params?.featherRadius !== undefined ? { feather_radius: params.featherRadius } : {}),
+                ...(params?.color !== undefined ? { color: params.color } : {}),
             })
 
             if (!res?.success) throw new Error(res?.error ?? 'Apply failed')
