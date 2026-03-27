@@ -526,6 +526,7 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
   initAppState.run('last_clean_shutdown', null);
   initAppState.run('ignored_recheck_active', '0');
   initAppState.run('ignored_recheck_offset', '0');
+  initAppState.run('duplicate_check_dirty', '0');
 
   // --- MIGRATION: Smart Face Storage (BLOBs + Pruning) ---
   try {
@@ -831,6 +832,40 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
   try {
     db.exec('ALTER TABLE photos ADD COLUMN gps_lon REAL');
   } catch { /* column already exists */ }
+
+  // --- MIGRATION: Duplicate Detection (Phase 107) ---
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN sha256_hash TEXT');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN phash TEXT');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN duplicate_group_id INTEGER REFERENCES duplicate_groups(id) ON DELETE SET NULL');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_photos_sha256 ON photos(sha256_hash)');
+  } catch { /* index already exists */ }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS duplicate_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL CHECK(type IN ('exact', 'near')),
+        status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending', 'resolved', 'dismissed')),
+        winner_photo_id INTEGER REFERENCES photos(id) ON DELETE SET NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch { /* table already exists */ }
+
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_photos_dup_group ON photos(duplicate_group_id)');
+  } catch { /* index already exists */ }
 
   // Backfill GPS coordinates from metadata_json for existing photos
   const gpsBackfillKey = 'migration_gps_cache_backfill_v1';

@@ -146,11 +146,100 @@ app, to recover corrupt photo files directly from the Scan Warnings panel.
 | `failed` | Red error text + Retry button |
 | `unrepairable` | Orange 🚫 Unrepairable badge (persistent) |
 
+## 8. 🔁 Duplicate Photo Detection
+
+The app automatically finds and groups redundant photos using a two-pass background system, with a dedicated UI for safe, user-controlled cleanup.
+
+### Detection Methods
+
+| Pass | Algorithm | What it catches |
+|------|-----------|----------------|
+| **Exact** | SHA-256 file hash | Byte-for-byte identical copies |
+| **Near** | pHash (64-bit) + Hamming distance ≤ 10 | Resized, re-saved, or format-converted versions |
+
+### Background Hashing
+- **SHA-256** is computed at scan time (streaming Node.js, negligible overhead).
+- **pHash** is computed during AI analysis via Python `imagehash` library.
+- A `BackgroundDuplicateCheckerService` handles **backfill** for pre-existing photos in batches (SHA-256: 100/batch, pHash: 20/batch) during idle time.
+- The service runs only when no scan or AI processing is active.
+
+### Duplicate Groups
+- Groups contain **N ≥ 2 photos** (not limited to pairs).
+- Near-duplicate clustering uses a **Union-Find** algorithm (O(n²) over integer pHashes, handles 100 K entries comfortably).
+- A `findExistingGroup` guard prevents duplicate group creation on re-runs.
+- Groups are typed (`exact` / `near`) and have a lifecycle status (`pending` → `resolved` / `dismissed`).
+
+### UI
+- **Stats pills:** Exact / Similar / Resolved counts.
+- **Hashing banner:** Live progress while the library is still being hashed (polls every 5 s).
+- **Group card:** Horizontal filmstrip of all N photos; auto-selects best photo (highest resolution → earliest date); each photo toggles independently between keep (✓, full opacity) and trash (trash icon, dimmed); at least one must remain selected.
+- **Multi-keep:** Any number of photos can be kept; only unselected ones are trashed. Button label reflects the count ("Keep 2 selected & trash others"). `keepPhotoIds[]` sent to IPC; first ID stored as `winner_photo_id`.
+- **Resolution:** "Keep selected & trash others" (uses `shell.trashItem` — recoverable) or "Not duplicates" (dismiss).
+- **Pagination:** 20 groups per page with "Load more".
+- **Sidebar badge:** Yellow count of pending groups, updated every 60 s.
+
 ## 9. Privacy & Performance
 - **Local-First:** No photos are ever uploaded to the cloud. All AI runs on your GPU/CPU.
 - **Virtualization:** The gallery uses `react-window` to handle libraries with 100,000+ photos without lagging.
 
-## 10. Detailed Hardware Requirements
+## 10. 🎨 Creative Tools (SAM 3 Segmentation)
+
+An interactive AI segmentation canvas that lets users isolate subjects and apply non-destructive creative operations to any photo in the library.
+
+### Model Stack
+- **SAM 3 (Segment Anything Model 3):** `Sam3Model` + `Sam3Processor` via HuggingFace `transformers 5.3.0.dev0`. The tracker variant (`Sam3TrackerModel`) handles point prompts.
+- **Session-based architecture:** Each photo opens a server-side session that caches the pre-encoded image tensor. Predictions within the session reuse the cache, keeping per-prompt latency low.
+- **Checkpoint:** Downloaded on-demand via HuggingFace Hub (`huggingface_hub.snapshot_download`). Stored in `models/sam3/`.
+
+### Prompt Modes
+
+| Mode | Input | Python entry point |
+|------|-------|--------------------|
+| **Box** | `[x1, y1, x2, y2]` in image coords | `predict_from_box()` |
+| **Points** | `[[x, y], ...]` + `[label, ...]` (1=fg, 0=bg) | `predict_from_points()` |
+| **Text** | Natural-language string | `predict_from_text()` |
+| **Box + Points** | Box + point arrays simultaneously | `predict_from_box_and_points()` |
+
+Combined box+points passes both `input_boxes`/`input_boxes_labels` and `input_points`/`input_labels` to `Sam3Processor` in a single forward pass. Falls back to `predict_from_box()` if combined call raises an exception.
+
+### Operations
+
+| Operation | Implementation |
+|-----------|----------------|
+| **Remove Background** | NumPy mask inversion — pixels outside mask set to alpha=0 |
+| **Isolate Subject** | Copy masked pixels onto transparent canvas |
+| **Blur Background** | `cv2.GaussianBlur` on outside-mask region, composited back |
+| **Sharpen Subject** | `PIL.ImageFilter.UnsharpMask` on masked region |
+| **Save to Library** | Write result PNG to same directory as original, trigger library re-ingest |
+
+### Canvas Interaction (Frontend)
+- **Drag state machine:** Discriminated union `DragAction` (`draw-box` | `move-box` | `resize-box` | `move-point` | `none`) held in a ref to avoid stale closures.
+- **Box handles:** 8 handles (4 corners + 4 edge midpoints) drawn on canvas; hit-tested within 10px radius.
+- **Hover refs:** `hoveredHandleRef`, `hoveredPointIdxRef` — refs (not state) to avoid re-renders on every `mousemove`.
+- **`stateRef` pattern:** All mouse handlers read `stateRef.current` (mirrored via `useEffect`) to avoid stale closure without listing state in `useCallback` deps.
+- **Responsive layout:** Canvas `max-width/max-height: 100%` fills parent flex container while preserving intrinsic 680:480 aspect ratio. Mask overlay uses `%`-based positioning relative to canvas dimensions so it tracks correctly at any CSS display scale.
+
+### IPC Channels
+| Channel | Direction | Purpose |
+|---------|-----------|---------|
+| `ai:segment:startSession` | Renderer → Main → Python | Open session, load + encode image |
+| `ai:segment:predict` | Renderer → Main → Python | Run segmentation with current prompts |
+| `ai:segment:applyOperation` | Renderer → Main → Python | Apply creative operation to mask |
+| `ai:segment:endSession` | Renderer → Main → Python | Free session cache |
+
+### Key Files
+| File | Role |
+|------|------|
+| `src/python/facelib/sam3_provider.py` | SAM 3 model wrapper — session management, all predict variants |
+| `src/python/commands/segmentation.py` | IPC dispatcher — routes predict/apply/session commands |
+| `src/python/api/routes/segment.py` | Flask route layer |
+| `src/components/CreativeToolsPanel.tsx` | Canvas UI, drag state machine, prompt management |
+| `src/components/canvasHelpers.ts` | Pure geometry helpers (transforms, hit-testing, handle positions) |
+| `src/components/CreativeOperationsBar.tsx` | Operations toolbar (extracted for file-size compliance) |
+| `src/hooks/useSegmentation.ts` | Segmentation state — sessions, prompts, predictions, operations |
+| `src/views/Tools.tsx` | Tools view shell — routes to Creative Tools / Blurry Photos panels |
+
+## 11. Detailed Hardware Requirements
 
 | Feature | CPU Only (Minimum) | GPU (Recommended) | Notes |
 | :--- | :--- | :--- | :--- |

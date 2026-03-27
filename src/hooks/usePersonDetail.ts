@@ -22,6 +22,8 @@ export interface Person {
     id: number;
     name: string;
     cover_face_id?: number | null; // Added
+    frontal_face_count?: number;
+    profile_face_count?: number;
 }
 
 // Outlier detection result from backend

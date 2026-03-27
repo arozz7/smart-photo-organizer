@@ -295,7 +295,64 @@ The **Create** view is for when you want to gather specific photos for a project
 
 ---
 
-## 🛠️ 8. Advanced Settings & Maintenance
+## 🔁 8. Duplicate Photos
+
+The **Duplicates** view helps you find and safely remove redundant copies of your photos — whether they are byte-for-byte identical files or visually similar versions of the same shot.
+
+### How Detection Works
+The system uses two complementary methods:
+
+| Method | What it finds | How |
+|--------|--------------|-----|
+| **Exact match** | 100% identical files | SHA-256 hash comparison |
+| **Near match** | Resized, re-saved, or format-converted copies | Perceptual hash (pHash) — Hamming distance ≤ 10 bits out of 64 |
+
+Hashes are computed **automatically in the background** during idle time:
+- SHA-256 is computed when a photo is first scanned (fast, Node.js).
+- pHash is computed during AI analysis (also fast, Python).
+- For pre-existing photos scanned before this feature was available, the app will **backfill** hashes automatically in the background — no action required. A progress banner appears while hashing is still in progress.
+
+### The Duplicates View
+
+Open the **Duplicates** tab in the sidebar (Tools section). You'll see:
+
+- **Stats pills:** Exact matches / Similar / Resolved counts at a glance.
+- **Hashing banner:** Spinning indicator while your library is still being hashed. Duplicates appear after hashing completes.
+- **3 tabs:** Pending · Resolved · Dismissed — each with a count badge.
+
+### Reviewing a Duplicate Group
+
+Each group shows a **horizontal filmstrip** of all N photos that were detected as duplicates.
+
+- The **auto-selected best photo** starts with a ✓ badge (highest resolution, then earliest date). All others are initially marked for deletion.
+- **Click any photo** to toggle it between "keep" (✓ badge, full opacity) and "trash" (trash icon, dimmed). You can keep **as many photos as you like** — only the unselected ones will be trashed.
+- At least one photo must always remain selected; clicking the last kept photo is a no-op.
+- Use the **"Move duplicates to trash" checkbox** (on by default) to send unselected photos to your system Trash when resolving. Uncheck it to keep all files and just mark the group resolved.
+
+### Actions
+
+| Button | What it does |
+|--------|-------------|
+| **Keep selected & trash others** | Marks the group as Resolved. Moves all unselected photos to system Trash (recoverable) if the checkbox is on. Keeping multiple photos is allowed — the button label updates to reflect the count (e.g., "Keep 2 selected & trash others"). |
+| **Not duplicates** | Marks the group as Dismissed. No files are touched. |
+
+> [!IMPORTANT]
+> **Nothing is deleted automatically.** The system only takes action when you explicitly click the resolve button. Dismissed groups are preserved and can be reviewed in the Dismissed tab.
+
+### Manual Check
+
+Click **"Check now"** (top-right) to immediately queue a duplicate detection run, without waiting for the background service. Useful after a fresh scan.
+
+### Tips
+
+- **Exact duplicates** are safe to resolve — they are byte-for-byte the same file. You rarely need more than one copy.
+- **Near duplicates** may be intentionally different (e.g., full-res original + web export, RAW + JPEG, two edits). Keep whichever versions you need.
+- Files sent to Trash are **recoverable** from your system's Recycle Bin / Trash folder.
+- Large libraries are processed in pages of 20 groups. Use "Load more" to see additional groups.
+
+---
+
+## 🛠️ 9. Advanced Settings & Maintenance
 
 The **Settings** tab contains advanced controls to fine-tune the application's performance and manage your data.
 
@@ -342,5 +399,64 @@ Other Fine-Tuning controls:
     - **LOWER (0.1 - 0.3):** Factual, consistent descriptions. 
     - **HIGHER (0.7+):** Multi-sentence, descriptive, and "creative" tagging.
 
--   **Queue Management:** In the **Queues** tab, you can watch the AI working in real-time. 
+-   **Queue Management:** In the **Queues** tab, you can watch the AI working in real-time.
     -   **Manual Start:** The AI Queue starts in a **Paused** state to prevent slowing down your system on startup. Click **"Resume"** to begin processing pending tasks.
+
+---
+
+## 🎨 10. Creative Tools: AI Segmentation Canvas
+
+The **Creative Tools** panel lets you apply AI-powered creative edits to any photo using an interactive canvas backed by **SAM 3 (Segment Anything Model 3)**.
+
+### Opening Creative Tools
+
+Open the **Tools** section in the sidebar and select **Creative Tools**. Click **Choose Photo** to pick a photo from your library. The photo loads in the canvas at a 680×480 logical resolution that scales to fill the available window area.
+
+### Selecting a Subject
+
+SAM 3 lets you isolate any part of a photo using three prompt modes — switch between them using the toolbar at the top of the canvas.
+
+#### Box Mode
+
+- **Draw:** Click and drag on the canvas to draw a bounding box around your subject.
+- **Move:** Click inside the box and drag to reposition it anywhere on the image.
+- **Resize:** Eight handles appear on the corners and edge midpoints — drag any handle to resize.
+- **Delete:** Press the `Delete` key to clear the box and reset the canvas.
+
+#### Points Mode
+
+- **Add Foreground Point (+):** Click anywhere inside the subject (green dot — tells the AI "include this area").
+- **Add Background Point (−):** Toggle to background mode in the toolbar, then click outside the subject (red dot — tells the AI "exclude this area").
+- **Move a Point:** Click and drag any existing point to a new position.
+- **Delete a Point:** Click directly on a point without dragging to remove it.
+
+#### Combined Box + Points Mode
+
+Switch to **Points** mode while a box is already drawn — the box is preserved and both prompts are sent to the AI together. The toolbar displays **"Box preserved — combined mode active"**. This typically produces the most accurate masks for complex subjects with fine edges.
+
+#### Text Mode
+
+Type a natural-language description (e.g., `"person"`, `"sky"`, `"red car"`) and click **Predict** to let the AI locate and segment the described subject.
+
+### Applying Operations
+
+Once a mask is predicted, the result panel on the right shows the output. Choose an operation from the toolbar:
+
+| Operation | Effect |
+|-----------|--------|
+| **Remove Background** | Erases everything outside the mask — saves as a transparent PNG. |
+| **Isolate Subject** | Extracts only the selected subject onto a transparent background. |
+| **Blur Background** | Blurs the area outside the mask. Adjust the **Blur Radius** slider to control intensity. |
+| **Sharpen Subject** | Applies unsharp-mask sharpening to the masked region. |
+| **Save to Library** | Saves the result next to the original file and adds it to your library. |
+
+> [!TIP]
+> Click **Download** in the result panel to save the file to disk before committing it to the library.
+
+### Canvas Interaction Tips
+
+- For subjects with fine edges (hair, fur), combine a tight Box with a few foreground Points for best accuracy.
+- Use background Points (−) near areas incorrectly included in the mask to refine the selection.
+- The canvas scales to fill your window — resize the app to get more working area.
+- Press `Delete` while in Box mode to clear a misdrawn box without switching modes.
+- If the model warning banner appears, download the SAM 3 checkpoint via **Settings → Manage Models** before using Creative Tools.

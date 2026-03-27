@@ -218,7 +218,15 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
     
     metrics['tag'] = (time.time() - t_tag_start) * 1000
     metrics['total'] = (time.time() - t_start) * 1000
-    
+
+    # [Phase 107] Compute perceptual hash while image is already loaded
+    phash_value = None
+    try:
+        from duplicate_detection import compute_phash
+        phash_value = compute_phash(file_path)
+    except Exception as e:
+        logger.warning(f"[scan] pHash computation failed: {e}")
+
     response = {
         "type": "analysis_result",
         "photoId": photo_id,
@@ -228,6 +236,7 @@ def analyze_image(payload, load_image_cv2_func, req_id=None):
         "metrics": metrics,
         "scanMode": scan_mode,
         "globalBlurScore": float(global_blur),
+        "phash": phash_value,
         "width": img.shape[1],
         "height": img.shape[0]
     }

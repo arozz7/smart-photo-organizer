@@ -105,6 +105,7 @@ export class AppStateRepository {
     static endScan(): void {
         this.setFlag('scan_in_progress', '0');
         this.setFlag('bucketing_dirty', '1');
+        this.setFlag('duplicate_check_dirty', '1'); // [Phase 107] Trigger duplicate check after scan
     }
 
     /**
@@ -194,5 +195,19 @@ export class AppStateRepository {
      */
     static setAIProcessingActive(active: boolean): void {
         this.setFlag('ai_processing_active', active ? '1' : '0');
+    }
+
+    // --- Phase 107: Duplicate Check ---
+
+    static isDuplicateCheckDirty(): boolean {
+        return this.getFlag('duplicate_check_dirty') === '1';
+    }
+
+    static markDuplicateCheckDirty(): void {
+        this.setFlag('duplicate_check_dirty', '1');
+    }
+
+    static clearDuplicateCheckDirty(): void {
+        this.setFlag('duplicate_check_dirty', '0');
     }
 }

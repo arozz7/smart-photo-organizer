@@ -2,7 +2,9 @@ import { Outlet, NavLink } from 'react-router-dom'
 import {
     HomeIcon, ImageIcon, PersonIcon, GlobeIcon,
     ListBulletIcon, GearIcon, PlusCircledIcon, MagnifyingGlassIcon,
+    CopyIcon, MixerHorizontalIcon,
 } from '@radix-ui/react-icons'
+import { useState, useEffect } from 'react'
 import StatusBar from './StatusBar'
 import { AIStatusIndicator } from './AIStatusIndicator'
 import { useScan } from '../context/ScanContext'
@@ -37,9 +39,30 @@ function SidebarLink({ to, icon, children, end, badge }: SidebarLinkProps) {
     )
 }
 
+function useDuplicateCount() {
+    const [count, setCount] = useState(0)
+    useEffect(() => {
+        let cancelled = false
+        async function load() {
+            try {
+                // @ts-ignore
+                const res = await window.ipcRenderer.invoke('db:getDuplicateStats')
+                if (!cancelled && res.success) {
+                    setCount((res.stats.pending_exact ?? 0) + (res.stats.pending_near ?? 0))
+                }
+            } catch { /* non-critical */ }
+        }
+        load()
+        const id = setInterval(load, 60_000)
+        return () => { cancelled = true; clearInterval(id) }
+    }, [])
+    return count
+}
+
 export default function Layout() {
     const { viewingPhoto, setViewingPhoto, navigateToPhoto } = useScan()
     const { hasNewMemories } = useDashboard()
+    const duplicateCount = useDuplicateCount()
     return (
         <div className="flex h-screen bg-gray-900 text-gray-100 overflow-hidden font-sans">
             {/* Sidebar */}
@@ -69,6 +92,18 @@ export default function Layout() {
                     <div className="pt-3 mt-3 border-t border-gray-700/50 space-y-1">
                         <SidebarLink to="/create" icon={<PlusCircledIcon className="w-4 h-4" />}>Create</SidebarLink>
                         <SidebarLink to="/queues" icon={<ListBulletIcon className="w-4 h-4" />}>Queues</SidebarLink>
+                        <SidebarLink to="/tools" icon={<MixerHorizontalIcon className="w-4 h-4" />}>Tools</SidebarLink>
+                        <SidebarLink
+                            to="/duplicates"
+                            icon={<CopyIcon className="w-4 h-4" />}
+                            badge={duplicateCount > 0 ? (
+                                <span className="ml-auto px-1.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-600 text-white tabular-nums">
+                                    {duplicateCount > 99 ? '99+' : duplicateCount}
+                                </span>
+                            ) : null}
+                        >
+                            Duplicates
+                        </SidebarLink>
                     </div>
 
                     {/* System */}

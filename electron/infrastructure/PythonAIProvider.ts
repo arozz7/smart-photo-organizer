@@ -162,20 +162,23 @@ export class PythonAIProvider implements IAIProvider, IService {
                 );
             }
 
-            // Save global blur score + description to photos table
+            // Save global blur score, description, and pHash to photos table
             try {
-                const photoUpdates: { blur_score?: number; description?: string } = {};
+                const photoUpdates: { blur_score?: number; description?: string; phash?: string } = {};
                 if (message.globalBlurScore !== undefined && message.globalBlurScore !== null) {
                     photoUpdates.blur_score = message.globalBlurScore;
                 }
                 if (message.description) {
                     photoUpdates.description = message.description;
                 }
+                if (message.phash) {
+                    photoUpdates.phash = message.phash;
+                }
                 if (Object.keys(photoUpdates).length > 0) {
                     PhotoRepository.updatePhoto(message.photoId, photoUpdates);
                 }
             } catch (e) {
-                logger.error('[Main] Failed to save photo blur_score/description:', e);
+                logger.error('[Main] Failed to save photo blur_score/description/phash:', e);
             }
 
             // Record Scan History for Metrics

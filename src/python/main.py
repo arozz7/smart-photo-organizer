@@ -193,7 +193,7 @@ def handle_command(command):
             runtime_exists = os.path.exists(os.path.join(os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer')), 'ai-runtime'))
             
             # Use dynamic URL if provided, otherwise default (though default might be outdated if version mismatch)
-            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.6.5/ai-runtime-win-x64.zip")
+            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.8.0/ai-runtime-win-x64.zip")
             
             models_info["AI GPU Runtime (Torch/CUDA)"] = {
                 "exists": runtime_exists,
@@ -490,6 +490,29 @@ def handle_command(command):
         from commands import scan
         response = scan.detect_faces_in_region(payload, load_image_cv2, req_id)
 
+    elif cmd_type == 'compute_phash_batch':
+        # [Phase 107] Batch pHash computation for backfilling existing photos
+        from duplicate_detection import compute_phash_batch
+        entries = payload.get('entries', [])
+        try:
+            results = compute_phash_batch(entries)
+            response = {"type": "compute_phash_batch_result", "results": results}
+        except Exception as e:
+            logger.error(f"[compute_phash_batch] Error: {e}")
+            response = {"type": "compute_phash_batch_result", "results": [], "error": str(e)}
+
+    elif cmd_type == 'group_near_duplicates':
+        # [Phase 107] Cluster pre-computed pHashes by Hamming distance
+        from duplicate_detection import group_near_duplicates
+        entries = payload.get('entries', [])
+        threshold = int(payload.get('threshold', 10))
+        try:
+            groups = group_near_duplicates(entries, threshold)
+            response = {"type": "group_near_duplicates_result", "groups": groups}
+        except Exception as e:
+            logger.error(f"[group_near_duplicates] Error: {e}")
+            response = {"type": "group_near_duplicates_result", "groups": [], "error": str(e)}
+
 
     elif cmd_type == 'generate_tags':
         photo_id = payload.get('photoId')
@@ -572,6 +595,26 @@ def handle_command(command):
             logger.exception("Enhancement Error")
             response = {"type": "enhance_result", "success": False, "error": str(e), "reqId": req_id}
 
+    elif cmd_type == 'segment_capabilities':
+        # [Phase 111] SAM 3 Creative Tools
+        from commands import segmentation
+        response = segmentation.get_capabilities(payload, req_id)
+
+    elif cmd_type == 'segment_set_image':
+        # [Phase 111] SAM 3 Creative Tools
+        from commands import segmentation
+        response = segmentation.set_image(payload, req_id)
+
+    elif cmd_type == 'segment_predict':
+        # [Phase 111] SAM 3 Creative Tools
+        from commands import segmentation
+        response = segmentation.predict(payload, req_id)
+
+    elif cmd_type == 'segment_apply':
+        # [Phase 111] SAM 3 Creative Tools
+        from commands import segmentation
+        response = segmentation.apply_operation(payload, req_id)
+
     elif cmd_type == 'download_model':
         # [Phase 57.5] Refactored to commands/utilities.py
         from commands import utilities
@@ -595,7 +638,7 @@ def handle_command(command):
     elif cmd_type == 'get_system_status':
         # [Phase 57.5] Refactored to commands/utilities.py
         from commands import utilities
-        response = utilities.get_system_status(req_id)
+        response = utilities.get_system_status(req_id, runtime_url=payload.get('runtimeUrl'))
 
     elif cmd_type == 'get_index_status':
         # [Phase 57.5] Refactored to commands/utilities.py

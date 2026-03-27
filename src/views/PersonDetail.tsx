@@ -440,16 +440,16 @@ const PersonDetail = () => {
             />
 
             {/* Pose Centroid Stats (Phase 105-3) */}
-            {(person.frontal_face_count > 0 || person.profile_face_count > 0) && (
+            {((person.frontal_face_count ?? 0) > 0 || (person.profile_face_count ?? 0) > 0) && (
                 <div className="mb-4 flex items-center gap-3 text-xs text-gray-500">
                     <span className="font-medium text-gray-400">Pose centroids:</span>
-                    {person.frontal_face_count > 0 && (
+                    {(person.frontal_face_count ?? 0) > 0 && (
                         <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
                             Frontal {person.frontal_face_count}
                         </span>
                     )}
-                    {person.profile_face_count > 0 && (
+                    {(person.profile_face_count ?? 0) > 0 && (
                         <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-yellow-400 inline-block" />
                             Profile {person.profile_face_count}

@@ -1,5 +1,4 @@
 import * as tf from '@tensorflow/tfjs';
-import * as cocoSsd from '@tensorflow-models/coco-ssd';
 // @ts-ignore
 import { pipeline, env } from '@xenova/transformers';
 import { Human, Config } from '@vladmandic/human';
@@ -46,20 +45,21 @@ self.Element = MockElement;
 self.Image = MockImage;
 
 let human: Human | null = null;
-let cocoModel: cocoSsd.ObjectDetection | null = null;
 let clipPipeline: any = null;
 let isModelsLoaded = false;
 
-const CANDIDATE_LABELS = [
-    // Nature
-    'forest', 'trees', 'mountain', 'lake', 'river', 'ocean', 'beach', 'sunset', 'snow', 'flower', 'garden', 'sky', 'clouds',
-    // Urban
-    'city', 'building', 'street', 'room', 'office', 'house', 'bridge',
-    // Events/People
-    'party', 'wedding', 'concert', 'crowd', 'portrait', 'meeting', 'dinner',
-    // Objects/Misc
-    'food', 'pet', 'car', 'vehicle', 'drawing', 'text', 'screenshot'
-];
+const LABEL_TAXONOMY: Record<string, string[]> = {
+    scenes: ['outdoor', 'indoor', 'portrait', 'landscape', 'macro', 'aerial', 'underwater', 'night', 'studio'],
+    nature: ['forest', 'mountain', 'lake', 'river', 'ocean', 'beach', 'desert', 'snow', 'garden', 'waterfall', 'sunset', 'sunrise', 'sky', 'clouds', 'rainbow', 'stars'],
+    urban: ['city', 'building', 'street', 'bridge', 'skyline', 'architecture', 'parking', 'store', 'restaurant', 'cafe', 'vehicle', 'car'],
+    interior: ['room', 'kitchen', 'bedroom', 'bathroom', 'office', 'classroom', 'gym', 'church', 'museum', 'library'],
+    people: ['portrait', 'group photo', 'selfie', 'crowd', 'wedding', 'party', 'concert', 'sports', 'graduation', 'birthday'],
+    animals: ['dog', 'cat', 'bird', 'horse', 'fish', 'rabbit', 'deer', 'bear', 'butterfly', 'insect', 'reptile', 'pet'],
+    objects: ['bicycle', 'motorcycle', 'boat', 'airplane', 'train', 'food', 'drink', 'flower', 'book', 'phone', 'computer', 'guitar', 'clock', 'sign', 'drawing', 'text', 'screenshot'],
+    activities: ['cooking', 'eating', 'dancing', 'swimming', 'hiking', 'reading', 'playing', 'running', 'cycling', 'shopping'],
+    style: ['black and white', 'vintage', 'artistic', 'minimalist', 'abstract', 'panorama', 'long exposure'],
+    mood: ['happy', 'peaceful', 'dramatic', 'romantic', 'mysterious', 'festive', 'cozy'],
+};
 
 self.onmessage = async (e: MessageEvent) => {
     const { type, payload } = e.data;
@@ -105,7 +105,7 @@ async function initModels(profile: string = 'balanced') {
             },
             body: { enabled: false },
             hand: { enabled: false },
-            object: { enabled: false }, // We use COCO-SSD for now
+            object: { enabled: false },
             gesture: { enabled: false },
             filter: { enabled: false }
         };
@@ -115,11 +115,7 @@ async function initModels(profile: string = 'balanced') {
         await human.warmup(); // Warmup
         console.log('[Worker] Human (Face) models loaded');
 
-        // 2. Load COCO-SSD (Object Detection)
-        cocoModel = await cocoSsd.load();
-        console.log('[Worker] COCO-SSD loaded');
-
-        // 3. Load CLIP (Scene Classification)
+        // 2. Load CLIP (Scene Classification)
         const clipModel = isHighAccuracy ? 'Xenova/clip-vit-large-patch14' : 'Xenova/clip-vit-base-patch32';
         console.log(`[Worker] Using CLIP model: ${clipModel}`);
         clipPipeline = await pipeline('zero-shot-image-classification', clipModel);
@@ -204,16 +200,7 @@ async function processImage(payload: { photoId: number, imageBitmap: ImageBitmap
             }
         }
 
-        // 2. Object Detection (COCO-SSD)
-        if (cocoModel) {
-            // @ts-ignore
-            const objects = await cocoModel.detect(canvas);
-            objects
-                .filter(p => p.score > 0.5)
-                .forEach(p => allTags.add(p.class.toLowerCase()));
-        }
-
-        // 3. Scene Classification (CLIP)
+        // 2. Scene Classification (CLIP Multi-Pass)
         if (clipPipeline) {
             const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
             const reader = new FileReader();
@@ -223,10 +210,39 @@ async function processImage(payload: { photoId: number, imageBitmap: ImageBitmap
             });
             const dataUrl = await dataUrlPromise;
 
-            const output = await clipPipeline(dataUrl, CANDIDATE_LABELS);
-            const scenes = Array.isArray(output) ? output : [output];
-            scenes
-                .filter((p: any) => p.score > 0.25)
+            // Pass 1 (Broad Categories)
+            const broadCategories = ['nature', 'urban', 'interior', 'people', 'animals', 'objects'];
+            const categoryOutput = await clipPipeline(dataUrl, broadCategories);
+            const categories = Array.isArray(categoryOutput) ? categoryOutput : [categoryOutput];
+            
+            // Collect labels from top 2 scoring categories + always check scenes/style/mood
+            const topCategories = categories
+                .sort((a: any, b: any) => b.score - a.score)
+                .slice(0, 2)
+                .filter((p: any) => p.score > 0.15)
+                .map((p: any) => p.label);
+                
+            const labelsToTest = new Set<string>();
+            
+            // Fixed base categories
+            LABEL_TAXONOMY.scenes.forEach(l => labelsToTest.add(l));
+            LABEL_TAXONOMY.style.forEach(l => labelsToTest.add(l));
+            LABEL_TAXONOMY.mood.forEach(l => labelsToTest.add(l));
+            
+            // Dynamic domain categories
+            for (const category of topCategories) {
+                if (LABEL_TAXONOMY[category]) {
+                    LABEL_TAXONOMY[category].forEach((l: string) => labelsToTest.add(l));
+                }
+            }
+            
+            // Pass 2: Fine-grained classification
+            const candidateList = Array.from(labelsToTest);
+            const specificOutput = await clipPipeline(dataUrl, candidateList);
+            const specificScenes = Array.isArray(specificOutput) ? specificOutput : [specificOutput];
+            
+            specificScenes
+                .filter((p: any) => p.score > 0.15) // Confidence threshold for taking the tag
                 .forEach((p: any) => allTags.add(p.label));
         }
 

@@ -4,6 +4,17 @@ This document tracks planned features and ideas for the Smart Photo Organizer. U
 
 ## 🟢 Phase 1: AI & Organization (Current Focus)
 
+### 10. 🎨 Creative Tools / SAM 3 Segmentation ✅ Complete (v0.8.0 / Phase 108–111)
+**Goal:** Let users isolate subjects and apply non-destructive creative operations locally.
+- [x] **SAM 3 Integration:** HuggingFace `transformers` Sam3Model + Sam3Processor for interactive segmentation.
+- [x] **Prompt Modes:** Box, Points, Text, and combined Box+Points.
+- [x] **Canvas Editing:** Drag/move/resize box (8 handles), drag/add/delete points, Delete key to clear box.
+- [x] **Operations:** Remove Background, Isolate Subject, Blur Background, Sharpen Subject, Save to Library.
+- [x] **Responsive Canvas:** Fluid layout — canvas scales to window size while preserving aspect ratio.
+- [x] **Blurry Photos Export:** Export low-quality face captures as ZIP for external review.
+- [ ] **Colorization:** Auto-color black & white archival photos (future).
+- [ ] **Inpainting:** Fill removed regions with AI-generated content (future).
+
 ### 6. ✨ AI Enhancement Station (In Progress)
 **Goal:** Improve photo quality locally using dedicated AI models.
 - [x] **Upscaling:** Use models like Real-ESRGAN to increase resolution of old/cropped photos.
@@ -22,7 +33,7 @@ This document tracks planned features and ideas for the Smart Photo Organizer. U
 **Goal:** Clean up the actual file system.
 - [ ] **Templates:** Rename files using patterns like `{YYYY}-{MM}-{DD}_{Location}_{OriginalName}`.
 - [ ] **AI-Based:** Rename based on primary subject (e.g., `Dog_Playing_2024.jpg`).
-- [ ] **Deduplication:** Find and remove duplicate files (using image hashing).
+- [x] **Deduplication:** Find and remove duplicate files (SHA-256 exact + pHash near-duplicate detection) — ✅ Complete (v0.8.0 / Phase 107).
 
 ---
 

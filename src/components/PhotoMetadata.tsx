@@ -13,7 +13,7 @@ interface PhotoMetadataProps {
     onTagsChanged: () => void
 }
 
-export function PhotoMetadata({ photo, metadata, tags, newTag, setNewTag, isScanning, setIsScanning, onGoToFolder, onTagsChanged }: PhotoMetadataProps) {
+export function PhotoMetadata({ photo, metadata, tags, newTag, setNewTag, onGoToFolder, onTagsChanged }: PhotoMetadataProps) {
     const { loadTags, refreshPhoto } = useScan()
     const { addToQueue } = useAI()
 

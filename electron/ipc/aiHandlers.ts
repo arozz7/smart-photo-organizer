@@ -134,6 +134,12 @@ export function registerAIHandlers() {
             } else {
                 url = `https://github.com/arozz7/smart-photo-organizer/releases/download/v${app.getVersion()}/ai-runtime-win-x64.zip`;
             }
+        } else if (modelName === 'sam3' || modelName.startsWith('SAM 3')) {
+            // SAM 3 is a gated HuggingFace model — requires prior `huggingface-cli login`.
+            // Python handler detects the hf:// prefix and uses huggingface_hub.snapshot_download.
+            url = 'hf://facebook/sam3';
+        } else if (modelName.startsWith('AdaFace')) {
+            url = 'https://huggingface.co/mk-minchul/adaface/resolve/main/adaface_ir50_webface4m.onnx';
         }
         return await pythonProvider.sendRequest('download_model', { modelName, url }, 3600000);
     });
@@ -782,5 +788,44 @@ export function registerAIHandlers() {
             logger.error(`[IPC] face:getVerificationStatus failed: ${e}`);
             return { success: false, error: String(e) };
         }
+    });
+
+    // ---------------------------------------------------------------
+    // SAM 3 Creative Tools — Phase 111
+    // ---------------------------------------------------------------
+
+    ipcMain.handle('ai:segment:capabilities', async () => {
+        return await pythonProvider.sendRequest('segment_capabilities', {}, 90_000);
+    });
+
+    ipcMain.handle('ai:segment:setImage', async (_, { imagePath }: { imagePath: string }) => {
+        return await pythonProvider.sendRequest('segment_set_image', { imagePath }, 15_000);
+    });
+
+    ipcMain.handle('ai:segment:predict', async (_, payload: {
+        session_id: string;
+        text?: string;
+        box?: number[];
+        points?: number[][];
+        point_labels?: number[];
+    }) => {
+        return await pythonProvider.sendRequest('segment_predict', payload, 120_000);
+    });
+
+    ipcMain.handle('ai:segment:apply', async (_, payload: {
+        session_id: string;
+        operation: 'background-remove' | 'isolate' | 'blur' | 'enhance'
+                 | 'desaturate-bg' | 'fill-bg'
+                 | 'pixelate-bg' | 'spotlight' | 'color-tint';
+        mask_b64: string;
+        invert_mask?: boolean;
+        feather_radius?: number;
+        radius?: number;
+        color?: string;
+        pixel_size?: number;
+        brightness?: number;
+        tint_opacity?: number;
+    }) => {
+        return await pythonProvider.sendRequest('segment_apply', payload, 120_000);
     });
 }

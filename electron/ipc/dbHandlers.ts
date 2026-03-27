@@ -1,5 +1,6 @@
-import { ipcMain } from 'electron';
+import { ipcMain, shell } from 'electron';
 import { PhotoRepository } from '../data/repositories/PhotoRepository';
+import { DuplicateGroupRepository } from '../data/repositories/DuplicateGroupRepository';
 import { FaceRepository } from '../data/repositories/FaceRepository';
 import { PersonRepository } from '../data/repositories/PersonRepository';
 import { BucketRepository } from '../data/repositories/BucketRepository';
@@ -124,6 +125,19 @@ export function registerDBHandlers() {
         try {
             return PhotoRepository.getUnprocessedPhotos();
         } catch (e) { return []; }
+    });
+
+    ipcMain.handle('photo:getBlurryPhotos', async (_, args: {
+        threshold: number;
+        groupBy: 'folder' | 'location' | 'none';
+        limit?: number;
+        offset?: number;
+    }) => {
+        try {
+            return { success: true, ...PhotoRepository.getBlurryPhotos(args) };
+        } catch (e) {
+            return { success: false, photos: [], total: 0, error: String(e) };
+        }
     });
 
     ipcMain.handle('db:getPhotosMissingBlurScores', async () => {
@@ -1111,5 +1125,92 @@ export function registerDBHandlers() {
             console.error('[Main] Failed to check age backfill auto-resume:', e);
         }
     }, 10000); // 10 second delay for services to fully initialize
+
+    // --- DUPLICATE DETECTION (Phase 107) ---
+
+    ipcMain.handle('db:getDuplicateGroups', async (_, { status = 'pending', limit = 50, offset = 0 } = {}) => {
+        try {
+            const groups = DuplicateGroupRepository.getGroupsWithPhotos(status, limit, offset);
+            return { success: true, groups };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('db:getDuplicateStats', async () => {
+        try {
+            return { success: true, stats: DuplicateGroupRepository.getStats() };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('db:resolveDuplicateGroup', async (_, { groupId, keepPhotoIds, trashLosers }: { groupId: number; keepPhotoIds: number[]; trashLosers: boolean }) => {
+        try {
+            const group = DuplicateGroupRepository.getGroupById(groupId);
+            if (!group) return { success: false, error: 'Group not found' };
+
+            // Primary winner is the first kept photo (for the DB column)
+            const primaryWinnerId = keepPhotoIds[0];
+            DuplicateGroupRepository.resolveGroup(groupId, primaryWinnerId);
+
+            if (trashLosers) {
+                const keepSet = new Set(keepPhotoIds);
+                const loserIds = PhotoRepository.getPhotosByGroupId(groupId)
+                    .map((p: any) => p.id)
+                    .filter((id: number) => !keepSet.has(id));
+
+                const loserPaths = PhotoRepository.getFilePaths(loserIds);
+                for (const filePath of loserPaths) {
+                    try {
+                        await shell.trashItem(filePath);
+                    } catch (trashErr) {
+                        console.error(`[Duplicates] Failed to trash ${filePath}:`, trashErr);
+                    }
+                }
+
+                // Remove trashed photos from the DB
+                for (const id of loserIds) {
+                    PhotoRepository.deletePhotoById(id);
+                }
+            }
+
+            // Unlink all kept photos from the group
+            PhotoRepository.setDuplicateGroup(keepPhotoIds, null);
+
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('db:dismissDuplicateGroup', async (_, { groupId }: { groupId: number }) => {
+        try {
+            DuplicateGroupRepository.dismissGroup(groupId);
+            // Unlink all photos from the dismissed group
+            const photos = PhotoRepository.getPhotosByGroupId(groupId) as any[];
+            PhotoRepository.setDuplicateGroup(photos.map(p => p.id), null);
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('db:triggerDuplicateCheck', async () => {
+        try {
+            AppStateRepository.markDuplicateCheckDirty();
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    });
+
+    ipcMain.handle('db:getHashBackfillStats', async () => {
+        try {
+            return { success: true, ...PhotoRepository.countPhotosNeedingHash() };
+        } catch (e) {
+            return { success: false, needsSha256: 0, needsPhash: 0, error: String(e) };
+        }
+    });
 }
 

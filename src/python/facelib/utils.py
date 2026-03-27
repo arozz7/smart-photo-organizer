@@ -182,19 +182,25 @@ def get_faiss():
     except ImportError:
         return None
 
-def get_model_status(model_urls, weights_dir):
+def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
     """
     Returns a dictionary of model status information.
     Required by ModelDownloader.tsx.
+
+    Args:
+        model_urls:   Dict of enhancement model name → download URL (from enhance.MODEL_URLS).
+        weights_dir:  Directory where .pth enhancement models are stored.
+        runtime_url:  Version-correct AI Runtime download URL passed from Electron (uses
+                      app.getVersion()). Falls back to a placeholder when not provided.
     """
     models_info = {}
-    
+
     # 1. AI Runtime (Special Case)
     library_path = os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer'))
     runtime_path = os.path.join(library_path, 'ai-runtime')
     models_info["AI GPU Runtime (Torch/CUDA)"] = {
         "exists": os.path.exists(runtime_path),
-        "url": "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.6.5/ai-runtime-win-x64.zip",
+        "url": runtime_url or "https://github.com/arozz7/smart-photo-organizer/releases/download/latest/ai-runtime-win-x64.zip",
         "size": 5800000000, # Approx 5.8GB
         "localPath": runtime_path,
         "isRuntime": True
@@ -210,7 +216,7 @@ def get_model_status(model_urls, weights_dir):
             "size": os.path.getsize(m_path) if exists else 0,
             "localPath": m_path
         }
-    
+
     # 3. InsightFace Core Models (Hardcoded locations)
     buffalo_path = os.path.expanduser('~/.insightface/models/buffalo_l')
     models_info["Buffalo_L (InsightFace)"] = {
@@ -221,7 +227,7 @@ def get_model_status(model_urls, weights_dir):
     }
 
     # 4. SmolVLM (HuggingFace)
-    # Note: Path is approx, actual HF path varies by has. We check the concept.
+    # Note: Path is approx, actual HF path varies by hash. We check the parent dir.
     vlm_path = os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')
     models_info["SmolVLM-Instruct"] = {
         "exists": os.path.exists(vlm_path),
@@ -229,5 +235,42 @@ def get_model_status(model_urls, weights_dir):
         "size": 0,
         "localPath": vlm_path
     }
-    
+
+    # 5. AdaFace (ONNX — low-quality face recognition)
+    models_root = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'models'))
+    adaface_path = os.path.join(models_root, 'adaface_ir50_webface4m.onnx')
+    models_info["AdaFace IR50 (Face Recognition)"] = {
+        "exists": os.path.exists(adaface_path),
+        "url": "https://huggingface.co/mk-minchul/adaface/resolve/main/adaface_ir50_webface4m.onnx",
+        "size": os.path.getsize(adaface_path) if os.path.exists(adaface_path) else 0,
+        "localPath": adaface_path
+    }
+
+    # 6. SAM 3 (HuggingFace — facebook/sam3)
+    # Accept either a proper HF snapshot dir (has config.json) or a bare .safetensors file.
+    sam3_dir = os.path.join(models_root, 'sam3')
+    sam3_bare = os.path.join(models_root, 'sam3_model.safetensors')
+    if os.path.isdir(sam3_dir) and os.path.exists(os.path.join(sam3_dir, 'config.json')):
+        sam3_exists = True
+        sam3_local = sam3_dir
+        sam3_size = sum(
+            os.path.getsize(os.path.join(r, f))
+            for r, _, files in os.walk(sam3_dir)
+            for f in files
+        )
+    elif os.path.isfile(sam3_bare):
+        sam3_exists = True
+        sam3_local = sam3_bare
+        sam3_size = os.path.getsize(sam3_bare)
+    else:
+        sam3_exists = False
+        sam3_local = sam3_dir  # default expected location
+        sam3_size = 0
+    models_info["SAM 3 (Segmentation)"] = {
+        "exists": sam3_exists,
+        "url": "https://huggingface.co/facebook/sam3",
+        "size": sam3_size,
+        "localPath": sam3_local
+    }
+
     return models_info
