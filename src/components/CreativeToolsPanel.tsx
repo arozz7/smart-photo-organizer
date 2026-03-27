@@ -15,7 +15,7 @@ const CANVAS_H = 480
 const MODE_BUTTONS: { mode: PromptMode; label: string; title: string }[] = [
     { mode: 'box', label: '□ Box', title: 'Drag to draw · handles resize · drag inside moves · Delete clears' },
     { mode: 'points', label: '· Points', title: 'Click = include · Shift+click = exclude · click point = delete · drag point = move' },
-    { mode: 'text', label: 'Text', title: 'Text prompts require a text-to-box model — not available with SAM 3' },
+    { mode: 'text', label: 'Text', title: 'Describe what to segment — short noun phrases work best (e.g. person · dog · red umbrella)' },
 ]
 
 export default function CreativeToolsPanel() {
@@ -29,12 +29,18 @@ export default function CreativeToolsPanel() {
         loadImage,
         openImageDialog,
         setPromptMode,
+        setText,
         addPoint,
         removePoint,
         movePoint,
         setBox,
         clearPrompts,
         setSelectedMaskIdx,
+        setTextThreshold,
+        setMaskThreshold,
+        setFeatherRadius,
+        setInvertSelection,
+        unionAllMasks,
         predict,
         applyOperation,
         reset,
@@ -393,11 +399,6 @@ export default function CreativeToolsPanel() {
                 </div>
 
                 {/* Mode hints */}
-                {state.promptMode === 'text' && (
-                    <span className="text-xs text-yellow-500 italic">
-                        Text prompts require a text-to-box model — use Box or Points mode
-                    </span>
-                )}
                 {state.promptMode === 'points' && state.imagePath && (
                     <span className="text-xs text-gray-400 italic">
                         Click = include &nbsp;·&nbsp; Shift+click = exclude &nbsp;·&nbsp; Click point = delete &nbsp;·&nbsp; Drag point = move
@@ -428,6 +429,56 @@ export default function CreativeToolsPanel() {
                     </button>
                 )}
             </div>
+
+            {/* Text mode — input + confidence sliders */}
+            {state.promptMode === 'text' && (
+                <div className="flex flex-col gap-2 bg-gray-800/60 rounded-lg px-4 py-2.5 border border-gray-700 flex-shrink-0">
+                    {/* Text input + Segment button */}
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="text"
+                            value={state.text}
+                            onChange={e => setText(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter' && state.text.trim() && !busy) predict() }}
+                            placeholder="person on the left · red umbrella · dog"
+                            disabled={!state.sessionId || busy}
+                            className="flex-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 disabled:opacity-40"
+                        />
+                        <button
+                            onClick={() => predict()}
+                            disabled={!state.sessionId || !state.text.trim() || busy}
+                            className="px-3 py-1.5 rounded-md text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+                        >
+                            Segment
+                        </button>
+                    </div>
+                    {/* Confidence sliders */}
+                    <div className="flex items-center gap-4 flex-wrap">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-400 font-medium w-24 shrink-0">Confidence:</span>
+                            <input
+                                type="range" min={0.1} max={0.9} step={0.05}
+                                value={state.textThreshold}
+                                onChange={e => setTextThreshold(Number(e.target.value))}
+                                className="w-24 accent-indigo-500"
+                                aria-label="Confidence threshold"
+                            />
+                            <span className="text-xs text-gray-300 w-8 tabular-nums">{state.textThreshold.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-400 font-medium w-24 shrink-0">Mask quality:</span>
+                            <input
+                                type="range" min={0.1} max={0.9} step={0.05}
+                                value={state.maskThreshold}
+                                onChange={e => setMaskThreshold(Number(e.target.value))}
+                                className="w-24 accent-indigo-500"
+                                aria-label="Mask quality threshold"
+                            />
+                            <span className="text-xs text-gray-300 w-8 tabular-nums">{state.maskThreshold.toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Error banner */}
             {state.error && (
@@ -507,8 +558,12 @@ export default function CreativeToolsPanel() {
 
                     {/* Mask selector pills */}
                     {state.masks.length > 1 && (
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="text-xs text-gray-400">Mask:</span>
+                        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                            <span className="text-xs text-gray-400">
+                                {state.promptMode === 'text'
+                                    ? `Found ${state.masks.length} instances:`
+                                    : 'Mask:'}
+                            </span>
                             {state.masks.map((m, i) => (
                                 <button
                                     key={i}
@@ -522,6 +577,15 @@ export default function CreativeToolsPanel() {
                                     {i + 1} ({(m.score * 100).toFixed(0)}%)
                                 </button>
                             ))}
+                            {state.promptMode === 'text' && (
+                                <button
+                                    onClick={unionAllMasks}
+                                    className="px-2.5 py-1 rounded-md text-xs bg-gray-700 text-indigo-300 hover:bg-gray-600 transition-colors"
+                                    title="Merge all instances into a single mask"
+                                >
+                                    Union All
+                                </button>
+                            )}
                         </div>
                     )}
                 </div>
@@ -558,6 +622,10 @@ export default function CreativeToolsPanel() {
                 busy={busy}
                 hasResult={!!state.resultB64}
                 resultB64={state.resultB64}
+                featherRadius={state.featherRadius}
+                invertSelection={state.invertSelection}
+                onFeatherChange={setFeatherRadius}
+                onInvertChange={setInvertSelection}
                 onApply={applyOperation}
             />
 

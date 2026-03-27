@@ -131,6 +131,87 @@
         4. UI: Replace the current "↓ Save" download button with a split-button dropdown — "Download", "Save to Library", "Copy to Clipboard". Show "Open in Library →" toast after successful save.
     - **Change Log:** `aiChangeLog/phase-115-sam3-result-management.md`
 
+- **Creative Compositing Workspace — Phase 116:**
+    - **Goal:** A dedicated Compositing page that lets the user build layered compositions from segments extracted across multiple photos. Designed from the start around a proper Z-ordered layer stack so partial occlusion (e.g. a person partially behind a foreground object) works correctly without architectural rework later.
+    - **Layer model:** Each layer is `{ id, name, sourceImagePath, maskB64, x, y, scaleX, scaleY, rotation, opacity, zIndex, visible }`. Layers are composited bottom-to-top (ascending `zIndex`) using `PIL.Image.alpha_composite`, so a layer at `z=2` naturally occludes a layer at `z=1` for their overlapping pixels.
+    - **Core Features:**
+        - **Compositing Page (new route `/creative/compose`):** Two-panel layout — canvas workspace on the left (renders the live flat composite), Layers panel on the right.
+        - **Layers Panel:** Scrollable stack showing layer thumbnails in z-order. Each row has: visibility toggle (eye icon), opacity slider, layer name (editable), drag handle for z-reorder (drag up = bring forward, drag down = send back). "Bring to Front / Send to Back" quick buttons. Click row = select layer on canvas.
+        - **Add Layer from Creative Tools:** A "Send to Compose" action in Phase 115 (Result Management) that pushes the current mask + image into the Compositing page as a new layer at `zIndex = max + 1`.
+        - **Add Layer from Library:** A "+" button in the Layers panel opens the `LibraryPhotoPickerModal`; the chosen photo's Creative Tools session (if active) or a new session is created, the user segments it, then sends it to the compositor.
+        - **Background Layer:** `z=0` is always the base photo (non-segmented, full image). Cannot be deleted, only replaced.
+        - **Canvas Pixel-hit Layer Selection:** Clicking a canvas pixel selects the topmost visible layer whose alpha mask covers that pixel — prevents accidentally grabbing a layer hidden behind another.
+        - **Python compositor command `compose_layers`:** Accepts the full ordered layer list as JSON, composites them in z-order, returns the result as base64 PNG. Runs in the segmentation Python process.
+        - **Z-order example use case:** Background (park photo, z=0) → Person A standing in background (z=1) → Tree trunk segment (z=2) partially in front of Person A → Person B in foreground (z=3). Each layer's mask handles transparency; the compositor renders them in order.
+    - **Implementation Phases:**
+        1. Python: `compose_layers(layers: list[LayerSpec]) -> str` in `segmentation_ops.py`. Sort by `zIndex`, `alpha_composite` bottom-to-top. Handle scale/rotation via `PIL.Image.transform`.
+        2. IPC: `ai:compose:layers` handler in a new `compositeHandlers.ts`. Expose via preload.
+        3. State: `useCompositor` hook — layer CRUD (add, remove, update, reorder), `flattenLayers()` action that calls the IPC command.
+        4. UI: New route `/creative/compose`. Canvas (renders live preview) + Layers panel. Drag-to-reorder using `@dnd-kit/core` (already in deps or add it).
+        5. Integration: "Send to Compose" button in Creative Tools result area (Phase 115 hook point).
+    - **Change Log:** `aiChangeLog/phase-116-compositing-workspace.md`
+
+- **Photo Adjustments — Phase 117:**
+    - **Goal:** Non-destructive basic photo editing controls — brightness, contrast, shadows, highlights, white balance, black point, white point — applicable either globally to the whole image or scoped to the selected segment mask. No new models required; pure PIL / numpy.
+    - **Core Features:**
+        - **Global mode:** Adjustments apply to the full image (the base background layer or any loaded photo).
+        - **Segment-scoped mode:** When a mask is active in Creative Tools or Compositing, adjustments apply only inside (or outside, using the Invert Selection toggle from Phase 113) the mask region. Composited onto the original via alpha blending.
+        - **Controls:**
+            - **Brightness** — `PIL.ImageEnhance.Brightness(factor)`, range 0.0–2.0, default 1.0.
+            - **Contrast** — `PIL.ImageEnhance.Contrast(factor)`, range 0.0–2.0, default 1.0.
+            - **Shadows** — lift dark tones only (tone curve: apply gain below midpoint, leave highlights unchanged).
+            - **Highlights** — pull bright tones down (tone curve: compress above midpoint).
+            - **White Balance / Color Temperature** — multiply R and B channels by complementary temperature coefficients (warm: R↑ B↓; cool: R↓ B↑). Range ~2500K–10000K mapped to ±coefficients.
+            - **Black Point** — input levels minimum: rescale [blackPoint, 255] → [0, 255] using `np.clip` + linear stretch.
+            - **White Point** — input levels maximum: rescale [0, whitePoint] → [0, 255].
+        - **Adjustments panel:** Collapsible section added to Creative Tools sidebar (or a dedicated Adjustments tab in the Compositing page). Each control is a labeled slider with numeric display and a "Reset" button.
+        - **Python `apply_adjustments(image, mask, params, scope)` in `segmentation_ops.py`:** Single function accepting all adjustment params as a dict. Applies them in a defined order (WB → levels → brightness → contrast → shadows/highlights) to avoid compounding artefacts.
+    - **Implementation Phases:**
+        1. Python: `apply_adjustments` in `segmentation_ops.py`. Unit-test each adjustment in isolation with known pixel values.
+        2. IPC: `ai:segment:adjust` handler (or extend `ai:segment:apply`). Add `'adjust'` to the operation type union.
+        3. Hook: Add `applyAdjustments(params, scope)` to `useSegmentation`. `scope: 'global' | 'segment' | 'inverse'`.
+        4. UI: Adjustments panel (sliders + reset) in Creative Tools text-mode area / ops bar extension. Wire `scope` to the existing Invert Selection toggle.
+    - **Change Log:** `aiChangeLog/phase-117-photo-adjustments.md`
+
+- **Per-Layer Transform (Resize & Rotate) — Phase 118:**
+    - **Goal:** Give each layer in the Compositor (and segments in the standalone Creative Tools) interactive resize and rotation handles directly on the canvas, building on the layer entity introduced in Phase 116. Z-order is inherited — the transform handles belong to the active (selected) layer and do not affect layer ordering.
+    - **Core Features:**
+        - **Transform box:** When a layer is selected, an 8-handle bounding box appears around its non-transparent pixels. Corner handles scale proportionally (shift = free aspect); edge handles scale one axis.
+        - **Rotation grip:** A small circular handle above the top-center edge of the bounding box. Dragging it rotates the layer around its centroid. Angle snaps to 15° increments when Shift is held.
+        - **Move:** Click-drag anywhere inside the bounding box moves the layer (updates `x`, `y` on the layer entity).
+        - **Flip:** Horizontal / vertical flip buttons in a floating mini-toolbar that appears above the selected layer's bounding box.
+        - **Numeric input:** A small HUD below the bounding box shows `W × H` and rotation angle as editable number fields for precise control.
+        - **Layer-aware Z-order interaction:** During a move/resize drag, the layer's `zIndex` is unchanged. The canvas continues to composite all layers in their current order so the user sees accurate occlusion while dragging.
+        - **Python transform application:** On "Apply" (or real-time at 200 ms debounce), call `compose_layers` from Phase 116 with the updated transform on the active layer. PIL handles the affine transform (`Image.transform` with `AFFINE` or `Image.rotate` for rotation).
+    - **Implementation Phases:**
+        1. Define `LayerTransform { x, y, scaleX, scaleY, rotation }` type shared between hook and Python payload.
+        2. Canvas: `TransformBox` component — renders 8 scale handles + rotation grip; emits `onTransformChange(LayerTransform)` events. Reuse `BoxHandle` pattern from `canvasHelpers.ts`.
+        3. Hook: `useCompositor.updateLayerTransform(layerId, transform)` — updates layer state and debounces a `flattenLayers()` re-composite.
+        4. Python: Extend `compose_layers` to apply `scaleX/scaleY/rotation` per layer using PIL affine transform before compositing.
+        5. UI: Numeric HUD + flip buttons. Wire Shift-key snap for rotation. Integrate into Compositing page and (as a lighter variant) into standalone Creative Tools for single-image editing.
+    - **Change Log:** `aiChangeLog/phase-118-layer-transform.md`
+
+- **Mask Refinement: Eraser, Brush, Undo/Redo, Zoom/Pan — Phase 119:**
+    - **Goal:** Allow the user to manually clean up any SAM 3 mask after prediction — erasing false-positive regions and painting back missed areas — before applying an operation. Fully independent of how the mask was produced (box, text, points, exemplar). Works with Invert Selection.
+    - **Core Design Principle:** The eraser/brush writes directly into `mask_b64` in state (mask editing, not re-prediction). No model calls required. The modified mask is used by all subsequent `applyOperation` calls exactly like a predicted mask.
+    - **Core Features:**
+        - **Edit Mask Mode:** A new toolbar button "✏ Edit Mask" (visible when `masks.length > 0`) enters mask-editing mode. The mask overlay transitions from a passive `<img>` element to an active `<canvas>` drawn with `ImageData`, enabling pixel-level drawing.
+        - **Brush / Eraser tool:** Single tool with two sub-modes toggled by a button or `E`/`B` key shortcut. Erase = paint black (remove mask). Paint = paint white (add to mask). Cursor shows a circle preview matching the current brush radius.
+        - **Brush size slider:** Range 2–80 px, default 12. The circle cursor scales live as the slider moves. Mouse scroll wheel also adjusts size when in Edit Mask mode.
+        - **Stroke-based undo/redo:** On `mouseup` after any stroke, push a snapshot of the current `mask_b64` onto a history stack (max 20 entries). `Ctrl+Z` pops the stack (undo); `Ctrl+Shift+Z` / `Ctrl+Y` moves forward (redo). The stack resets when a new prediction runs.
+        - **Zoom / Pan:** A user-controlled zoom multiplier on top of the existing fit-to-canvas `CanvasTransform`. Mouse wheel (outside Edit Mask mode) or pinch zooms in/out around the cursor. Space+drag or middle-button pans. `+` / `-` toolbar buttons + a "Fit" reset. All canvas coordinate helpers (`toImageCoords`, hit tests, brush drawing) work correctly at any zoom because they all go through the same `CanvasTransform`.
+        - **"Done Editing" button:** Exits Edit Mask mode, saves the final `mask_b64` to state, and re-renders the mask as the passive overlay. Operations can then be applied normally.
+        - **Soft brush (optional):** A "hardness" slider (0 = Gaussian falloff at edge, 1 = hard circle). Implemented by drawing a radial gradient into a small `OffscreenCanvas` and using it as a brush stamp. Default hard (1.0).
+    - **Implementation Phases:**
+        1. **Canvas zoom/pan:** Add `userZoom: number` and `panOffset: {x, y}` to panel state. Extend `CanvasTransform` computation to include user zoom. Wire wheel event and +/- buttons. Update all hit-test and coordinate helpers to use the combined transform. Add pan gesture (space+drag).
+        2. **Edit Mask mode:** Add `editingMask: boolean` flag to panel state. When true, render mask as a `<canvas>` layer (drawn with `putImageData` from decoded `mask_b64`). When false, render as passive `<img>` overlay (current behaviour). Add "✏ Edit Mask" toolbar button.
+        3. **Brush drawing:** On `mousemove` while `mousedown` in edit mode, paint a circle of white (paint) or black (erase) pixels into the mask `ImageData` at the cursor's image-space coordinates, scaled by brush radius. Throttle to `requestAnimationFrame`. Cursor preview: a `<div>` styled as a circle, positioned over the canvas.
+        4. **Undo/Redo stack:** `maskHistory: string[]` + `maskFuture: string[]` in `useSegmentation` state. Push on `mouseup`. `Ctrl+Z` / `Ctrl+Y` handlers. Stack cleared on new prediction. Expose `undoMask()` / `redoMask()` + `canUndo` / `canRedo` flags.
+        5. **"Done Editing":** Export mask canvas to base64 PNG (`canvas.toDataURL`), call `setSelectedMask(b64)` (new hook action that updates `masks[selectedMaskIdx].mask_b64`), exit edit mode.
+        6. **Brush size control:** Slider in the toolbar (visible only in edit mode) + wheel-to-resize while hovering canvas. Cursor circle preview updates live.
+        7. **Tests:** Unit test `toImageCoords` at various zoom levels. Integration test that undo restores a previous mask snapshot.
+    - **Change Log:** `aiChangeLog/phase-119-mask-refinement.md`
+
 - **Hardware Compatibility:** Force Mode Selection (GPU/CPU), Multi-GPU support, OpenVINO/ONNX runtime.
 - **Face Restoration Config:** Expose GFPGAN blending weight, Restoration Strength slider.
 - **Custom AI Models:** Load user-provided `.pth` models from a `models/` directory.
@@ -170,6 +251,10 @@
 - **SAM 3 New Operations (Pixelate, Spotlight, Invert, Tint):** Planned — Phase 113. See AI & Computer Vision section above.
 - **SAM 3 Image Exemplar Prompts:** Planned — Phase 114. See AI & Computer Vision section above.
 - **SAM 3 Result Management (Save to Library, Clipboard):** Planned — Phase 115. See AI & Computer Vision section above.
+- **Mask Refinement (eraser/brush, undo/redo, zoom/pan):** Planned — Phase 119. See AI & Computer Vision section above.
+- **Creative Compositing Workspace (Z-ordered layers, multi-photo segment transfer):** Planned — Phase 116. See AI & Computer Vision section above.
+- **Photo Adjustments (brightness/contrast/shadows/WB/levels, global or segment-scoped):** Planned — Phase 117. See AI & Computer Vision section above.
+- **Per-Layer Transform (resize/rotate canvas handles, flip, numeric HUD):** Planned — Phase 118. See AI & Computer Vision section above.
 - **Collage Creator:** Masonry/Grid layouts, Face-Aware cropping.
 - **Static Gallery Generator:** Export album as a static HTML site.
 - **Face Dataset Export:** Generate cleaned, high-res face crops for LORA training.

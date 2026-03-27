@@ -814,9 +814,17 @@ export function registerAIHandlers() {
 
     ipcMain.handle('ai:segment:apply', async (_, payload: {
         session_id: string;
-        operation: 'background-remove' | 'isolate' | 'blur' | 'enhance';
+        operation: 'background-remove' | 'isolate' | 'blur' | 'enhance'
+                 | 'desaturate-bg' | 'fill-bg'
+                 | 'pixelate-bg' | 'spotlight' | 'color-tint';
         mask_b64: string;
+        invert_mask?: boolean;
+        feather_radius?: number;
         radius?: number;
+        color?: string;
+        pixel_size?: number;
+        brightness?: number;
+        tint_opacity?: number;
     }) => {
         return await pythonProvider.sendRequest('segment_apply', payload, 120_000);
     });

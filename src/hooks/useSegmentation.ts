@@ -5,7 +5,19 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 // ---------------------------------------------------------------------------
 
 export type PromptMode = 'text' | 'box' | 'points'
-export type Operation = 'background-remove' | 'isolate' | 'blur' | 'enhance' | 'desaturate-bg' | 'fill-bg'
+export type Operation =
+    | 'background-remove' | 'isolate' | 'blur' | 'enhance'
+    | 'desaturate-bg' | 'fill-bg'
+    | 'pixelate-bg' | 'spotlight' | 'color-tint'
+
+// Load a mask PNG (base64) into an HTMLImageElement
+function loadMaskImage(b64: string): Promise<HTMLImageElement> {
+    return new Promise(resolve => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.src = `data:image/png;base64,${b64}`
+    })
+}
 
 export interface MaskResult {
     mask_b64: string
@@ -30,6 +42,17 @@ export interface PointPrompt {
     label: 1 | 0    // 1 = positive, 0 = negative
 }
 
+export interface LastOp {
+    operation: Operation
+    extra?: {
+        radius?: number
+        color?: string
+        pixelSize?: number
+        spotlightBrightness?: number
+        tintOpacity?: number
+    }
+}
+
 export interface SegmentState {
     capabilities: Capabilities | null
     sessionId: string | null
@@ -45,6 +68,13 @@ export interface SegmentState {
     isApplying: boolean
     isLoadingImage: boolean
     error: string | null
+    // Text-mode confidence thresholds
+    textThreshold: number
+    maskThreshold: number
+    // Global mask modifiers (apply to every operation)
+    featherRadius: number
+    invertSelection: boolean
+    lastOp: LastOp | null
 }
 
 const INITIAL_STATE: SegmentState = {
@@ -62,6 +92,11 @@ const INITIAL_STATE: SegmentState = {
     isApplying: false,
     isLoadingImage: false,
     error: null,
+    textThreshold: 0.5,
+    maskThreshold: 0.5,
+    featherRadius: 0,
+    invertSelection: false,
+    lastOp: null,
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +117,13 @@ export function useSegmentation() {
     const boxRef = useRef<[number, number, number, number] | null>(INITIAL_STATE.box)
     const masksRef = useRef<MaskResult[]>(INITIAL_STATE.masks)
     const selectedMaskIdxRef = useRef<number>(INITIAL_STATE.selectedMaskIdx)
+    const textThresholdRef = useRef<number>(INITIAL_STATE.textThreshold)
+    const maskThresholdRef = useRef<number>(INITIAL_STATE.maskThreshold)
+    const featherRadiusRef = useRef<number>(INITIAL_STATE.featherRadius)
+    const invertSelectionRef = useRef<boolean>(INITIAL_STATE.invertSelection)
+    const lastOpRef = useRef<LastOp | null>(INITIAL_STATE.lastOp)
+    const thresholdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const featherTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     // No dependency array — runs after every render to stay fully in sync
     useEffect(() => {
@@ -91,7 +133,53 @@ export function useSegmentation() {
         boxRef.current = state.box
         masksRef.current = state.masks
         selectedMaskIdxRef.current = state.selectedMaskIdx
+        textThresholdRef.current = state.textThreshold
+        maskThresholdRef.current = state.maskThreshold
+        featherRadiusRef.current = state.featherRadius
+        invertSelectionRef.current = state.invertSelection
+        lastOpRef.current = state.lastOp
     })
+
+    // Auto re-predict when confidence/mask thresholds change in text mode.
+    // Debounced 600 ms so rapid slider drags don't fire on every tick.
+    useEffect(() => {
+        if (
+            state.promptMode !== 'text' ||
+            !state.text.trim() ||
+            !sessionRef.current ||
+            state.isPredicting
+        ) return
+
+        if (thresholdTimerRef.current) clearTimeout(thresholdTimerRef.current)
+        thresholdTimerRef.current = setTimeout(() => { predict() }, 600)
+
+        return () => {
+            if (thresholdTimerRef.current) clearTimeout(thresholdTimerRef.current)
+        }
+    }, [state.textThreshold, state.maskThreshold]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Auto re-apply when invert selection is toggled (instant — no debounce needed).
+    useEffect(() => {
+        if (!lastOpRef.current || !masksRef.current.length || !sessionRef.current) return
+        const op = lastOpRef.current
+        applyOperation(op.operation, { featherRadius: featherRadiusRef.current, ...op.extra })
+    }, [state.invertSelection]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Auto re-apply the last operation when feather radius changes.
+    // Debounced 600 ms so rapid slider drags coalesce into one IPC call.
+    useEffect(() => {
+        if (!lastOpRef.current || !masksRef.current.length || !sessionRef.current) return
+
+        if (featherTimerRef.current) clearTimeout(featherTimerRef.current)
+        featherTimerRef.current = setTimeout(() => {
+            const op = lastOpRef.current!
+            applyOperation(op.operation, { featherRadius: featherRadiusRef.current, ...op.extra })
+        }, 600)
+
+        return () => {
+            if (featherTimerRef.current) clearTimeout(featherTimerRef.current)
+        }
+    }, [state.featherRadius]) // eslint-disable-line react-hooks/exhaustive-deps
 
     // ------------------------------------------------------------------
     // Model capabilities
@@ -207,6 +295,49 @@ export function useSegmentation() {
         setState(s => ({ ...s, selectedMaskIdx: idx, resultB64: null }))
     }, [])
 
+    const setTextThreshold = useCallback((v: number) => {
+        setState(s => ({ ...s, textThreshold: v }))
+    }, [])
+
+    const setMaskThreshold = useCallback((v: number) => {
+        setState(s => ({ ...s, maskThreshold: v }))
+    }, [])
+
+    const setFeatherRadius = useCallback((v: number) => {
+        setState(s => ({ ...s, featherRadius: v }))
+    }, [])
+
+    const setInvertSelection = useCallback((v: boolean) => {
+        setState(s => ({ ...s, invertSelection: v }))
+    }, [])
+
+    const unionAllMasks = useCallback(async () => {
+        const masks = masksRef.current
+        if (masks.length <= 1) return
+
+        const imgs = await Promise.all(masks.map(m => loadMaskImage(m.mask_b64)))
+        const canvas = document.createElement('canvas')
+        canvas.width = imgs[0].naturalWidth
+        canvas.height = imgs[0].naturalHeight
+        const ctx = canvas.getContext('2d')!
+
+        ctx.drawImage(imgs[0], 0, 0)
+        ctx.globalCompositeOperation = 'lighten'
+        for (let i = 1; i < imgs.length; i++) {
+            ctx.drawImage(imgs[i], 0, 0)
+        }
+
+        const unioned = canvas.toDataURL('image/png').split(',')[1]
+        const totalArea = masks.reduce((sum, m) => sum + m.area, 0)
+
+        setState(s => ({
+            ...s,
+            masks: [{ mask_b64: unioned, score: 1.0, area: totalArea }],
+            selectedMaskIdx: 0,
+            resultB64: null,
+        }))
+    }, [])
+
     // ------------------------------------------------------------------
     // Predict
     //
@@ -234,7 +365,12 @@ export function useSegmentation() {
             let payload: Record<string, unknown> = { session_id: currentSession }
 
             if (promptMode === 'text' && text.trim()) {
-                payload = { session_id: currentSession, text: text.trim() }
+                payload = {
+                    session_id: currentSession,
+                    text: text.trim(),
+                    text_threshold: textThresholdRef.current,
+                    mask_threshold: maskThresholdRef.current,
+                }
             } else if (box && points.length > 0) {
                 // Combined box + points (works in both box and points mode)
                 payload = {
@@ -277,6 +413,9 @@ export function useSegmentation() {
         radius?: number
         featherRadius?: number
         color?: string
+        pixelSize?: number
+        spotlightBrightness?: number
+        tintOpacity?: number
     }) => {
         // Read current values synchronously from refs — avoids the setState-as-read anti-pattern
         const sessionId = sessionRef.current
@@ -297,14 +436,32 @@ export function useSegmentation() {
                 session_id: sessionId,
                 operation,
                 mask_b64: maskB64,
-                ...(params?.radius !== undefined ? { radius: params.radius } : {}),
+                invert_mask: invertSelectionRef.current,
                 ...(params?.featherRadius !== undefined ? { feather_radius: params.featherRadius } : {}),
+                ...(params?.radius !== undefined ? { radius: params.radius } : {}),
                 ...(params?.color !== undefined ? { color: params.color } : {}),
+                ...(params?.pixelSize !== undefined ? { pixel_size: params.pixelSize } : {}),
+                ...(params?.spotlightBrightness !== undefined ? { brightness: params.spotlightBrightness } : {}),
+                ...(params?.tintOpacity !== undefined ? { tint_opacity: params.tintOpacity } : {}),
             })
 
             if (!res?.success) throw new Error(res?.error ?? 'Apply failed')
 
-            setState(s => ({ ...s, resultB64: res.result_b64, isApplying: false, error: null }))
+            // Record which operation ran so the feather/invert debounce can re-apply it
+            const extra: LastOp['extra'] = {}
+            if (params?.radius !== undefined) extra.radius = params.radius
+            if (params?.color !== undefined) extra.color = params.color
+            if (params?.pixelSize !== undefined) extra.pixelSize = params.pixelSize
+            if (params?.spotlightBrightness !== undefined) extra.spotlightBrightness = params.spotlightBrightness
+            if (params?.tintOpacity !== undefined) extra.tintOpacity = params.tintOpacity
+
+            setState(s => ({
+                ...s,
+                resultB64: res.result_b64,
+                isApplying: false,
+                error: null,
+                lastOp: { operation, extra: Object.keys(extra).length ? extra : undefined },
+            }))
         } catch (e: any) {
             setState(s => ({ ...s, isApplying: false, error: e.message }))
         }
@@ -332,6 +489,11 @@ export function useSegmentation() {
         setBox,
         clearPrompts,
         setSelectedMaskIdx,
+        setTextThreshold,
+        setMaskThreshold,
+        setFeatherRadius,
+        setInvertSelection,
+        unionAllMasks,
         predict,
         applyOperation,
         reset,

@@ -10,7 +10,7 @@ import base64
 import io
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter
 
 
 # ---------------------------------------------------------------------------
@@ -142,4 +142,70 @@ def apply_fill_background(
     fill[:] = color
     a3 = _alpha3(_to_alpha(mask))
     result = (orig * a3 + fill * (1.0 - a3)).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(result)
+
+
+def apply_pixelate_background(
+    image: Image.Image,
+    mask: np.ndarray,
+    pixel_size: int = 12,
+) -> Image.Image:
+    """
+    Pixelate the background; keep subject sharp.
+
+    Downsizes the full image by pixel_size then upscales with NEAREST
+    interpolation to produce the mosaic effect, then composites with the
+    subject from the original.
+    """
+    w, h = image.size
+    pixel_size = max(2, pixel_size)
+    small = image.resize((max(1, w // pixel_size), max(1, h // pixel_size)), Image.NEAREST)
+    pixelated = small.resize((w, h), Image.NEAREST)
+
+    orig = np.array(image.convert("RGB"), dtype=np.float32)
+    pix_arr = np.array(pixelated.convert("RGB"), dtype=np.float32)
+    a3 = _alpha3(_to_alpha(mask))
+    result = (orig * a3 + pix_arr * (1.0 - a3)).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(result)
+
+
+def apply_spotlight(
+    image: Image.Image,
+    mask: np.ndarray,
+    brightness: float = 0.35,
+) -> Image.Image:
+    """
+    Darken the background while leaving the subject at full brightness.
+
+    brightness: 0.0 = fully black background, 1.0 = no change.  Default 0.35.
+    """
+    brightness = float(np.clip(brightness, 0.0, 1.0))
+    darkened = ImageEnhance.Brightness(image.convert("RGB")).enhance(brightness)
+
+    orig = np.array(image.convert("RGB"), dtype=np.float32)
+    dark_arr = np.array(darkened, dtype=np.float32)
+    a3 = _alpha3(_to_alpha(mask))
+    result = (orig * a3 + dark_arr * (1.0 - a3)).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(result)
+
+
+def apply_color_tint(
+    image: Image.Image,
+    mask: np.ndarray,
+    color: tuple[int, int, int] = (255, 165, 0),
+    opacity: float = 0.5,
+) -> Image.Image:
+    """
+    Apply a semi-transparent color wash over the background (or subject).
+
+    color:   RGB tuple (0–255 each).  Defaults to orange.
+    opacity: 0.0 = no tint, 1.0 = solid color.  Default 0.5.
+    """
+    opacity = float(np.clip(opacity, 0.0, 1.0))
+    orig = np.array(image.convert("RGB"), dtype=np.float32)
+    tint = np.full_like(orig, fill_value=0, dtype=np.float32)
+    tint[:] = color
+    blended = (orig * (1.0 - opacity) + tint * opacity).clip(0, 255)
+    a3 = _alpha3(_to_alpha(mask))
+    result = (orig * a3 + blended * (1.0 - a3)).clip(0, 255).astype(np.uint8)
     return Image.fromarray(result)

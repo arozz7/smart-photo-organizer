@@ -166,12 +166,117 @@ class Sam3Provider(SegmentationProvider):
             raise KeyError(session_id)
         return session["image"]
 
-    def predict_from_text(self, session_id: str, text: str) -> dict[str, Any]:
-        """SAM 3 does not support text-only prompts — returns empty masks."""
-        return {
-            "masks": [],
-            "info": "Text prompts are not supported. Use box or point mode.",
-        }
+    def predict_from_text(
+        self,
+        session_id: str,
+        text: str,
+        threshold: float = 0.5,
+        mask_threshold: float = 0.5,
+    ) -> dict[str, Any]:
+        """
+        Run PCS segmentation using a text prompt.
+
+        Uses Sam3Model with a text kwarg — the model's Promptable Concept
+        Segmentation (PCS) mode.  Returns all matching instances found in the
+        image (e.g. "person" → one mask per person).
+        """
+        self._ensure_initialized()
+        if self._failed:
+            return {"masks": [], "error": self._fail_reason}
+
+        image = self._get_session(session_id)["image"]
+
+        import torch
+
+        inputs = self._processor(
+            images=image,
+            text=text,
+            return_tensors="pt",
+        ).to(self._device)
+
+        original_sizes = inputs.get("original_sizes")
+        target_sizes = (
+            original_sizes.tolist()
+            if original_sizes is not None
+            else [[image.height, image.width]]
+        )
+
+        with torch.no_grad():
+            outputs = self._model(**inputs)
+
+        try:
+            results = self._processor.post_process_instance_segmentation(
+                outputs,
+                threshold=threshold,
+                mask_threshold=mask_threshold,
+                target_sizes=target_sizes,
+            )[0]
+            result = self._format_box_output(results)
+            logger.info(
+                "predict_from_text: text=%r threshold=%.2f found %d mask(s)",
+                text, threshold, len(result["masks"]),
+            )
+            return result
+        except Exception as e:
+            logger.error("predict_from_text post-process failed: %s", e)
+            return {"masks": []}
+
+    def predict_from_text_with_exclusions(
+        self,
+        session_id: str,
+        text: str,
+        neg_boxes: list[list[int]],
+        threshold: float = 0.5,
+        mask_threshold: float = 0.5,
+    ) -> dict[str, Any]:
+        """
+        PCS segmentation with a text prompt and negative bounding-box exclusions.
+
+        neg_boxes is a list of [x1, y1, x2, y2] regions to exclude from matches.
+        Each is passed to Sam3Processor with input_boxes_labels=0 (negative).
+        """
+        self._ensure_initialized()
+        if self._failed:
+            return {"masks": [], "error": self._fail_reason}
+
+        image = self._get_session(session_id)["image"]
+
+        import torch
+
+        inputs = self._processor(
+            images=image,
+            text=text,
+            input_boxes=[neg_boxes],
+            input_boxes_labels=[[0] * len(neg_boxes)],
+            return_tensors="pt",
+        ).to(self._device)
+
+        original_sizes = inputs.get("original_sizes")
+        target_sizes = (
+            original_sizes.tolist()
+            if original_sizes is not None
+            else [[image.height, image.width]]
+        )
+
+        with torch.no_grad():
+            outputs = self._model(**inputs)
+
+        try:
+            results = self._processor.post_process_instance_segmentation(
+                outputs,
+                threshold=threshold,
+                mask_threshold=mask_threshold,
+                target_sizes=target_sizes,
+            )[0]
+            result = self._format_box_output(results)
+            logger.info(
+                "predict_from_text_with_exclusions: text=%r neg_boxes=%d found %d mask(s)",
+                text, len(neg_boxes), len(result["masks"]),
+            )
+            return result
+        except Exception as e:
+            logger.error("predict_from_text_with_exclusions post-process failed: %s", e)
+            return {"masks": []}
 
     def predict_from_box(self, session_id: str, box: list[int]) -> dict[str, Any]:
         """Run segmentation using a bounding-box prompt [x1, y1, x2, y2]."""
@@ -408,7 +513,7 @@ class Sam3Provider(SegmentationProvider):
             "model_ready": model_ready,
             "model_file_present": file_ready,
             "transformers_compatible": transformers_ok,
-            "text_prompts": False,
+            "text_prompts": True,
             "video": False,
             "checkpoint": str(checkpoint_path),
         }

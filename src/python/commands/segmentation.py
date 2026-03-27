@@ -68,11 +68,21 @@ def predict(payload: dict[str, Any], req_id: str | None = None) -> dict[str, Any
     box = payload.get("box")
     points = payload.get("points")
     point_labels = payload.get("point_labels")
+    text_threshold = float(payload.get("text_threshold", 0.5))
+    mask_threshold = float(payload.get("mask_threshold", 0.5))
+    exclusion_boxes = payload.get("exclusion_boxes")  # list[list[int]] | None
 
     try:
         provider = _get_provider()
         if text:
-            result = provider.predict_from_text(session_id, text)
+            if exclusion_boxes:
+                result = provider.predict_from_text_with_exclusions(
+                    session_id, text, exclusion_boxes, text_threshold, mask_threshold
+                )
+            else:
+                result = provider.predict_from_text(
+                    session_id, text, text_threshold, mask_threshold
+                )
         elif box and points is not None and point_labels is not None:
             result = provider.predict_from_box_and_points(session_id, box, points, point_labels)
         elif box:
@@ -103,19 +113,28 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
     """
     Apply a mask operation to the session image.
 
-    payload.operation:     "background-remove" | "isolate" | "blur" | "enhance"
-                           | "desaturate-bg" | "fill-bg"
-    payload.mask_b64:      base64 grayscale PNG mask from a predict call
-    payload.radius:        (blur only) Gaussian radius, default 15
-    payload.feather_radius: soft-edge feathering radius applied before any op, default 0
-    payload.color:         (fill-bg only) CSS hex color string, default "#ffffff"
+    payload.operation:        "background-remove" | "isolate" | "blur" | "enhance"
+                              | "desaturate-bg" | "fill-bg"
+                              | "pixelate-bg" | "spotlight" | "color-tint"
+    payload.mask_b64:         base64 grayscale PNG mask from a predict call
+    payload.invert_mask:      flip subject/background before applying op, default false
+    payload.feather_radius:   soft-edge feathering radius applied before any op, default 0
+    payload.radius:           (blur only) Gaussian radius, default 15
+    payload.color:            (fill-bg / color-tint) CSS hex color string, default "#ffffff"
+    payload.pixel_size:       (pixelate-bg only) mosaic block size in px, default 12
+    payload.brightness:       (spotlight only) background brightness 0.0–1.0, default 0.35
+    payload.tint_opacity:     (color-tint only) tint opacity 0.0–1.0, default 0.5
     """
     session_id = payload.get("session_id", "")
     operation = payload.get("operation", "background-remove")
     mask_b64 = payload.get("mask_b64", "")
-    radius = int(payload.get("radius", 15))
+    invert_mask = bool(payload.get("invert_mask", False))
     feather_radius = int(payload.get("feather_radius", 0))
+    radius = int(payload.get("radius", 15))
     hex_color = str(payload.get("color", "#ffffff"))
+    pixel_size = int(payload.get("pixel_size", 12))
+    brightness = float(payload.get("brightness", 0.35))
+    tint_opacity = float(payload.get("tint_opacity", 0.5))
 
     try:
         provider = _get_provider()
@@ -131,11 +150,16 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
             apply_enhance,
             apply_desaturate_background,
             apply_fill_background,
+            apply_pixelate_background,
+            apply_spotlight,
+            apply_color_tint,
         )
 
-        # Decode boolean mask then optionally feather edges to float alpha
+        # Decode boolean mask → float alpha, optionally feather edges, optionally invert
         mask = decode_mask(mask_b64)
         alpha = feather_mask(mask, feather_radius)
+        if invert_mask:
+            alpha = 1.0 - alpha
 
         if operation == "background-remove":
             result_image = apply_background_remove(image, alpha)
@@ -149,6 +173,12 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
             result_image = apply_desaturate_background(image, alpha)
         elif operation == "fill-bg":
             result_image = apply_fill_background(image, alpha, _parse_hex_color(hex_color))
+        elif operation == "pixelate-bg":
+            result_image = apply_pixelate_background(image, alpha, pixel_size)
+        elif operation == "spotlight":
+            result_image = apply_spotlight(image, alpha, brightness)
+        elif operation == "color-tint":
+            result_image = apply_color_tint(image, alpha, _parse_hex_color(hex_color), tint_opacity)
         else:
             return {"success": False, "error": f"Unknown operation: {operation}", "reqId": req_id}
 
