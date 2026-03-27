@@ -90,15 +90,28 @@ class EnhanceRequest(ApplyRequest):
 # ------------------------------------------------------------------
 
 def _validate_image_path(image_path: str) -> str:
-    """Validate extension and existence; raise HTTPException on failure."""
+    """Validate extension and existence; raise HTTPException on failure.
+
+    Sanitization order (all checks precede path resolution):
+    1. Reject empty strings and null bytes.
+    2. Validate extension on the raw suffix before resolving symlinks.
+    3. Resolve to absolute path and re-validate extension (symlink protection).
+    4. Confirm the resolved path is an existing regular file.
+    """
+    if not image_path or "\x00" in image_path:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    raw_suffix = Path(image_path).suffix.lower()
+    if raw_suffix not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {raw_suffix}")
+
     resolved = Path(image_path).resolve()
     if resolved.suffix.lower() not in _ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type: {resolved.suffix}",
-        )
+        raise HTTPException(status_code=400, detail=f"Unsupported file type after resolution: {resolved.suffix}")
+
     if not resolved.is_file():
         raise HTTPException(status_code=404, detail="Image not found")
+
     return str(resolved)
 
 
