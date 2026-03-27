@@ -795,7 +795,7 @@ export function registerAIHandlers() {
     // ---------------------------------------------------------------
 
     ipcMain.handle('ai:segment:capabilities', async () => {
-        return await pythonProvider.sendRequest('segment_capabilities', {}, 30_000);
+        return await pythonProvider.sendRequest('segment_capabilities', {}, 90_000);
     });
 
     ipcMain.handle('ai:segment:setImage', async (_, { imagePath }: { imagePath: string }) => {

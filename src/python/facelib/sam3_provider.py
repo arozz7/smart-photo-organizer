@@ -372,11 +372,27 @@ class Sam3Provider(SegmentationProvider):
         return {"masks": constrained}
 
     def get_capabilities(self) -> dict[str, Any]:
-        # Check SAM 3 import availability without triggering a full model load
-        try:
-            from transformers import Sam3Model  # noqa: F401
+        # Fast, non-blocking availability check.
+        # `from transformers import Sam3Model` triggers a cold package import that can
+        # take 30-40 s when other large models (InsightFace, ONNX) are already in memory.
+        # Blocking the IPC process that long causes Electron timeouts for both
+        # `capabilities` and any concurrently-queued `setImage` calls.
+        # Strategy:
+        #   1. If transformers is already in sys.modules, check for Sam3Model directly
+        #      (< 1 ms).
+        #   2. Otherwise use importlib.util.find_spec — checks the installed package
+        #      on disk without importing it (< 5 ms).
+        import sys as _sys
+        import importlib.util as _ilu
+
+        transformers_mod = _sys.modules.get("transformers")
+        if transformers_mod is not None:
+            transformers_ok = hasattr(transformers_mod, "Sam3Model")
+        elif _ilu.find_spec("transformers") is not None:
+            # Installed but not yet loaded.  Assume Sam3Model is present; the real
+            # import happens lazily in initialize() on first predict() call.
             transformers_ok = True
-        except ImportError:
+        else:
             transformers_ok = False
 
         checkpoint_path = Path(self._checkpoint).resolve()

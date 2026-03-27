@@ -69,6 +69,68 @@
 - **Enhanced CLIP Tagging:** ✅ Complete — Phase 109. Dropped Coco-SSD; replaced flat label list with structured `LABEL_TAXONOMY` (10 categories, ~90 labels); two-pass classification (broad scene → domain-specific). See [Changelog](../../aiChangeLog/phase-109-clip-tagging.md)
 - **SAM 3 Creative Tools Service:** ✅ Complete — Phase 110. Model-agnostic `SegmentationProvider` ABC + `Sam3Provider` (text/box/point prompts via HuggingFace Transformers). 7 FastAPI endpoints (`/capabilities`, `/set-image`, `/predict`, `/apply/background-remove`, `/apply/isolate`, `/apply/blur`, `/apply/enhance`). See [Changelog](../../aiChangeLog/phase-110-sam3-creative-tools.md)
     - **Frontend Creative Tools UI:** ✅ Complete — Phase 111. Interactive canvas UI with text/box/point prompt modes, mask overlay, operations bar (Remove BG, Isolate, Blur, Sharpen), result preview with checkerboard transparency, and download. See [Changelog](../../aiChangeLog/phase-111-creative-tools-ui.md)
+- **SAM 3 Text Prompts & PCS Mode — Phase 112:**
+    - **Goal:** Activate SAM 3's headline feature — open-vocabulary text segmentation. The paper confirms `Sam3Model` natively supports text prompts (e.g., "person on the left", "red umbrella"). Our current `predict_from_text` deliberately returns empty based on a Phase 111 assumption that was never validated against the actual HuggingFace API. This is a bug fix for a core advertised capability.
+    - **Background:** SAM 3 distinguishes two task types. PVS (Promptable Visual Segmentation) uses points/boxes to target a specific instance. PCS (Promptable Concept Segmentation) uses text or image exemplars to return **all matching instances at once** (e.g., "person" → masks for every person in the photo). Text prompts are PCS. The model architecture includes a 32-token causal text encoder and a Fusion Encoder that cross-attends text and vision features before detection queries run.
+    - **Core Features:**
+        - **Fix `predict_from_text`:** Replace stub with real call — `Sam3Processor(images=image, text="noun phrase")` → `Sam3Model` → `post_process_instance_segmentation`. Short noun phrases only (2–5 words; the paper notes the 32-token limit).
+        - **Multi-Instance Result Display:** Text prompts return N masks (one per found instance). Add a filmstrip-style "Found instances" panel below the canvas when N > 1. Each thumbnail is clickable to select which mask to operate on, plus a "Select All" mode that unions all masks.
+        - **Text + Negative Box Refinement:** Combine text prompt with one or more negative bounding boxes (`input_boxes_labels=[[0]]`) to exclude regions. UX: after entering text, user can optionally switch to "exclusion box" draw mode to crop out false matches. Backed by combined `processor(images=image, text=..., input_boxes=[[neg_box]], input_boxes_labels=[[0]])` call.
+        - **UI Label Fix:** Change "not available with SAM 3" tooltip to reflect actual capability. Add placeholder hint text in the text input (e.g., "person on the left · red umbrella · dog").
+        - **Confidence Threshold Slider:** Expose `threshold` and `mask_threshold` (both default 0.5) in the ops bar so the user can tune how strict the match is.
+    - **Implementation Phases:**
+        1. Python: Implement real `predict_from_text` in `Sam3Provider` using `Sam3Model` + `Sam3Processor` with text kwarg. Add `predict_from_text_with_exclusions(text, neg_boxes)` variant.
+        2. IPC/Hook: Extend `segment_predict` payload and `useSegmentation` hook to carry `text_threshold` and `exclusion_boxes` fields.
+        3. UI: Fix mode button label + tooltip; add text input placeholder; wire confidence sliders.
+        4. UI: Multi-instance filmstrip component — renders when `masks.length > 1`; select/deselect individual masks; "union all" checkbox.
+        5. Tests: Python unit tests for `predict_from_text` with a known image + text pair; test exclusion box path.
+    - **Change Log:** `aiChangeLog/phase-112-sam3-text-prompts.md`
+
+- **SAM 3 New Operations — Phase 113:**
+    - **Goal:** Add three high-value creative operations to `segmentation_ops.py` and the `CreativeOperationsBar` that the SAM 3 blog and paper both highlight as flagship effects. All are pure Python PIL operations — no model changes, no new model downloads.
+    - **Core Features:**
+        - **Pixelate Background:** The SAM 3 Playground explicitly names "pixelation" as a template effect. Apply to non-subject pixels: resize masked region down to `max(W,H) / pixel_size` then scale back up with NEAREST interpolation. `pixel_size` slider (4–40 px) in the ops bar.
+        - **Spotlight Effect:** Darken the background while leaving the subject at full brightness (Instagram "spotlight" effect). `ImageEnhance.Brightness` applied only to the background alpha region. Brightness slider (0.0 = black BG, 1.0 = no change). Default 0.35.
+        - **Invert Selection Toggle:** A single toggle in the ops bar that flips which side of the mask receives each operation. When on, all operations — blur, pixelate, spotlight, sharpen, desaturate, fill, remove — apply to the **subject** instead of the background. Internally: swap the `alpha` mask before passing to each `apply_*` function.
+        - **Color Tint:** Apply a semi-transparent color wash over the background (or subject if inverted). Blends using alpha compositing at adjustable opacity (0–100%). A colour swatch + opacity slider inline with the button, matching the existing Fill BG pattern.
+    - **Implementation Phases:**
+        1. Python: Add `apply_pixelate_background`, `apply_spotlight`, `apply_color_tint` to `segmentation_ops.py`. Update `apply_operation` dispatch in `commands/segmentation.py`. Add new operation strings to the `operation` literal type in `aiHandlers.ts`.
+        2. Hook: Add `'pixelate-bg' | 'spotlight' | 'color-tint'` to `Operation` type in `useSegmentation.ts`; add `pixelSize`, `brightness`, `tintColor`, `tintOpacity` to `applyOperation` params.
+        3. UI: Add three buttons + associated controls to `CreativeOperationsBar`. Add the Invert Selection toggle (checkbox/switch) above the operations row — affects all operations.
+    - **Change Log:** `aiChangeLog/phase-113-sam3-new-ops.md`
+
+- **SAM 3 Image Exemplar Prompts — Phase 114:**
+    - **Goal:** Add "Exemplar" as a fourth prompt mode. The user draws a reference box around any object; SAM 3 returns **all instances of the same concept** found in the photo. This is PCS (Promptable Concept Segmentation) via image exemplar — distinct from the current box mode (which targets the specific instance inside the box). Per the paper, the exemplar encoder extracts ROI-pooled visual features + positional embedding + positive/negative label embedding, processes them through a small transformer, and produces exemplar tokens the detector uses to find matching instances.
+    - **Technical distinction from current box mode:** The current "Box" mode calls `Sam3TrackerModel` for PVS (one specific instance). Exemplar mode calls `Sam3Model` with `input_boxes` + `input_boxes_labels=[[1]]` for PCS (all similar instances). The processor routes them differently. Negative exemplar boxes (`label=0`) exclude concepts.
+    - **Core Features:**
+        - **New `exemplar` PromptMode:** Fourth mode button ("⬚ Exemplar") in the canvas mode bar. Same draw UX as box, but semantics differ — user is saying "find me more of this" not "segment exactly this".
+        - **Python `predict_from_exemplar`:** Calls `Sam3Model` (not TrackerModel) with `input_boxes=[[ref_box]], input_boxes_labels=[[1]]`. Returns all found instances. Optional: allow multiple reference boxes (positive + negative) to refine what "concept" means.
+        - **Multi-Instance Result Panel:** Reuse the filmstrip component from Phase 112 to show all found instances. Particularly useful when asking "find all people" or "find all cars."
+        - **Negative Exemplar Exclusion:** After drawing the reference box, the user can draw additional boxes with a "−" toggle to mark exclusion regions (`label=0`). The processor accepts mixed positive/negative exemplar boxes in one call.
+        - **"Find Similar in Library" Stretch Goal:** Surface found concept masks as a Library search trigger — "show me all photos containing this type of object."
+    - **Implementation Phases:**
+        1. Python: Add `predict_from_exemplar(session_id, ref_box, neg_boxes)` to `Sam3Provider`. Verify processor call with `Sam3Model` correctly routes as PCS exemplar, not PVS box.
+        2. IPC: Add `exemplar_boxes` + `exemplar_neg_boxes` fields to `segment_predict` payload schema. Route in `commands/segmentation.py` to new method.
+        3. Hook: Add `'exemplar'` to `PromptMode`. Add `exemplarBox` + `exemplarNegBoxes` state fields to `SegmentState`.
+        4. UI: Add Exemplar mode button and canvas interaction (draw ref box first; secondary "−" toggle for exclusion boxes; visual distinction between ref box and neg boxes — green vs red outlines).
+        5. UI: Wire multi-instance filmstrip from Phase 112.
+        6. Tests: Python unit test for exemplar path with a photo containing multiple instances of the same object.
+    - **Change Log:** `aiChangeLog/phase-114-sam3-exemplar-prompts.md`
+
+- **SAM 3 Result Management — Phase 115:**
+    - **Goal:** Close the workflow loop. Currently the only exit from Creative Tools is a browser-style download. Add Save to Library (write result as a sidecar alongside the original), Copy to Clipboard, and "Open in Library" navigation.
+    - **Core Features:**
+        - **Save to Library:** Write the result PNG alongside the source file as `<original-stem>_edited.<ext>` (or into a configurable `_edits/` subfolder). Register the new file in the `photos` table via `PhotoRepository.insertPhoto` so it appears in the Library. IPC handler `creative:saveResult` accepts `{ sourcePath, resultB64, suffix }`.
+        - **Copy to Clipboard:** `navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])` directly from the renderer. Works without IPC for images under ~15MB.
+        - **Open in Library:** After saving, navigate to the Library view with the new file highlighted (pass its `photoId` as a deep-link state).
+        - **Recent Edits Panel (stretch):** Small "Recent" section at the bottom of the Creative Tools panel showing thumbnails of the last 5 saved results with quick-reload buttons.
+    - **Implementation Phases:**
+        1. IPC: Add `creative:saveResult` handler in `aiHandlers.ts` (or new `creativeHandlers.ts`). Writes file to disk, calls `PhotoRepository.insertPhoto`, returns new `photoId`.
+        2. Expose `creative:saveResult` in `preload.ts` via contextBridge.
+        3. Hook: Add `saveResult(suffix?)` and `copyToClipboard()` actions to `useSegmentation`.
+        4. UI: Replace the current "↓ Save" download button with a split-button dropdown — "Download", "Save to Library", "Copy to Clipboard". Show "Open in Library →" toast after successful save.
+    - **Change Log:** `aiChangeLog/phase-115-sam3-result-management.md`
+
 - **Hardware Compatibility:** Force Mode Selection (GPU/CPU), Multi-GPU support, OpenVINO/ONNX runtime.
 - **Face Restoration Config:** Expose GFPGAN blending weight, Restoration Strength slider.
 - **Custom AI Models:** Load user-provided `.pth` models from a `models/` directory.
@@ -104,6 +166,10 @@
     - **UI:** New "Tools" view with guided wizards for each recovery strategy.
 
 ### Creative Tools
+- **SAM 3 Text Prompts & PCS Mode:** Planned — Phase 112. See AI & Computer Vision section above.
+- **SAM 3 New Operations (Pixelate, Spotlight, Invert, Tint):** Planned — Phase 113. See AI & Computer Vision section above.
+- **SAM 3 Image Exemplar Prompts:** Planned — Phase 114. See AI & Computer Vision section above.
+- **SAM 3 Result Management (Save to Library, Clipboard):** Planned — Phase 115. See AI & Computer Vision section above.
 - **Collage Creator:** Masonry/Grid layouts, Face-Aware cropping.
 - **Static Gallery Generator:** Export album as a static HTML site.
 - **Face Dataset Export:** Generate cleaned, high-res face crops for LORA training.
