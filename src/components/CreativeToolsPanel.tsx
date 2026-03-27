@@ -16,12 +16,15 @@ const MODE_BUTTONS: { mode: PromptMode; label: string; title: string }[] = [
     { mode: 'box', label: '□ Box', title: 'Drag to draw · handles resize · drag inside moves · Delete clears' },
     { mode: 'points', label: '· Points', title: 'Click = include · Shift+click = exclude · click point = delete · drag point = move' },
     { mode: 'text', label: 'Text', title: 'Describe what to segment — short noun phrases work best (e.g. person · dog · red umbrella)' },
+    { mode: 'exemplar', label: '⊡ Exemplar', title: 'Draw a reference box around one instance — SAM 3 finds all similar instances in the photo' },
 ]
 
 export default function CreativeToolsPanel() {
     const [pickerOpen, setPickerOpen] = useState(false)
     const [cursor, setCursor] = useState('default')
     const [liveBox, setLiveBox] = useState<[number, number, number, number] | null>(null)
+    // Exemplar mode: controls whether the next drawn box is a reference or exclusion box
+    const [exemplarDrawIsNeg, setExemplarDrawIsNeg] = useState(false)
 
     const {
         state,
@@ -34,6 +37,9 @@ export default function CreativeToolsPanel() {
         removePoint,
         movePoint,
         setBox,
+        setExemplarBox,
+        addExemplarNegBox,
+        clearExemplarBoxes,
         clearPrompts,
         setSelectedMaskIdx,
         setTextThreshold,
@@ -72,17 +78,19 @@ export default function CreativeToolsPanel() {
     }, [state.imagePath])
     useEffect(() => {
         redrawCanvasRef.current()
-    }, [state.points, state.box, liveBox])
-    // Delete key clears box in box mode
+    }, [state.points, state.box, state.exemplarBox, state.exemplarNegBoxes, liveBox])
+    // Delete key clears box in box mode, or all exemplar boxes in exemplar mode
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Delete' && stateRef.current.promptMode === 'box' && stateRef.current.box) {
-                clearPrompts()
+            const s = stateRef.current
+            if (e.key === 'Delete') {
+                if (s.promptMode === 'box' && s.box) clearPrompts()
+                else if (s.promptMode === 'exemplar' && (s.exemplarBox || s.exemplarNegBoxes.length)) clearExemplarBoxes()
             }
         }
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
-    }, [clearPrompts])
+    }, [clearPrompts, clearExemplarBoxes])
 
     // ---------------------------------------------------------------------------
     // Canvas drawing
@@ -140,6 +148,26 @@ export default function CreativeToolsPanel() {
             }
         }
 
+        // Exemplar mode: ref box (green) + neg boxes (red) + live drag preview
+        if (state.promptMode === 'exemplar') {
+            const drawExemplarBox = (
+                box: [number, number, number, number],
+                color: string,
+                dash: number[] = []
+            ) => {
+                const [x1, y1, x2, y2] = box
+                ctx.save()
+                ctx.strokeStyle = color
+                ctx.lineWidth = 2
+                ctx.setLineDash(dash)
+                ctx.strokeRect(offsetX + x1 * scale, offsetY + y1 * scale, (x2 - x1) * scale, (y2 - y1) * scale)
+                ctx.restore()
+            }
+            if (liveBox) drawExemplarBox(liveBox, '#6366f1', [5, 3])
+            if (state.exemplarBox) drawExemplarBox(state.exemplarBox, '#22c55e')
+            for (const neg of state.exemplarNegBoxes) drawExemplarBox(neg, '#ef4444')
+        }
+
         // Points
         const movingIdx = movingPointIdxRef.current
         for (let i = 0; i < state.points.length; i++) {
@@ -160,7 +188,7 @@ export default function CreativeToolsPanel() {
             ctx.stroke()
             ctx.restore()
         }
-    }, [state.points, state.box, liveBox])
+    }, [state.points, state.box, state.exemplarBox, state.exemplarNegBoxes, state.promptMode, liveBox])
 
     useEffect(() => { redrawCanvasRef.current = redrawCanvas }, [redrawCanvas])
 
@@ -209,6 +237,11 @@ export default function CreativeToolsPanel() {
                 didMoveRef.current = false
             }
         }
+
+        if (s.promptMode === 'exemplar') {
+            dragRef.current = { type: 'draw-box', startCX: cx, startCY: cy }
+            didMoveRef.current = false
+        }
     }, [])
 
     const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -251,6 +284,8 @@ export default function CreativeToolsPanel() {
             const hitIdx = hitTestPoint(cx, cy, s.points, t)
             if (hitIdx !== hoveredPointIdxRef.current) { hoveredPointIdxRef.current = hitIdx; redrawCanvasRef.current() }
             setCursor(hitIdx !== null ? 'pointer' : 'cell')
+        } else if (s.promptMode === 'exemplar' && s.imagePath) {
+            setCursor('crosshair')
         }
     }, [])
 
@@ -267,6 +302,17 @@ export default function CreativeToolsPanel() {
             const box: [number, number, number, number] = [Math.min(p1.x, p2.x), Math.min(p1.y, p2.y), Math.max(p1.x, p2.x), Math.max(p1.y, p2.y)]
             dragRef.current = { type: 'none' }
             setLiveBox(null)
+            const s = stateRef.current
+            if (s.promptMode === 'exemplar') {
+                if (!exemplarDrawIsNeg || !s.exemplarBox) {
+                    setExemplarBox(box)
+                    predict({ exemplarBox: box, exemplarNegBoxes: s.exemplarNegBoxes })
+                } else {
+                    addExemplarNegBox(box)
+                    predict({ exemplarBox: s.exemplarBox, exemplarNegBoxes: [...s.exemplarNegBoxes, box] })
+                }
+                return
+            }
             setBox(box)
             predict({ box })
         } else if (drag.type === 'move-box') {
@@ -309,7 +355,10 @@ export default function CreativeToolsPanel() {
         hoveredHandleRef.current = null
         hoveredPointIdxRef.current = null
         const s = stateRef.current
-        setCursor(s.promptMode === 'box' && s.imagePath ? 'crosshair' : s.promptMode === 'points' && s.imagePath ? 'cell' : 'default')
+        setCursor(
+            (s.promptMode === 'box' || s.promptMode === 'exemplar') && s.imagePath ? 'crosshair' :
+            s.promptMode === 'points' && s.imagePath ? 'cell' : 'default'
+        )
         redrawCanvasRef.current()
     }, [])
 
@@ -338,6 +387,11 @@ export default function CreativeToolsPanel() {
         addPoint(pt)
         predict({ points: [...s.points, pt] })
     }, [addPoint, removePoint, predict, clearPrompts])
+
+    // Reset exemplar draw mode toggle when leaving exemplar mode
+    useEffect(() => {
+        if (state.promptMode !== 'exemplar') setExemplarDrawIsNeg(false)
+    }, [state.promptMode])
 
     const busy = state.isPredicting || state.isApplying || state.isLoadingImage
 
@@ -410,6 +464,13 @@ export default function CreativeToolsPanel() {
                         Drag handles to resize &nbsp;·&nbsp; Drag inside to move &nbsp;·&nbsp; Delete key clears
                     </span>
                 )}
+                {state.promptMode === 'exemplar' && state.imagePath && (
+                    <span className="text-xs text-gray-400 italic">
+                        {!state.exemplarBox
+                            ? 'Draw a reference box around one instance'
+                            : 'Found instances shown below · draw exclusion boxes to refine · Delete clears all'}
+                    </span>
+                )}
 
                 {/* Clear / Reset */}
                 <button
@@ -477,6 +538,34 @@ export default function CreativeToolsPanel() {
                             <span className="text-xs text-gray-300 w-8 tabular-nums">{state.maskThreshold.toFixed(2)}</span>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Exemplar mode — draw-mode toggle (ref vs exclude) */}
+            {state.promptMode === 'exemplar' && state.exemplarBox && (
+                <div className="flex items-center gap-3 bg-gray-800/60 rounded-lg px-4 py-2 border border-gray-700 flex-shrink-0">
+                    <span className="text-xs text-gray-400 font-medium">Draw mode:</span>
+                    <div className="flex rounded-md overflow-hidden border border-gray-600">
+                        <button
+                            onClick={() => setExemplarDrawIsNeg(false)}
+                            className={`px-3 py-1 text-xs transition-colors ${!exemplarDrawIsNeg ? 'bg-green-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                            title="Draw a new reference box (replaces current)"
+                        >
+                            ⬚ Reference
+                        </button>
+                        <button
+                            onClick={() => setExemplarDrawIsNeg(true)}
+                            className={`px-3 py-1 text-xs transition-colors ${exemplarDrawIsNeg ? 'bg-red-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                            title="Draw exclusion boxes to suppress unwanted instances"
+                        >
+                            − Exclude
+                        </button>
+                    </div>
+                    {state.exemplarNegBoxes.length > 0 && (
+                        <span className="text-xs text-gray-500">
+                            {state.exemplarNegBoxes.length} exclusion{state.exemplarNegBoxes.length !== 1 ? 's' : ''}
+                        </span>
+                    )}
                 </div>
             )}
 
@@ -557,11 +646,11 @@ export default function CreativeToolsPanel() {
                     </div>
 
                     {/* Mask selector pills */}
-                    {state.masks.length > 1 && (
+                    {state.masks.length > 0 && (
                         <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
                             <span className="text-xs text-gray-400">
-                                {state.promptMode === 'text'
-                                    ? `Found ${state.masks.length} instances:`
+                                {(state.promptMode === 'text' || state.promptMode === 'exemplar')
+                                    ? `Found ${state.masks.length} instance${state.masks.length !== 1 ? 's' : ''}:`
                                     : 'Mask:'}
                             </span>
                             {state.masks.map((m, i) => (
@@ -577,7 +666,7 @@ export default function CreativeToolsPanel() {
                                     {i + 1} ({(m.score * 100).toFixed(0)}%)
                                 </button>
                             ))}
-                            {state.promptMode === 'text' && (
+                            {(state.promptMode === 'text' || state.promptMode === 'exemplar') && state.masks.length > 1 && (
                                 <button
                                     onClick={unionAllMasks}
                                     className="px-2.5 py-1 rounded-md text-xs bg-gray-700 text-indigo-300 hover:bg-gray-600 transition-colors"

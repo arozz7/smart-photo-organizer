@@ -278,6 +278,71 @@ class Sam3Provider(SegmentationProvider):
             logger.error("predict_from_text_with_exclusions post-process failed: %s", e)
             return {"masks": []}
 
+    def predict_from_exemplar(
+        self,
+        session_id: str,
+        ref_box: list[int],
+        neg_boxes: list[list[int]] | None = None,
+        threshold: float = 0.5,
+        mask_threshold: float = 0.5,
+    ) -> dict[str, Any]:
+        """
+        PCS segmentation using an image exemplar (visual reference box).
+
+        Calls Sam3Model with the reference box as a positive exemplar
+        (input_boxes_labels=1) and optional negative boxes (label=0) to
+        exclude concept instances from the results.
+
+        Unlike predict_from_box (PVS — segments the specific instance inside
+        the box), this method asks SAM 3 to find all instances of the same
+        visual concept anywhere in the image.
+        """
+        self._ensure_initialized()
+        if self._failed:
+            return {"masks": [], "error": self._fail_reason}
+
+        image = self._get_session(session_id)["image"]
+        negs = neg_boxes or []
+
+        import torch
+
+        all_boxes = [ref_box] + negs
+        all_labels = [1] + [0] * len(negs)
+
+        inputs = self._processor(
+            images=image,
+            input_boxes=[all_boxes],
+            input_boxes_labels=[all_labels],
+            return_tensors="pt",
+        ).to(self._device)
+
+        original_sizes = inputs.get("original_sizes")
+        target_sizes = (
+            original_sizes.tolist()
+            if original_sizes is not None
+            else [[image.height, image.width]]
+        )
+
+        with torch.no_grad():
+            outputs = self._model(**inputs)
+
+        try:
+            results = self._processor.post_process_instance_segmentation(
+                outputs,
+                threshold=threshold,
+                mask_threshold=mask_threshold,
+                target_sizes=target_sizes,
+            )[0]
+            result = self._format_box_output(results)
+            logger.info(
+                "predict_from_exemplar: ref_box=%s neg_boxes=%d found %d mask(s)",
+                ref_box, len(negs), len(result["masks"]),
+            )
+            return result
+        except Exception as e:
+            logger.error("predict_from_exemplar post-process failed: %s", e)
+            return {"masks": []}
+
     def predict_from_box(self, session_id: str, box: list[int]) -> dict[str, Any]:
         """Run segmentation using a bounding-box prompt [x1, y1, x2, y2]."""
         self._ensure_initialized()
@@ -514,6 +579,7 @@ class Sam3Provider(SegmentationProvider):
             "model_file_present": file_ready,
             "transformers_compatible": transformers_ok,
             "text_prompts": True,
+            "exemplar_prompts": True,
             "video": False,
             "checkpoint": str(checkpoint_path),
         }

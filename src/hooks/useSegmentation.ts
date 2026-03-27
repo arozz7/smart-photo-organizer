@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 // Types
 // ---------------------------------------------------------------------------
 
-export type PromptMode = 'text' | 'box' | 'points'
+export type PromptMode = 'text' | 'box' | 'points' | 'exemplar'
 export type Operation =
     | 'background-remove' | 'isolate' | 'blur' | 'enhance'
     | 'desaturate-bg' | 'fill-bg'
@@ -61,6 +61,8 @@ export interface SegmentState {
     text: string
     points: PointPrompt[]
     box: [number, number, number, number] | null  // [x1,y1,x2,y2] image-space
+    exemplarBox: [number, number, number, number] | null
+    exemplarNegBoxes: [number, number, number, number][]
     masks: MaskResult[]
     selectedMaskIdx: number
     resultB64: string | null
@@ -85,6 +87,8 @@ const INITIAL_STATE: SegmentState = {
     text: '',
     points: [],
     box: null,
+    exemplarBox: null,
+    exemplarNegBoxes: [],
     masks: [],
     selectedMaskIdx: 0,
     resultB64: null,
@@ -115,6 +119,8 @@ export function useSegmentation() {
     const textRef = useRef<string>(INITIAL_STATE.text)
     const pointsRef = useRef<PointPrompt[]>(INITIAL_STATE.points)
     const boxRef = useRef<[number, number, number, number] | null>(INITIAL_STATE.box)
+    const exemplarBoxRef = useRef<[number, number, number, number] | null>(INITIAL_STATE.exemplarBox)
+    const exemplarNegBoxesRef = useRef<[number, number, number, number][]>(INITIAL_STATE.exemplarNegBoxes)
     const masksRef = useRef<MaskResult[]>(INITIAL_STATE.masks)
     const selectedMaskIdxRef = useRef<number>(INITIAL_STATE.selectedMaskIdx)
     const textThresholdRef = useRef<number>(INITIAL_STATE.textThreshold)
@@ -131,6 +137,8 @@ export function useSegmentation() {
         textRef.current = state.text
         pointsRef.current = state.points
         boxRef.current = state.box
+        exemplarBoxRef.current = state.exemplarBox
+        exemplarNegBoxesRef.current = state.exemplarNegBoxes
         masksRef.current = state.masks
         selectedMaskIdxRef.current = state.selectedMaskIdx
         textThresholdRef.current = state.textThreshold
@@ -256,6 +264,9 @@ export function useSegmentation() {
                 points: [],
                 // Preserve box when switching Box→Points for combined-prompt mode
                 box: mode === 'points' ? s.box : null,
+                // Clear exemplar state when leaving exemplar mode
+                exemplarBox: mode === 'exemplar' ? s.exemplarBox : null,
+                exemplarNegBoxes: mode === 'exemplar' ? s.exemplarNegBoxes : [],
                 masks: [],
                 selectedMaskIdx: 0,
                 resultB64: null,
@@ -287,8 +298,24 @@ export function useSegmentation() {
         setState(s => ({ ...s, box }))
     }, [])
 
+    const setExemplarBox = useCallback((box: [number, number, number, number] | null) => {
+        setState(s => ({ ...s, exemplarBox: box }))
+    }, [])
+
+    const addExemplarNegBox = useCallback((box: [number, number, number, number]) => {
+        setState(s => ({ ...s, exemplarNegBoxes: [...s.exemplarNegBoxes, box] }))
+    }, [])
+
+    const removeExemplarNegBox = useCallback((idx: number) => {
+        setState(s => ({ ...s, exemplarNegBoxes: s.exemplarNegBoxes.filter((_, i) => i !== idx) }))
+    }, [])
+
+    const clearExemplarBoxes = useCallback(() => {
+        setState(s => ({ ...s, exemplarBox: null, exemplarNegBoxes: [], masks: [], selectedMaskIdx: 0, resultB64: null, error: null }))
+    }, [])
+
     const clearPrompts = useCallback(() => {
-        setState(s => ({ ...s, points: [], box: null, text: '', masks: [], selectedMaskIdx: 0, resultB64: null, error: null }))
+        setState(s => ({ ...s, points: [], box: null, text: '', exemplarBox: null, exemplarNegBoxes: [], masks: [], selectedMaskIdx: 0, resultB64: null, error: null }))
     }, [])
 
     const setSelectedMaskIdx = useCallback((idx: number) => {
@@ -350,6 +377,8 @@ export function useSegmentation() {
         points?: PointPrompt[]
         box?: [number, number, number, number] | null
         text?: string
+        exemplarBox?: [number, number, number, number] | null
+        exemplarNegBoxes?: [number, number, number, number][]
     }) => {
         const currentSession = sessionRef.current
         if (!currentSession) return
@@ -364,7 +393,16 @@ export function useSegmentation() {
 
             let payload: Record<string, unknown> = { session_id: currentSession }
 
-            if (promptMode === 'text' && text.trim()) {
+            const exemplarBox = override?.exemplarBox !== undefined ? override.exemplarBox : exemplarBoxRef.current
+            const exemplarNegBoxes = override?.exemplarNegBoxes ?? exemplarNegBoxesRef.current
+
+            if (promptMode === 'exemplar' && exemplarBox) {
+                payload = {
+                    session_id: currentSession,
+                    exemplar_box: exemplarBox,
+                    exemplar_neg_boxes: exemplarNegBoxes,
+                }
+            } else if (promptMode === 'text' && text.trim()) {
                 payload = {
                     session_id: currentSession,
                     text: text.trim(),
@@ -487,6 +525,10 @@ export function useSegmentation() {
         removePoint,
         movePoint,
         setBox,
+        setExemplarBox,
+        addExemplarNegBox,
+        removeExemplarNegBox,
+        clearExemplarBoxes,
         clearPrompts,
         setSelectedMaskIdx,
         setTextThreshold,

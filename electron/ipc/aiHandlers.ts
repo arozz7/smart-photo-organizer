@@ -808,6 +808,8 @@ export function registerAIHandlers() {
         box?: number[];
         points?: number[][];
         point_labels?: number[];
+        exemplar_box?: number[];
+        exemplar_neg_boxes?: number[][];
     }) => {
         return await pythonProvider.sendRequest('segment_predict', payload, 120_000);
     });
