@@ -37,17 +37,17 @@ def _validate_image_path(image_path: str) -> str:
         raise HTTPException(status_code=400, detail="Invalid path")
 
     # Step 2 — extension check on raw suffix (sanitizes before Path ops)
-    raw_suffix = Path(image_path).suffix.lower()  # lgtm[py/path-injection]
+    raw_suffix = Path(image_path).suffix.lower()
     if raw_suffix not in _ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Invalid file type: {raw_suffix}")
 
     # Step 3 — resolve to absolute path and re-validate (guards against symlink attacks)
-    resolved = Path(image_path).resolve()  # lgtm[py/path-injection]
+    resolved = Path(image_path).resolve()
     if resolved.suffix.lower() not in _ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Invalid file type after resolution: {resolved.suffix}")
 
     # Step 4 — confirm it is an existing regular file
-    if not resolved.is_file():  # lgtm[py/path-injection]
+    if not resolved.is_file():
         raise HTTPException(status_code=404, detail="Image not found")
 
     return str(resolved)
