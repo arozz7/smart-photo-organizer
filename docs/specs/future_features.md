@@ -212,6 +212,43 @@
         7. **Tests:** Unit test `toImageCoords` at various zoom levels. Integration test that undo restores a previous mask snapshot.
     - **Change Log:** `aiChangeLog/phase-119-mask-refinement.md`
 
+- **FLUX.2 Background Generation & Inpainting — Phase 120:**
+    - **Goal:** Add AI-powered background generation and replacement as a new creative operation. After a SAM 3 segmentation produces a subject mask, FLUX.2 [klein] generates a new background from a text prompt and composites the subject back over it. Enables creative background replacement ("replace background with a misty forest at dawn") without manual photo editing.
+    - **Model:** [`black-forest-labs/FLUX.2-klein-9B`](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) — 9B parameter rectified flow transformer, step-distilled to 4 inference steps, sub-second generation. Uses the `diffusers` library (`pip install git+https://github.com/huggingface/diffusers.git`).
+    - **Hardware Requirements:** ~29 GB VRAM (NVIDIA RTX 4090 or above). CPU offload path available via `pipe.enable_model_cpu_offload()` for slower generation on lesser hardware. Gated behind a capability check — UI shows a "not available" state if VRAM is insufficient.
+    - **License:** FLUX Non-Commercial License. Non-commercial use only — enforce with a warning in the Settings UI and in the model download flow.
+    - **Pipeline Architecture:**
+        1. **SAM 3 segments the subject** → produces `mask_b64` (subject = white, background = black).
+        2. **User enters a background prompt** ("sunset over the ocean", "modern office interior").
+        3. **FLUX.2 generates a background image** at the same dimensions as the source photo using `Flux2KleinPipeline` text-to-image. Seed is configurable for reproducibility.
+        4. **Composite:** Python composites the generated background with the subject using the SAM 3 mask: `result = Image.composite(subject_rgba, generated_bg, mask)`. Feathering (from Phase 113) is applied to the mask edge before compositing.
+        5. **Result returned** as `result_b64` — same format as all other creative operations.
+    - **New Creative Operation:** `"generate-bg"` added to `segmentation_ops.py` as `apply_generate_background(image, mask, prompt, seed, steps, guidance_scale)`. Orchestrated by a new `FluxProvider` class (same interface as `Sam3Provider`).
+    - **Core Features:**
+        - **Generate Background button** in `CreativeOperationsBar` (only active when a mask exists and FLUX is available).
+        - **Prompt input field** in the operations bar (below the generate button) — text box for the background description.
+        - **Seed control:** Optional integer seed for reproducibility ("re-roll" button regenerates with a random seed).
+        - **Inference steps slider:** Range 1–4, default 4. Lower = faster but lower quality.
+        - **Guidance scale slider:** Range 1.0–5.0, default 1.0 (model is step-distilled, low guidance works well).
+        - **Model download flow:** Integrated into Settings → AI Models alongside SAM 3. Shows model size (~18 GB), VRAM requirement, and license acknowledgement checkbox before downloading.
+        - **Capability gating:** `FluxProvider.get_capabilities()` checks installed diffusers version, available VRAM (via `torch.cuda.mem_get_info`), and model file presence. `CreativeOperationsBar` disables the button with a tooltip ("Requires RTX 4090 / 29 GB VRAM") if unavailable.
+    - **FluxProvider class** (`src/python/facelib/flux_provider.py`):
+        - Lazily loads `Flux2KleinPipeline` on first use (same pattern as `Sam3Provider`).
+        - `generate_background(prompt, width, height, seed, num_steps, guidance_scale) -> PIL.Image` — thin wrapper around `pipe(...)`.
+        - `get_capabilities() -> dict` — fast non-blocking check (same `sys.modules` + `find_spec` pattern as SAM 3 to avoid cold import delays).
+    - **IPC:** New `ai:flux:generate` handler in `aiHandlers.ts`. Payload: `{ prompt, width, height, seed?, num_steps?, guidance_scale? }`. Returns `{ result_b64 }`.
+    - **Segmentation dispatch:** `apply_generate_background` in `apply_operation` receives the pre-generated FLUX image as a base64 arg (generated in a prior IPC call) and composites it with the subject using the SAM 3 mask.
+    - **Implementation Phases:**
+        1. Python: `FluxProvider` class with `generate_background` and `get_capabilities`. Model lazy-load with CPU offload fallback.
+        2. Python: `apply_generate_background(image, mask, generated_bg_b64, feather_radius)` in `segmentation_ops.py`.
+        3. IPC: `ai:flux:capabilities` + `ai:flux:generate` handlers. Expose in `preload.ts`.
+        4. Hook: `useFlux` hook with `checkCapabilities()`, `generateBackground(prompt, opts)` action, `isGenerating` state.
+        5. UI: Generate Background button + prompt input + seed/steps/guidance sliders in `CreativeOperationsBar`. Capability gate with tooltip.
+        6. Settings: FLUX model download card in AI Models settings (size, VRAM, license warning, download progress).
+        7. Tests: Python unit tests for `FluxProvider.get_capabilities` (mocked diffusers), `apply_generate_background` composite logic (mocked PIL), IPC routing.
+    - **Stretch Goal — Variation Generation:** A "Variations" button that calls `generate_background` 4 times with different seeds and shows a 2×2 grid picker before compositing. Lets users browse options before committing.
+    - **Change Log:** `aiChangeLog/phase-120-flux-background-generation.md`
+
 - **Hardware Compatibility:** Force Mode Selection (GPU/CPU), Multi-GPU support, OpenVINO/ONNX runtime.
 - **Face Restoration Config:** Expose GFPGAN blending weight, Restoration Strength slider.
 - **Custom AI Models:** Load user-provided `.pth` models from a `models/` directory.
@@ -255,6 +292,7 @@
 - **Creative Compositing Workspace (Z-ordered layers, multi-photo segment transfer):** Planned — Phase 116. See AI & Computer Vision section above.
 - **Photo Adjustments (brightness/contrast/shadows/WB/levels, global or segment-scoped):** Planned — Phase 117. See AI & Computer Vision section above.
 - **Per-Layer Transform (resize/rotate canvas handles, flip, numeric HUD):** Planned — Phase 118. See AI & Computer Vision section above.
+- **FLUX.2 Background Generation (AI-powered background replacement):** Planned — Phase 120. See AI & Computer Vision section above.
 - **Collage Creator:** Masonry/Grid layouts, Face-Aware cropping.
 - **Static Gallery Generator:** Export album as a static HTML site.
 - **Face Dataset Export:** Generate cleaned, high-res face crops for LORA training.

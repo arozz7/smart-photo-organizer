@@ -71,10 +71,16 @@ def predict(payload: dict[str, Any], req_id: str | None = None) -> dict[str, Any
     text_threshold = float(payload.get("text_threshold", 0.5))
     mask_threshold = float(payload.get("mask_threshold", 0.5))
     exclusion_boxes = payload.get("exclusion_boxes")  # list[list[int]] | None
+    exemplar_box = payload.get("exemplar_box")        # list[int] | None
+    exemplar_neg_boxes = payload.get("exemplar_neg_boxes") or []  # list[list[int]]
 
     try:
         provider = _get_provider()
-        if text:
+        if exemplar_box:
+            result = provider.predict_from_exemplar(
+                session_id, exemplar_box, exemplar_neg_boxes
+            )
+        elif text:
             if exclusion_boxes:
                 result = provider.predict_from_text_with_exclusions(
                     session_id, text, exclusion_boxes, text_threshold, mask_threshold
