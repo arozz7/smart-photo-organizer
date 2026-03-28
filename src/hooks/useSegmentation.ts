@@ -506,6 +506,25 @@ export function useSegmentation() {
     }, [])
 
     // ------------------------------------------------------------------
+    // Save result to library
+    // ------------------------------------------------------------------
+
+    const saveResult = useCallback(async (): Promise<{ savedPath: string } | { error: string }> => {
+        const resultB64 = state.resultB64
+        const sourcePath = state.imagePath
+        if (!resultB64 || !sourcePath) return { error: 'No result to save' }
+
+        try {
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('creative:saveResult', { resultB64, sourcePath })
+            if (!res?.success) return { error: res?.error ?? 'Save failed' }
+            return { savedPath: res.savedPath }
+        } catch (e: any) {
+            return { error: e.message ?? 'Save failed' }
+        }
+    }, [state.resultB64, state.imagePath])
+
+    // ------------------------------------------------------------------
     // Reset
     // ------------------------------------------------------------------
 
@@ -538,6 +557,7 @@ export function useSegmentation() {
         unionAllMasks,
         predict,
         applyOperation,
+        saveResult,
         reset,
     }
 }

@@ -1,5 +1,8 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { Operation } from '../hooks/useSegmentation'
+
+type SaveStatus = { type: 'idle' } | { type: 'saving' } | { type: 'ok'; path: string } | { type: 'err'; msg: string }
+type ClipStatus = { type: 'idle' } | { type: 'ok' } | { type: 'err'; msg: string }
 
 interface Props {
     hasMasks: boolean
@@ -10,6 +13,7 @@ interface Props {
     invertSelection: boolean
     onFeatherChange: (v: number) => void
     onInvertChange: (v: boolean) => void
+    onSaveToLibrary: () => Promise<{ savedPath: string } | { error: string }>
     onApply: (op: Operation, params?: {
         radius?: number
         featherRadius?: number
@@ -23,7 +27,7 @@ interface Props {
 export default function CreativeOperationsBar({
     hasMasks, busy, hasResult, resultB64,
     featherRadius, invertSelection,
-    onFeatherChange, onInvertChange, onApply,
+    onFeatherChange, onInvertChange, onSaveToLibrary, onApply,
 }: Props) {
     const [blurRadius, setBlurRadius] = useState(15)
     const [fillColor, setFillColor] = useState('#ffffff')
@@ -31,6 +35,30 @@ export default function CreativeOperationsBar({
     const [spotlightBrightness, setSpotlightBrightness] = useState(0.35)
     const [tintColor, setTintColor] = useState('#ff9900')
     const [tintOpacity, setTintOpacity] = useState(0.5)
+    const [dropdownOpen, setDropdownOpen] = useState(false)
+    const [saveStatus, setSaveStatus] = useState<SaveStatus>({ type: 'idle' })
+    const [clipStatus, setClipStatus] = useState<ClipStatus>({ type: 'idle' })
+    const dropdownRef = useRef<HTMLDivElement>(null)
+    const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const clipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    // Close dropdown on outside click
+    useEffect(() => {
+        if (!dropdownOpen) return
+        const handler = (e: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+                setDropdownOpen(false)
+            }
+        }
+        document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [dropdownOpen])
+
+    // Clear timers on unmount
+    useEffect(() => () => {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+        if (clipTimerRef.current) clearTimeout(clipTimerRef.current)
+    }, [])
 
     const disabled = !hasMasks || busy
 
@@ -45,12 +73,34 @@ export default function CreativeOperationsBar({
         [onApply, featherRadius],
     )
 
-    const downloadBlob = useCallback(() => {
+    const handleSaveToLibrary = useCallback(async () => {
+        setSaveStatus({ type: 'saving' })
+        const result = await onSaveToLibrary()
+        if ('savedPath' in result) {
+            // Show only the file name to keep the label short
+            const fileName = result.savedPath.split(/[\\/]/).pop() ?? result.savedPath
+            setSaveStatus({ type: 'ok', path: fileName })
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+            saveTimerRef.current = setTimeout(() => setSaveStatus({ type: 'idle' }), 3000)
+        } else {
+            setSaveStatus({ type: 'err', msg: result.error })
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+            saveTimerRef.current = setTimeout(() => setSaveStatus({ type: 'idle' }), 3000)
+        }
+    }, [onSaveToLibrary])
+
+    const handleCopyToClipboard = useCallback(async () => {
         if (!resultB64) return
-        const link = document.createElement('a')
-        link.href = `data:image/png;base64,${resultB64}`
-        link.download = `creative-result-${Date.now()}.png`
-        link.click()
+        setDropdownOpen(false)
+        try {
+            const blob = await fetch(`data:image/png;base64,${resultB64}`).then(r => r.blob())
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+            setClipStatus({ type: 'ok' })
+        } catch (e: any) {
+            setClipStatus({ type: 'err', msg: e.message ?? 'Copy failed' })
+        }
+        if (clipTimerRef.current) clearTimeout(clipTimerRef.current)
+        clipTimerRef.current = setTimeout(() => setClipStatus({ type: 'idle' }), 3000)
     }, [resultB64])
 
     return (
@@ -183,10 +233,63 @@ export default function CreativeOperationsBar({
                     Sharpen
                 </button>
 
-                <button onClick={downloadBlob} disabled={!hasResult}
-                    className="ml-auto px-3 py-1.5 rounded-md text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors">
-                    ↓ Save
-                </button>
+                {/* Split-button: Save to Library + Copy to Clipboard */}
+                <div className="ml-auto flex items-center gap-2">
+
+                    {/* Inline status feedback */}
+                    {saveStatus.type === 'ok' && (
+                        <span className="text-xs text-green-400 truncate max-w-[180px]" title={saveStatus.path}>
+                            Saved: {saveStatus.path}
+                        </span>
+                    )}
+                    {saveStatus.type === 'err' && (
+                        <span className="text-xs text-red-400 truncate max-w-[180px]" title={saveStatus.msg}>
+                            Error: {saveStatus.msg}
+                        </span>
+                    )}
+                    {clipStatus.type === 'ok' && saveStatus.type === 'idle' && (
+                        <span className="text-xs text-green-400">Copied!</span>
+                    )}
+                    {clipStatus.type === 'err' && saveStatus.type === 'idle' && (
+                        <span className="text-xs text-red-400 truncate max-w-[180px]" title={clipStatus.msg}>
+                            {clipStatus.msg}
+                        </span>
+                    )}
+
+                    {/* Split-button container */}
+                    <div ref={dropdownRef} className="relative flex">
+                        {/* Primary: Save to Library */}
+                        <button
+                            onClick={handleSaveToLibrary}
+                            disabled={!hasResult || saveStatus.type === 'saving'}
+                            className="px-3 py-1.5 rounded-l-md text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors border-r border-indigo-400"
+                        >
+                            {saveStatus.type === 'saving' ? 'Saving…' : '↓ Save to Library'}
+                        </button>
+
+                        {/* Chevron toggle */}
+                        <button
+                            onClick={() => setDropdownOpen(o => !o)}
+                            disabled={!hasResult}
+                            aria-label="More save options"
+                            className="px-2 py-1.5 rounded-r-md text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+                        >
+                            ▾
+                        </button>
+
+                        {/* Dropdown */}
+                        {dropdownOpen && (
+                            <div className="absolute right-0 bottom-full mb-1 w-44 rounded-md shadow-lg bg-gray-700 border border-gray-600 z-10">
+                                <button
+                                    onClick={handleCopyToClipboard}
+                                    className="w-full text-left px-3 py-2 text-sm text-white hover:bg-gray-600 rounded-md"
+                                >
+                                    Copy to Clipboard
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
         </div>
     )
