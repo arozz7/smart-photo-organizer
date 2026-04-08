@@ -10,6 +10,10 @@ import { LayerSpec } from '../types/compositor'
 interface Props {
     layer: LayerSpec
     isBackground: boolean
+    /** Whether this layer is the currently selected layer (for adjustments). */
+    isActive?: boolean
+    /** Called when the user clicks the row to select it for adjustments. */
+    onSelect?: () => void
     onUpdate: (patch: Partial<LayerSpec>) => void
     onRemove: () => void
     onBringToFront: () => void
@@ -19,6 +23,8 @@ interface Props {
 export default function LayerRow({
     layer,
     isBackground,
+    isActive = false,
+    onSelect,
     onUpdate,
     onRemove,
     onBringToFront,
@@ -53,11 +59,14 @@ export default function LayerRow({
         <div
             ref={setNodeRef}
             style={style}
+            onClick={onSelect}
             className={`flex items-center gap-2 px-3 py-2 rounded-md border transition-colors ${
-                isBackground
-                    ? 'bg-gray-800 border-gray-600'
-                    : 'bg-gray-750 border-gray-700 hover:border-gray-600'
-            }`}
+                isActive
+                    ? 'bg-gray-800 border-indigo-500'
+                    : isBackground
+                        ? 'bg-gray-800 border-gray-600'
+                        : 'bg-gray-750 border-gray-700 hover:border-gray-600'
+            } ${onSelect ? 'cursor-pointer' : ''}`}
         >
             {/* Drag Handle */}
             <button

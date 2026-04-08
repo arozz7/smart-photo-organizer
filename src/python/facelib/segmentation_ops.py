@@ -212,6 +212,100 @@ def apply_color_tint(
 
 
 # ---------------------------------------------------------------------------
+# Photo Adjustments
+# ---------------------------------------------------------------------------
+
+def apply_adjustments(
+    image: Image.Image,
+    params: dict,
+    mask: np.ndarray | None = None,
+) -> Image.Image:
+    """
+    Apply non-destructive photo adjustments to an image.
+
+    Adjustments are applied in a fixed order to avoid compounding artefacts:
+      1. White Balance (temperature)
+      2. Levels (black_point / white_point)
+      3. Brightness
+      4. Contrast
+      5. Shadows (lift dark tones)
+      6. Highlights (compress bright tones)
+
+    Args:
+        image:  Source PIL Image (any mode; converted to RGB internally).
+        params: Dict of adjustment values — all optional; omitted keys use identity defaults.
+                Keys: temperature (-1.0–1.0), black_point (0–200), white_point (55–255),
+                      brightness (0.0–2.0), contrast (0.0–2.0),
+                      shadows (-1.0–1.0), highlights (-1.0–1.0).
+        mask:   Optional float32 numpy array [H, W] in [0, 1].
+                1.0 = fully adjusted, 0.0 = fully original.
+                When None, the entire image is adjusted (global scope).
+
+    Returns:
+        Adjusted PIL Image in RGB mode.
+    """
+    original = image.convert("RGB")
+    result = original.copy()
+    arr = np.array(result, dtype=np.float32)
+
+    # 1. White Balance — temperature: -1.0 (cool) → +1.0 (warm)
+    temperature = float(params.get("temperature", 0.0))
+    if temperature != 0.0:
+        r_factor = 1.0 + temperature * 0.2
+        b_factor = 1.0 - temperature * 0.2
+        arr[:, :, 0] = np.clip(arr[:, :, 0] * r_factor, 0, 255)
+        arr[:, :, 2] = np.clip(arr[:, :, 2] * b_factor, 0, 255)
+
+    # 2. Levels — black_point and white_point input remapping
+    black_point = int(params.get("black_point", 0))
+    white_point = int(params.get("white_point", 255))
+    if black_point != 0 or white_point != 255:
+        arr = np.clip(arr, black_point, white_point)
+        range_span = max(white_point - black_point, 1)
+        arr = (arr - black_point) / range_span * 255.0
+
+    result = Image.fromarray(arr.clip(0, 255).astype(np.uint8), "RGB")
+
+    # 3. Brightness
+    brightness = float(params.get("brightness", 1.0))
+    if brightness != 1.0:
+        result = ImageEnhance.Brightness(result).enhance(brightness)
+
+    # 4. Contrast
+    contrast = float(params.get("contrast", 1.0))
+    if contrast != 1.0:
+        result = ImageEnhance.Contrast(result).enhance(contrast)
+
+    # 5. Shadows — lift dark tones (pixels < 128)
+    shadows = float(params.get("shadows", 0.0))
+    if shadows != 0.0:
+        arr = np.array(result, dtype=np.float32)
+        shadow_gain = 1.0 + shadows * 0.5
+        dark_mask = arr < 128
+        arr[dark_mask] = np.clip(arr[dark_mask] * shadow_gain, 0, 255)
+        result = Image.fromarray(arr.clip(0, 255).astype(np.uint8), "RGB")
+
+    # 6. Highlights — compress bright tones (pixels > 128)
+    highlights = float(params.get("highlights", 0.0))
+    if highlights != 0.0:
+        arr = np.array(result, dtype=np.float32)
+        highlight_factor = 1.0 - highlights * 0.3
+        bright_mask = arr > 128
+        arr[bright_mask] = np.clip(arr[bright_mask] * highlight_factor, 0, 255)
+        result = Image.fromarray(arr.clip(0, 255).astype(np.uint8), "RGB")
+
+    # Scope compositing — blend adjusted result over original using mask
+    if mask is not None:
+        orig_arr = np.array(original, dtype=np.float32)
+        adj_arr = np.array(result, dtype=np.float32)
+        a3 = _alpha3(_to_alpha(mask))
+        blended = (adj_arr * a3 + orig_arr * (1.0 - a3)).clip(0, 255).astype(np.uint8)
+        return Image.fromarray(blended, "RGB")
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Compositor
 # ---------------------------------------------------------------------------
 

@@ -615,6 +615,11 @@ def handle_command(command):
         from commands import segmentation
         response = segmentation.apply_operation(payload, req_id)
 
+    elif cmd_type == 'segment_adjust':
+        # [Phase 117] Photo Adjustments
+        from commands import segmentation
+        response = segmentation.apply_adjustments_command(payload, req_id)
+
     elif cmd_type == 'compose':
         # [Phase 116] Creative Compositing Workspace
         from commands import composite

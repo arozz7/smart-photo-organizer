@@ -11,6 +11,7 @@ import { registerDashboardHandlers } from './ipc/dashboardHandlers';
 import { registerCollageHandlers } from './ipc/collageHandlers';
 import { registerPrsHandlers } from './ipc/prsHandlers';
 import { registerCompositeHandlers } from './ipc/compositeHandlers';
+import { registerAdjustmentHandlers } from './ipc/adjustmentHandlers';
 import { scanQueue } from './scanQueue';
 import { initDB } from './db'
 import { fileURLToPath } from 'node:url'
@@ -143,6 +144,7 @@ app.whenReady().then(async () => {
   registerCollageHandlers();
   registerPrsHandlers();
   registerCompositeHandlers();
+  registerAdjustmentHandlers();
 
   // Pass mainWindow reference to Provider when available
   // We can hook into WindowManager or set it when created.
