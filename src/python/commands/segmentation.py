@@ -195,3 +195,65 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
     except Exception as e:
         logger.exception("segment_apply error")
         return {"success": False, "error": str(e), "reqId": req_id}
+
+
+def apply_adjustments_command(payload: dict[str, Any], req_id: str | None = None) -> dict[str, Any]:
+    """
+    Apply non-destructive photo adjustments (brightness, contrast, WB, levels,
+    shadows, highlights) to an image, optionally scoped to a segmentation mask.
+
+    payload fields:
+      image_b64     : str  — base64 PNG/JPEG of the source image (required)
+      scope         : str  — "global" | "segment" (default "global")
+      mask_b64      : str  — base64 grayscale PNG mask; required when scope="segment"
+      invert_mask   : bool — flip the mask before applying (default False)
+      feather_radius: int  — Gaussian feather radius for mask edges (default 0)
+      params        : dict — adjustment key/value pairs (all optional)
+    """
+    import base64
+    import io
+    from PIL import Image
+
+    image_b64: str = payload.get("image_b64", "")
+    if not image_b64:
+        return {"success": False, "error": "image_b64 is required", "reqId": req_id}
+
+    scope: str = payload.get("scope", "global")
+    if scope not in ("global", "segment"):
+        return {"success": False, "error": "scope must be 'global' or 'segment'", "reqId": req_id}
+
+    mask_b64: str = payload.get("mask_b64", "")
+    if scope == "segment" and not mask_b64:
+        return {"success": False, "error": "mask_b64 is required when scope is 'segment'", "reqId": req_id}
+
+    try:
+        from facelib.segmentation_ops import (
+            apply_adjustments, decode_mask, feather_mask, encode_image,
+        )
+
+        img_bytes = base64.b64decode(image_b64)
+        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
+        mask = None
+        if scope == "segment":
+            feather_radius: int = int(payload.get("feather_radius", 0))
+            invert_mask: bool = bool(payload.get("invert_mask", False))
+            raw_mask = decode_mask(mask_b64)
+            alpha = feather_mask(raw_mask, feather_radius)
+            if invert_mask:
+                alpha = 1.0 - alpha
+            mask = alpha
+
+        params: dict = payload.get("params") or {}
+        result_image = apply_adjustments(image, params, mask=mask)
+
+        logger.info(
+            "apply_adjustments_command complete scope=%s feather=%s",
+            scope,
+            payload.get("feather_radius", 0),
+        )
+        return {"success": True, "result_b64": encode_image(result_image), "reqId": req_id}
+
+    except Exception as e:
+        logger.exception("apply_adjustments_command error")
+        return {"success": False, "error": str(e), "reqId": req_id}

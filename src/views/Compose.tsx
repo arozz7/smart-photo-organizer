@@ -19,6 +19,9 @@ import { useCompositor } from '../hooks/useCompositor'
 import { LayerSpec } from '../types/compositor'
 import LayerRow from '../components/LayerRow'
 import LibraryPhotoPickerModal from '../components/LibraryPhotoPickerModal'
+import AdjustmentsPanel from '../components/AdjustmentsPanel'
+import type { AdjustmentParams, AdjustmentScope } from '../types/adjustments'
+import { toSnakeAdjustParams } from '../types/adjustments'
 
 // Max longest side for encoding source images — keeps IPC payload manageable
 const MAX_ENCODE_PX = 2048
@@ -66,6 +69,12 @@ export default function Compose() {
     const [loadingLayer, setLoadingLayer] = useState(false)
     const loadingRef = useRef(false)
     const processedNavState = useRef(false)
+    // Right-panel tab: 'layers' | 'adjustments'
+    const [activeTab, setActiveTab] = useState<'layers' | 'adjustments'>('layers')
+    // Active (selected) layer for adjustments
+    const [activeLayerId, setActiveLayerId] = useState<string | null>(null)
+    const [adjustBusy, setAdjustBusy] = useState(false)
+    const [adjustScope, setAdjustScope] = useState<AdjustmentScope>('global')
 
     const {
         state,
@@ -108,6 +117,39 @@ export default function Compose() {
             moveLayer(String(active.id), String(over.id))
         }
     }, [moveLayer])
+
+    // ---------------------------------------------------------------------------
+    // Apply adjustments to the active layer
+    // ---------------------------------------------------------------------------
+
+    const handleApplyAdjustments = useCallback(async (
+        imageB64: string,
+        params: AdjustmentParams,
+        scope: AdjustmentScope,
+    ) => {
+        if (!activeLayerId || adjustBusy) return
+        const activeLayer = state.layers.find(l => l.id === activeLayerId)
+        if (!activeLayer) return
+
+        const maskB64 = scope === 'segment' ? activeLayer.maskB64 : undefined
+        if (scope === 'segment' && !maskB64) return
+
+        setAdjustBusy(true)
+        try {
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('ai:segment:adjust', {
+                image_b64: imageB64,
+                scope,
+                mask_b64: maskB64 || undefined,
+                params:   toSnakeAdjustParams(params),
+            })
+            if (res?.success) {
+                updateLayer(activeLayerId, { sourceImageB64: res.result_b64 })
+            }
+        } catch { /* non-critical */ } finally {
+            setAdjustBusy(false)
+        }
+    }, [activeLayerId, adjustBusy, state.layers, updateLayer])
 
     // ---------------------------------------------------------------------------
     // Add layer from Library picker
@@ -254,65 +296,106 @@ export default function Compose() {
                     )}
                 </div>
 
-                {/* Layers panel */}
+                {/* Right panel: Layers + Adjustments tabs */}
                 <div className="flex-[2] flex flex-col min-h-0 min-w-[280px] max-w-[360px]">
 
-                    {/* Panel header */}
-                    <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-700 bg-gray-800/60 flex-shrink-0">
-                        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                            Layers ({state.layers.length})
-                        </span>
-                        <button
-                            onClick={() => setPickerOpen(true)}
-                            disabled={loadingLayer}
-                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
-                            aria-label="Add layer from library"
-                        >
-                            <PlusIcon className="w-3.5 h-3.5" />
-                            {loadingLayer ? 'Loading…' : 'Add'}
-                        </button>
-                    </div>
-
-                    {/* Layer stack */}
-                    <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                        {state.layers.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-600">
-                                <div className="text-3xl">📋</div>
-                                <p className="text-xs text-center">
-                                    No layers yet.<br />Pick a photo from Library or send a segment from Creative Tools.
-                                </p>
-                            </div>
-                        ) : (
-                            <DndContext
-                                sensors={sensors}
-                                collisionDetection={closestCenter}
-                                onDragEnd={handleDragEnd}
+                    {/* Tab bar */}
+                    <div className="flex border-b border-gray-700 bg-gray-800/60 flex-shrink-0">
+                        {(['layers', 'adjustments'] as const).map(tab => (
+                            <button
+                                key={tab}
+                                onClick={() => setActiveTab(tab)}
+                                className={`flex-1 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                                    activeTab === tab
+                                        ? 'text-indigo-400 border-b-2 border-indigo-500'
+                                        : 'text-gray-500 hover:text-gray-300'
+                                }`}
                             >
-                                <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-                                    {sortedLayers.map(layer => (
-                                        <LayerRow
-                                            key={layer.id}
-                                            layer={layer}
-                                            isBackground={layer.id === backgroundLayer?.id}
-                                            onUpdate={patch => updateLayer(layer.id, patch)}
-                                            onRemove={() => removeLayer(layer.id)}
-                                            onBringToFront={() => bringToFront(layer.id)}
-                                            onSendToBack={() => sendToBack(layer.id)}
-                                        />
-                                    ))}
-                                </SortableContext>
-                            </DndContext>
+                                {tab === 'layers' ? `Layers (${state.layers.length})` : 'Adjustments'}
+                            </button>
+                        ))}
+                        {activeTab === 'layers' && (
+                            <button
+                                onClick={() => setPickerOpen(true)}
+                                disabled={loadingLayer}
+                                className="flex items-center gap-1 px-2.5 py-2 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors flex-shrink-0"
+                                aria-label="Add layer from library"
+                            >
+                                <PlusIcon className="w-3.5 h-3.5" />
+                                {loadingLayer ? '…' : 'Add'}
+                            </button>
                         )}
                     </div>
 
-                    {/* Panel footer hint */}
-                    {state.layers.length > 0 && (
-                        <div className="px-4 py-2 border-t border-gray-700 flex-shrink-0">
-                            <p className="text-xs text-gray-600">
-                                Higher layers render on top · drag to reorder · eye = visibility
-                            </p>
-                        </div>
+                    {/* Layers tab */}
+                    {activeTab === 'layers' && (
+                        <>
+                            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                                {state.layers.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-600">
+                                        <div className="text-3xl">📋</div>
+                                        <p className="text-xs text-center">
+                                            No layers yet.<br />Pick a photo from Library or send a segment from Creative Tools.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <DndContext
+                                        sensors={sensors}
+                                        collisionDetection={closestCenter}
+                                        onDragEnd={handleDragEnd}
+                                    >
+                                        <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+                                            {sortedLayers.map(layer => (
+                                                <LayerRow
+                                                    key={layer.id}
+                                                    layer={layer}
+                                                    isBackground={layer.id === backgroundLayer?.id}
+                                                    isActive={layer.id === activeLayerId}
+                                                    onSelect={() => setActiveLayerId(layer.id)}
+                                                    onUpdate={patch => updateLayer(layer.id, patch)}
+                                                    onRemove={() => removeLayer(layer.id)}
+                                                    onBringToFront={() => bringToFront(layer.id)}
+                                                    onSendToBack={() => sendToBack(layer.id)}
+                                                />
+                                            ))}
+                                        </SortableContext>
+                                    </DndContext>
+                                )}
+                            </div>
+                            {state.layers.length > 0 && (
+                                <div className="px-4 py-2 border-t border-gray-700 flex-shrink-0">
+                                    <p className="text-xs text-gray-600">
+                                        Higher layers render on top · drag to reorder · click to select for adjustments
+                                    </p>
+                                </div>
+                            )}
+                        </>
                     )}
+
+                    {/* Adjustments tab */}
+                    {activeTab === 'adjustments' && (() => {
+                        const activeLayer = state.layers.find(l => l.id === activeLayerId) ?? null
+                        return (
+                            <div className="flex-1 overflow-y-auto">
+                                {!activeLayerId ? (
+                                    <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-600 px-4">
+                                        <p className="text-xs text-center">
+                                            Select a layer in the Layers tab to apply adjustments.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <AdjustmentsPanel
+                                        imageB64={activeLayer?.sourceImageB64 ?? null}
+                                        hasMask={!!(activeLayer?.maskB64)}
+                                        scope={adjustScope}
+                                        onScopeChange={setAdjustScope}
+                                        busy={adjustBusy}
+                                        onApply={handleApplyAdjustments}
+                                    />
+                                )}
+                            </div>
+                        )
+                    })()}
                 </div>
             </div>
 

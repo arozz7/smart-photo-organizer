@@ -9,6 +9,10 @@ export type Operation =
     | 'background-remove' | 'isolate' | 'blur' | 'enhance'
     | 'desaturate-bg' | 'fill-bg'
     | 'pixelate-bg' | 'spotlight' | 'color-tint'
+    | 'adjust'
+
+export type { AdjustmentParams, AdjustmentScope } from '../types/adjustments'
+export { toSnakeAdjustParams } from '../types/adjustments'
 
 // Load a mask PNG (base64) into an HTMLImageElement
 function loadMaskImage(b64: string): Promise<HTMLImageElement> {
@@ -525,6 +529,43 @@ export function useSegmentation() {
     }, [state.resultB64, state.imagePath])
 
     // ------------------------------------------------------------------
+    // Photo Adjustments (Phase 117)
+    // ------------------------------------------------------------------
+
+    const applyAdjustments = useCallback(async (
+        imageB64: string,
+        params: import('../types/adjustments').AdjustmentParams,
+        scope: import('../types/adjustments').AdjustmentScope,
+    ): Promise<void> => {
+        const maskB64 = scope === 'segment'
+            ? (masksRef.current[selectedMaskIdxRef.current]?.mask_b64 ?? '')
+            : undefined
+
+        if (scope === 'segment' && !maskB64) {
+            setState(s => ({ ...s, error: 'Segment scope requires an active mask' }))
+            return
+        }
+
+        setState(s => ({ ...s, isApplying: true, error: null }))
+        try {
+            const { toSnakeAdjustParams } = await import('../types/adjustments')
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('ai:segment:adjust', {
+                image_b64:      imageB64,
+                scope,
+                mask_b64:       maskB64,
+                invert_mask:    invertSelectionRef.current,
+                feather_radius: featherRadiusRef.current,
+                params:         toSnakeAdjustParams(params),
+            })
+            if (!res?.success) throw new Error(res?.error ?? 'Adjustment failed')
+            setState(s => ({ ...s, resultB64: res.result_b64, isApplying: false, error: null }))
+        } catch (e: any) {
+            setState(s => ({ ...s, isApplying: false, error: e.message ?? 'Adjustment failed' }))
+        }
+    }, [])
+
+    // ------------------------------------------------------------------
     // Reset
     // ------------------------------------------------------------------
 
@@ -557,6 +598,7 @@ export function useSegmentation() {
         unionAllMasks,
         predict,
         applyOperation,
+        applyAdjustments,
         saveResult,
         reset,
     }
