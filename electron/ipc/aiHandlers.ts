@@ -1,4 +1,6 @@
 import { ipcMain, app } from 'electron';
+import path from 'node:path';
+import fs from 'node:fs/promises';
 import { pythonProvider } from '../infrastructure/PythonAIProvider';
 import { PhotoService } from '../core/services/PhotoService';
 import { setAISettings, getAISettings } from '../store';
@@ -829,5 +831,43 @@ export function registerAIHandlers() {
         tint_opacity?: number;
     }) => {
         return await pythonProvider.sendRequest('segment_apply', payload, 120_000);
+    });
+
+    // ---------------------------------------------------------------
+    // Phase 115 — Save creative result to library
+    // ---------------------------------------------------------------
+
+    ipcMain.handle('creative:saveResult', async (_, payload: {
+        resultB64: string;
+        sourcePath: string;
+    }) => {
+        const { resultB64, sourcePath } = payload;
+
+        if (!resultB64 || typeof resultB64 !== 'string') {
+            return { success: false, error: 'Missing resultB64' };
+        }
+        if (!sourcePath || typeof sourcePath !== 'string') {
+            return { success: false, error: 'Missing sourcePath' };
+        }
+
+        try {
+            const libraryPath = ConfigService.getLibraryPath();
+            const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+            const dir = path.join(libraryPath, 'Creative Results', today);
+            await fs.mkdir(dir, { recursive: true });
+
+            const timestamp = Date.now();
+            const fileName = `creative-${timestamp}.png`;
+            const savedPath = path.join(dir, fileName);
+
+            const buffer = Buffer.from(resultB64, 'base64');
+            await fs.writeFile(savedPath, buffer);
+
+            logger.info({ savedPath }, 'creative:saveResult written');
+            return { success: true, savedPath };
+        } catch (e: any) {
+            logger.error({ error: e }, 'creative:saveResult failed');
+            return { success: false, error: e.message ?? String(e) };
+        }
     });
 }

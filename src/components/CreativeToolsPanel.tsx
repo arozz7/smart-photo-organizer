@@ -49,6 +49,7 @@ export default function CreativeToolsPanel() {
         unionAllMasks,
         predict,
         applyOperation,
+        saveResult,
         reset,
     } = useSegmentation()
 
@@ -715,6 +716,7 @@ export default function CreativeToolsPanel() {
                 invertSelection={state.invertSelection}
                 onFeatherChange={setFeatherRadius}
                 onInvertChange={setInvertSelection}
+                onSaveToLibrary={saveResult}
                 onApply={applyOperation}
             />
 
