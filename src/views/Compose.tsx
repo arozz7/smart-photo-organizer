@@ -1,0 +1,326 @@
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    DragEndEvent,
+} from '@dnd-kit/core'
+import {
+    SortableContext,
+    sortableKeyboardCoordinates,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { PlusIcon } from '@radix-ui/react-icons'
+import { useCompositor } from '../hooks/useCompositor'
+import { LayerSpec } from '../types/compositor'
+import LayerRow from '../components/LayerRow'
+import LibraryPhotoPickerModal from '../components/LibraryPhotoPickerModal'
+
+// Max longest side for encoding source images — keeps IPC payload manageable
+const MAX_ENCODE_PX = 2048
+
+// ---------------------------------------------------------------------------
+// Helper: load an image file from disk and encode it as a capped base64 PNG
+// ---------------------------------------------------------------------------
+
+async function encodeImageFile(filePath: string): Promise<{ b64: string; width: number; height: number }> {
+    // @ts-ignore
+    const buf: ArrayBuffer = await window.ipcRenderer.invoke('read-file-buffer', filePath)
+    const blob = new Blob([buf])
+    const url = URL.createObjectURL(blob)
+
+    return new Promise((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => {
+            const longestSide = Math.max(img.naturalWidth, img.naturalHeight)
+            const scale = longestSide > MAX_ENCODE_PX ? MAX_ENCODE_PX / longestSide : 1
+            const w = Math.round(img.naturalWidth * scale)
+            const h = Math.round(img.naturalHeight * scale)
+
+            const canvas = document.createElement('canvas')
+            canvas.width = w
+            canvas.height = h
+            const ctx = canvas.getContext('2d')!
+            ctx.drawImage(img, 0, 0, w, h)
+            URL.revokeObjectURL(url)
+            const b64 = canvas.toDataURL('image/png').split(',')[1]
+            resolve({ b64, width: w, height: h })
+        }
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to load image')) }
+        img.src = url
+    })
+}
+
+// ---------------------------------------------------------------------------
+// View
+// ---------------------------------------------------------------------------
+
+export default function Compose() {
+    const navigate = useNavigate()
+    const location = useLocation()
+    const [pickerOpen, setPickerOpen] = useState(false)
+    const [loadingLayer, setLoadingLayer] = useState(false)
+    const loadingRef = useRef(false)
+    const processedNavState = useRef(false)
+
+    const {
+        state,
+        updateLayer,
+        removeLayer,
+        moveLayer,
+        bringToFront,
+        sendToBack,
+        addLayer,
+        setCanvasDimensions,
+        addFromCreativeTools,
+    } = useCompositor()
+
+    // Auto-add layer when navigated here from "Send to Compose"
+    useEffect(() => {
+        if (processedNavState.current) return
+        const navPayload = (location.state as any)?.payload
+        if (navPayload?.sourceImageB64 && navPayload?.maskB64) {
+            processedNavState.current = true
+            addFromCreativeTools({
+                sourceImageB64: navPayload.sourceImageB64,
+                maskB64: navPayload.maskB64,
+                suggestedName: navPayload.suggestedName,
+            })
+        }
+    }, [location.state, addFromCreativeTools])
+
+    // ---------------------------------------------------------------------------
+    // dnd-kit sensors
+    // ---------------------------------------------------------------------------
+
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    )
+
+    const handleDragEnd = useCallback((event: DragEndEvent) => {
+        const { active, over } = event
+        if (over && active.id !== over.id) {
+            moveLayer(String(active.id), String(over.id))
+        }
+    }, [moveLayer])
+
+    // ---------------------------------------------------------------------------
+    // Add layer from Library picker
+    // ---------------------------------------------------------------------------
+
+    const handleAddFromLibrary = useCallback(async (filePath: string) => {
+        if (loadingRef.current) return
+        loadingRef.current = true
+        setPickerOpen(false)
+        setLoadingLayer(true)
+
+        try {
+            const { b64, width, height } = await encodeImageFile(filePath)
+
+            // First layer → set canvas dimensions to match
+            if (state.layers.length === 0) {
+                setCanvasDimensions(width, height)
+            }
+
+            const fileName = filePath.split(/[\\/]/).pop() ?? 'Photo'
+            addLayer({
+                name: fileName,
+                sourceImageB64: b64,
+                maskB64: '',           // full-image layer — no mask
+                x: 0,
+                y: 0,
+                scaleX: 1,
+                scaleY: 1,
+                rotation: 0,
+                opacity: 1,
+                visible: true,
+            })
+        } catch (e: any) {
+            console.warn('[Compose] Failed to encode image:', e)
+        } finally {
+            loadingRef.current = false
+            setLoadingLayer(false)
+        }
+    }, [state.layers.length, addLayer, setCanvasDimensions])
+
+    // ---------------------------------------------------------------------------
+    // Layer sorted by zIndex descending for display (top of stack = first in list)
+    // ---------------------------------------------------------------------------
+
+    const sortedLayers = [...state.layers].sort((a, b) => b.zIndex - a.zIndex)
+    const itemIds = sortedLayers.map(l => l.id)
+
+    const backgroundLayer = state.layers.reduce<LayerSpec | null>((pick, l) => {
+        if (!pick || l.zIndex < pick.zIndex) return l
+        return pick
+    }, null)
+
+    // ---------------------------------------------------------------------------
+    // Render
+    // ---------------------------------------------------------------------------
+
+    return (
+        <div className="h-full flex flex-col bg-gray-900 text-gray-100 overflow-hidden">
+
+            {/* Header */}
+            <div className="flex items-center gap-4 px-6 py-3 border-b border-gray-700 flex-shrink-0">
+                <h1 className="text-lg font-semibold text-white">Compositing Workspace</h1>
+                <span className="text-xs text-gray-500">
+                    Canvas {state.canvasWidth} × {state.canvasHeight}px
+                </span>
+                <button
+                    onClick={() => navigate('/create')}
+                    className="ml-auto text-xs text-gray-400 hover:text-white transition-colors"
+                >
+                    ← Creative Tools
+                </button>
+            </div>
+
+            {/* Body: canvas (left 65%) + layers panel (right 35%) */}
+            <div className="flex-1 flex min-h-0 overflow-hidden">
+
+                {/* Canvas preview */}
+                <div className="flex-[3] flex flex-col min-h-0 border-r border-gray-700">
+                    <div className="flex-1 flex items-center justify-center bg-gray-950 relative overflow-hidden">
+
+                        {state.isCompositing && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+                                <span className="text-white text-sm">Compositing…</span>
+                            </div>
+                        )}
+
+                        {state.resultB64 ? (
+                            <div
+                                className="flex-1 flex items-center justify-center w-full h-full p-4"
+                                style={{
+                                    backgroundImage: 'repeating-conic-gradient(#374151 0% 25%, #1f2937 0% 50%)',
+                                    backgroundSize: '20px 20px',
+                                }}
+                            >
+                                <img
+                                    src={`data:image/png;base64,${state.resultB64}`}
+                                    alt="Composition preview"
+                                    className="max-w-full max-h-full object-contain shadow-2xl"
+                                />
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center gap-3 text-gray-600">
+                                <div className="text-5xl">🎨</div>
+                                <p className="text-sm">Add a layer to begin compositing</p>
+                                <button
+                                    onClick={() => setPickerOpen(true)}
+                                    className="mt-2 flex items-center gap-2 px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+                                >
+                                    <PlusIcon className="w-4 h-4" />
+                                    Add from Library
+                                </button>
+                            </div>
+                        )}
+
+                        {state.error && (
+                            <div className="absolute bottom-4 left-4 right-4 px-3 py-2 rounded-md bg-red-900/80 border border-red-700 text-red-300 text-sm">
+                                {state.error}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Canvas footer actions */}
+                    {state.resultB64 && (
+                        <div className="flex items-center gap-3 px-4 py-2 border-t border-gray-700 bg-gray-800/60 flex-shrink-0">
+                            <a
+                                href={`data:image/png;base64,${state.resultB64}`}
+                                download="composition.png"
+                                className="px-3 py-1.5 rounded-md text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                            >
+                                ↓ Download PNG
+                            </a>
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        const blob = await fetch(`data:image/png;base64,${state.resultB64}`).then(r => r.blob())
+                                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+                                    } catch { /* non-critical */ }
+                                }}
+                                className="px-3 py-1.5 rounded-md text-sm bg-gray-700 hover:bg-gray-600 text-white transition-colors"
+                            >
+                                Copy to Clipboard
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* Layers panel */}
+                <div className="flex-[2] flex flex-col min-h-0 min-w-[280px] max-w-[360px]">
+
+                    {/* Panel header */}
+                    <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-700 bg-gray-800/60 flex-shrink-0">
+                        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                            Layers ({state.layers.length})
+                        </span>
+                        <button
+                            onClick={() => setPickerOpen(true)}
+                            disabled={loadingLayer}
+                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+                            aria-label="Add layer from library"
+                        >
+                            <PlusIcon className="w-3.5 h-3.5" />
+                            {loadingLayer ? 'Loading…' : 'Add'}
+                        </button>
+                    </div>
+
+                    {/* Layer stack */}
+                    <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                        {state.layers.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-600">
+                                <div className="text-3xl">📋</div>
+                                <p className="text-xs text-center">
+                                    No layers yet.<br />Pick a photo from Library or send a segment from Creative Tools.
+                                </p>
+                            </div>
+                        ) : (
+                            <DndContext
+                                sensors={sensors}
+                                collisionDetection={closestCenter}
+                                onDragEnd={handleDragEnd}
+                            >
+                                <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+                                    {sortedLayers.map(layer => (
+                                        <LayerRow
+                                            key={layer.id}
+                                            layer={layer}
+                                            isBackground={layer.id === backgroundLayer?.id}
+                                            onUpdate={patch => updateLayer(layer.id, patch)}
+                                            onRemove={() => removeLayer(layer.id)}
+                                            onBringToFront={() => bringToFront(layer.id)}
+                                            onSendToBack={() => sendToBack(layer.id)}
+                                        />
+                                    ))}
+                                </SortableContext>
+                            </DndContext>
+                        )}
+                    </div>
+
+                    {/* Panel footer hint */}
+                    {state.layers.length > 0 && (
+                        <div className="px-4 py-2 border-t border-gray-700 flex-shrink-0">
+                            <p className="text-xs text-gray-600">
+                                Higher layers render on top · drag to reorder · eye = visibility
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <LibraryPhotoPickerModal
+                open={pickerOpen}
+                onSelect={handleAddFromLibrary}
+                onClose={() => setPickerOpen(false)}
+            />
+        </div>
+    )
+}

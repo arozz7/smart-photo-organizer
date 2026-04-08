@@ -1,4 +1,4 @@
-﻿import './setup-env'; // Must be first
+import './setup-env'; // Must be first
 import { app, BrowserWindow } from 'electron'
 import { registerImageProtocol } from './services/imageProtocol';
 import { pythonProvider } from './infrastructure/PythonAIProvider';
@@ -10,6 +10,7 @@ import { registerAppHandlers } from './ipc/appHandlers';
 import { registerDashboardHandlers } from './ipc/dashboardHandlers';
 import { registerCollageHandlers } from './ipc/collageHandlers';
 import { registerPrsHandlers } from './ipc/prsHandlers';
+import { registerCompositeHandlers } from './ipc/compositeHandlers';
 import { scanQueue } from './scanQueue';
 import { initDB } from './db'
 import { fileURLToPath } from 'node:url'
@@ -141,6 +142,7 @@ app.whenReady().then(async () => {
   registerDashboardHandlers();
   registerCollageHandlers();
   registerPrsHandlers();
+  registerCompositeHandlers();
 
   // Pass mainWindow reference to Provider when available
   // We can hook into WindowManager or set it when created.

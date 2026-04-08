@@ -15,6 +15,7 @@ import Search from './views/Search'
 import EnhanceLab from './views/EnhanceLab'
 import Duplicates from './views/Duplicates'
 import Tools from './views/Tools'
+import Compose from './views/Compose'
 
 function App() {
   const [isReady, setIsReady] = useState(false)
@@ -33,6 +34,7 @@ function App() {
           <Route path="people" element={<People />} />
           <Route path="person/:personId" element={<PersonDetail />} />
           <Route path="create" element={<Create />} />
+          <Route path="compose" element={<Compose />} />
           <Route path="enhance/:photoId" element={<EnhanceLab />} /> {/* Added */}
           <Route path="locations" element={<Locations />} />
           <Route path="queues" element={<Queues />} />
