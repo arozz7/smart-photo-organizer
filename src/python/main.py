@@ -615,6 +615,11 @@ def handle_command(command):
         from commands import segmentation
         response = segmentation.apply_operation(payload, req_id)
 
+    elif cmd_type == 'compose':
+        # [Phase 116] Creative Compositing Workspace
+        from commands import composite
+        response = composite.compose(payload, req_id)
+
     elif cmd_type == 'download_model':
         # [Phase 57.5] Refactored to commands/utilities.py
         from commands import utilities

@@ -209,3 +209,83 @@ def apply_color_tint(
     a3 = _alpha3(_to_alpha(mask))
     result = (orig * a3 + blended * (1.0 - a3)).clip(0, 255).astype(np.uint8)
     return Image.fromarray(result)
+
+
+# ---------------------------------------------------------------------------
+# Compositor
+# ---------------------------------------------------------------------------
+
+def compose_layers(layers: list[dict], width: int, height: int) -> str:
+    """
+    Composite an ordered list of layers into a single RGBA PNG.
+
+    Each layer dict must contain:
+      sourceImageB64 : base64 PNG/JPEG of the full source image
+      maskB64        : base64 grayscale PNG mask (white = subject, black = bg)
+      zIndex         : int — compositing order (ascending = bottom-to-top)
+      visible        : bool — skip when False
+      x, y           : int  — pixel offset of layer top-left on canvas
+      scaleX, scaleY : float — scale factors (1.0 = natural)
+      rotation       : float — clockwise degrees
+      opacity        : float — 0.0 (transparent) to 1.0 (opaque)
+
+    Returns a base64-encoded RGBA PNG string.
+    """
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+
+    # Sort ascending so z=0 is drawn first (background), higher z is drawn on top
+    sorted_layers = sorted(layers, key=lambda lyr: lyr.get("zIndex", 0))
+
+    for lyr in sorted_layers:
+        if not lyr.get("visible", True):
+            continue
+
+        src_b64: str = lyr.get("sourceImageB64", "")
+        mask_b64: str = lyr.get("maskB64", "")
+        if not src_b64:
+            continue
+
+        # Decode source image
+        src_bytes = base64.b64decode(src_b64)
+        src_img = Image.open(io.BytesIO(src_bytes)).convert("RGBA")
+
+        # Apply mask if provided; otherwise use the full image
+        if mask_b64:
+            mask_arr = decode_mask(mask_b64)  # bool [H, W]
+            alpha_arr = (mask_arr.astype(np.uint8) * 255)
+            # Resize alpha to match src if dimensions differ
+            if alpha_arr.shape[:2] != (src_img.height, src_img.width):
+                alpha_img = Image.fromarray(alpha_arr, mode="L").resize(
+                    (src_img.width, src_img.height), Image.LANCZOS
+                )
+                alpha_arr = np.array(alpha_img)
+            alpha_channel = Image.fromarray(alpha_arr, mode="L")
+            r, g, b, _a = src_img.split()
+            src_img = Image.merge("RGBA", (r, g, b, alpha_channel))
+
+        # Apply per-layer opacity by scaling the alpha channel
+        opacity = float(lyr.get("opacity", 1.0))
+        if opacity < 1.0:
+            r, g, b, a = src_img.split()
+            a_arr = (np.array(a, dtype=np.float32) * opacity).clip(0, 255).astype(np.uint8)
+            src_img = Image.merge("RGBA", (r, g, b, Image.fromarray(a_arr, mode="L")))
+
+        # Apply scale
+        scale_x = float(lyr.get("scaleX", 1.0))
+        scale_y = float(lyr.get("scaleY", 1.0))
+        if scale_x != 1.0 or scale_y != 1.0:
+            new_w = max(1, int(src_img.width * scale_x))
+            new_h = max(1, int(src_img.height * scale_y))
+            src_img = src_img.resize((new_w, new_h), Image.LANCZOS)
+
+        # Apply rotation (PIL rotates CCW, spec uses CW degrees)
+        rotation = float(lyr.get("rotation", 0.0))
+        if rotation != 0.0:
+            src_img = src_img.rotate(-rotation, expand=True, resample=Image.BICUBIC)
+
+        # Paste onto canvas at (x, y) using the layer's own alpha as mask
+        x = int(lyr.get("x", 0))
+        y = int(lyr.get("y", 0))
+        canvas.alpha_composite(src_img, dest=(x, y))
+
+    return encode_image(canvas)

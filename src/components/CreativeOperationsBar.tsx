@@ -14,6 +14,7 @@ interface Props {
     onFeatherChange: (v: number) => void
     onInvertChange: (v: boolean) => void
     onSaveToLibrary: () => Promise<{ savedPath: string } | { error: string }>
+    onSendToCompose?: () => void
     onApply: (op: Operation, params?: {
         radius?: number
         featherRadius?: number
@@ -27,7 +28,7 @@ interface Props {
 export default function CreativeOperationsBar({
     hasMasks, busy, hasResult, resultB64,
     featherRadius, invertSelection,
-    onFeatherChange, onInvertChange, onSaveToLibrary, onApply,
+    onFeatherChange, onInvertChange, onSaveToLibrary, onSendToCompose, onApply,
 }: Props) {
     const [blurRadius, setBlurRadius] = useState(15)
     const [fillColor, setFillColor] = useState('#ffffff')
@@ -286,6 +287,15 @@ export default function CreativeOperationsBar({
                                 >
                                     Copy to Clipboard
                                 </button>
+                                {onSendToCompose && (
+                                    <button
+                                        onClick={() => { setDropdownOpen(false); onSendToCompose() }}
+                                        className="w-full text-left px-3 py-2 text-sm text-white hover:bg-gray-600 rounded-md"
+                                        title="Push this segment as a new layer into the Compositing Workspace"
+                                    >
+                                        Send to Compose ↗
+                                    </button>
+                                )}
                             </div>
                         )}
                     </div>

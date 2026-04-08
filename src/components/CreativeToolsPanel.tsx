@@ -1,4 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useSegmentation, PromptMode, PointPrompt } from '../hooks/useSegmentation'
 import LibraryPhotoPickerModal from './LibraryPhotoPickerModal'
 import CreativeOperationsBar from './CreativeOperationsBar'
@@ -20,6 +21,7 @@ const MODE_BUTTONS: { mode: PromptMode; label: string; title: string }[] = [
 ]
 
 export default function CreativeToolsPanel() {
+    const navigate = useNavigate()
     const [pickerOpen, setPickerOpen] = useState(false)
     const [cursor, setCursor] = useState('default')
     const [liveBox, setLiveBox] = useState<[number, number, number, number] | null>(null)
@@ -52,6 +54,52 @@ export default function CreativeToolsPanel() {
         saveResult,
         reset,
     } = useSegmentation()
+
+    // ---------------------------------------------------------------------------
+    // Send to Compose
+    // ---------------------------------------------------------------------------
+
+    const handleSendToCompose = useCallback(async () => {
+        const { resultB64, imagePath } = state
+        if (!resultB64 || !imagePath) return
+        try {
+            // @ts-ignore
+            const buf: ArrayBuffer = await window.ipcRenderer.invoke('read-file-buffer', imagePath)
+            const blob = new Blob([buf])
+            const url = URL.createObjectURL(blob)
+            await new Promise<void>((resolve) => {
+                const img = new Image()
+                img.onload = () => {
+                    const MAX_PX = 2048
+                    const scale = Math.max(img.naturalWidth, img.naturalHeight) > MAX_PX
+                        ? MAX_PX / Math.max(img.naturalWidth, img.naturalHeight)
+                        : 1
+                    const w = Math.round(img.naturalWidth * scale)
+                    const h = Math.round(img.naturalHeight * scale)
+                    const canvas = document.createElement('canvas')
+                    canvas.width = w; canvas.height = h
+                    canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+                    URL.revokeObjectURL(url)
+                    const sourceImageB64 = canvas.toDataURL('image/png').split(',')[1]
+                    const fileName = imagePath.split(/[\\/]/).pop() ?? 'Segment'
+                    navigate('/compose', {
+                        state: {
+                            payload: {
+                                sourceImageB64,
+                                maskB64: resultB64,
+                                suggestedName: fileName,
+                            },
+                        },
+                    })
+                    resolve()
+                }
+                img.onerror = () => { URL.revokeObjectURL(url); resolve() }
+                img.src = url
+            })
+        } catch (e) {
+            console.warn('[CreativeToolsPanel] handleSendToCompose failed:', e)
+        }
+    }, [state.resultB64, state.imagePath, navigate])
 
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const imageRef = useRef<HTMLImageElement | null>(null)
@@ -717,6 +765,7 @@ export default function CreativeToolsPanel() {
                 onFeatherChange={setFeatherRadius}
                 onInvertChange={setInvertSelection}
                 onSaveToLibrary={saveResult}
+                onSendToCompose={state.resultB64 ? handleSendToCompose : undefined}
                 onApply={applyOperation}
             />
 
