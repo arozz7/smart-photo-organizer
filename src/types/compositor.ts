@@ -8,8 +8,17 @@
  *   - electron/ipc/compositeHandlers.ts (loosely via payload shape)
  */
 
+/** Transform fields shared between LayerSpec and useCompositor.updateLayerTransform. */
+export interface LayerTransform {
+    x: number;
+    y: number;
+    scaleX: number;
+    scaleY: number;
+    rotation: number;
+}
+
 /** Full specification of a single compositor layer. */
-export interface LayerSpec {
+export interface LayerSpec extends LayerTransform {
     /** Unique identifier (UUID). */
     id: string;
     /** Human-readable display name (editable). */
@@ -30,6 +39,9 @@ export interface LayerSpec {
     scaleY: number;
     /** Clockwise rotation in degrees. */
     rotation: number;
+    /** Natural pixel dimensions of the source image — used to draw the TransformBox. */
+    sourceWidth: number;
+    sourceHeight: number;
     /** Layer opacity, 0.0 (transparent) → 1.0 (opaque). */
     opacity: number;
     /** Compositing order. Layers with lower zIndex render below higher zIndex. */
@@ -46,6 +58,9 @@ export interface SendToComposePayload {
     maskB64: string;
     /** Suggested display name for the new layer. */
     suggestedName?: string;
+    /** Natural pixel dimensions of the source image (for TransformBox). */
+    sourceWidth?: number;
+    sourceHeight?: number;
 }
 
 /** State managed by useCompositor. */
