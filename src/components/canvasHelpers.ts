@@ -2,7 +2,7 @@
  * Pure geometry helpers for the CreativeToolsPanel canvas interactions.
  * No React or DOM dependencies — all functions are deterministic given inputs.
  */
-import type { PointPrompt } from '../hooks/useSegmentation'
+import type { PointPrompt } from '../types/segmentation'
 
 export interface CanvasTransform {
     scale: number
@@ -21,6 +21,7 @@ export type DragAction =
     | { type: 'move-box'; startCX: number; startCY: number; origBox: [number, number, number, number] }
     | { type: 'resize-box'; handle: BoxHandle; startCX: number; startCY: number; origBox: [number, number, number, number] }
     | { type: 'move-point'; index: number; startCX: number; startCY: number; origPt: PointPrompt }
+    | { type: 'pan'; startCX: number; startCY: number; startPanX: number; startPanY: number }
 
 const HANDLE_ORDER: BoxHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 
@@ -103,4 +104,27 @@ export function applyResizeHandle(
 
 export function getCursorForHandle(handle: BoxHandle): string {
     return HANDLE_CURSORS[handle]
+}
+
+/**
+ * Compute the CanvasTransform for a given image at a given zoom/pan.
+ * Bakes userZoom and panX/panY into the standard CanvasTransform fields so all
+ * existing helpers (toImageCoords, hit tests) work correctly at any zoom.
+ */
+export function computeCanvasTransform(
+    naturalWidth: number,
+    naturalHeight: number,
+    canvasW: number,
+    canvasH: number,
+    userZoom = 1,
+    panX = 0,
+    panY = 0,
+): CanvasTransform {
+    const baseScale = Math.min(canvasW / naturalWidth, canvasH / naturalHeight)
+    const scale = baseScale * userZoom
+    const renderedW = naturalWidth * scale
+    const renderedH = naturalHeight * scale
+    const offsetX = (canvasW - renderedW) / 2 + panX
+    const offsetY = (canvasH - renderedH) / 2 + panY
+    return { scale, offsetX, offsetY, renderedW, renderedH }
 }
