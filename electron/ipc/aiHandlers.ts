@@ -351,8 +351,8 @@ export function registerAIHandlers() {
             if (type === 'cluster_faces' || type === 'analyze_image') timeout = 900000;
             return await pythonProvider.sendRequest(type, payload, timeout);
         } catch (e: any) {
-            console.warn(`[Main] ai:command failed (likely shutdown): ${e}`);
             if (e.message === 'Shutdown') return null;
+            console.warn(`[Main] ai:command failed unexpectedly: ${e}`);
             return { success: false, error: "Service unavailable" };
         }
     });

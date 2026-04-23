@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { LayerSpec, CompositorState, SendToComposePayload } from '../types/compositor'
+import { LayerSpec, LayerTransform, CompositorState, SendToComposePayload } from '../types/compositor'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -116,6 +116,10 @@ export function useCompositor() {
         })
     }, [scheduleFlatten])
 
+    const updateLayerTransform = useCallback((id: string, transform: LayerTransform) => {
+        updateLayer(id, transform)
+    }, [updateLayer])
+
     // ------------------------------------------------------------------
     // Layer ordering
     // ------------------------------------------------------------------
@@ -183,6 +187,8 @@ export function useCompositor() {
             scaleX: 1,
             scaleY: 1,
             rotation: 0,
+            sourceWidth: payload.sourceWidth ?? 0,
+            sourceHeight: payload.sourceHeight ?? 0,
             opacity: 1,
             visible: true,
         }
@@ -204,6 +210,7 @@ export function useCompositor() {
         addLayer,
         removeLayer,
         updateLayer,
+        updateLayerTransform,
         moveLayer,
         bringToFront,
         sendToBack,

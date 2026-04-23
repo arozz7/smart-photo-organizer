@@ -16,8 +16,9 @@ import {
 } from '@dnd-kit/sortable'
 import { PlusIcon } from '@radix-ui/react-icons'
 import { useCompositor } from '../hooks/useCompositor'
-import { LayerSpec } from '../types/compositor'
+import { LayerSpec, LayerTransform } from '../types/compositor'
 import LayerRow from '../components/LayerRow'
+import TransformBox from '../components/TransformBox'
 import LibraryPhotoPickerModal from '../components/LibraryPhotoPickerModal'
 import AdjustmentsPanel from '../components/AdjustmentsPanel'
 import type { AdjustmentParams, AdjustmentScope } from '../types/adjustments'
@@ -79,6 +80,7 @@ export default function Compose() {
     const {
         state,
         updateLayer,
+        updateLayerTransform,
         removeLayer,
         moveLayer,
         bringToFront,
@@ -121,6 +123,10 @@ export default function Compose() {
     // ---------------------------------------------------------------------------
     // Apply adjustments to the active layer
     // ---------------------------------------------------------------------------
+
+    const handleTransformChange = useCallback((transform: LayerTransform) => {
+        if (activeLayerId) updateLayerTransform(activeLayerId, transform)
+    }, [activeLayerId, updateLayerTransform])
 
     const handleApplyAdjustments = useCallback(async (
         imageB64: string,
@@ -179,6 +185,8 @@ export default function Compose() {
                 scaleX: 1,
                 scaleY: 1,
                 rotation: 0,
+                sourceWidth: width,
+                sourceHeight: height,
                 opacity: 1,
                 visible: true,
             })
@@ -244,11 +252,24 @@ export default function Compose() {
                                     backgroundSize: '20px 20px',
                                 }}
                             >
-                                <img
-                                    src={`data:image/png;base64,${state.resultB64}`}
-                                    alt="Composition preview"
-                                    className="max-w-full max-h-full object-contain shadow-2xl"
-                                />
+                                <div className="relative max-w-full max-h-full">
+                                    <img
+                                        src={`data:image/png;base64,${state.resultB64}`}
+                                        alt="Composition preview"
+                                        className="max-w-full max-h-full object-contain shadow-2xl block"
+                                    />
+                                    {activeLayerId && (() => {
+                                        const activeLayer = state.layers.find(l => l.id === activeLayerId)
+                                        return activeLayer ? (
+                                            <TransformBox
+                                                layer={activeLayer}
+                                                canvasW={state.canvasWidth}
+                                                canvasH={state.canvasHeight}
+                                                onTransformChange={handleTransformChange}
+                                            />
+                                        ) : null
+                                    })()}
+                                </div>
                             </div>
                         ) : (
                             <div className="flex flex-col items-center gap-3 text-gray-600">

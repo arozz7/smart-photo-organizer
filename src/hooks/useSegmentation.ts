@@ -1,110 +1,19 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { INITIAL_STATE } from '../types/segmentation'
+import type { PromptMode, Operation, MaskResult, Capabilities, PointPrompt, LastOp, SegmentState } from '../types/segmentation'
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export type PromptMode = 'text' | 'box' | 'points' | 'exemplar'
-export type Operation =
-    | 'background-remove' | 'isolate' | 'blur' | 'enhance'
-    | 'desaturate-bg' | 'fill-bg'
-    | 'pixelate-bg' | 'spotlight' | 'color-tint'
-    | 'adjust'
-
+// Re-export types for backwards compat with existing consumers
+export type { PromptMode, Operation, MaskResult, Capabilities, PointPrompt, LastOp, SegmentState } from '../types/segmentation'
 export type { AdjustmentParams, AdjustmentScope } from '../types/adjustments'
 export { toSnakeAdjustParams } from '../types/adjustments'
 
-// Load a mask PNG (base64) into an HTMLImageElement
+// Load a mask PNG (base64) into an HTMLImageElement — used by unionAllMasks
 function loadMaskImage(b64: string): Promise<HTMLImageElement> {
     return new Promise(resolve => {
         const img = new Image()
         img.onload = () => resolve(img)
         img.src = `data:image/png;base64,${b64}`
     })
-}
-
-export interface MaskResult {
-    mask_b64: string
-    score: number
-    area: number
-}
-
-export interface Capabilities {
-    model_ready: boolean
-    text_prompts: boolean
-    provider: string
-    checkpoint?: string
-    model_file_present?: boolean
-    transformers_compatible?: boolean
-    install_hint?: string
-    error?: string
-}
-
-export interface PointPrompt {
-    x: number        // image-space coordinates
-    y: number
-    label: 1 | 0    // 1 = positive, 0 = negative
-}
-
-export interface LastOp {
-    operation: Operation
-    extra?: {
-        radius?: number
-        color?: string
-        pixelSize?: number
-        spotlightBrightness?: number
-        tintOpacity?: number
-    }
-}
-
-export interface SegmentState {
-    capabilities: Capabilities | null
-    sessionId: string | null
-    imagePath: string | null
-    promptMode: PromptMode
-    text: string
-    points: PointPrompt[]
-    box: [number, number, number, number] | null  // [x1,y1,x2,y2] image-space
-    exemplarBox: [number, number, number, number] | null
-    exemplarNegBoxes: [number, number, number, number][]
-    masks: MaskResult[]
-    selectedMaskIdx: number
-    resultB64: string | null
-    isPredicting: boolean
-    isApplying: boolean
-    isLoadingImage: boolean
-    error: string | null
-    // Text-mode confidence thresholds
-    textThreshold: number
-    maskThreshold: number
-    // Global mask modifiers (apply to every operation)
-    featherRadius: number
-    invertSelection: boolean
-    lastOp: LastOp | null
-}
-
-const INITIAL_STATE: SegmentState = {
-    capabilities: null,
-    sessionId: null,
-    imagePath: null,
-    promptMode: 'text',
-    text: '',
-    points: [],
-    box: null,
-    exemplarBox: null,
-    exemplarNegBoxes: [],
-    masks: [],
-    selectedMaskIdx: 0,
-    resultB64: null,
-    isPredicting: false,
-    isApplying: false,
-    isLoadingImage: false,
-    error: null,
-    textThreshold: 0.5,
-    maskThreshold: 0.5,
-    featherRadius: 0,
-    invertSelection: false,
-    lastOp: null,
 }
 
 // ---------------------------------------------------------------------------
@@ -441,6 +350,8 @@ export function useSegmentation() {
                 selectedMaskIdx: 0,
                 isPredicting: false,
                 error: null,
+                maskHistory: [],
+                maskFuture: [],
             }))
         } catch (e: any) {
             setState(s => ({ ...s, isPredicting: false, error: e.message }))
@@ -566,6 +477,70 @@ export function useSegmentation() {
     }, [])
 
     // ------------------------------------------------------------------
+    // Phase 119 — Mask editing (undo/redo, brush mode)
+    // ------------------------------------------------------------------
+
+    const enterEditMask = useCallback(() => {
+        setState(s => ({ ...s, editingMask: true }))
+    }, [])
+
+    const exitEditMask = useCallback(() => {
+        setState(s => ({ ...s, editingMask: false }))
+    }, [])
+
+    const applyMaskEdit = useCallback((newMaskB64: string) => {
+        setState(s => {
+            const prevMaskB64 = s.masks[s.selectedMaskIdx]?.mask_b64 ?? ''
+            const masks = s.masks.map((m, i) =>
+                i === s.selectedMaskIdx ? { ...m, mask_b64: newMaskB64 } : m
+            )
+            return {
+                ...s,
+                masks,
+                resultB64: null,
+                maskHistory: [...s.maskHistory.slice(-19), prevMaskB64],
+                maskFuture: [],
+            }
+        })
+    }, [])
+
+    const undoMask = useCallback(() => {
+        setState(s => {
+            if (s.maskHistory.length === 0) return s
+            const prev = s.maskHistory[s.maskHistory.length - 1]
+            const current = s.masks[s.selectedMaskIdx]?.mask_b64 ?? ''
+            const masks = s.masks.map((m, i) =>
+                i === s.selectedMaskIdx ? { ...m, mask_b64: prev } : m
+            )
+            return {
+                ...s,
+                masks,
+                resultB64: null,
+                maskHistory: s.maskHistory.slice(0, -1),
+                maskFuture: [current, ...s.maskFuture],
+            }
+        })
+    }, [])
+
+    const redoMask = useCallback(() => {
+        setState(s => {
+            if (s.maskFuture.length === 0) return s
+            const next = s.maskFuture[0]
+            const current = s.masks[s.selectedMaskIdx]?.mask_b64 ?? ''
+            const masks = s.masks.map((m, i) =>
+                i === s.selectedMaskIdx ? { ...m, mask_b64: next } : m
+            )
+            return {
+                ...s,
+                masks,
+                resultB64: null,
+                maskHistory: [...s.maskHistory, current],
+                maskFuture: s.maskFuture.slice(1),
+            }
+        })
+    }, [])
+
+    // ------------------------------------------------------------------
     // Reset
     // ------------------------------------------------------------------
 
@@ -600,6 +575,13 @@ export function useSegmentation() {
         applyOperation,
         applyAdjustments,
         saveResult,
+        enterEditMask,
+        exitEditMask,
+        applyMaskEdit,
+        undoMask,
+        redoMask,
+        canUndo: state.maskHistory.length > 0,
+        canRedo: state.maskFuture.length > 0,
         reset,
     }
 }
