@@ -143,6 +143,7 @@ class Sam3Provider(SegmentationProvider):
 
     def set_image(self, image_path: str) -> str:
         """Load an image into a session and return the session_id."""
+        self._ensure_initialized()
         path = Path(image_path)
         if not path.is_file():
             raise FileNotFoundError(f"Image not found: {image_path}")

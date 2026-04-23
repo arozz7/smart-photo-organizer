@@ -353,6 +353,16 @@ export function useSegmentation() {
                 maskHistory: [],
                 maskFuture: [],
             }))
+
+            // Eagerly update refs so applyOperation reads the fresh mask immediately
+            masksRef.current = res.masks ?? []
+            selectedMaskIdxRef.current = 0
+
+            // Auto-reapply the last operation whenever the mask changes (e.g. threshold slider)
+            if (lastOpRef.current && (res.masks ?? []).length > 0) {
+                const op = lastOpRef.current
+                applyOperation(op.operation, { featherRadius: featherRadiusRef.current, ...op.extra })
+            }
         } catch (e: any) {
             setState(s => ({ ...s, isPredicting: false, error: e.message }))
         }
