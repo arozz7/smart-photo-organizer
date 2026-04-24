@@ -480,7 +480,8 @@ export function useSegmentation() {
                 params:         toSnakeAdjustParams(params),
             })
             if (!res?.success) throw new Error(res?.error ?? 'Adjustment failed')
-            setState(s => ({ ...s, resultB64: res.result_b64, isApplying: false, error: null }))
+            // Clear lastOp so feather/invert/threshold auto-reapply doesn't overwrite the adjustment result
+            setState(s => ({ ...s, resultB64: res.result_b64, isApplying: false, error: null, lastOp: null }))
         } catch (e: any) {
             setState(s => ({ ...s, isApplying: false, error: e.message ?? 'Adjustment failed' }))
         }
