@@ -408,55 +408,185 @@ Other Fine-Tuning controls:
 
 The **Creative Tools** panel lets you apply AI-powered creative edits to any photo using an interactive canvas backed by **SAM 3 (Segment Anything Model 3)**.
 
+<!-- SCREENSHOT: Creative Tools full view — canvas with mask overlay, result panel, operations bar — save as docs/assets/CreativeTools_Overview.png -->
+> 📷 _[Screenshot placeholder: Creative Tools overview]_
+
 ### Opening Creative Tools
 
-Open the **Tools** section in the sidebar and select **Creative Tools**. Click **Choose Photo** to pick a photo from your library. The photo loads in the canvas at a 680×480 logical resolution that scales to fill the available window area.
+Open the **Tools** section in the sidebar and select **Creative Tools**. Click **From Library** to pick a photo, or **Load File** to open any image from disk. On first use per session, the SAM 3 model loads (~5–10 seconds) during the "Loading image…" phase.
 
-### Selecting a Subject
+### 10.1 Prompt Modes
 
-SAM 3 lets you isolate any part of a photo using three prompt modes — switch between them using the toolbar at the top of the canvas.
+Switch between modes using the toolbar at the top. The active mode is highlighted in indigo.
 
-#### Box Mode
+#### □ Box Mode
 
 - **Draw:** Click and drag on the canvas to draw a bounding box around your subject.
-- **Move:** Click inside the box and drag to reposition it anywhere on the image.
-- **Resize:** Eight handles appear on the corners and edge midpoints — drag any handle to resize.
-- **Delete:** Press the `Delete` key to clear the box and reset the canvas.
+- **Move:** Click inside the box and drag to reposition.
+- **Resize:** Drag any of the 8 corner/edge handles.
+- **Delete:** Press the `Delete` key or click **Clear**.
 
-#### Points Mode
+#### · Points Mode
 
-- **Add Foreground Point (+):** Click anywhere inside the subject (green dot — tells the AI "include this area").
-- **Add Background Point (−):** Toggle to background mode in the toolbar, then click outside the subject (red dot — tells the AI "exclude this area").
-- **Move a Point:** Click and drag any existing point to a new position.
-- **Delete a Point:** Click directly on a point without dragging to remove it.
+- **Foreground (+) Point:** Click anywhere inside the subject to tell the AI "include this area" (green dot).
+- **Background (−) Point:** Shift+click to mark areas the AI should exclude (red dot).
+- **Move a Point:** Click and drag any existing point.
+- **Delete a Point:** Click directly on a point without dragging.
 
-#### Combined Box + Points Mode
+#### Combined Box + Points
 
-Switch to **Points** mode while a box is already drawn — the box is preserved and both prompts are sent to the AI together. The toolbar displays **"Box preserved — combined mode active"**. This typically produces the most accurate masks for complex subjects with fine edges.
+Switch to **Points** mode while a box is active — both prompts are combined for higher-precision masks. The toolbar shows **"Box preserved — combined mode active"**.
 
 #### Text Mode
 
-Type a natural-language description (e.g., `"person"`, `"sky"`, `"red car"`) and click **Predict** to let the AI locate and segment the described subject.
+Type a natural-language description (e.g., `"person"`, `"red umbrella"`) and press Enter or click **Segment**.
 
-### Applying Operations
+- **Confidence** slider — how strictly the AI interprets your text (higher = fewer, more precise results).
+- **Mask Quality** slider — minimum mask edge quality threshold.
+- Both sliders auto-re-segment after a short debounce.
 
-Once a mask is predicted, the result panel on the right shows the output. Choose an operation from the toolbar:
+#### ⊡ Exemplar Mode
+
+Draw a reference box around one representative instance of an object. SAM 3 finds all similar instances in the photo.
+
+- Add **Exclusion Boxes** (toggle **− Exclude** draw mode) to remove false matches.
+- Click **Union All** when multiple instances are found to merge them into one mask.
+
+<!-- SCREENSHOT: Exemplar mode with multiple instances highlighted — save as docs/assets/CreativeTools_Exemplar.png -->
+> 📷 _[Screenshot placeholder: Exemplar mode — multiple objects detected]_
+
+### 10.2 Operations
+
+Click any operation to apply it to the current mask. The active operation button is **highlighted in indigo** — click it again to clear the result (toggle off).
+
+#### Global modifiers
+
+| Control | Effect |
+|---------|--------|
+| **Feather** (0–30 px) | Softens the mask edge — feathered edges blend more naturally with the background. |
+| **Invert Selection** | Flips which side the operation applies to — e.g., "Blur BG" with Invert becomes "Blur Subject". |
+
+#### Operation reference
 
 | Operation | Effect |
 |-----------|--------|
-| **Remove Background** | Erases everything outside the mask — saves as a transparent PNG. |
-| **Isolate Subject** | Extracts only the selected subject onto a transparent background. |
-| **Blur Background** | Blurs the area outside the mask. Adjust the **Blur Radius** slider to control intensity. |
-| **Sharpen Subject** | Applies unsharp-mask sharpening to the masked region. |
-| **Save to Library** | Saves the result next to the original file and adds it to your library. |
+| **Remove BG** | Removes the background, leaving the subject on a transparent layer. |
+| **Isolate** | Extracts the selected subject onto a transparent background. |
+| **B&W BG** | Keeps the subject in full color; desaturates the background to grayscale. |
+| **Blur BG** | Gaussian blur on the background — drag the radius slider (3–50 px). |
+| **Pixelate BG** | Mosaic-style pixelation of the background — drag the pixel size slider (4–40 px). |
+| **Spotlight** | Darkens the background; subject stays bright — drag the brightness slider (0–1). |
+| **Fill BG** | Replaces the background with a solid color — click the color swatch to choose. |
+| **Color Tint** | Overlays a semi-transparent color wash on the background — pick a color and set opacity. |
+| **Sharpen** | Applies unsharp-mask sharpening to the selected region. |
 
-> [!TIP]
-> Click **Download** in the result panel to save the file to disk before committing it to the library.
+<!-- SCREENSHOT: Operations bar with "B&W BG" active and result visible — save as docs/assets/CreativeTools_OperationsBar.png -->
+> 📷 _[Screenshot placeholder: Operations bar with an active operation and result shown]_
 
-### Canvas Interaction Tips
+### 10.3 Photo Adjustments
 
-- For subjects with fine edges (hair, fur), combine a tight Box with a few foreground Points for best accuracy.
-- Use background Points (−) near areas incorrectly included in the mask to refine the selection.
-- The canvas scales to fill your window — resize the app to get more working area.
-- Press `Delete` while in Box mode to clear a misdrawn box without switching modes.
-- If the model warning banner appears, download the SAM 3 checkpoint via **Settings → Manage Models** before using Creative Tools.
+Click **Adjust** in the toolbar to open the compact adjustments sidebar. Sliders **auto-apply** after a short debounce — there is no separate Apply button.
+
+| Slider | Range | What it does |
+|--------|-------|-------------|
+| **Temp** | −1 → +1 | Color temperature (cool/warm) — displayed in Kelvin |
+| **Black** | 0 → 200 | Black point — crushes dark tones |
+| **White** | 55 → 255 | White point — clips bright highlights |
+| **Bright** | 0.0 → 2.0 | Overall brightness multiplier |
+| **Contr** | 0.0 → 2.0 | Contrast multiplier |
+| **Shdws** | −1 → +1 | Shadow lift or crush |
+| **Hi-lts** | −1 → +1 | Highlight compression or lift |
+
+**Scope** (shown when a mask is active):
+- **Global** — applies the adjustment to the entire image.
+- **Seg** — applies only to the masked region (e.g., adjust only the subject's skin tones).
+
+**Resetting:** Click any slider label (e.g., "Temp") to reset that slider to its default. Click the **↺** icon in the panel header to reset all sliders.
+
+<!-- SCREENSHOT: Adjustments sidebar open with warm temperature applied — save as docs/assets/CreativeTools_Adjustments.png -->
+> 📷 _[Screenshot placeholder: Adjustments sidebar with modified sliders and result showing warm tones]_
+
+### 10.4 Mask Editor
+
+Once a mask is predicted, click **✏ Edit Mask** to enter the brush editor. Draw or erase pixels directly on the mask to fix edges the AI got wrong.
+
+- **Paint** — adds white (foreground/include) pixels to the mask.
+- **Erase** — removes pixels from the mask.
+- **Brush Size** — drag the slider (2–80 px).
+- **Undo** — `Ctrl+Z` (up to 20 steps).
+- **Redo** — `Ctrl+Y` or `Ctrl+Shift+Z`.
+- Click **Done Editing** to commit the mask. Any active operation is automatically re-applied.
+
+<!-- SCREENSHOT: Mask editor with brush cursor visible on a hair-edge detail — save as docs/assets/CreativeTools_MaskEditor.png -->
+> 📷 _[Screenshot placeholder: Mask editor — brush painting on a hair edge]_
+
+### 10.5 Saving Results
+
+| Button | Description |
+|--------|-------------|
+| **↓ Save to Library** | Saves the result alongside the original file and adds it to your library. |
+| **▾ (dropdown)** | Opens secondary actions — see below. |
+| **Copy to Clipboard** | Copies the result PNG to the system clipboard for pasting in other apps. |
+| **Send to Compose ↗** | Pushes the result as a new layer into the Compositing Workspace. |
+
+### 10.6 Tips
+
+- For subjects with fine edges (hair, fur), combine a tight **Box** with a few foreground **Points** for the most accurate mask.
+- Use the **Feather** slider (2–5 px) for natural-looking edge blends, especially on soft subjects.
+- **Zoom** in using `+` / `−` / `Fit` buttons or pinch-zoom to inspect mask details. Pan with the **Space+drag** gesture.
+- If the model warning banner appears, download the SAM 3 checkpoint via **Settings → Manage Models**.
+
+---
+
+## 🖼️ 11. Compositing Workspace
+
+The **Compositing Workspace** lets you layer multiple photos and segments into a single composite image.
+
+<!-- SCREENSHOT: Compositing workspace with two layers — save as docs/assets/Compositing_Overview.png -->
+> 📷 _[Screenshot placeholder: Compositing workspace overview — layers panel, canvas, transform controls]_
+
+Open **Tools → Compositing** from the sidebar, or use **Send to Compose ↗** from Creative Tools to import a segment directly.
+
+### 11.1 Adding Layers
+
+- Click the **+** button in the Layers tab to add a photo from your library as a new layer.
+- **Send to Compose ↗** in Creative Tools adds a segment (with its transparency mask) directly as a layer.
+- Each layer shows its name, visibility toggle, and delete button in the Layers panel.
+
+### 11.2 Layer Management
+
+- **Reorder:** Drag a layer row up or down to change its stacking order (top of list = topmost on canvas).
+- **Bring to Front / Send to Back:** Use the arrow buttons on any layer row.
+- **Remove:** Click the trash icon. This cannot be undone.
+- **Rename:** Click a layer's name to edit it inline.
+
+### 11.3 Per-Layer Transform
+
+Select a layer, then switch to the **Transform** tab. A transform box appears on the canvas with handles you can drag.
+
+| Handle / Control | Action |
+|-----------------|--------|
+| Drag inside the box | Move the layer |
+| Corner / edge handles | Resize (proportional by default) |
+| Rotation handle (above top edge) | Rotate freely |
+| **↔ H** button | Flip horizontally |
+| **↕ V** button | Flip vertically |
+| X, Y, W, H, Angle fields | Type exact numeric values |
+
+<!-- SCREENSHOT: Transform box visible on a layer — save as docs/assets/Compositing_Transform.png -->
+> 📷 _[Screenshot placeholder: Per-layer transform box with handles on a composited image]_
+
+### 11.4 Adjustments per Layer
+
+Select a layer and open the **Adjustments** tab. The same 7 sliders as Creative Tools apply — changes are per-layer and non-destructive until you click **Apply**.
+
+### 11.5 Canvas Size
+
+Set the output canvas dimensions at the top of the workspace. Click **Set** to apply — the canvas resizes and all layers maintain their relative positions.
+
+### 11.6 Saving the Composite
+
+Click **Export** to flatten all visible layers and save the composite image to a location on your computer.
+
+<!-- SCREENSHOT: Exported composite result — save as docs/assets/Compositing_Export.png -->
+> 📷 _[Screenshot placeholder: Finished composite being exported]_

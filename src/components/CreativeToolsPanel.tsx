@@ -535,8 +535,8 @@ export default function CreativeToolsPanel() {
                     )}
                 </div>
 
-                {/* Right: result preview — shrinks when adjust panel is open */}
-                <div className={`${adjustPanelOpen ? 'flex-[1] min-w-[130px]' : 'flex-[2] min-w-[180px]'} flex flex-col gap-0 rounded-lg border border-gray-700 bg-gray-900 overflow-hidden min-h-0 transition-all`}>
+                {/* Right: result preview */}
+                <div className="flex-[2] min-w-[160px] flex flex-col gap-0 rounded-lg border border-gray-700 bg-gray-900 overflow-hidden min-h-0">
                     <div className="px-3 pt-3 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider flex-shrink-0">Result</div>
                     {state.resultB64 ? (
                         <div className="flex-1 flex items-center justify-center p-2 min-h-0" style={{ backgroundImage: 'repeating-conic-gradient(#374151 0% 25%, #1f2937 0% 50%)', backgroundSize: '16px 16px' }}>
@@ -547,19 +547,21 @@ export default function CreativeToolsPanel() {
                     )}
                 </div>
 
-                {/* Adjustments column — pushes result pane left when open */}
+                {/* Adjustments column — fixed 200px so both canvas and result shrink proportionally */}
                 {adjustPanelOpen && (
-                    <AdjustmentsPanel
-                        imageB64={encodedImageB64}
-                        hasMask={state.masks.length > 0}
-                        scope={adjustScope}
-                        onScopeChange={setAdjustScope}
-                        params={adjustParams}
-                        onParamsChange={setAdjustParams}
-                        busy={busy}
-                        onApply={applyAdjustments}
-                        autoApply
-                    />
+                    <div className="w-[200px] flex-shrink-0 flex flex-col min-h-0">
+                        <AdjustmentsPanel
+                            imageB64={encodedImageB64}
+                            hasMask={state.masks.length > 0}
+                            scope={adjustScope}
+                            onScopeChange={setAdjustScope}
+                            params={adjustParams}
+                            onParamsChange={setAdjustParams}
+                            busy={busy}
+                            onApply={applyAdjustments}
+                            autoApply
+                        />
+                    </div>
                 )}
             </div>
 

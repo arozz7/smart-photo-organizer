@@ -93,7 +93,7 @@ export default function AdjustmentsPanel({
     const hasAnyChange = SLIDERS.some(d => (params[d.key] as number) !== d.default)
 
     return (
-        <div className="flex flex-col gap-0 rounded-lg border border-gray-700 bg-gray-900 overflow-hidden flex-shrink-0">
+        <div className="flex flex-col gap-0 rounded-lg border border-gray-700 bg-gray-900 overflow-hidden w-full h-full">
             {/* Header */}
             <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 flex-1">
