@@ -121,7 +121,9 @@ export function useCreativeCanvas(opts: UseCreativeCanvasOptions) {
 
     useEffect(() => {
         const onDown = (e: KeyboardEvent) => {
-            if (e.code === 'Space' && !e.repeat) { e.preventDefault(); spaceDownRef.current = true }
+            const tag = (e.target as HTMLElement)?.tagName
+            const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable
+            if (e.code === 'Space' && !e.repeat && !isEditable) { e.preventDefault(); spaceDownRef.current = true }
         }
         const onUp = (e: KeyboardEvent) => {
             if (e.code === 'Space') spaceDownRef.current = false
