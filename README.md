@@ -233,7 +233,8 @@ Export low-quality face crops directly for external review or training datasets.
 Apply AI-powered creative edits to any photo using an interactive canvas powered by **SAM 3 (Segment Anything Model 3)**.
 
 <!-- SCREENSHOT: Creative Tools canvas with a subject selected, mask overlay visible, and the B&W BG result in the right panel — save as docs/assets/CreativeTools_Overview.png -->
-> 📷 _[Screenshot: Creative Tools overview — canvas, mask overlay, result panel, and operations bar]_
+> 📷 _[Screenshot: Creative Tools overview — canvas, mask overlay, result panel, and operations bar]_ (docs/assets/CreativeTools_Overview.png)
+
 
 Open **Tools → Creative Tools** and pick any photo from your library or click **Load File** to open from disk.
 
