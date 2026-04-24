@@ -77,7 +77,7 @@ export function computeHandles(layer: LayerSpec): {
 export function computeRotationGrip(
     tm: [number, number],
     cx: number, cy: number,
-    rotation: number,
+    _rotation: number,
 ): [number, number] {
     // Direction from centroid toward tm (then continue outward)
     const dx = tm[0] - cx
