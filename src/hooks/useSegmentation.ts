@@ -1,20 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { INITIAL_STATE } from '../types/segmentation'
-import type { PromptMode, Operation, MaskResult, Capabilities, PointPrompt, LastOp, SegmentState } from '../types/segmentation'
+import type { PromptMode, Operation, MaskResult, Capabilities, PointPrompt, SegmentState, ActiveOp, OpExtra, LastAdjustment } from '../types/segmentation'
+import { BG_OPS, runOpsIPC, runAdjustmentIPC, computeUnionMask } from './segmentationChain'
 
 // Re-export types for backwards compat with existing consumers
-export type { PromptMode, Operation, MaskResult, Capabilities, PointPrompt, LastOp, SegmentState } from '../types/segmentation'
+export type { PromptMode, Operation, MaskResult, Capabilities, PointPrompt, SegmentState, ActiveOp, OpExtra, LastAdjustment } from '../types/segmentation'
 export type { AdjustmentParams, AdjustmentScope } from '../types/adjustments'
 export { toSnakeAdjustParams } from '../types/adjustments'
-
-// Load a mask PNG (base64) into an HTMLImageElement — used by unionAllMasks
-function loadMaskImage(b64: string): Promise<HTMLImageElement> {
-    return new Promise(resolve => {
-        const img = new Image()
-        img.onload = () => resolve(img)
-        img.src = `data:image/png;base64,${b64}`
-    })
-}
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -23,46 +15,106 @@ function loadMaskImage(b64: string): Promise<HTMLImageElement> {
 export function useSegmentation() {
     const [state, setState] = useState<SegmentState>(INITIAL_STATE)
 
-    // Stable ref for session ID so async callbacks never close over stale value
-    const sessionRef = useRef<string | null>(null)
+    const sessionRef              = useRef<string | null>(null)
+    const promptModeRef           = useRef<PromptMode>(INITIAL_STATE.promptMode)
+    const textRef                 = useRef<string>(INITIAL_STATE.text)
+    const pointsRef               = useRef<PointPrompt[]>(INITIAL_STATE.points)
+    const boxRef                  = useRef<[number, number, number, number] | null>(INITIAL_STATE.box)
+    const exemplarBoxRef          = useRef<[number, number, number, number] | null>(INITIAL_STATE.exemplarBox)
+    const exemplarNegBoxesRef     = useRef<[number, number, number, number][]>(INITIAL_STATE.exemplarNegBoxes)
+    const masksRef                = useRef<MaskResult[]>(INITIAL_STATE.masks)
+    const selectedMaskIdxRef      = useRef<number>(INITIAL_STATE.selectedMaskIdx)
+    const textThresholdRef        = useRef<number>(INITIAL_STATE.textThreshold)
+    const maskThresholdRef        = useRef<number>(INITIAL_STATE.maskThreshold)
+    const featherRadiusRef        = useRef<number>(INITIAL_STATE.featherRadius)
+    const invertSelectionRef      = useRef<boolean>(INITIAL_STATE.invertSelection)
+    const activeOpsRef            = useRef<ActiveOp[]>(INITIAL_STATE.activeOps)
+    const lastAdjustmentRef       = useRef<LastAdjustment | null>(INITIAL_STATE.lastAdjustment)
+    const opChainResultB64Ref     = useRef<string | null>(INITIAL_STATE.opChainResultB64)
+    const thresholdTimerRef       = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const featherTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-    // Refs for values read by async callbacks — updated after every render so
-    // predict() and applyOperation() never close over stale state.
-    const promptModeRef = useRef<PromptMode>(INITIAL_STATE.promptMode)
-    const textRef = useRef<string>(INITIAL_STATE.text)
-    const pointsRef = useRef<PointPrompt[]>(INITIAL_STATE.points)
-    const boxRef = useRef<[number, number, number, number] | null>(INITIAL_STATE.box)
-    const exemplarBoxRef = useRef<[number, number, number, number] | null>(INITIAL_STATE.exemplarBox)
-    const exemplarNegBoxesRef = useRef<[number, number, number, number][]>(INITIAL_STATE.exemplarNegBoxes)
-    const masksRef = useRef<MaskResult[]>(INITIAL_STATE.masks)
-    const selectedMaskIdxRef = useRef<number>(INITIAL_STATE.selectedMaskIdx)
-    const textThresholdRef = useRef<number>(INITIAL_STATE.textThreshold)
-    const maskThresholdRef = useRef<number>(INITIAL_STATE.maskThreshold)
-    const featherRadiusRef = useRef<number>(INITIAL_STATE.featherRadius)
-    const invertSelectionRef = useRef<boolean>(INITIAL_STATE.invertSelection)
-    const lastOpRef = useRef<LastOp | null>(INITIAL_STATE.lastOp)
-    const thresholdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const featherTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-    // No dependency array — runs after every render to stay fully in sync
+    // No dependency array — keeps all refs in sync after every render.
     useEffect(() => {
-        promptModeRef.current = state.promptMode
-        textRef.current = state.text
-        pointsRef.current = state.points
-        boxRef.current = state.box
-        exemplarBoxRef.current = state.exemplarBox
-        exemplarNegBoxesRef.current = state.exemplarNegBoxes
-        masksRef.current = state.masks
-        selectedMaskIdxRef.current = state.selectedMaskIdx
-        textThresholdRef.current = state.textThreshold
-        maskThresholdRef.current = state.maskThreshold
-        featherRadiusRef.current = state.featherRadius
-        invertSelectionRef.current = state.invertSelection
-        lastOpRef.current = state.lastOp
+        promptModeRef.current         = state.promptMode
+        textRef.current               = state.text
+        pointsRef.current             = state.points
+        boxRef.current                = state.box
+        exemplarBoxRef.current        = state.exemplarBox
+        exemplarNegBoxesRef.current   = state.exemplarNegBoxes
+        masksRef.current              = state.masks
+        selectedMaskIdxRef.current    = state.selectedMaskIdx
+        textThresholdRef.current      = state.textThreshold
+        maskThresholdRef.current      = state.maskThreshold
+        featherRadiusRef.current      = state.featherRadius
+        invertSelectionRef.current    = state.invertSelection
+        activeOpsRef.current          = state.activeOps
+        lastAdjustmentRef.current     = state.lastAdjustment
+        opChainResultB64Ref.current   = state.opChainResultB64
     })
 
-    // Auto re-predict when confidence/mask thresholds change in text mode.
-    // Debounced 600 ms so rapid slider drags don't fire on every tick.
+    // ------------------------------------------------------------------
+    // Core chain runner — ops in canonical order, then optional adjustment
+    // ------------------------------------------------------------------
+
+    // @ts-ignore
+    const invoke = (ch: string, p: Record<string, unknown>) => window.ipcRenderer.invoke(ch, p)
+
+    const runChain = useCallback(async (
+        ops: ActiveOp[],
+        adjustment: LastAdjustment | null,
+    ) => {
+        if (ops.length === 0 && !adjustment) {
+            setState(s => ({ ...s, resultB64: null, opChainResultB64: null }))
+            return
+        }
+
+        const sessionId = sessionRef.current
+        const maskB64   = masksRef.current[selectedMaskIdxRef.current]?.mask_b64 ?? ''
+
+        if (ops.length > 0 && (!sessionId || !maskB64)) {
+            setState(s => ({ ...s, error: 'No mask selected' }))
+            return
+        }
+
+        setState(s => ({ ...s, isApplying: true, error: null }))
+
+        try {
+            let opChainResult: string | null = null
+
+            if (ops.length > 0 && sessionId && maskB64) {
+                opChainResult = await runOpsIPC(
+                    invoke, ops, sessionId, maskB64,
+                    invertSelectionRef.current, featherRadiusRef.current,
+                )
+            }
+
+            opChainResultB64Ref.current = opChainResult
+
+            let finalResult: string | null = opChainResult
+
+            if (adjustment) {
+                const source   = opChainResult ?? adjustment.baseImageB64
+                const adjMask  = adjustment.scope === 'segment' ? maskB64 : undefined
+                finalResult = await runAdjustmentIPC(
+                    invoke, source, adjustment.params, adjustment.scope,
+                    adjMask, invertSelectionRef.current, featherRadiusRef.current,
+                )
+            }
+
+            setState(s => ({
+                ...s,
+                resultB64: finalResult,
+                opChainResultB64: opChainResult,
+                isApplying: false,
+                error: null,
+            }))
+        } catch (e: any) {
+            setState(s => ({ ...s, isApplying: false, error: e.message }))
+        }
+    }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Auto re-predict (debounced) when confidence/mask thresholds change in text mode.
     useEffect(() => {
         if (
             state.promptMode !== 'text' ||
@@ -79,22 +131,21 @@ export function useSegmentation() {
         }
     }, [state.textThreshold, state.maskThreshold]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Auto re-apply when invert selection is toggled (instant — no debounce needed).
+    // Auto re-run chain when invert selection toggles (instant).
     useEffect(() => {
-        if (!lastOpRef.current || !masksRef.current.length || !sessionRef.current) return
-        const op = lastOpRef.current
-        applyOperation(op.operation, { featherRadius: featherRadiusRef.current, ...op.extra })
+        if (!masksRef.current.length || !sessionRef.current) return
+        if (!activeOpsRef.current.length && !lastAdjustmentRef.current) return
+        runChain(activeOpsRef.current, lastAdjustmentRef.current)
     }, [state.invertSelection]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Auto re-apply the last operation when feather radius changes.
-    // Debounced 600 ms so rapid slider drags coalesce into one IPC call.
+    // Auto re-run chain when feather radius changes (debounced).
     useEffect(() => {
-        if (!lastOpRef.current || !masksRef.current.length || !sessionRef.current) return
+        if (!masksRef.current.length || !sessionRef.current) return
+        if (!activeOpsRef.current.length && !lastAdjustmentRef.current) return
 
         if (featherTimerRef.current) clearTimeout(featherTimerRef.current)
         featherTimerRef.current = setTimeout(() => {
-            const op = lastOpRef.current!
-            applyOperation(op.operation, { featherRadius: featherRadiusRef.current, ...op.extra })
+            runChain(activeOpsRef.current, lastAdjustmentRef.current)
         }, 600)
 
         return () => {
@@ -114,7 +165,6 @@ export function useSegmentation() {
                 setState(s => ({ ...s, capabilities: res as Capabilities, error: null }))
             }
         } catch (e) {
-            // Non-fatal — capabilities check runs on mount, failure just means model not ready
             console.warn('[Segment] capabilities check failed:', e)
         }
     }, [])
@@ -142,6 +192,9 @@ export function useSegmentation() {
                 masks: [],
                 selectedMaskIdx: 0,
                 resultB64: null,
+                opChainResultB64: null,
+                activeOps: [],
+                lastAdjustment: null,
                 error: null,
             }))
         } catch (e: any) {
@@ -175,14 +228,15 @@ export function useSegmentation() {
                 ...s,
                 promptMode: mode,
                 points: [],
-                // Preserve box when switching Box→Points for combined-prompt mode
                 box: mode === 'points' ? s.box : null,
-                // Clear exemplar state when leaving exemplar mode
                 exemplarBox: mode === 'exemplar' ? s.exemplarBox : null,
                 exemplarNegBoxes: mode === 'exemplar' ? s.exemplarNegBoxes : [],
                 masks: [],
                 selectedMaskIdx: 0,
                 resultB64: null,
+                opChainResultB64: null,
+                activeOps: [],
+                lastAdjustment: null,
             }
         })
     }, [])
@@ -228,12 +282,24 @@ export function useSegmentation() {
     }, [])
 
     const clearPrompts = useCallback(() => {
-        setState(s => ({ ...s, points: [], box: null, text: '', exemplarBox: null, exemplarNegBoxes: [], masks: [], selectedMaskIdx: 0, resultB64: null, error: null }))
+        setState(s => ({
+            ...s,
+            points: [], box: null, text: '', exemplarBox: null, exemplarNegBoxes: [],
+            masks: [], selectedMaskIdx: 0,
+            resultB64: null, opChainResultB64: null, activeOps: [], lastAdjustment: null,
+            error: null,
+        }))
     }, [])
 
     const setSelectedMaskIdx = useCallback((idx: number) => {
         setState(s => ({ ...s, selectedMaskIdx: idx, resultB64: null }))
-    }, [])
+        // Re-run chain with the new mask (refs will be updated by next effect, but
+        // we pass the new idx directly to avoid a stale-closure read)
+        setTimeout(() => {
+            if (!activeOpsRef.current.length && !lastAdjustmentRef.current) return
+            runChain(activeOpsRef.current, lastAdjustmentRef.current)
+        }, 0)
+    }, [runChain])
 
     const setTextThreshold = useCallback((v: number) => {
         setState(s => ({ ...s, textThreshold: v }))
@@ -252,27 +318,11 @@ export function useSegmentation() {
     }, [])
 
     const unionAllMasks = useCallback(async () => {
-        const masks = masksRef.current
-        if (masks.length <= 1) return
-
-        const imgs = await Promise.all(masks.map(m => loadMaskImage(m.mask_b64)))
-        const canvas = document.createElement('canvas')
-        canvas.width = imgs[0].naturalWidth
-        canvas.height = imgs[0].naturalHeight
-        const ctx = canvas.getContext('2d')!
-
-        ctx.drawImage(imgs[0], 0, 0)
-        ctx.globalCompositeOperation = 'lighten'
-        for (let i = 1; i < imgs.length; i++) {
-            ctx.drawImage(imgs[i], 0, 0)
-        }
-
-        const unioned = canvas.toDataURL('image/png').split(',')[1]
-        const totalArea = masks.reduce((sum, m) => sum + m.area, 0)
-
+        const result = await computeUnionMask(masksRef.current)
+        if (!result) return
         setState(s => ({
             ...s,
-            masks: [{ mask_b64: unioned, score: 1.0, area: totalArea }],
+            masks: [{ mask_b64: result.mask_b64, score: 1.0, area: result.area }],
             selectedMaskIdx: 0,
             resultB64: null,
         }))
@@ -280,10 +330,6 @@ export function useSegmentation() {
 
     // ------------------------------------------------------------------
     // Predict
-    //
-    // overridePoints / overrideBox allow callers to pass values that were
-    // just set via addPoint/setBox in the same synchronous event handler,
-    // before the refs have been updated by the next render cycle.
     // ------------------------------------------------------------------
 
     const predict = useCallback(async (override?: {
@@ -300,44 +346,25 @@ export function useSegmentation() {
 
         try {
             const promptMode = promptModeRef.current
-            const points = override?.points ?? pointsRef.current
-            const box = override?.box ?? boxRef.current
-            const text = override?.text ?? textRef.current
+            const points     = override?.points ?? pointsRef.current
+            const box        = override?.box    ?? boxRef.current
+            const text       = override?.text   ?? textRef.current
 
             let payload: Record<string, unknown> = { session_id: currentSession }
 
-            const exemplarBox = override?.exemplarBox !== undefined ? override.exemplarBox : exemplarBoxRef.current
+            const exemplarBox      = override?.exemplarBox !== undefined ? override.exemplarBox : exemplarBoxRef.current
             const exemplarNegBoxes = override?.exemplarNegBoxes ?? exemplarNegBoxesRef.current
 
             if (promptMode === 'exemplar' && exemplarBox) {
-                payload = {
-                    session_id: currentSession,
-                    exemplar_box: exemplarBox,
-                    exemplar_neg_boxes: exemplarNegBoxes,
-                }
+                payload = { session_id: currentSession, exemplar_box: exemplarBox, exemplar_neg_boxes: exemplarNegBoxes }
             } else if (promptMode === 'text' && text.trim()) {
-                payload = {
-                    session_id: currentSession,
-                    text: text.trim(),
-                    text_threshold: textThresholdRef.current,
-                    mask_threshold: maskThresholdRef.current,
-                }
+                payload = { session_id: currentSession, text: text.trim(), text_threshold: textThresholdRef.current, mask_threshold: maskThresholdRef.current }
             } else if (box && points.length > 0) {
-                // Combined box + points (works in both box and points mode)
-                payload = {
-                    session_id: currentSession,
-                    box,
-                    points: points.map(p => [p.x, p.y]),
-                    point_labels: points.map(p => p.label),
-                }
+                payload = { session_id: currentSession, box, points: points.map(p => [p.x, p.y]), point_labels: points.map(p => p.label) }
             } else if (box) {
                 payload = { session_id: currentSession, box }
             } else if (points.length > 0) {
-                payload = {
-                    session_id: currentSession,
-                    points: points.map(p => [p.x, p.y]),
-                    point_labels: points.map(p => p.label),
-                }
+                payload = { session_id: currentSession, points: points.map(p => [p.x, p.y]), point_labels: points.map(p => p.label) }
             }
 
             // @ts-ignore
@@ -353,94 +380,52 @@ export function useSegmentation() {
                 maskHistory: [],
                 maskFuture: [],
             }))
+
+            masksRef.current          = res.masks ?? []
+            selectedMaskIdxRef.current = 0
+
+            // Auto-reapply the full chain whenever the mask changes.
+            if ((res.masks ?? []).length > 0 && (activeOpsRef.current.length > 0 || lastAdjustmentRef.current)) {
+                runChain(activeOpsRef.current, lastAdjustmentRef.current)
+            }
         } catch (e: any) {
             setState(s => ({ ...s, isPredicting: false, error: e.message }))
         }
-    }, [])
+    }, [runChain])
 
     // ------------------------------------------------------------------
-    // Apply operation
+    // Operation stack — applyOp / deactivateOp
     // ------------------------------------------------------------------
 
-    const applyOperation = useCallback(async (operation: Operation, params?: {
-        radius?: number
-        featherRadius?: number
-        color?: string
-        pixelSize?: number
-        spotlightBrightness?: number
-        tintOpacity?: number
-    }) => {
-        // Read current values synchronously from refs — avoids the setState-as-read anti-pattern
-        const sessionId = sessionRef.current
-        const masks = masksRef.current
-        const selectedMaskIdx = selectedMaskIdxRef.current
-        const maskB64 = masks[selectedMaskIdx]?.mask_b64 ?? ''
+    const applyOp = useCallback(async (operation: Operation, extra?: OpExtra) => {
+        const current = activeOpsRef.current
+        const existingIdx = current.findIndex(a => a.operation === operation)
 
-        if (!sessionId || !maskB64) {
-            setState(s => ({ ...s, error: 'No mask selected' }))
-            return
+        let newOps: ActiveOp[]
+        if (existingIdx >= 0) {
+            // Update params on an already-active op (e.g. slider changed).
+            newOps = current.map((a, i) => i === existingIdx ? { ...a, extra } : a)
+        } else if (BG_OPS.has(operation)) {
+            // Replace any existing bg op — only one bg op at a time.
+            newOps = [...current.filter(a => !BG_OPS.has(a.operation)), { operation, extra }]
+        } else {
+            newOps = [...current, { operation, extra }]
         }
 
-        setState(s => ({ ...s, isApplying: true, error: null }))
+        setState(s => ({ ...s, activeOps: newOps }))
+        activeOpsRef.current = newOps
+        await runChain(newOps, lastAdjustmentRef.current)
+    }, [runChain])
 
-        try {
-            // @ts-ignore
-            const res = await window.ipcRenderer.invoke('ai:segment:apply', {
-                session_id: sessionId,
-                operation,
-                mask_b64: maskB64,
-                invert_mask: invertSelectionRef.current,
-                ...(params?.featherRadius !== undefined ? { feather_radius: params.featherRadius } : {}),
-                ...(params?.radius !== undefined ? { radius: params.radius } : {}),
-                ...(params?.color !== undefined ? { color: params.color } : {}),
-                ...(params?.pixelSize !== undefined ? { pixel_size: params.pixelSize } : {}),
-                ...(params?.spotlightBrightness !== undefined ? { brightness: params.spotlightBrightness } : {}),
-                ...(params?.tintOpacity !== undefined ? { tint_opacity: params.tintOpacity } : {}),
-            })
-
-            if (!res?.success) throw new Error(res?.error ?? 'Apply failed')
-
-            // Record which operation ran so the feather/invert debounce can re-apply it
-            const extra: LastOp['extra'] = {}
-            if (params?.radius !== undefined) extra.radius = params.radius
-            if (params?.color !== undefined) extra.color = params.color
-            if (params?.pixelSize !== undefined) extra.pixelSize = params.pixelSize
-            if (params?.spotlightBrightness !== undefined) extra.spotlightBrightness = params.spotlightBrightness
-            if (params?.tintOpacity !== undefined) extra.tintOpacity = params.tintOpacity
-
-            setState(s => ({
-                ...s,
-                resultB64: res.result_b64,
-                isApplying: false,
-                error: null,
-                lastOp: { operation, extra: Object.keys(extra).length ? extra : undefined },
-            }))
-        } catch (e: any) {
-            setState(s => ({ ...s, isApplying: false, error: e.message }))
-        }
-    }, [])
+    const deactivateOp = useCallback(async (operation: Operation) => {
+        const newOps = activeOpsRef.current.filter(a => a.operation !== operation)
+        setState(s => ({ ...s, activeOps: newOps }))
+        activeOpsRef.current = newOps
+        await runChain(newOps, lastAdjustmentRef.current)
+    }, [runChain])
 
     // ------------------------------------------------------------------
-    // Save result to library
-    // ------------------------------------------------------------------
-
-    const saveResult = useCallback(async (): Promise<{ savedPath: string } | { error: string }> => {
-        const resultB64 = state.resultB64
-        const sourcePath = state.imagePath
-        if (!resultB64 || !sourcePath) return { error: 'No result to save' }
-
-        try {
-            // @ts-ignore
-            const res = await window.ipcRenderer.invoke('creative:saveResult', { resultB64, sourcePath })
-            if (!res?.success) return { error: res?.error ?? 'Save failed' }
-            return { savedPath: res.savedPath }
-        } catch (e: any) {
-            return { error: e.message ?? 'Save failed' }
-        }
-    }, [state.resultB64, state.imagePath])
-
-    // ------------------------------------------------------------------
-    // Photo Adjustments (Phase 117)
+    // Photo Adjustments — stack on top of op chain
     // ------------------------------------------------------------------
 
     const applyAdjustments = useCallback(async (
@@ -448,33 +433,18 @@ export function useSegmentation() {
         params: import('../types/adjustments').AdjustmentParams,
         scope: import('../types/adjustments').AdjustmentScope,
     ): Promise<void> => {
-        const maskB64 = scope === 'segment'
-            ? (masksRef.current[selectedMaskIdxRef.current]?.mask_b64 ?? '')
-            : undefined
-
+        const maskB64 = masksRef.current[selectedMaskIdxRef.current]?.mask_b64 ?? ''
         if (scope === 'segment' && !maskB64) {
             setState(s => ({ ...s, error: 'Segment scope requires an active mask' }))
             return
         }
 
-        setState(s => ({ ...s, isApplying: true, error: null }))
-        try {
-            const { toSnakeAdjustParams } = await import('../types/adjustments')
-            // @ts-ignore
-            const res = await window.ipcRenderer.invoke('ai:segment:adjust', {
-                image_b64:      imageB64,
-                scope,
-                mask_b64:       maskB64,
-                invert_mask:    invertSelectionRef.current,
-                feather_radius: featherRadiusRef.current,
-                params:         toSnakeAdjustParams(params),
-            })
-            if (!res?.success) throw new Error(res?.error ?? 'Adjustment failed')
-            setState(s => ({ ...s, resultB64: res.result_b64, isApplying: false, error: null }))
-        } catch (e: any) {
-            setState(s => ({ ...s, isApplying: false, error: e.message ?? 'Adjustment failed' }))
-        }
-    }, [])
+        const adj: LastAdjustment = { params, scope, baseImageB64: imageB64 }
+        setState(s => ({ ...s, lastAdjustment: adj }))
+        lastAdjustmentRef.current = adj
+
+        await runChain(activeOpsRef.current, adj)
+    }, [runChain])
 
     // ------------------------------------------------------------------
     // Phase 119 — Mask editing (undo/redo, brush mode)
@@ -502,14 +472,22 @@ export function useSegmentation() {
                 maskFuture: [],
             }
         })
-    }, [])
+        // Re-run chain with the edited mask (state updates async, but refs stay in sync)
+        setTimeout(() => {
+            if (!activeOpsRef.current.length && !lastAdjustmentRef.current) return
+            masksRef.current = masksRef.current.map((m, i) =>
+                i === selectedMaskIdxRef.current ? { ...m, mask_b64: newMaskB64 } : m
+            )
+            runChain(activeOpsRef.current, lastAdjustmentRef.current)
+        }, 0)
+    }, [runChain])
 
     const undoMask = useCallback(() => {
         setState(s => {
             if (s.maskHistory.length === 0) return s
-            const prev = s.maskHistory[s.maskHistory.length - 1]
+            const prev    = s.maskHistory[s.maskHistory.length - 1]
             const current = s.masks[s.selectedMaskIdx]?.mask_b64 ?? ''
-            const masks = s.masks.map((m, i) =>
+            const masks   = s.masks.map((m, i) =>
                 i === s.selectedMaskIdx ? { ...m, mask_b64: prev } : m
             )
             return {
@@ -525,9 +503,9 @@ export function useSegmentation() {
     const redoMask = useCallback(() => {
         setState(s => {
             if (s.maskFuture.length === 0) return s
-            const next = s.maskFuture[0]
+            const next    = s.maskFuture[0]
             const current = s.masks[s.selectedMaskIdx]?.mask_b64 ?? ''
-            const masks = s.masks.map((m, i) =>
+            const masks   = s.masks.map((m, i) =>
                 i === s.selectedMaskIdx ? { ...m, mask_b64: next } : m
             )
             return {
@@ -541,8 +519,37 @@ export function useSegmentation() {
     }, [])
 
     // ------------------------------------------------------------------
-    // Reset
+    // Save result to library
     // ------------------------------------------------------------------
+
+    const saveResult = useCallback(async (): Promise<{ savedPath: string } | { error: string }> => {
+        const resultB64  = state.resultB64
+        const sourcePath = state.imagePath
+        if (!resultB64 || !sourcePath) return { error: 'No result to save' }
+
+        try {
+            // @ts-ignore
+            const res = await window.ipcRenderer.invoke('creative:saveResult', { resultB64, sourcePath })
+            if (!res?.success) return { error: res?.error ?? 'Save failed' }
+            return { savedPath: res.savedPath }
+        } catch (e: any) {
+            return { error: e.message ?? 'Save failed' }
+        }
+    }, [state.resultB64, state.imagePath])
+
+    // ------------------------------------------------------------------
+    // Clear result / Reset
+    // ------------------------------------------------------------------
+
+    const clearResult = useCallback(() => {
+        setState(s => ({
+            ...s,
+            resultB64: null,
+            opChainResultB64: null,
+            activeOps: [],
+            lastAdjustment: null,
+        }))
+    }, [])
 
     const reset = useCallback(() => {
         sessionRef.current = null
@@ -572,8 +579,10 @@ export function useSegmentation() {
         setInvertSelection,
         unionAllMasks,
         predict,
-        applyOperation,
+        applyOp,
+        deactivateOp,
         applyAdjustments,
+        clearResult,
         saveResult,
         enterEditMask,
         exitEditMask,

@@ -8,6 +8,8 @@ import CreativeOperationsBar from './CreativeOperationsBar'
 import AdjustmentsPanel from './AdjustmentsPanel'
 import MaskEditorOverlay from './MaskEditorOverlay'
 import type { AdjustmentScope } from '../types/adjustments'
+import type { AdjustmentParams } from '../types/adjustments'
+import { DEFAULT_ADJUSTMENT_PARAMS } from '../types/adjustments'
 
 const MODE_BUTTONS: { mode: PromptMode; label: string; title: string }[] = [
     { mode: 'box',     label: '□ Box',       title: 'Drag to draw · handles resize · drag inside moves · Delete clears' },
@@ -21,6 +23,8 @@ export default function CreativeToolsPanel() {
     const [pickerOpen,         setPickerOpen]         = useState(false)
     const [exemplarDrawIsNeg,  setExemplarDrawIsNeg]  = useState(false)
     const [adjustScope,        setAdjustScope]        = useState<AdjustmentScope>('global')
+    const [adjustPanelOpen,    setAdjustPanelOpen]    = useState(false)
+    const [adjustParams,       setAdjustParams]       = useState<Required<AdjustmentParams>>({ ...DEFAULT_ADJUSTMENT_PARAMS })
     const [encodedImageB64,    setEncodedImageB64]    = useState<string | null>(null)
     // resetNonce increments on undo/redo to tell MaskEditorOverlay to reinit its canvas
     const [maskResetNonce, setMaskResetNonce] = useState(0)
@@ -47,7 +51,8 @@ export default function CreativeToolsPanel() {
         setInvertSelection,
         unionAllMasks,
         predict,
-        applyOperation,
+        applyOp,
+        deactivateOp,
         applyAdjustments,
         saveResult,
         enterEditMask,
@@ -165,6 +170,11 @@ export default function CreativeToolsPanel() {
         run()
         return () => { cancelled = true }
     }, [state.imagePath])
+
+    // Reset adjustment params when a new image is loaded
+    useEffect(() => {
+        setAdjustParams({ ...DEFAULT_ADJUSTMENT_PARAMS })
+    }, [state.sessionId])
 
     // Reset exemplar draw toggle when leaving exemplar mode
     useEffect(() => {
@@ -299,6 +309,19 @@ export default function CreativeToolsPanel() {
                     <button onClick={fitToView} title="Fit"      className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-gray-700 transition-colors">Fit</button>
                 </div>
 
+                {/* Adjust toggle */}
+                <button
+                    onClick={() => setAdjustPanelOpen(o => !o)}
+                    title="Toggle Adjustments panel"
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        adjustPanelOpen
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                >
+                    Adjust
+                </button>
+
                 {/* Clear / Reset */}
                 <button
                     onClick={clearPrompts}
@@ -411,7 +434,7 @@ export default function CreativeToolsPanel() {
                 </div>
             )}
 
-            {/* Canvas + Result */}
+            {/* Canvas + Result + [Adjust] */}
             <div className="flex-1 flex gap-3 min-h-0">
 
                 {/* Left: canvas */}
@@ -513,7 +536,7 @@ export default function CreativeToolsPanel() {
                 </div>
 
                 {/* Right: result preview */}
-                <div className="flex-[2] min-w-[180px] flex flex-col gap-0 rounded-lg border border-gray-700 bg-gray-900 overflow-hidden min-h-0">
+                <div className="flex-[2] min-w-[160px] flex flex-col gap-0 rounded-lg border border-gray-700 bg-gray-900 overflow-hidden min-h-0">
                     <div className="px-3 pt-3 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider flex-shrink-0">Result</div>
                     {state.resultB64 ? (
                         <div className="flex-1 flex items-center justify-center p-2 min-h-0" style={{ backgroundImage: 'repeating-conic-gradient(#374151 0% 25%, #1f2937 0% 50%)', backgroundSize: '16px 16px' }}>
@@ -523,6 +546,23 @@ export default function CreativeToolsPanel() {
                         <div className="flex-1 flex items-center justify-center text-gray-600 text-sm px-4 text-center">Apply an operation to see the result here</div>
                     )}
                 </div>
+
+                {/* Adjustments column — fixed 200px so both canvas and result shrink proportionally */}
+                {adjustPanelOpen && (
+                    <div className="w-[200px] flex-shrink-0 flex flex-col min-h-0">
+                        <AdjustmentsPanel
+                            imageB64={encodedImageB64}
+                            hasMask={state.masks.length > 0}
+                            scope={adjustScope}
+                            onScopeChange={setAdjustScope}
+                            params={adjustParams}
+                            onParamsChange={setAdjustParams}
+                            busy={busy}
+                            onApply={applyAdjustments}
+                            autoApply
+                        />
+                    </div>
+                )}
             </div>
 
             {/* Operations bar */}
@@ -533,20 +573,13 @@ export default function CreativeToolsPanel() {
                 resultB64={state.resultB64}
                 featherRadius={state.featherRadius}
                 invertSelection={state.invertSelection}
+                activeOps={state.activeOps.map(a => a.operation)}
                 onFeatherChange={setFeatherRadius}
                 onInvertChange={setInvertSelection}
                 onSaveToLibrary={saveResult}
                 onSendToCompose={state.resultB64 ? handleSendToCompose : undefined}
-                onApply={applyOperation}
-            />
-
-            <AdjustmentsPanel
-                imageB64={encodedImageB64}
-                hasMask={state.masks.length > 0}
-                scope={adjustScope}
-                onScopeChange={setAdjustScope}
-                busy={state.isApplying ?? false}
-                onApply={applyAdjustments}
+                onApplyOp={applyOp}
+                onDeactivateOp={deactivateOp}
             />
 
             <LibraryPhotoPickerModal

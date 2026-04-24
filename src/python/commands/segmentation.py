@@ -141,10 +141,21 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
     pixel_size = int(payload.get("pixel_size", 12))
     brightness = float(payload.get("brightness", 0.35))
     tint_opacity = float(payload.get("tint_opacity", 0.5))
+    enhance_opacity = float(payload.get("enhance_opacity", 1.0))
+    enhance_threshold = int(payload.get("enhance_threshold", 3))
 
     try:
         provider = _get_provider()
-        image = provider.get_session_image(session_id)
+
+        source_b64 = payload.get("source_image_b64")
+        if source_b64:
+            import base64
+            import io
+            from PIL import Image as _PILImage
+            _bytes = base64.b64decode(source_b64)
+            image = _PILImage.open(io.BytesIO(_bytes)).convert("RGB")
+        else:
+            image = provider.get_session_image(session_id)
 
         from facelib.segmentation_ops import (
             decode_mask,
@@ -174,7 +185,7 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
         elif operation == "blur":
             result_image = apply_blur_background(image, alpha, radius)
         elif operation == "enhance":
-            result_image = apply_enhance(image, alpha)
+            result_image = apply_enhance(image, alpha, opacity=enhance_opacity, threshold=enhance_threshold)
         elif operation == "desaturate-bg":
             result_image = apply_desaturate_background(image, alpha)
         elif operation == "fill-bg":

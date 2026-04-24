@@ -22,7 +22,7 @@ import TransformBox from '../components/TransformBox'
 import LibraryPhotoPickerModal from '../components/LibraryPhotoPickerModal'
 import AdjustmentsPanel from '../components/AdjustmentsPanel'
 import type { AdjustmentParams, AdjustmentScope } from '../types/adjustments'
-import { toSnakeAdjustParams } from '../types/adjustments'
+import { DEFAULT_ADJUSTMENT_PARAMS, toSnakeAdjustParams } from '../types/adjustments'
 
 // Max longest side for encoding source images — keeps IPC payload manageable
 const MAX_ENCODE_PX = 2048
@@ -74,8 +74,9 @@ export default function Compose() {
     const [activeTab, setActiveTab] = useState<'layers' | 'adjustments'>('layers')
     // Active (selected) layer for adjustments
     const [activeLayerId, setActiveLayerId] = useState<string | null>(null)
-    const [adjustBusy, setAdjustBusy] = useState(false)
-    const [adjustScope, setAdjustScope] = useState<AdjustmentScope>('global')
+    const [adjustBusy,   setAdjustBusy]   = useState(false)
+    const [adjustScope,  setAdjustScope]  = useState<AdjustmentScope>('global')
+    const [adjustParams, setAdjustParams] = useState<Required<AdjustmentParams>>({ ...DEFAULT_ADJUSTMENT_PARAMS })
 
     const {
         state,
@@ -119,6 +120,11 @@ export default function Compose() {
             moveLayer(String(active.id), String(over.id))
         }
     }, [moveLayer])
+
+    // Reset adjustment params when switching to a different layer
+    useEffect(() => {
+        setAdjustParams({ ...DEFAULT_ADJUSTMENT_PARAMS })
+    }, [activeLayerId])
 
     // ---------------------------------------------------------------------------
     // Apply adjustments to the active layer
@@ -410,6 +416,8 @@ export default function Compose() {
                                         hasMask={!!(activeLayer?.maskB64)}
                                         scope={adjustScope}
                                         onScopeChange={setAdjustScope}
+                                        params={adjustParams}
+                                        onParamsChange={setAdjustParams}
                                         busy={adjustBusy}
                                         onApply={handleApplyAdjustments}
                                     />

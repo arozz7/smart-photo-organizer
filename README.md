@@ -232,30 +232,124 @@ Export low-quality face crops directly for external review or training datasets.
 
 Apply AI-powered creative edits to any photo using an interactive canvas powered by **SAM 3 (Segment Anything Model 3)**.
 
-<!-- SCREENSHOT: Creative Tools canvas with a subject selected and the Remove Background result -->
+<!-- SCREENSHOT: Creative Tools canvas with a subject selected, mask overlay visible, and the B&W BG result in the right panel — save as docs/assets/CreativeTools_Overview.png -->
+> 📷 _[Screenshot: Creative Tools overview — canvas, mask overlay, result panel, and operations bar]_ (docs/assets/CreativeTools_Overview.png)
 
-Open **Tools → Creative Tools** and pick any photo from your library:
+
+Open **Tools → Creative Tools** and pick any photo from your library or click **Load File** to open from disk.
 
 #### Interactive Prompt Modes
 
 | Mode | How to use |
 |------|------------|
-| **Box** | Click and drag to draw a bounding box. Drag the box to reposition; drag any of 8 corner/edge handles to resize. Press `Delete` to clear. |
-| **Points** | Click to add foreground (+) or background (−) points. Drag a point to move it. Click a point to remove it. |
-| **Text** | Type a natural-language description (e.g., `"person"`, `"sky"`) to locate the subject. |
+| **□ Box** | Click and drag to draw a bounding box. Drag the box to reposition; drag any of 8 corner/edge handles to resize. Press `Delete` to clear. |
+| **· Points** | Click to add foreground (+) or shift-click to add background (−) points. Drag a point to move it. Click a point to remove it. |
+| **Text** | Type a natural-language description (e.g., `"person"`, `"red car"`) and press Enter or click **Segment**. Adjust the Confidence and Mask Quality sliders to refine results. |
+| **⊡ Exemplar** | Draw a reference box around one example instance — SAM 3 finds all similar instances in the photo. Add exclusion boxes to remove false matches. |
 | **Box + Points** | Switch to Points mode while a box is active — both prompts are combined for higher precision. |
 
-#### Available Operations
+<!-- SCREENSHOT: The four prompt mode examples in one panel — save as docs/assets/CreativeTools_PromptModes.png -->
+> 📷 _[Screenshot: Prompt mode examples — box selection, points selection, text mode, exemplar mode]_
+
+#### Operations
+
+Click any operation to apply it — the **active operation is highlighted** in indigo. Click it again to toggle off (clear the result). Adjust **Feather** and **Invert Selection** in the controls bar before or after applying.
 
 | Operation | Description |
 |-----------|-------------|
-| **Remove Background** | Erases everything outside the selected region, saving a transparent PNG. |
-| **Isolate Subject** | Extracts the selected subject onto a transparent background. |
-| **Blur Background** | Gaussian blur on everything outside the mask — adjustable radius. |
-| **Sharpen Subject** | Unsharp-mask sharpening on the selected region. |
-| **Save to Library** | Saves the edited result alongside the original as a new file. |
+| **Remove BG** | Erases everything outside the selected region, saving a transparent PNG. |
+| **Isolate** | Extracts the selected subject onto a transparent background. |
+| **B&W BG** | Keeps the subject in full color; converts the background to grayscale. |
+| **Blur BG** | Gaussian blur on the background — drag the radius slider to control intensity. |
+| **Pixelate BG** | Mosaic-style pixelation of the background — adjustable pixel size. |
+| **Spotlight** | Darkens the background and keeps the subject at full brightness — drag the brightness slider. |
+| **Fill BG** | Replaces the background with a solid color — click the color swatch to choose. |
+| **Color Tint** | Overlays a semi-transparent color wash on the background — pick a color and set opacity. |
+| **Sharpen** | Unsharp-mask sharpening on the selected region. |
 
-> **Note:** Creative Tools requires the AI GPU Runtime for best performance. CPU inference is supported but significantly slower.
+<!-- SCREENSHOT: Operations bar showing an active indigo-highlighted button with result visible — save as docs/assets/CreativeTools_Operations.png -->
+> 📷 _[Screenshot: Operations bar with "Blur BG" active (indigo ring) and blurred background result visible in the right panel]_
+
+#### Photo Adjustments
+
+Click **Adjust** in the toolbar to open the compact adjustments sidebar alongside the result panel. Sliders auto-apply with a short debounce — no Apply button needed.
+
+| Control | Range | Effect |
+|---------|-------|--------|
+| **Temp** | −1 (cool) → +1 (warm) | Color temperature shift (3000K–10000K) |
+| **Black** | 0–200 | Black point (shadow crush) |
+| **White** | 55–255 | White point (highlight clip) |
+| **Bright** | 0.0–2.0 | Brightness multiplier |
+| **Contr** | 0.0–2.0 | Contrast multiplier |
+| **Shdws** | −1–+1 | Shadow lift / crush |
+| **Hi-lts** | −1–+1 | Highlight pull-down / lift |
+
+Click a label to reset that slider. Click **↺** in the header to reset all. Use **Global** to adjust the whole photo, or **Seg** to restrict adjustments to the masked subject.
+
+<!-- SCREENSHOT: Adjustments sidebar open alongside the result panel — save as docs/assets/CreativeTools_Adjustments.png -->
+> 📷 _[Screenshot: Adjustments sidebar open, warm temperature applied to a portrait — before (result) and adjusted (result) side by side]_
+
+#### Mask Editor
+
+Once a mask is predicted, click **✏ Edit Mask** to enter the brush editor. Paint or erase pixels directly on the mask to refine edges the AI got wrong.
+
+- **Paint / Erase** — toggle brush mode in the editing toolbar
+- **Brush Size** — drag the slider
+- **Undo / Redo** — `Ctrl+Z` / `Ctrl+Y` (up to 20 steps)
+- Click **Done Editing** to commit the edited mask and re-apply any pending operation
+
+<!-- SCREENSHOT: Mask editor mode — brush cursor visible, mask overlay showing painted additions — save as docs/assets/CreativeTools_MaskEditor.png -->
+> 📷 _[Screenshot: Mask editor in action — brush cursor painting on a hair edge]_
+
+#### Saving Results
+
+| Action | Description |
+|--------|-------------|
+| **↓ Save to Library** | Saves the edited result alongside the original and adds it to your library. |
+| **Copy to Clipboard** | Copies the result PNG directly to the system clipboard for pasting elsewhere. |
+| **Send to Compose ↗** | Pushes the result as a new layer into the Compositing Workspace for multi-layer editing. |
+
+> **Note:** Creative Tools requires the AI GPU Runtime for best performance. CPU inference is supported but significantly slower (~39s cold load for the first segmentation per session).
+
+---
+
+### 🖼️ Compositing Workspace
+
+Combine multiple segments and photos into a single layered composition.
+
+<!-- SCREENSHOT: Compositing workspace with two layers composited — save as docs/assets/Compositing_Overview.png -->
+> 📷 _[Screenshot: Compositing workspace with a landscape background and an isolated portrait layer on top]_
+
+Open **Tools → Compositing** or use **Send to Compose ↗** from Creative Tools to add a segment as a layer.
+
+#### Layers
+
+- **Add Layer** — click the **+** button in the Layers tab to add a photo from your library
+- **Reorder** — drag layers up/down in the Layers panel to change stacking order
+- **Bring to Front / Send to Back** — right-click a layer row for quick stacking shortcuts
+- **Remove** — click the trash icon on any layer row
+
+#### Per-Layer Transform
+
+Select a layer, switch to the **Transform** tab, and interact directly on the canvas:
+
+| Control | Canvas Gesture |
+|---------|---------------|
+| **Move** | Drag inside the transform box |
+| **Resize** | Drag any of the 8 corner/edge handles |
+| **Rotate** | Drag the rotation handle above the box |
+| **Flip** | Click **↔ H** or **↕ V** in the sidebar |
+| **Numeric Input** | Type exact X, Y, W, H, or Angle values in the sidebar |
+
+<!-- SCREENSHOT: Transform box on a layer — rotation handle and resize handles visible — save as docs/assets/Compositing_Transform.png -->
+> 📷 _[Screenshot: Transform box with handles visible on a composited portrait layer]_
+
+#### Adjustments per Layer
+
+Select a layer and open the **Adjustments** tab in the right panel to tone the layer independently. The same 7 adjustment controls as Creative Tools apply.
+
+<!-- SCREENSHOT: Compositing adjustments tab — layer selected, sliders shown — save as docs/assets/Compositing_Adjustments.png -->
+> 📷 _[Screenshot: Compositing workspace with adjustments panel open on the selected layer]_
 
 ---
 

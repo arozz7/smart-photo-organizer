@@ -121,7 +121,9 @@ export function useCreativeCanvas(opts: UseCreativeCanvasOptions) {
 
     useEffect(() => {
         const onDown = (e: KeyboardEvent) => {
-            if (e.code === 'Space' && !e.repeat) { e.preventDefault(); spaceDownRef.current = true }
+            const tag = (e.target as HTMLElement)?.tagName
+            const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable
+            if (e.code === 'Space' && !e.repeat && !isEditable) { e.preventDefault(); spaceDownRef.current = true }
         }
         const onUp = (e: KeyboardEvent) => {
             if (e.code === 'Space') spaceDownRef.current = false
@@ -522,7 +524,18 @@ export function useCreativeCanvas(opts: UseCreativeCanvasOptions) {
     // Derived values for the component to use in JSX
     // -----------------------------------------------------------------------
 
-    const transform  = transformRef.current
+    // Compute transform from React state so the mask overlay is always in sync
+    // with the current zoom/pan — transformRef.current lags by one render cycle.
+    const transform = imageRef.current
+        ? computeCanvasTransform(
+              imageRef.current.naturalWidth,
+              imageRef.current.naturalHeight,
+              CANVAS_W, CANVAS_H,
+              viewState.zoom, viewState.panX, viewState.panY,
+          )
+        : null
+    transformRef.current = transform
+
     const activeMask = transform && state.masks.length > 0 ? state.masks[state.selectedMaskIdx] : null
 
     return {

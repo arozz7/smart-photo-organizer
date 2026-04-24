@@ -40,6 +40,27 @@ applied them — this phase is entirely a UI addition.
   - `snapAngle`: rounding at thresholds, negative angles
   - `computeHandles`: centroid, corners, scale, 90° rotation, negative scale (flip)
 
+## Post-Phase Additions (same branch)
+
+### Sharpen Sliders (feat commit a9e3a95)
+Extends the Sharpen/Enhance operation with two interactive controls:
+- **Opacity** (0–100%): blends sharpened result over original via `enhance_opacity`
+- **Detail threshold** (0–10): Laplacian edge-detection threshold via `enhance_threshold`
+
+Files modified:
+- `src/python/facelib/segmentation_ops.py` — `apply_enhance` accepts `opacity` + `threshold` params
+- `src/python/commands/segmentation.py` — extracts and forwards both params from IPC payload
+- `electron/ipc/aiHandlers.ts` — adds `enhance_opacity?` + `enhance_threshold?` to IPC payload type
+- `src/types/segmentation.ts` — extends `LastOp.extra` with both fields
+- `src/hooks/useSegmentation.ts` — maps params to IPC payload; records in `extra`
+- `src/components/CreativeOperationsBar.tsx` — converted Sharpen to compound button with two range sliders
+
+### Test Suite Fix (fix commit 0e427ff)
+Global `vi.mock('electron', ...)` added to `tests/setup.ts` to prevent `ConfigService`
+static field (`app.getPath(...)`) from crashing vitest workers at import time.
+- Restored 21 previously-absent tests; total: **51 files / 417 tests** (was 396)
+- Affected files: `FaceService.test.ts`, `FaceService.autoAssign.test.ts`, `PhotoService.test.ts`
+
 ## Assumptions & Risks
 - `sourceWidth/sourceHeight` default to `0` for layers added via `addFromCreativeTools`
   without explicit dims (e.g., sent from Creative Tools before this phase). The
