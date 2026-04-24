@@ -51,9 +51,9 @@ export default function CreativeToolsPanel() {
         setInvertSelection,
         unionAllMasks,
         predict,
-        applyOperation,
+        applyOp,
+        deactivateOp,
         applyAdjustments,
-        clearResult,
         saveResult,
         enterEditMask,
         exitEditMask,
@@ -573,13 +573,13 @@ export default function CreativeToolsPanel() {
                 resultB64={state.resultB64}
                 featherRadius={state.featherRadius}
                 invertSelection={state.invertSelection}
-                lastOp={state.lastOp}
+                activeOps={state.activeOps.map(a => a.operation)}
                 onFeatherChange={setFeatherRadius}
                 onInvertChange={setInvertSelection}
                 onSaveToLibrary={saveResult}
                 onSendToCompose={state.resultB64 ? handleSendToCompose : undefined}
-                onClearResult={clearResult}
-                onApply={applyOperation}
+                onApplyOp={applyOp}
+                onDeactivateOp={deactivateOp}
             />
 
             <LibraryPhotoPickerModal

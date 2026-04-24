@@ -146,7 +146,16 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
 
     try:
         provider = _get_provider()
-        image = provider.get_session_image(session_id)
+
+        source_b64 = payload.get("source_image_b64")
+        if source_b64:
+            import base64
+            import io
+            from PIL import Image as _PILImage
+            _bytes = base64.b64decode(source_b64)
+            image = _PILImage.open(io.BytesIO(_bytes)).convert("RGB")
+        else:
+            image = provider.get_session_image(session_id)
 
         from facelib.segmentation_ops import (
             decode_mask,

@@ -7,6 +7,27 @@ export type Operation =
 
 export type { AdjustmentParams, AdjustmentScope } from './adjustments'
 
+export interface OpExtra {
+    radius?: number
+    color?: string
+    pixelSize?: number
+    spotlightBrightness?: number
+    tintOpacity?: number
+    enhanceOpacity?: number
+    enhanceThreshold?: number
+}
+
+export interface ActiveOp {
+    operation: Operation
+    extra?: OpExtra
+}
+
+export interface LastAdjustment {
+    params: import('./adjustments').AdjustmentParams
+    scope: import('./adjustments').AdjustmentScope
+    baseImageB64: string
+}
+
 export interface MaskResult {
     mask_b64: string
     score: number
@@ -30,19 +51,6 @@ export interface PointPrompt {
     label: 1 | 0
 }
 
-export interface LastOp {
-    operation: Operation
-    extra?: {
-        radius?: number
-        color?: string
-        pixelSize?: number
-        spotlightBrightness?: number
-        tintOpacity?: number
-        enhanceOpacity?: number
-        enhanceThreshold?: number
-    }
-}
-
 export interface SegmentState {
     capabilities: Capabilities | null
     sessionId: string | null
@@ -56,6 +64,9 @@ export interface SegmentState {
     masks: MaskResult[]
     selectedMaskIdx: number
     resultB64: string | null
+    opChainResultB64: string | null
+    activeOps: ActiveOp[]
+    lastAdjustment: LastAdjustment | null
     isPredicting: boolean
     isApplying: boolean
     isLoadingImage: boolean
@@ -64,7 +75,6 @@ export interface SegmentState {
     maskThreshold: number
     featherRadius: number
     invertSelection: boolean
-    lastOp: LastOp | null
     // Phase 119
     editingMask: boolean
     maskHistory: string[]
@@ -92,6 +102,9 @@ export const INITIAL_STATE: SegmentState = {
     masks: [],
     selectedMaskIdx: 0,
     resultB64: null,
+    opChainResultB64: null,
+    activeOps: [],
+    lastAdjustment: null,
     isPredicting: false,
     isApplying: false,
     isLoadingImage: false,
@@ -100,7 +113,6 @@ export const INITIAL_STATE: SegmentState = {
     maskThreshold: 0.5,
     featherRadius: 0,
     invertSelection: false,
-    lastOp: null,
     editingMask: false,
     maskHistory: [],
     maskFuture: [],
