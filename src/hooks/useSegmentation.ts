@@ -552,6 +552,14 @@ export function useSegmentation() {
     }, [])
 
     // ------------------------------------------------------------------
+    // Clear result (toggle off the active operation)
+    // ------------------------------------------------------------------
+
+    const clearResult = useCallback(() => {
+        setState(s => ({ ...s, resultB64: null, lastOp: null }))
+    }, [])
+
+    // ------------------------------------------------------------------
     // Reset
     // ------------------------------------------------------------------
 
@@ -585,6 +593,7 @@ export function useSegmentation() {
         predict,
         applyOperation,
         applyAdjustments,
+        clearResult,
         saveResult,
         enterEditMask,
         exitEditMask,

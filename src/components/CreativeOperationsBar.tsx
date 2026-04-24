@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Operation } from '../hooks/useSegmentation'
+import { Operation, LastOp } from '../hooks/useSegmentation'
 
 type SaveStatus = { type: 'idle' } | { type: 'saving' } | { type: 'ok'; path: string } | { type: 'err'; msg: string }
 type ClipStatus = { type: 'idle' } | { type: 'ok' } | { type: 'err'; msg: string }
@@ -11,10 +11,12 @@ interface Props {
     resultB64: string | null
     featherRadius: number
     invertSelection: boolean
+    lastOp: LastOp | null
     onFeatherChange: (v: number) => void
     onInvertChange: (v: boolean) => void
     onSaveToLibrary: () => Promise<{ savedPath: string } | { error: string }>
     onSendToCompose?: () => void
+    onClearResult: () => void
     onApply: (op: Operation, params?: {
         radius?: number
         featherRadius?: number
@@ -27,8 +29,9 @@ interface Props {
 
 export default function CreativeOperationsBar({
     hasMasks, busy, hasResult, resultB64,
-    featherRadius, invertSelection,
-    onFeatherChange, onInvertChange, onSaveToLibrary, onSendToCompose, onApply,
+    featherRadius, invertSelection, lastOp,
+    onFeatherChange, onInvertChange, onSaveToLibrary, onSendToCompose,
+    onClearResult, onApply,
 }: Props) {
     const [blurRadius, setBlurRadius] = useState(15)
     const [fillColor, setFillColor] = useState('#ffffff')
@@ -63,6 +66,7 @@ export default function CreativeOperationsBar({
 
     const disabled = !hasMasks || busy
 
+    // Toggle: clicking the active operation clears the result; clicking a new one applies it
     const apply = useCallback(
         (op: Operation, extra?: {
             radius?: number
@@ -70,9 +74,18 @@ export default function CreativeOperationsBar({
             pixelSize?: number
             spotlightBrightness?: number
             tintOpacity?: number
-        }) => onApply(op, { featherRadius, ...extra }),
-        [onApply, featherRadius],
+        }) => {
+            if (lastOp?.operation === op) {
+                onClearResult()
+            } else {
+                onApply(op, { featherRadius, ...extra })
+            }
+        },
+        [onApply, onClearResult, featherRadius, lastOp],
     )
+
+    // Returns true when the given operation is the currently active one
+    const isActive = (op: Operation) => lastOp?.operation === op
 
     const handleSaveToLibrary = useCallback(async () => {
         setSaveStatus({ type: 'saving' })
@@ -146,26 +159,28 @@ export default function CreativeOperationsBar({
                 <span className="text-xs text-gray-400 font-medium mr-1">Operations:</span>
 
                 <button onClick={() => apply('background-remove')} disabled={disabled}
-                    className="px-3 py-1.5 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors">
+                    title={isActive('background-remove') ? 'Click to clear result' : undefined}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors ${isActive('background-remove') ? 'bg-indigo-700 hover:bg-indigo-600 ring-1 ring-indigo-400' : 'bg-gray-700 hover:bg-gray-600'}`}>
                     Remove BG
                 </button>
 
                 <button onClick={() => apply('isolate')} disabled={disabled}
-                    className="px-3 py-1.5 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors">
+                    title={isActive('isolate') ? 'Click to clear result' : undefined}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors ${isActive('isolate') ? 'bg-indigo-700 hover:bg-indigo-600 ring-1 ring-indigo-400' : 'bg-gray-700 hover:bg-gray-600'}`}>
                     Isolate
                 </button>
 
                 <button onClick={() => apply('desaturate-bg')} disabled={disabled}
-                    title="Keep subject in color, convert background to grayscale"
-                    className="px-3 py-1.5 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors">
+                    title={isActive('desaturate-bg') ? 'Click to clear result' : 'Keep subject in color, convert background to grayscale'}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors ${isActive('desaturate-bg') ? 'bg-indigo-700 hover:bg-indigo-600 ring-1 ring-indigo-400' : 'bg-gray-700 hover:bg-gray-600'}`}>
                     B&amp;W BG
                 </button>
 
                 {/* Blur BG */}
-                <div className="flex items-center gap-2 bg-gray-700 rounded-md px-3 py-1">
+                <div className={`flex items-center gap-2 rounded-md px-3 py-1 ${isActive('blur') ? 'bg-indigo-900/60 ring-1 ring-indigo-500' : 'bg-gray-700'}`}>
                     <button onClick={() => apply('blur', { radius: blurRadius })} disabled={disabled}
-                        title="Blur the background, keep subject sharp"
-                        className="text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed">
+                        title={isActive('blur') ? 'Click to clear result' : 'Blur the background, keep subject sharp'}
+                        className={`text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed ${isActive('blur') ? 'text-indigo-200' : 'text-white'}`}>
                         Blur BG
                     </button>
                     <input type="range" min={3} max={50} step={1} value={blurRadius}
@@ -175,10 +190,10 @@ export default function CreativeOperationsBar({
                 </div>
 
                 {/* Pixelate BG */}
-                <div className="flex items-center gap-2 bg-gray-700 rounded-md px-3 py-1">
+                <div className={`flex items-center gap-2 rounded-md px-3 py-1 ${isActive('pixelate-bg') ? 'bg-indigo-900/60 ring-1 ring-indigo-500' : 'bg-gray-700'}`}>
                     <button onClick={() => apply('pixelate-bg', { pixelSize })} disabled={disabled}
-                        title="Pixelate the background"
-                        className="text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed">
+                        title={isActive('pixelate-bg') ? 'Click to clear result' : 'Pixelate the background'}
+                        className={`text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed ${isActive('pixelate-bg') ? 'text-indigo-200' : 'text-white'}`}>
                         Pixelate BG
                     </button>
                     <input type="range" min={4} max={40} step={2} value={pixelSize}
@@ -188,10 +203,10 @@ export default function CreativeOperationsBar({
                 </div>
 
                 {/* Spotlight */}
-                <div className="flex items-center gap-2 bg-gray-700 rounded-md px-3 py-1">
+                <div className={`flex items-center gap-2 rounded-md px-3 py-1 ${isActive('spotlight') ? 'bg-indigo-900/60 ring-1 ring-indigo-500' : 'bg-gray-700'}`}>
                     <button onClick={() => apply('spotlight', { spotlightBrightness })} disabled={disabled}
-                        title="Darken background, keep subject bright"
-                        className="text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed">
+                        title={isActive('spotlight') ? 'Click to clear result' : 'Darken background, keep subject bright'}
+                        className={`text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed ${isActive('spotlight') ? 'text-indigo-200' : 'text-white'}`}>
                         Spotlight
                     </button>
                     <input type="range" min={0} max={1} step={0.05} value={spotlightBrightness}
@@ -201,25 +216,25 @@ export default function CreativeOperationsBar({
                 </div>
 
                 {/* Fill BG */}
-                <div className="flex items-center gap-1 bg-gray-700 rounded-md px-2 py-1">
+                <div className={`flex items-center gap-1 rounded-md px-2 py-1 ${isActive('fill-bg') ? 'bg-indigo-900/60 ring-1 ring-indigo-500' : 'bg-gray-700'}`}>
                     <input type="color" value={fillColor} onChange={e => setFillColor(e.target.value)}
                         className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
                         aria-label="Fill color" />
                     <button onClick={() => apply('fill-bg', { color: fillColor })} disabled={disabled}
-                        title="Replace background with solid color"
-                        className="text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed px-1">
+                        title={isActive('fill-bg') ? 'Click to clear result' : 'Replace background with solid color'}
+                        className={`text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed px-1 ${isActive('fill-bg') ? 'text-indigo-200' : 'text-white'}`}>
                         Fill BG
                     </button>
                 </div>
 
                 {/* Color Tint */}
-                <div className="flex items-center gap-1 bg-gray-700 rounded-md px-2 py-1">
+                <div className={`flex items-center gap-1 rounded-md px-2 py-1 ${isActive('color-tint') ? 'bg-indigo-900/60 ring-1 ring-indigo-500' : 'bg-gray-700'}`}>
                     <input type="color" value={tintColor} onChange={e => setTintColor(e.target.value)}
                         className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
                         aria-label="Tint color" />
                     <button onClick={() => apply('color-tint', { color: tintColor, tintOpacity })} disabled={disabled}
-                        title="Apply a semi-transparent color wash over the background"
-                        className="text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed px-1">
+                        title={isActive('color-tint') ? 'Click to clear result' : 'Apply a semi-transparent color wash over the background'}
+                        className={`text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed px-1 ${isActive('color-tint') ? 'text-indigo-200' : 'text-white'}`}>
                         Color Tint
                     </button>
                     <input type="range" min={0} max={1} step={0.05} value={tintOpacity}
@@ -229,8 +244,8 @@ export default function CreativeOperationsBar({
                 </div>
 
                 <button onClick={() => apply('enhance')} disabled={disabled}
-                    title="Sharpen the selected subject"
-                    className="px-3 py-1.5 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors">
+                    title={isActive('enhance') ? 'Click to clear result' : 'Sharpen the selected subject'}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors ${isActive('enhance') ? 'bg-indigo-700 hover:bg-indigo-600 ring-1 ring-indigo-400' : 'bg-gray-700 hover:bg-gray-600'}`}>
                     Sharpen
                 </button>
 
