@@ -24,6 +24,8 @@ interface Props {
         pixelSize?: number
         spotlightBrightness?: number
         tintOpacity?: number
+        enhanceOpacity?: number
+        enhanceThreshold?: number
     }) => void
 }
 
@@ -39,6 +41,8 @@ export default function CreativeOperationsBar({
     const [spotlightBrightness, setSpotlightBrightness] = useState(0.35)
     const [tintColor, setTintColor] = useState('#ff9900')
     const [tintOpacity, setTintOpacity] = useState(0.5)
+    const [enhanceOpacity, setEnhanceOpacity] = useState(1.0)
+    const [enhanceThreshold, setEnhanceThreshold] = useState(3)
     const [dropdownOpen, setDropdownOpen] = useState(false)
     const [saveStatus, setSaveStatus] = useState<SaveStatus>({ type: 'idle' })
     const [clipStatus, setClipStatus] = useState<ClipStatus>({ type: 'idle' })
@@ -74,6 +78,8 @@ export default function CreativeOperationsBar({
             pixelSize?: number
             spotlightBrightness?: number
             tintOpacity?: number
+            enhanceOpacity?: number
+            enhanceThreshold?: number
         }) => {
             if (lastOp?.operation === op) {
                 onClearResult()
@@ -243,11 +249,24 @@ export default function CreativeOperationsBar({
                     <span className="text-xs text-gray-300 w-8 tabular-nums">{(tintOpacity * 100).toFixed(0)}%</span>
                 </div>
 
-                <button onClick={() => apply('enhance')} disabled={disabled}
-                    title={isActive('enhance') ? 'Click to clear result' : 'Sharpen the selected subject'}
-                    className={`px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors ${isActive('enhance') ? 'bg-indigo-700 hover:bg-indigo-600 ring-1 ring-indigo-400' : 'bg-gray-700 hover:bg-gray-600'}`}>
-                    Sharpen
-                </button>
+                {/* Sharpen */}
+                <div className={`flex items-center gap-2 rounded-md px-3 py-1 ${isActive('enhance') ? 'bg-indigo-900/60 ring-1 ring-indigo-500' : 'bg-gray-700'}`}>
+                    <button onClick={() => apply('enhance', { enhanceOpacity, enhanceThreshold })} disabled={disabled}
+                        title={isActive('enhance') ? 'Click to clear result' : 'Sharpen the selected subject'}
+                        className={`text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed ${isActive('enhance') ? 'text-indigo-200' : 'text-white'}`}>
+                        Sharpen
+                    </button>
+                    <span className="text-xs text-gray-400 shrink-0">Opacity</span>
+                    <input type="range" min={0} max={1} step={0.05} value={enhanceOpacity}
+                        onChange={e => setEnhanceOpacity(Number(e.target.value))}
+                        className="w-14 accent-indigo-500" aria-label="Sharpen opacity" />
+                    <span className="text-xs text-gray-300 w-6 tabular-nums">{Math.round(enhanceOpacity * 100)}%</span>
+                    <span className="text-xs text-gray-400 shrink-0">Detail</span>
+                    <input type="range" min={0} max={10} step={1} value={enhanceThreshold}
+                        onChange={e => setEnhanceThreshold(Number(e.target.value))}
+                        className="w-14 accent-indigo-500" aria-label="Sharpen detail threshold" />
+                    <span className="text-xs text-gray-300 w-4 tabular-nums">{enhanceThreshold}</span>
+                </div>
 
                 {/* Split-button: Save to Library + Copy to Clipboard */}
                 <div className="ml-auto flex items-center gap-2">

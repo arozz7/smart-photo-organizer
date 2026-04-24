@@ -38,6 +38,8 @@ export interface LastOp {
         pixelSize?: number
         spotlightBrightness?: number
         tintOpacity?: number
+        enhanceOpacity?: number
+        enhanceThreshold?: number
     }
 }
 

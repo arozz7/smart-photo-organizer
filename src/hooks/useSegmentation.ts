@@ -379,6 +379,8 @@ export function useSegmentation() {
         pixelSize?: number
         spotlightBrightness?: number
         tintOpacity?: number
+        enhanceOpacity?: number
+        enhanceThreshold?: number
     }) => {
         // Read current values synchronously from refs — avoids the setState-as-read anti-pattern
         const sessionId = sessionRef.current
@@ -406,6 +408,8 @@ export function useSegmentation() {
                 ...(params?.pixelSize !== undefined ? { pixel_size: params.pixelSize } : {}),
                 ...(params?.spotlightBrightness !== undefined ? { brightness: params.spotlightBrightness } : {}),
                 ...(params?.tintOpacity !== undefined ? { tint_opacity: params.tintOpacity } : {}),
+                ...(params?.enhanceOpacity !== undefined ? { enhance_opacity: params.enhanceOpacity } : {}),
+                ...(params?.enhanceThreshold !== undefined ? { enhance_threshold: params.enhanceThreshold } : {}),
             })
 
             if (!res?.success) throw new Error(res?.error ?? 'Apply failed')
@@ -417,6 +421,8 @@ export function useSegmentation() {
             if (params?.pixelSize !== undefined) extra.pixelSize = params.pixelSize
             if (params?.spotlightBrightness !== undefined) extra.spotlightBrightness = params.spotlightBrightness
             if (params?.tintOpacity !== undefined) extra.tintOpacity = params.tintOpacity
+            if (params?.enhanceOpacity !== undefined) extra.enhanceOpacity = params.enhanceOpacity
+            if (params?.enhanceThreshold !== undefined) extra.enhanceThreshold = params.enhanceThreshold
 
             setState(s => ({
                 ...s,

@@ -103,13 +103,26 @@ def apply_blur_background(image: Image.Image, mask: np.ndarray, radius: int = 15
     return Image.fromarray(result)
 
 
-def apply_enhance(image: Image.Image, mask: np.ndarray) -> Image.Image:
-    """Apply unsharp-mask sharpening to the subject only (masked region)."""
-    sharpened = image.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
+def apply_enhance(
+    image: Image.Image,
+    mask: np.ndarray,
+    opacity: float = 1.0,
+    threshold: int = 3,
+) -> Image.Image:
+    """Apply unsharp-mask sharpening to the subject only (masked region).
+
+    Args:
+        opacity:   Blend strength 0.0–1.0 — how strongly sharpening mixes in.
+        threshold: USM threshold 0–10 — higher = only sharpen prominent edges.
+    """
+    threshold = max(0, min(10, int(threshold)))
+    opacity = max(0.0, min(1.0, float(opacity)))
+    sharpened = image.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=threshold))
     orig = np.array(image.convert("RGB"), dtype=np.float32)
     sharp_arr = np.array(sharpened.convert("RGB"), dtype=np.float32)
     a3 = _alpha3(_to_alpha(mask))
-    result = (orig * (1.0 - a3) + sharp_arr * a3).clip(0, 255).astype(np.uint8)
+    blend = a3 * opacity
+    result = (orig * (1.0 - blend) + sharp_arr * blend).clip(0, 255).astype(np.uint8)
     return Image.fromarray(result)
 
 

@@ -141,6 +141,8 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
     pixel_size = int(payload.get("pixel_size", 12))
     brightness = float(payload.get("brightness", 0.35))
     tint_opacity = float(payload.get("tint_opacity", 0.5))
+    enhance_opacity = float(payload.get("enhance_opacity", 1.0))
+    enhance_threshold = int(payload.get("enhance_threshold", 3))
 
     try:
         provider = _get_provider()
@@ -174,7 +176,7 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
         elif operation == "blur":
             result_image = apply_blur_background(image, alpha, radius)
         elif operation == "enhance":
-            result_image = apply_enhance(image, alpha)
+            result_image = apply_enhance(image, alpha, opacity=enhance_opacity, threshold=enhance_threshold)
         elif operation == "desaturate-bg":
             result_image = apply_desaturate_background(image, alpha)
         elif operation == "fill-bg":

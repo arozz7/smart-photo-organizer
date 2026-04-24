@@ -829,6 +829,8 @@ export function registerAIHandlers() {
         pixel_size?: number;
         brightness?: number;
         tint_opacity?: number;
+        enhance_opacity?: number;
+        enhance_threshold?: number;
     }) => {
         return await pythonProvider.sendRequest('segment_apply', payload, 120_000);
     });
