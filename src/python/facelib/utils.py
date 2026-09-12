@@ -226,12 +226,12 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
         "localPath": buffalo_path
     }
 
-    # 4. SmolVLM (HuggingFace)
+    # 4. SmolVLM2 (HuggingFace)
     # Note: Path is approx, actual HF path varies by hash. We check the parent dir.
-    vlm_path = os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')
-    models_info["SmolVLM-Instruct"] = {
+    vlm_path = os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM2-2.2B-Instruct')
+    models_info["SmolVLM2-2.2B-Instruct"] = {
         "exists": os.path.exists(vlm_path),
-        "url": "HuggingFace (SmolVLM-Instruct)",
+        "url": "HuggingFace (SmolVLM2-2.2B-Instruct)",
         "size": 0,
         "localPath": vlm_path
     }

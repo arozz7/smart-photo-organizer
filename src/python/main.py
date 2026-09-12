@@ -220,11 +220,11 @@ def handle_command(command):
                 "size": 0,
                 "localPath": os.path.expanduser('~/.insightface/models/buffalo_l')
             }
-            models_info["SmolVLM-Instruct"] = {
-                "exists": os.path.exists(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')),
-                "url": "HuggingFace (SmolVLM-Instruct)",
+            models_info["SmolVLM2-2.2B-Instruct"] = {
+                "exists": os.path.exists(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM2-2.2B-Instruct')),
+                "url": "HuggingFace (SmolVLM2-2.2B-Instruct)",
                 "size": 0,
-                "localPath": os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')
+                "localPath": os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM2-2.2B-Instruct')
             }
             response['models'] = models_info
 

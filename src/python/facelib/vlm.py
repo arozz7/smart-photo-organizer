@@ -40,19 +40,19 @@ def init_vlm():
         from contextlib import redirect_stdout
         from transformers import AutoProcessor
         with redirect_stdout(sys.stderr):
-            vlm_processor = AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM-Instruct")
+            vlm_processor = AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM2-2.2B-Instruct")
             try:
                 from transformers import AutoModelForImageTextToText
                 vlm_model = AutoModelForImageTextToText.from_pretrained(
-                    "HuggingFaceTB/SmolVLM-Instruct",
-                    torch_dtype=dtype, 
-                    _attn_implementation="eager" 
+                    "HuggingFaceTB/SmolVLM2-2.2B-Instruct",
+                    torch_dtype=dtype,
+                    _attn_implementation="eager"
                 )
             except ImportError:
                  # Fallback for older transformers
                  from transformers import AutoModelForVision2Seq
                  vlm_model = AutoModelForVision2Seq.from_pretrained(
-                    "HuggingFaceTB/SmolVLM-Instruct",
+                    "HuggingFaceTB/SmolVLM2-2.2B-Instruct",
                     torch_dtype=dtype,
                     _attn_implementation="eager"
                 )

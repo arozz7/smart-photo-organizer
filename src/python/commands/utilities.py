@@ -265,7 +265,7 @@ def get_system_status(req_id=None, runtime_url: str | None = None):
         status['vlm'] = {
             'loaded': (vlm.vlm_model is not None),
             'device': "cuda" if torch_lib and torch_lib.cuda.is_available() else "cpu",
-            'model': 'SmolVLM-Instruct'
+            'model': 'SmolVLM2-2.2B-Instruct'
         }
         
         # System
