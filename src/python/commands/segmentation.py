@@ -23,15 +23,11 @@ def _get_provider():
     """Return the singleton Sam3Provider, creating it on first call."""
     global _provider
     if _provider is None:
-        from facelib.sam3_provider import Sam3Provider
+        from facelib.segmentation_factory import create_segmentation_provider
         from config import AI_CONFIG
 
         cfg = AI_CONFIG.get("segmentation", {})
-        _provider = Sam3Provider(
-            model_checkpoint=cfg.get("model_checkpoint", "models/sam3"),
-            device=cfg.get("device", "auto"),
-            max_cached_sessions=cfg.get("max_cached_sessions", 5),
-        )
+        _provider = create_segmentation_provider(cfg)
     return _provider
 
 

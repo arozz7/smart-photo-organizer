@@ -247,10 +247,17 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
     }
 
     # 6. SAM 3 (HuggingFace — facebook/sam3)
-    # Accept either a proper HF snapshot dir (has config.json) or a bare .safetensors file.
+    # Two providers, two checkpoint formats: sam3.pt (GPU, Sam3PackageProvider)
+    # takes priority since it's the default when a CUDA GPU is present; fall
+    # back to the old HF snapshot dir or bare .safetensors (CPU, Sam3TransformersProvider).
+    sam3_pt = os.path.join(models_root, 'sam3.pt')
     sam3_dir = os.path.join(models_root, 'sam3')
     sam3_bare = os.path.join(models_root, 'sam3_model.safetensors')
-    if os.path.isdir(sam3_dir) and os.path.exists(os.path.join(sam3_dir, 'config.json')):
+    if os.path.isfile(sam3_pt):
+        sam3_exists = True
+        sam3_local = sam3_pt
+        sam3_size = os.path.getsize(sam3_pt)
+    elif os.path.isdir(sam3_dir) and os.path.exists(os.path.join(sam3_dir, 'config.json')):
         sam3_exists = True
         sam3_local = sam3_dir
         sam3_size = sum(
@@ -264,7 +271,7 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
         sam3_size = os.path.getsize(sam3_bare)
     else:
         sam3_exists = False
-        sam3_local = sam3_dir  # default expected location
+        sam3_local = sam3_pt  # default expected location
         sam3_size = 0
     models_info["SAM 3 (Segmentation)"] = {
         "exists": sam3_exists,

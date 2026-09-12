@@ -80,7 +80,7 @@ def download_model(payload, req_id=None):
             repo_id = url[len('hf://'):]  # e.g. "facebook/sam3"
             from config import AI_CONFIG
             checkpoint_dir = AI_CONFIG.get('segmentation', {}).get(
-                'model_checkpoint', 'models/sam3'
+                'model_checkpoint', 'models/sam3.pt'
             )
             import huggingface_hub
             logger.info(f"Downloading HuggingFace model '{repo_id}' → '{checkpoint_dir}'")

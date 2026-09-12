@@ -1,18 +1,30 @@
 """
 SAM 3 concrete implementation of SegmentationProvider.
 
-Uses the official SAM 3 classes from transformers 5.0.0.dev0+:
-  - Sam3Model + Sam3Processor             → box-prompt segmentation
-  - Sam3TrackerModel + Sam3TrackerProcessor → point-prompt segmentation
+Uses Meta's own `sam3` package (facebookresearch/sam3) rather than the
+community `transformers` SAM 3 integration used previously — that integration
+could not load the SAM 3.1 checkpoint (different internal module naming) and
+this migration standardizes on Meta's officially maintained loading path for
+both the base SAM 3 checkpoint and any future SAM 3.1 upgrade.
 
-Requires transformers installed from git:
-  pip install git+https://github.com/huggingface/transformers.git
+Install with:
+  pip install git+https://github.com/facebookresearch/sam3.git
+  pip install einops triton-windows pycocotools
+(einops/triton-windows/pycocotools are transitive runtime deps the package's
+own install metadata does not declare; triton-windows is a community-built
+Windows-compatible drop-in for the Linux/CUDA-only `triton` package.)
 
-If the classes are not importable the provider marks itself unavailable and
-all prediction methods return empty results — the UI shows an install prompt.
+Two APIs from the package cover every prompt type this app needs, both fed by
+a single `Sam3Processor.set_image()` call per session:
+  - Sam3Processor.set_text_prompt() / .add_geometric_prompt() — PCS (concept)
+    prompts: free text, and positive/negative boxes for exemplar-style or
+    exclusion-style prompting.
+  - Sam3Image.predict_inst() (on the model returned by build_sam3_image_model
+    with enable_inst_interactivity=True) — SAM 1/2-style single-instance
+    prompts: point clicks and/or a box, reusing the same inference_state.
 
 Configuration (via ai-config.json):
-  segmentation.model_checkpoint   — path to weights file or HF repo dir
+  segmentation.model_checkpoint   — path to the sam3.pt checkpoint file
   segmentation.device             — "auto" | "cuda" | "cpu"
   segmentation.max_cached_sessions — int (default 5)
 """
@@ -20,7 +32,6 @@ Configuration (via ai-config.json):
 import base64
 import io
 import logging
-import shutil
 import time
 import uuid
 from pathlib import Path
@@ -33,21 +44,26 @@ from facelib.segmentation_provider import SegmentationProvider
 
 logger = logging.getLogger("smart-photo-ai")
 
-_INSTALL_CMD = "pip install git+https://github.com/huggingface/transformers.git"
+_INSTALL_CMD = (
+    "pip install git+https://github.com/facebookresearch/sam3.git "
+    "einops triton-windows pycocotools"
+)
 
 
-class Sam3Provider(SegmentationProvider):
+class Sam3PackageProvider(SegmentationProvider):
     """
-    SAM 3 segmentation provider.
+    SAM 3 segmentation provider backed by Meta's official `sam3` package.
 
-    Lazily loads Sam3Model + Sam3TrackerModel on first prediction call.
-    Maintains an in-memory session cache (PIL Images) with LRU eviction.
-    Degrades gracefully when transformers < 5.0.dev is installed.
+    Lazily loads the SAM 3 image model (detector + SAM1-task interactive
+    predictor sharing one vision backbone) on first prediction call.
+    Maintains an in-memory session cache (PIL image + precomputed inference
+    state) with LRU eviction. Degrades gracefully when the `sam3` package
+    is not installed.
     """
 
     def __init__(
         self,
-        model_checkpoint: str = "models/sam3_model.safetensors",
+        model_checkpoint: str = "models/sam3.pt",
         device: str = "auto",
         max_cached_sessions: int = 5,
     ) -> None:
@@ -55,19 +71,15 @@ class Sam3Provider(SegmentationProvider):
         self._device_pref = device
         self._max_sessions = max_cached_sessions
 
-        # Sam3Model + Sam3Processor for box prompts
         self._model: Any = None
         self._processor: Any = None
-        # Sam3TrackerModel + Sam3TrackerProcessor for point prompts
-        self._tracker: Any = None
-        self._tracker_processor: Any = None
 
         self._device: str = "cpu"
         self._initialized: bool = False
         self._failed: bool = False
         self._fail_reason: str = ""
 
-        # session_id → {"image": PIL.Image, "created_at": float}
+        # session_id → {"image": PIL.Image, "state": dict, "created_at": float}
         self._sessions: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
@@ -75,63 +87,39 @@ class Sam3Provider(SegmentationProvider):
     # ------------------------------------------------------------------
 
     def initialize(self) -> None:
-        """Load SAM 3 model weights from the local checkpoint."""
+        """Load the SAM 3 image model from the local checkpoint."""
         if self._initialized or self._failed:
             return
 
-        # Fail fast if the SAM 3 classes aren't in this transformers build
         try:
-            from transformers import (  # noqa: F401
-                Sam3Model,
-                Sam3Processor,
-                Sam3TrackerModel,
-                Sam3TrackerProcessor,
-            )
-        except ImportError:
+            import sam3  # noqa: F401
+            from sam3.model_builder import build_sam3_image_model
+            from sam3.model.sam3_image_processor import Sam3Processor
+        except ImportError as e:
             self._failed = True
-            self._fail_reason = (
-                f"SAM 3 requires transformers 5.0 dev. Install with: {_INSTALL_CMD}"
-            )
-            logger.warning("SAM 3 unavailable — transformers SAM 3 classes not found")
+            self._fail_reason = f"SAM 3 package not installed ({e}). Install with: {_INSTALL_CMD}"
+            logger.warning("SAM 3 unavailable — sam3 package not found")
             return
 
         self._device = self._resolve_device()
         checkpoint_path = Path(self._checkpoint).resolve()
 
-        # If checkpoint is a bare weights file, load from its parent directory.
-        # from_pretrained expects model.safetensors; copy if needed.
-        if checkpoint_path.is_file():
-            pretrained_src = checkpoint_path.parent
-            std_weights = pretrained_src / "model.safetensors"
-            if not std_weights.exists():
-                logger.info(
-                    "Copying %s → model.safetensors so from_pretrained can locate it",
-                    checkpoint_path.name,
-                )
-                shutil.copy2(checkpoint_path, std_weights)
-        else:
-            pretrained_src = checkpoint_path
+        if not checkpoint_path.is_file():
+            self._failed = True
+            self._fail_reason = f"Checkpoint not found: {checkpoint_path}"
+            logger.error("SAM 3 checkpoint missing at %s", checkpoint_path)
+            return
 
-        logger.info("Loading SAM 3 from %s on %s", pretrained_src, self._device)
+        logger.info("Loading SAM 3 (sam3 package) from %s on %s", checkpoint_path, self._device)
 
         try:
-            from transformers import (
-                Sam3Model,
-                Sam3Processor,
-                Sam3TrackerModel,
-                Sam3TrackerProcessor,
+            self._model = build_sam3_image_model(
+                device=self._device,
+                checkpoint_path=str(checkpoint_path),
+                load_from_HF=False,
+                enable_inst_interactivity=True,
             )
-
-            self._processor = Sam3Processor.from_pretrained(str(pretrained_src))
-            self._model = Sam3Model.from_pretrained(str(pretrained_src)).to(self._device)
-            self._model.eval()
-
-            self._tracker_processor = Sam3TrackerProcessor.from_pretrained(str(pretrained_src))
-            # The sam3_video checkpoint stores tracker weights under "tracker_model.*"
-            # but Sam3TrackerModel expects them at the root level. Remap manually.
-            self._tracker = self._load_tracker(pretrained_src, Sam3TrackerModel)
-            self._tracker = self._tracker.to(self._device)
-            self._tracker.eval()
+            self._processor = Sam3Processor(self._model, device=self._device)
         except Exception as e:
             self._failed = True
             self._fail_reason = str(e)
@@ -154,8 +142,11 @@ class Sam3Provider(SegmentationProvider):
         if len(self._sessions) >= self._max_sessions:
             self._evict_oldest()
 
+        state = self._processor.set_image(image) if not self._failed else None
+
         self._sessions[session_id] = {
             "image": image,
+            "state": state,
             "created_at": time.monotonic(),
         }
         logger.info("Image session created session_id=%s size=%s", session_id, image.size)
@@ -174,52 +165,25 @@ class Sam3Provider(SegmentationProvider):
         threshold: float = 0.5,
         mask_threshold: float = 0.5,
     ) -> dict[str, Any]:
-        """
-        Run PCS segmentation using a text prompt.
-
-        Uses Sam3Model with a text kwarg — the model's Promptable Concept
-        Segmentation (PCS) mode.  Returns all matching instances found in the
-        image (e.g. "person" → one mask per person).
-        """
+        """Run PCS segmentation using a text prompt (all matching instances)."""
         self._ensure_initialized()
         if self._failed:
             return {"masks": [], "error": self._fail_reason}
 
-        image = self._get_session(session_id)["image"]
-
-        import torch
-
-        inputs = self._processor(
-            images=image,
-            text=text,
-            return_tensors="pt",
-        ).to(self._device)
-
-        original_sizes = inputs.get("original_sizes")
-        target_sizes = (
-            original_sizes.tolist()
-            if original_sizes is not None
-            else [[image.height, image.width]]
-        )
-
-        with torch.no_grad():
-            outputs = self._model(**inputs)
+        state = self._get_session(session_id)["state"]
+        self._processor.reset_all_prompts(state)
+        self._processor.confidence_threshold = threshold
 
         try:
-            results = self._processor.post_process_instance_segmentation(
-                outputs,
-                threshold=threshold,
-                mask_threshold=mask_threshold,
-                target_sizes=target_sizes,
-            )[0]
-            result = self._format_box_output(results)
+            state = self._processor.set_text_prompt(prompt=text, state=state)
+            result = self._format_pcs_output(state, mask_threshold)
             logger.info(
                 "predict_from_text: text=%r threshold=%.2f found %d mask(s)",
                 text, threshold, len(result["masks"]),
             )
             return result
         except Exception as e:
-            logger.error("predict_from_text post-process failed: %s", e)
+            logger.error("predict_from_text failed: %s", e)
             return {"masks": []}
 
     def predict_from_text_with_exclusions(
@@ -230,53 +194,30 @@ class Sam3Provider(SegmentationProvider):
         threshold: float = 0.5,
         mask_threshold: float = 0.5,
     ) -> dict[str, Any]:
-        """
-        PCS segmentation with a text prompt and negative bounding-box exclusions.
-
-        neg_boxes is a list of [x1, y1, x2, y2] regions to exclude from matches.
-        Each is passed to Sam3Processor with input_boxes_labels=0 (negative).
-        """
+        """PCS segmentation with a text prompt and negative bounding-box exclusions."""
         self._ensure_initialized()
         if self._failed:
             return {"masks": [], "error": self._fail_reason}
 
-        image = self._get_session(session_id)["image"]
-
-        import torch
-
-        inputs = self._processor(
-            images=image,
-            text=text,
-            input_boxes=[neg_boxes],
-            input_boxes_labels=[[0] * len(neg_boxes)],
-            return_tensors="pt",
-        ).to(self._device)
-
-        original_sizes = inputs.get("original_sizes")
-        target_sizes = (
-            original_sizes.tolist()
-            if original_sizes is not None
-            else [[image.height, image.width]]
-        )
-
-        with torch.no_grad():
-            outputs = self._model(**inputs)
+        session = self._get_session(session_id)
+        state = session["state"]
+        img_w, img_h = session["image"].size
+        self._processor.reset_all_prompts(state)
+        self._processor.confidence_threshold = threshold
 
         try:
-            results = self._processor.post_process_instance_segmentation(
-                outputs,
-                threshold=threshold,
-                mask_threshold=mask_threshold,
-                target_sizes=target_sizes,
-            )[0]
-            result = self._format_box_output(results)
+            state = self._processor.set_text_prompt(prompt=text, state=state)
+            for neg_box in neg_boxes:
+                box_norm = self._xyxy_to_norm_cxcywh(neg_box, img_w, img_h)
+                state = self._processor.add_geometric_prompt(box=box_norm, label=False, state=state)
+            result = self._format_pcs_output(state, mask_threshold)
             logger.info(
                 "predict_from_text_with_exclusions: text=%r neg_boxes=%d found %d mask(s)",
                 text, len(neg_boxes), len(result["masks"]),
             )
             return result
         except Exception as e:
-            logger.error("predict_from_text_with_exclusions post-process failed: %s", e)
+            logger.error("predict_from_text_with_exclusions failed: %s", e)
             return {"masks": []}
 
     def predict_from_exemplar(
@@ -290,98 +231,53 @@ class Sam3Provider(SegmentationProvider):
         """
         PCS segmentation using an image exemplar (visual reference box).
 
-        Calls Sam3Model with the reference box as a positive exemplar
-        (input_boxes_labels=1) and optional negative boxes (label=0) to
-        exclude concept instances from the results.
-
-        Unlike predict_from_box (PVS — segments the specific instance inside
-        the box), this method asks SAM 3 to find all instances of the same
-        visual concept anywhere in the image.
+        No text prompt is set, so Sam3Processor.add_geometric_prompt() falls
+        back to a dummy "visual" text prompt internally, asking SAM 3 to find
+        all instances of the same visual concept as the positive box.
         """
         self._ensure_initialized()
         if self._failed:
             return {"masks": [], "error": self._fail_reason}
 
-        image = self._get_session(session_id)["image"]
+        session = self._get_session(session_id)
+        state = session["state"]
+        img_w, img_h = session["image"].size
         negs = neg_boxes or []
-
-        import torch
-
-        all_boxes = [ref_box] + negs
-        all_labels = [1] + [0] * len(negs)
-
-        inputs = self._processor(
-            images=image,
-            input_boxes=[all_boxes],
-            input_boxes_labels=[all_labels],
-            return_tensors="pt",
-        ).to(self._device)
-
-        original_sizes = inputs.get("original_sizes")
-        target_sizes = (
-            original_sizes.tolist()
-            if original_sizes is not None
-            else [[image.height, image.width]]
-        )
-
-        with torch.no_grad():
-            outputs = self._model(**inputs)
+        self._processor.reset_all_prompts(state)
+        self._processor.confidence_threshold = threshold
 
         try:
-            results = self._processor.post_process_instance_segmentation(
-                outputs,
-                threshold=threshold,
-                mask_threshold=mask_threshold,
-                target_sizes=target_sizes,
-            )[0]
-            result = self._format_box_output(results)
+            ref_norm = self._xyxy_to_norm_cxcywh(ref_box, img_w, img_h)
+            state = self._processor.add_geometric_prompt(box=ref_norm, label=True, state=state)
+            for neg_box in negs:
+                neg_norm = self._xyxy_to_norm_cxcywh(neg_box, img_w, img_h)
+                state = self._processor.add_geometric_prompt(box=neg_norm, label=False, state=state)
+            result = self._format_pcs_output(state, mask_threshold)
             logger.info(
                 "predict_from_exemplar: ref_box=%s neg_boxes=%d found %d mask(s)",
                 ref_box, len(negs), len(result["masks"]),
             )
             return result
         except Exception as e:
-            logger.error("predict_from_exemplar post-process failed: %s", e)
+            logger.error("predict_from_exemplar failed: %s", e)
             return {"masks": []}
 
     def predict_from_box(self, session_id: str, box: list[int]) -> dict[str, Any]:
-        """Run segmentation using a bounding-box prompt [x1, y1, x2, y2]."""
+        """Run SAM1-task instance segmentation using a bounding-box prompt [x1, y1, x2, y2]."""
         self._ensure_initialized()
         if self._failed:
             return {"masks": [], "error": self._fail_reason}
 
-        image = self._get_session(session_id)["image"]
-
-        import torch
-
-        # input_boxes: [image_level, box_level, coordinates] = (1, 1, 4)
-        inputs = self._processor(
-            images=image,
-            input_boxes=[[box]],
-            input_boxes_labels=[[1]],
-            return_tensors="pt",
-        ).to(self._device)
-
-        with torch.no_grad():
-            outputs = self._model(**inputs)
-
-        original_sizes = inputs.get("original_sizes")
-        target_sizes = (
-            original_sizes.tolist()
-            if original_sizes is not None
-            else [[image.height, image.width]]
-        )
+        state = self._get_session(session_id)["state"]
 
         try:
-            results = self._processor.post_process_instance_segmentation(
-                outputs,
-                threshold=0.5,
-                mask_threshold=0.5,
-                target_sizes=target_sizes,
-            )[0]
-            return self._format_box_output(results)
+            box_np = np.array(box, dtype=np.float32)[None, :]
+            masks, scores, _ = self._model.predict_inst(
+                state, point_coords=None, point_labels=None, box=box_np, multimask_output=False
+            )
+            return self._format_inst_output(masks, scores)
         except Exception as e:
-            logger.error("post_process_instance_segmentation failed: %s", e)
+            logger.error("predict_from_box failed: %s", e)
             return {"masks": []}
 
     def predict_from_points(
@@ -390,96 +286,23 @@ class Sam3Provider(SegmentationProvider):
         points: list[list[int]],
         labels: list[int],
     ) -> dict[str, Any]:
-        """
-        Run segmentation using click-point prompts.
-
-        Attempts Sam3TrackerModel first.  If it fails (e.g. due to partial
-        weight loading from the sam3_video checkpoint), falls back to deriving
-        a bounding box from the positive/negative points and routing through
-        the fully-loaded Sam3Model.
-        """
+        """Run SAM1-task instance segmentation using click-point prompts."""
         self._ensure_initialized()
         if self._failed:
             return {"masks": [], "error": self._fail_reason}
 
-        image = self._get_session(session_id)["image"]
-
-        import torch
-
-        inputs = self._tracker_processor(
-            images=image,
-            input_points=[[points]],
-            input_labels=[[labels]],
-            return_tensors="pt",
-        ).to(self._device)
-
-        with torch.no_grad():
-            outputs = self._tracker(**inputs)
-
-        original_sizes = inputs.get("original_sizes")
-        sizes_list = (
-            [tuple(s.tolist()) for s in original_sizes]
-            if original_sizes is not None
-            else [(image.height, image.width)]
-        )
+        state = self._get_session(session_id)["state"]
 
         try:
-            masks = self._tracker_processor.post_process_masks(
-                outputs.pred_masks.cpu(),
-                sizes_list,
-            )[0]
-            result = self._format_point_output(masks)
-            if result["masks"]:
-                return result
-            raise ValueError("tracker returned no masks")
-        except Exception as e:
-            logger.warning(
-                "Sam3TrackerModel post-process failed (%s) — falling back to box-from-points", e
+            point_coords = np.array(points, dtype=np.float32)
+            point_labels = np.array(labels, dtype=np.int64)
+            masks, scores, _ = self._model.predict_inst(
+                state, point_coords=point_coords, point_labels=point_labels, multimask_output=False
             )
-            return self._predict_points_via_box(session_id, points, labels, image)
-
-    def _predict_points_via_box(
-        self,
-        session_id: str,
-        points: list[list[int]],
-        labels: list[int],
-        image: Any,
-    ) -> dict[str, Any]:
-        """
-        Fallback: derive a bounding box from clicked points and use Sam3Model.
-
-        Positive points (label=1) expand the box; negative points (label=0)
-        shrink it from whichever edge they are closest to.
-        """
-        positive = [p for p, l in zip(points, labels) if l == 1]
-        negative = [p for p, l in zip(points, labels) if l == 0]
-
-        if not positive:
+            return self._format_inst_output(masks, scores)
+        except Exception as e:
+            logger.error("predict_from_points failed: %s", e)
             return {"masks": []}
-
-        xs = [p[0] for p in positive]
-        ys = [p[1] for p in positive]
-        pad = max(20, min(image.width, image.height) // 20)
-
-        x1 = max(0, min(xs) - pad)
-        y1 = max(0, min(ys) - pad)
-        x2 = min(image.width, max(xs) + pad)
-        y2 = min(image.height, max(ys) + pad)
-
-        # Shrink edges toward negative points
-        for nx, ny in negative:
-            if nx < (x1 + x2) / 2:
-                x1 = max(x1, nx)
-            else:
-                x2 = min(x2, nx)
-            if ny < (y1 + y2) / 2:
-                y1 = max(y1, ny)
-            else:
-                y2 = min(y2, ny)
-
-        box = [int(x1), int(y1), int(x2), int(y2)]
-        logger.info("Points fallback: derived box %s from %d point(s)", box, len(points))
-        return self.predict_from_box(session_id, box)
 
     def predict_from_box_and_points(
         self,
@@ -489,96 +312,49 @@ class Sam3Provider(SegmentationProvider):
         labels: list[int],
     ) -> dict[str, Any]:
         """
-        Run segmentation using both a bounding box and click-point prompts.
-
-        Strategy: run the tracker-based point segmentation first (which correctly
-        handles point prompts), then apply the box as a hard ROI constraint —
-        zeroing out any mask pixels that fall outside the box bounds.
-
-        This avoids trying to pass both input types to Sam3Processor at once
-        (it only supports box prompts and silently ignores point inputs).
-        Falls back to box-only if the point segmentation returns no masks.
+        Run SAM1-task instance segmentation using both a box and click points
+        in a single native call — predict_inst() accepts both prompt types
+        together directly, so no ROI-constraint fallback is needed here.
         """
         self._ensure_initialized()
         if self._failed:
             return {"masks": [], "error": self._fail_reason}
 
-        # Run point-based segmentation via the tracker
-        points_result = self.predict_from_points(session_id, points, labels)
+        state = self._get_session(session_id)["state"]
 
-        if not points_result.get("masks"):
-            logger.info(
-                "predict_from_box_and_points: tracker returned no masks — falling back to box-only"
+        try:
+            box_np = np.array(box, dtype=np.float32)
+            point_coords = np.array(points, dtype=np.float32)
+            point_labels = np.array(labels, dtype=np.int64)
+            masks, scores, _ = self._model.predict_inst(
+                state,
+                point_coords=point_coords,
+                point_labels=point_labels,
+                box=box_np,
+                multimask_output=False,
             )
-            return self.predict_from_box(session_id, box)
-
-        # Apply box as a hard spatial constraint: zero mask pixels outside the box
-        x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
-        constrained: list[dict] = []
-
-        for entry in points_result["masks"]:
-            mask_bytes = base64.b64decode(entry["mask_b64"])
-            mask_np = np.array(Image.open(io.BytesIO(mask_bytes)).convert("L")) > 128
-
-            roi = np.zeros_like(mask_np)
-            roi[y1:y2, x1:x2] = mask_np[y1:y2, x1:x2]
-
-            area = int(roi.sum())
-            if area > 0:
-                constrained.append({
-                    "mask_b64": self._mask_to_b64(roi),
-                    "score": entry["score"],
-                    "area": area,
-                })
-
-        if not constrained:
+            result = self._format_inst_output(masks, scores)
             logger.info(
-                "predict_from_box_and_points: ROI constraint removed all mask pixels — falling back to box-only"
+                "predict_from_box_and_points: %d mask(s)", len(result["masks"]),
             )
-            return self.predict_from_box(session_id, box)
-
-        logger.info(
-            "predict_from_box_and_points: %d mask(s) after box ROI constraint", len(constrained)
-        )
-        return {"masks": constrained}
+            return result
+        except Exception as e:
+            logger.error("predict_from_box_and_points failed: %s", e)
+            return {"masks": []}
 
     def get_capabilities(self) -> dict[str, Any]:
-        # Fast, non-blocking availability check.
-        # `from transformers import Sam3Model` triggers a cold package import that can
-        # take 30-40 s when other large models (InsightFace, ONNX) are already in memory.
-        # Blocking the IPC process that long causes Electron timeouts for both
-        # `capabilities` and any concurrently-queued `setImage` calls.
-        # Strategy:
-        #   1. If transformers is already in sys.modules, check for Sam3Model directly
-        #      (< 1 ms).
-        #   2. Otherwise use importlib.util.find_spec — checks the installed package
-        #      on disk without importing it (< 5 ms).
-        import sys as _sys
         import importlib.util as _ilu
 
-        transformers_mod = _sys.modules.get("transformers")
-        if transformers_mod is not None:
-            transformers_ok = hasattr(transformers_mod, "Sam3Model")
-        elif _ilu.find_spec("transformers") is not None:
-            # Installed but not yet loaded.  Assume Sam3Model is present; the real
-            # import happens lazily in initialize() on first predict() call.
-            transformers_ok = True
-        else:
-            transformers_ok = False
-
+        sam3_ok = _ilu.find_spec("sam3") is not None
         checkpoint_path = Path(self._checkpoint).resolve()
-        file_ready = (
-            (checkpoint_path.is_dir() and (checkpoint_path / "config.json").exists())
-            or checkpoint_path.is_file()
-            and checkpoint_path.suffix in {".safetensors", ".bin", ".pt", ".pth"}
-        )
+        file_ready = checkpoint_path.is_file() and checkpoint_path.suffix in {".pt", ".pth"}
 
-        model_ready = transformers_ok and file_ready and not self._failed
+        model_ready = sam3_ok and file_ready and not self._failed
         result: dict[str, Any] = {
             "provider": "sam3",
             "model_ready": model_ready,
             "model_file_present": file_ready,
-            "transformers_compatible": transformers_ok,
+            "transformers_compatible": sam3_ok,
             "text_prompts": True,
             "exemplar_prompts": True,
             "video": False,
@@ -586,16 +362,14 @@ class Sam3Provider(SegmentationProvider):
         }
         if self._failed:
             result["error"] = self._fail_reason
-        if not transformers_ok:
+        if not sam3_ok:
             result["install_hint"] = _INSTALL_CMD
         return result
 
     def cleanup(self) -> None:
         self._sessions.clear()
         self._model = None
-        self._tracker = None
         self._processor = None
-        self._tracker_processor = None
         self._initialized = False
         self._failed = False
         logger.info("SAM 3 provider cleaned up")
@@ -603,49 +377,6 @@ class Sam3Provider(SegmentationProvider):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-
-    def _load_tracker(self, pretrained_src: Path, Sam3TrackerModel: Any) -> Any:
-        """
-        Load Sam3TrackerModel with correctly remapped weights.
-
-        The sam3_video checkpoint has two namespaces relevant to the tracker:
-          - "tracker_model.*"  — tracker-specific layers (mask decoder, memory, etc.)
-          - root-level keys    — shared components like the vision encoder
-
-        Sam3TrackerModel expects both at root level.  We:
-          1. Strip "tracker_model." prefix from tracker-specific keys
-          2. Include all root-level keys that don't belong to another sub-model
-             (i.e. not under "detector_model.*" or "tracker_model.*")
-        """
-        from safetensors.torch import load_file as load_safetensors
-
-        weights_path = pretrained_src / "model.safetensors"
-        full_state = load_safetensors(str(weights_path))
-
-        # Sub-model prefixes whose keys belong exclusively to other models
-        other_model_prefixes = ("detector_model.", "tracker_model.")
-
-        tracker_state: dict = {}
-        for k, v in full_state.items():
-            if k.startswith("tracker_model."):
-                # Strip prefix so key lands at root level where tracker expects it
-                tracker_state[k[len("tracker_model."):]] = v
-            elif not any(k.startswith(p) for p in other_model_prefixes):
-                # Root-level shared weights (vision encoder, positional embeddings, etc.)
-                tracker_state[k] = v
-
-        tracker = Sam3TrackerModel.from_pretrained(str(pretrained_src))
-
-        missing, unexpected = tracker.load_state_dict(tracker_state, strict=False)
-        loaded = len(tracker_state) - len(unexpected)
-        logger.info(
-            "Tracker weights loaded: %d matched, %d missing, %d unexpected",
-            loaded, len(missing), len(unexpected),
-        )
-        if missing:
-            logger.debug("Tracker missing keys (first 10): %s", missing[:10])
-
-        return tracker
 
     def _resolve_device(self) -> str:
         if self._device_pref != "auto":
@@ -673,6 +404,14 @@ class Sam3Provider(SegmentationProvider):
         del self._sessions[oldest_id]
         logger.info("Session evicted (cache full) session_id=%s", oldest_id)
 
+    def _xyxy_to_norm_cxcywh(self, box_xyxy: list[int], img_w: int, img_h: int) -> list[float]:
+        x1, y1, x2, y2 = box_xyxy
+        cx = (x1 + x2) / 2 / img_w
+        cy = (y1 + y2) / 2 / img_h
+        bw = (x2 - x1) / img_w
+        bh = (y2 - y1) / img_h
+        return [cx, cy, bw, bh]
+
     def _mask_to_b64(self, mask_np: np.ndarray) -> str:
         """Convert a boolean numpy mask [H, W] → base64-encoded grayscale PNG."""
         mask_img = Image.fromarray((mask_np.astype(np.uint8) * 255), mode="L")
@@ -680,46 +419,32 @@ class Sam3Provider(SegmentationProvider):
         mask_img.save(buf, format="PNG")
         return base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    def _format_box_output(self, results: Any) -> dict[str, Any]:
-        """
-        Convert Sam3Model post_process_instance_segmentation result
-        → {masks: [{mask_b64, score, area}]}.
-        """
-        masks = getattr(results, "masks", None) or results.get("masks", [])
-        scores = getattr(results, "scores", None) or results.get("scores", [])
-
-        masks_out = []
-        for i, mask in enumerate(masks):
-            mask_np = mask.cpu().numpy() if hasattr(mask, "numpy") else np.array(mask)
-            score = float(scores[i].item()) if i < len(scores) else 1.0
-            masks_out.append({
-                "mask_b64": self._mask_to_b64(mask_np.astype(bool)),
-                "score": score,
-                "area": int(mask_np.sum()),
-            })
-
-        return {"masks": masks_out}
-
-    def _format_point_output(self, masks: Any) -> dict[str, Any]:
-        """
-        Convert Sam3TrackerModel post_process_masks output
-        → {masks: [{mask_b64, score, area}]}.
-        """
-        import torch
-        if isinstance(masks, torch.Tensor):
-            mask_list = [masks[i] for i in range(masks.shape[0])]
-        elif isinstance(masks, (list, tuple)):
-            mask_list = list(masks)
-        else:
+    def _format_pcs_output(self, state: dict, mask_threshold: float) -> dict[str, Any]:
+        """Convert Sam3Processor state (masks_logits/scores) → {masks: [...]}."""
+        masks_logits = state.get("masks_logits")
+        scores = state.get("scores")
+        if masks_logits is None or len(scores) == 0:
             return {"masks": []}
 
         masks_out = []
-        for mask in mask_list:
-            mask_np = mask.cpu().numpy() if hasattr(mask, "numpy") else np.array(mask)
+        probs = masks_logits.squeeze(1)  # N x H x W
+        for i in range(probs.shape[0]):
+            mask_np = (probs[i].detach().cpu().numpy() > mask_threshold)
             masks_out.append({
-                "mask_b64": self._mask_to_b64(mask_np.astype(bool)),
-                "score": 1.0,
+                "mask_b64": self._mask_to_b64(mask_np),
+                "score": float(scores[i].item()),
                 "area": int(mask_np.sum()),
             })
+        return {"masks": masks_out}
 
+    def _format_inst_output(self, masks: np.ndarray, scores: np.ndarray) -> dict[str, Any]:
+        """Convert predict_inst() output (CxHxW bool masks, C scores) → {masks: [...]}."""
+        masks_out = []
+        for i in range(masks.shape[0]):
+            mask_np = masks[i].astype(bool)
+            masks_out.append({
+                "mask_b64": self._mask_to_b64(mask_np),
+                "score": float(scores[i]),
+                "area": int(mask_np.sum()),
+            })
         return {"masks": masks_out}

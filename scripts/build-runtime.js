@@ -42,6 +42,14 @@ const heavyPackages = [
     'filelock', // Required by torch
     'typing_extensions', // Required by torch
     'fsspec',   // Required by torch
+    'sam3',     // Meta's official SAM 3 package (facebookresearch/sam3)
+    'timm',     // Required by sam3's vision backbone
+    'einops',   // Required by sam3 (not declared in its own install metadata)
+    'triton',   // Required by sam3 (installed as the triton-windows package on Windows)
+    'ftfy',     // Required by sam3's text tokenizer
+    'iopath',   // Required by sam3
+    'portalocker', // Required by sam3 (iopath dependency)
+    'pycocotools', // Required by sam3's inference-time import chain (not declared)
 ];
 
 console.log('--- AI Runtime Packager ---');

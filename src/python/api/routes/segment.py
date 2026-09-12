@@ -44,15 +44,11 @@ def get_provider() -> SegmentationProvider:
     """FastAPI dependency — returns the singleton SAM 3 provider."""
     global _provider_instance
     if _provider_instance is None:
-        from facelib.sam3_provider import Sam3Provider
+        from facelib.segmentation_factory import create_segmentation_provider
         from config import AI_CONFIG
 
         cfg = AI_CONFIG.get("segmentation", {})
-        _provider_instance = Sam3Provider(
-            model_checkpoint=cfg.get("model_checkpoint", "models/sam3"),
-            device=cfg.get("device", "auto"),
-            max_cached_sessions=cfg.get("max_cached_sessions", 5),
-        )
+        _provider_instance = create_segmentation_provider(cfg)
     return _provider_instance
 
 
