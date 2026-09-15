@@ -102,7 +102,8 @@ class Sam3PackageProvider(SegmentationProvider):
             return
 
         self._device = self._resolve_device()
-        checkpoint_path = Path(self._checkpoint).resolve()
+        from facelib.utils import resolve_model_path
+        checkpoint_path = Path(resolve_model_path(self._checkpoint)).resolve()
 
         if not checkpoint_path.is_file():
             self._failed = True
@@ -345,8 +346,9 @@ class Sam3PackageProvider(SegmentationProvider):
     def get_capabilities(self) -> dict[str, Any]:
         import importlib.util as _ilu
 
+        from facelib.utils import resolve_model_path
         sam3_ok = _ilu.find_spec("sam3") is not None
-        checkpoint_path = Path(self._checkpoint).resolve()
+        checkpoint_path = Path(resolve_model_path(self._checkpoint)).resolve()
         file_ready = checkpoint_path.is_file() and checkpoint_path.suffix in {".pt", ".pth"}
 
         model_ready = sam3_ok and file_ready and not self._failed

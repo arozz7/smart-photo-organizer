@@ -103,7 +103,8 @@ class Sam3TransformersProvider(SegmentationProvider):
             return
 
         self._device = self._resolve_device()
-        checkpoint_path = Path(self._checkpoint).resolve()
+        from facelib.utils import resolve_model_path
+        checkpoint_path = Path(resolve_model_path(self._checkpoint)).resolve()
 
         # If checkpoint is a bare weights file, load from its parent directory.
         # from_pretrained expects model.safetensors; copy if needed.
@@ -573,7 +574,8 @@ class Sam3TransformersProvider(SegmentationProvider):
         else:
             transformers_ok = False
 
-        checkpoint_path = Path(self._checkpoint).resolve()
+        from facelib.utils import resolve_model_path
+        checkpoint_path = Path(resolve_model_path(self._checkpoint)).resolve()
         file_ready = (
             (checkpoint_path.is_dir() and (checkpoint_path / "config.json").exists())
             or checkpoint_path.is_file()
