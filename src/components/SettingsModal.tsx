@@ -87,7 +87,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
         try {
             // @ts-ignore
             const saved = await window.ipcRenderer.invoke('ai:getSettings');
-            if (saved) setSettings(saved);
+            if (saved) setSettings(prevState => ({ ...prevState, ...saved }));
             // @ts-ignore
             const savedAdv = await window.ipcRenderer.invoke('ai:getAdvancedSettings');
             if (savedAdv) setAdvancedSettings(prevState => ({ ...prevState, ...savedAdv }));
@@ -568,6 +568,10 @@ const SettingSlider: React.FC<{
     onChange: (val: number) => void;
     tooltip: string;
 }> = ({ label, value, min, max, step, onChange, tooltip }) => {
+    // Defensive fallback: a caller passing an undefined/NaN value (e.g. a
+    // setting missing from a persisted config) must not crash the whole
+    // settings screen — fall back to the slider's minimum instead.
+    const safeValue = typeof value === 'number' && !Number.isNaN(value) ? value : min;
     return (
         <div className="flex flex-col space-y-3">
             <div className="flex items-center justify-between">
@@ -576,13 +580,13 @@ const SettingSlider: React.FC<{
                     <InfoTooltip text={tooltip} />
                 </div>
                 <span className="text-xs text-blue-400 font-mono bg-blue-900/30 px-2 py-0.5 rounded border border-blue-500/20">
-                    {step % 1 === 0 ? value.toFixed(0) : value.toFixed(2)}
+                    {step % 1 === 0 ? safeValue.toFixed(0) : safeValue.toFixed(2)}
                 </span>
             </div>
 
             <Slider.Root
                 className="relative flex items-center select-none touch-none w-full h-5"
-                value={[value]}
+                value={[safeValue]}
                 max={max}
                 min={min}
                 step={step}
