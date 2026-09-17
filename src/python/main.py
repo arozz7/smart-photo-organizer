@@ -553,18 +553,6 @@ def handle_command(command):
             full_w, full_h = rotated_img.size
             
             logger.info(f"Successfully rotated {file_path}")
-            
-            preview_dir = payload.get('previewStorageDir')
-            if preview_dir:
-                 preview_filename = f"preview_{photo_id}.jpg"
-                 preview_path = os.path.join(preview_dir, preview_filename)
-                 max_dim = 1280
-                 if full_w > max_dim or full_h > max_dim:
-                     preview_img = rotated_img.copy()
-                     preview_img.thumbnail((max_dim, max_dim))
-                     preview_img.save(preview_path, quality=80)
-                 else:
-                     rotated_img.save(preview_path, quality=80)
 
             response = {"type": "rotate_result", "photoId": photo_id, "success": True, "width": full_w, "height": full_h}
         except Exception as e:

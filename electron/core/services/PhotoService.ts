@@ -213,7 +213,26 @@ export class PhotoService {
         } else {
             // Non-RAW: Use Python/Pillow (destructive but fine for JPG/PNG usually, or better for compat)
             logger.info(`[PhotoService] Rotating Standard file ${filePath} by ${rotationDegrees} via Python`);
-            return pythonProvider.sendRequest('rotate_image', { photoId, filePath, rotation: rotationDegrees, previewStorageDir: previewsDir });
+            const result = await pythonProvider.sendRequest('rotate_image', { photoId, filePath, rotation: rotationDegrees });
+            if (!result || result.error || result.success === false) {
+                return result;
+            }
+
+            // Trigger Face Re-Scan — the file's pixels are now physically rotated,
+            // so old face boxes/embeddings no longer align with the image.
+            logger.info(`[PhotoService] Triggering Face Re-Scan (with cleanRescan)...`);
+            await PhotoService.analyzeImage({
+                photoId,
+                filePath,
+                scanMode: 'FAST',
+                cleanRescan: true
+            });
+
+            // Force Regenerate Preview — must use the same md5(filePath)-based naming
+            // extractPreview uses everywhere else, so the UI actually picks up the change.
+            await this.extractPreview(filePath, previewsDir, true, true);
+
+            return result;
         }
     }
 
