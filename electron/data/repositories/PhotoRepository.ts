@@ -241,15 +241,33 @@ export class PhotoRepository {
     }
 
     static getPhotosNeedingSha256(limit: number): { id: number; file_path: string }[] {
-        return getDB().prepare(
-            'SELECT id, file_path FROM photos WHERE sha256_hash IS NULL LIMIT ?'
-        ).all(limit) as { id: number; file_path: string }[];
+        return getDB().prepare(`
+            SELECT id, file_path FROM photos
+            WHERE sha256_hash IS NULL
+            AND NOT EXISTS (SELECT 1 FROM scan_errors se WHERE se.photo_id = photos.id AND se.stage = 'SHA256 Hash')
+            LIMIT ?
+        `).all(limit) as { id: number; file_path: string }[];
     }
 
     static getPhotosNeedingPhash(limit: number): { id: number; file_path: string; preview_cache_path: string | null }[] {
-        return getDB().prepare(
-            'SELECT id, file_path, preview_cache_path FROM photos WHERE phash IS NULL LIMIT ?'
-        ).all(limit) as { id: number; file_path: string; preview_cache_path: string | null }[];
+        return getDB().prepare(`
+            SELECT id, file_path, preview_cache_path FROM photos
+            WHERE phash IS NULL
+            AND NOT EXISTS (SELECT 1 FROM scan_errors se WHERE se.photo_id = photos.id AND se.stage = 'pHash')
+            LIMIT ?
+        `).all(limit) as { id: number; file_path: string; preview_cache_path: string | null }[];
+    }
+
+    /**
+     * Record a non-fatal background processing failure (e.g. an unreadable/
+     * corrupt file during hash backfill) so it stops being retried on every
+     * cycle. Reuses the same scan_errors table the initial scan writes to,
+     * keeping corrupt-file visibility in one place (Settings > Scan Errors).
+     */
+    static recordScanError(photoId: number, filePath: string, errorMessage: string, stage: string): void {
+        getDB().prepare(
+            'INSERT INTO scan_errors (photo_id, file_path, error_message, stage) VALUES (?, ?, ?, ?)'
+        ).run(photoId, filePath, errorMessage, stage);
     }
 
     static countPhotosNeedingHash(): { needsSha256: number; needsPhash: number } {

@@ -1,5 +1,5 @@
 import { FaceService } from './FaceService';
-import { promises as fs } from 'node:fs';
+import { promises as fs, constants as fsConstants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { ExifTool } from 'exiftool-vendored';
@@ -169,7 +169,19 @@ export class PhotoService {
             logger.info(`[PhotoService] Updating Orientation: ${currentOrt} (${currentDeg}°) + ${rotationDegrees}° -> ${newDeg}° (Ort: ${newOrt})`);
 
             // 3. Write New Orientation
-            // 3. Write New Orientation
+            // Camera-imported RAW files commonly keep the read-only file
+            // attribute — clear it so the write below doesn't fail with EPERM.
+            try {
+                await fs.access(filePath, fsConstants.W_OK);
+            } catch {
+                try {
+                    await fs.chmod(filePath, 0o666);
+                    logger.info(`[PhotoService] Cleared read-only attribute on ${filePath}`);
+                } catch (chmodErr) {
+                    logger.warn(`[PhotoService] Could not clear read-only attribute on ${filePath}: ${chmodErr}`);
+                }
+            }
+
             try {
                 // Force numeric write and overwrite original
                 // '-n' disables print conversion (writes raw number)

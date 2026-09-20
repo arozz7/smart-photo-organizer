@@ -3,7 +3,7 @@ import json
 import logging
 import time
 import os
-import os
+import stat
 import cv2
 import numpy as np
 import rawpy
@@ -542,13 +542,23 @@ def handle_command(command):
             ImageFile.LOAD_TRUNCATED_IMAGES = True
             img = Image.open(file_path)
             img = PILImageOps.exif_transpose(img)
-            
+
             angle = -int(rotation_angle)
             rotated_img = img.rotate(angle, expand=True)
-            
+
             exif = rotated_img.getexif()
-            if 0x0112 in exif: del exif[0x0112] 
-            
+            if 0x0112 in exif: del exif[0x0112]
+
+            # Photos copied from cameras/read-only media often keep the
+            # read-only file attribute — clear it so the overwrite below
+            # doesn't fail with PermissionError.
+            if not os.access(file_path, os.W_OK):
+                try:
+                    os.chmod(file_path, stat.S_IWRITE | stat.S_IREAD)
+                    logger.info(f"Cleared read-only attribute on {file_path}")
+                except Exception as chmod_e:
+                    logger.warning(f"Could not clear read-only attribute on {file_path}: {chmod_e}")
+
             rotated_img.save(file_path, quality=95, exif=exif)
             full_w, full_h = rotated_img.size
             
