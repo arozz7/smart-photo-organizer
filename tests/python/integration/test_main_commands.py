@@ -62,17 +62,22 @@ def test_add_to_index_delegation(mocker):
 def test_analyze_image_mocked(mocker, mock_ai_modules):
     # Mock image loading
     mocker.patch('main.load_image_cv2', return_value=np.zeros((100, 100, 3), dtype=np.uint8))
-    
-    # Mock face results
-    mock_face = MagicMock()
-    mock_face.bbox = np.array([10, 10, 50, 50])
-    mock_face.embedding = np.random.rand(512)
-    mock_face.det_score = 0.9
-    mock_ai_modules.get.return_value = [mock_face]
-    
+
+    # Mock the detector seam (detection, box expansion and quality gating live in
+    # facelib.detector and are covered separately). analyze_image should pass its results through.
+    detected_face = {
+        'box': {'x': 2, 'y': 2, 'width': 56, 'height': 56},
+        'score': 0.9,
+        'faceQuality': 0.8,
+        'descriptor': [0.0] * 512,
+    }
+    mock_detector = MagicMock()
+    mock_detector.detect.return_value = [detected_face]
+    mocker.patch('facelib.detector.FaceDetector', return_value=mock_detector)
+
     # Mock VLM result
     mocker.patch('facelib.vlm.generate_captions', return_value=("A photo", ["tag1", "tag2"]))
-    
+
     cmd = {
         "type": "analyze_image",
         "payload": {
@@ -82,22 +87,19 @@ def test_analyze_image_mocked(mocker, mock_ai_modules):
             "enableVLM": True
         }
     }
-    
-    # Ensure CONFIG is present (it's initialized at module level in main.py)
-    # We can override it for the test if needed:
-    mocker.patch.dict('main.CONFIG', {'faceBlurThreshold': 20.0})
-    
+
     response = main.handle_command(cmd)
-    
+
     assert response["type"] == "analysis_result"
     assert response["photoId"] == 123
+    assert response["scanMode"] == "FAST"
     assert len(response["faces"]) == 1
-    # Check box expansion: [10, 10, 50, 50] -> w=40, h=40. expansion=0.4. pad=8.
-    # [10-8, 10-8, 50+8, 50+8] = [2, 2, 58, 58]
-    assert response["faces"][0]["box"]["x"] == 2
-    assert response["faces"][0]["box"]["width"] == 56 # 58 - 2
-    assert "tags" in response
+    assert response["faces"][0]["box"] == {'x': 2, 'y': 2, 'width': 56, 'height': 56}
     assert response["tags"] == ["tag1", "tag2"]
+    assert response["description"] == "A photo"
+    assert (response["width"], response["height"]) == (100, 100)
+    mock_detector.detect.assert_called_once()
+    assert mock_detector.detect.call_args.kwargs.get('scan_mode', mock_detector.detect.call_args.args[-1]) == 'FAST'
     assert response["description"] == "A photo"
 
 def test_analyze_image_with_advanced_config(mocker, mock_ai_modules):

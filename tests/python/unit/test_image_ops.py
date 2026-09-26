@@ -73,5 +73,5 @@ def test_smart_crop_fallback_to_expand():
     bbox = [10, 10, 20, 20]
     # No landmarks
     cropped = image_ops.smart_crop_landmarks(bbox, None, 100, 100)
-    expanded = image_ops.expand_box(bbox, 100, 100, 0.4)
+    expanded = image_ops.expand_box(bbox, 100, 100, 0.25)
     assert cropped == expanded

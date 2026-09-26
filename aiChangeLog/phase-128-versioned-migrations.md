@@ -34,7 +34,7 @@ The plan originally moved the legacy block into migration 000. That is not possi
 
 ## Verification
 - `tsc --noEmit`: clean (was clean at baseline).
-- Full suite: 54 files, 437 passing, 1 skipped (the env-gated fixture generator).
+- TypeScript suite: 55 files, 441 passing, 1 skipped (the env-gated fixture generator). Python suite: 183 passing.
 - Real-library drift check: the DEV and PROD `library.db` schemas were read read-only (schema only, no rows, no copy) and compared with the fixture. No differences in tables, columns or indexes; both are `user_version = 0`.
 
 ## Findings
@@ -46,6 +46,15 @@ The plan originally moved the legacy block into migration 000. That is not possi
 - Pre-existing one-time destructive legacy steps (dropping `descriptor_json`, the `people` table rebuild) still run without a backup for very old libraries, as before. Real libraries checked are already past them.
 - The runner cannot be exercised end to end against a real numbered migration until Phase 130 adds one; it is covered by unit tests with synthetic migrations.
 
+## Python baseline fixes (roadmap Phase 128 task 1)
+The 6 Python tests that were already failing at v0.8.0 are fixed; the suite is now 183/183 green (was 172 passing, 6 failing).
+
+| Failure | Cause | Fix |
+|---|---|---|
+| `test_segment_api` x3 | **Real bug.** `api/routes/segment.py` called the stdlib logger in structured style (`logger.error({..}, "msg")`), so its own error handler raised `TypeError` and hid the real error. It also never resized a mismatched mask (the earlier fix `57264f4` only reached `commands/segmentation.py`) | New shared `fit_alpha_to_image` in `segmentation_ops.py`, used by both the API route and the IPC command (the inline resize block was replaced by it, same algorithm); fixed the 3 logger calls. 5 new tests |
+| `test_smart_crop_fallback_to_expand` | Stale test: the fallback deliberately uses 0.25 (matching `expand_box`'s default) | Test updated to 0.25 |
+| `test_vlm_tta::test_tta_180_degrees` | Stale test: the Phase 89.5 anti-hallucination rule requires descriptive evidence (eyes, nose, ...) before accepting a rotated face | Mock reason now includes evidence |
+| `test_analyze_image_mocked` | Stale mocks: detection moved to `facelib.detector.FaceDetector`, which builds its own InsightFace instances, so the test was loading the real models | Test now mocks at the `FaceDetector` seam and asserts pipeline output (box expansion is detector logic, covered separately) |
+
 ## Remaining in this phase
-- Fix the 6 Python tests that were already failing at v0.8.0 (see the roadmap, Phase 128 task 1).
-- Non-blocking UI notice for the downgrade case.
+- Non-blocking UI notice for the downgrade case (the runner already tolerates and logs it).
