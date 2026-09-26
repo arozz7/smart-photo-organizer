@@ -1,13 +1,15 @@
 /**
  * Scanner benchmark: runs the REAL scanner (sharp, ExifTool, SQLite) over a synthetic tree and
- * reports first-ingest and unchanged-rescan timings. Run through the vitest environment
- * (better-sqlite3 ABI + electron mock):
+ * reports first-ingest and unchanged-rescan timings, AND verifies the results are correct
+ * (a speed-up is meaningless if ExifTool silently timed out and returned empty metadata).
  *
- *   $env:SCAN_BENCH = "1"; $env:SCAN_BENCH_FILES = "1000"
+ * Run through the vitest environment (better-sqlite3 ABI + electron mock):
+ *
+ *   $env:SCAN_BENCH = "1"; $env:SCAN_BENCH_FILES = "500"
+ *   # optional: SCAN_BENCH_PROCS, SCAN_BENCH_CONCURRENCY, SCAN_BENCH_SIZE=photo
  *   node scripts/run-tests.cjs tests/tools/scanBench.test.ts
  *
- * Record the printed numbers in the phase changelog; they are machine-specific, so compare
- * before/after on the same machine only.
+ * Numbers are machine-specific; compare before/after on the same machine only.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,6 +19,21 @@ import sharp from 'sharp';
 export interface BenchOptions {
     files: number;
     foldersCount: number;
+    /** Image size in pixels. Default 320x240 (cheap); use ~3000x2000 to approximate real photos. */
+    width?: number;
+    height?: number;
+    /** Overrides the scanner settings for this run (must be set before ExifTool starts). */
+    concurrency?: number;
+    exiftoolProcesses?: number;
+}
+
+/** Counts of rows that came back wrong. Every field must be 0 for the run to be valid. */
+export interface BenchVerification {
+    rows: number;
+    emptyMetadata: number;
+    missingDimensions: number;
+    missingHash: number;
+    missingPreviewFile: number;
 }
 
 export interface BenchResult {
@@ -25,26 +42,64 @@ export interface BenchResult {
     rescanMs: number;
     ingestPerFileMs: number;
     rescanPerFileMs: number;
+    settings: { concurrency: number; exiftoolProcesses: number };
+    verification: BenchVerification;
 }
 
-/** Writes `files` small, distinct JPEGs spread over `foldersCount` folders. Returns the root. */
+/** Writes `files` distinct JPEGs spread over `foldersCount` folders. Returns the root. */
 export async function createSyntheticTree(options: BenchOptions): Promise<string> {
+    const { width = 320, height = 240 } = options;
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'spo-bench-'));
     for (let i = 0; i < options.files; i++) {
         const folder = path.join(root, `folder-${i % options.foldersCount}`);
         fs.mkdirSync(folder, { recursive: true });
-        // Distinct colour per file so hashes differ; tiny so generation stays cheap
-        const colour = { r: i % 256, g: (i * 7) % 256, b: (i * 13) % 256 };
-        await sharp({ create: { width: 320, height: 240, channels: 3, background: colour } })
-            .jpeg({ quality: 70 })
-            .toFile(path.join(folder, `IMG_${String(i).padStart(6, '0')}.jpg`));
+        // Distinct colour per file so hashes differ; gaussian noise makes big images realistic to encode
+        const image = sharp({
+            create: {
+                width, height, channels: 3,
+                background: { r: i % 256, g: (i * 7) % 256, b: (i * 13) % 256 },
+                ...(width * height > 1_000_000 ? { noise: { type: 'gaussian' as const, mean: 128, sigma: 30 } } : {}),
+            },
+        });
+        await image.jpeg({ quality: 80 }).toFile(path.join(folder, `IMG_${String(i).padStart(6, '0')}.jpg`));
     }
     return root;
 }
 
+interface StoredRow {
+    metadata_json: string | null;
+    width: number | null;
+    height: number | null;
+    sha256_hash: string | null;
+    preview_cache_path: string | null;
+}
+
+/** Reads every stored photo and counts the ones that are incomplete. */
+export function verifyIngest(rows: StoredRow[]): BenchVerification {
+    return {
+        rows: rows.length,
+        emptyMetadata: rows.filter(r => !r.metadata_json || r.metadata_json === '{}').length,
+        missingDimensions: rows.filter(r => !r.width || !r.height).length,
+        missingHash: rows.filter(r => !r.sha256_hash).length,
+        missingPreviewFile: rows.filter(r => {
+            if (!r.preview_cache_path) return true;
+            try { return fs.statSync(r.preview_cache_path).size === 0; } catch { return true; }
+        }).length,
+    };
+}
+
 export async function runScanBench(options: BenchOptions): Promise<BenchResult> {
-    const { initDB, closeDB } = await import('../../electron/db');
+    const { initDB, getDB, closeDB } = await import('../../electron/db');
     const { scanDirectory } = await import('../../electron/scanner');
+    const { ConfigService } = await import('../../electron/core/services/ConfigService');
+
+    // Override IN MEMORY only (ConfigService.updateSettings would persist to config.json).
+    // Must happen before ExifTool is first used: its process count is fixed at start-up.
+    const settings = { ...ConfigService.getScannerSettings() };
+    if (options.concurrency) settings.concurrency = options.concurrency;
+    if (options.exiftoolProcesses) settings.exiftoolProcesses = options.exiftoolProcesses;
+    const { vi } = await import('vitest');
+    vi.spyOn(ConfigService, 'getScannerSettings').mockReturnValue(settings);
 
     const tree = await createSyntheticTree(options);
     const library = fs.mkdtempSync(path.join(os.tmpdir(), 'spo-bench-lib-'));
@@ -54,6 +109,10 @@ export async function runScanBench(options: BenchOptions): Promise<BenchResult> 
         const t0 = performance.now();
         await scanDirectory(tree, library);
         const ingestMs = performance.now() - t0;
+
+        const verification = verifyIngest(getDB().prepare(
+            'SELECT metadata_json, width, height, sha256_hash, preview_cache_path FROM photos',
+        ).all() as StoredRow[]);
 
         const t1 = performance.now();
         await scanDirectory(tree, library);
@@ -65,6 +124,8 @@ export async function runScanBench(options: BenchOptions): Promise<BenchResult> 
             rescanMs: Math.round(rescanMs),
             ingestPerFileMs: Number((ingestMs / options.files).toFixed(2)),
             rescanPerFileMs: Number((rescanMs / options.files).toFixed(2)),
+            settings,
+            verification,
         };
     } finally {
         closeDB();

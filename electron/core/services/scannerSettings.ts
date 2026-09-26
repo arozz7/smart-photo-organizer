@@ -35,3 +35,16 @@ export function resolveScannerSettings(overrides: unknown, cpuCount: number): Sc
         exiftoolProcesses: parsed.exiftoolProcesses ?? defaults.exiftoolProcesses,
     };
 }
+
+/** Time one ExifTool task may take when nothing is queued ahead of it. */
+const EXIFTOOL_BASE_TASK_TIMEOUT_MS = 5000;
+
+/**
+ * ExifTool's per-task timeout clock starts when the task is QUEUED, not when it starts running.
+ * With more files in flight than ExifTool processes, tasks wait in line, so the budget grows with
+ * the queue depth (concurrency / processes) to avoid timing out healthy reads on low-core machines.
+ */
+export function exiftoolTaskTimeoutMs(settings: ScannerSettings): number {
+    const queueDepth = Math.max(1, Math.ceil(settings.concurrency / settings.exiftoolProcesses));
+    return EXIFTOOL_BASE_TASK_TIMEOUT_MS * queueDepth;
+}

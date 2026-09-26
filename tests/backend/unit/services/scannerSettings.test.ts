@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { defaultScannerSettings, resolveScannerSettings } from '../../../../electron/core/services/scannerSettings';
+import { defaultScannerSettings, exiftoolTaskTimeoutMs, resolveScannerSettings } from '../../../../electron/core/services/scannerSettings';
 
 describe('defaultScannerSettings', () => {
     it.each([
@@ -40,5 +40,19 @@ describe('resolveScannerSettings', () => {
     it('accepts the documented maximum of 16 and rejects 17', () => {
         expect(resolveScannerSettings({ concurrency: 16 }, 8).concurrency).toBe(16);
         expect(resolveScannerSettings({ concurrency: 17 }, 8).concurrency).toBe(4);
+    });
+});
+
+describe('exiftoolTaskTimeoutMs', () => {
+    // ExifTool starts a task's clock when it is queued, so queue wait must be budgeted
+    it.each([
+        [{ concurrency: 4, exiftoolProcesses: 4 }, 5000],
+        [{ concurrency: 1, exiftoolProcesses: 1 }, 5000],
+        [{ concurrency: 4, exiftoolProcesses: 1 }, 20000],
+        [{ concurrency: 4, exiftoolProcesses: 2 }, 10000],
+        [{ concurrency: 5, exiftoolProcesses: 2 }, 15000],
+        [{ concurrency: 2, exiftoolProcesses: 4 }, 5000],
+    ])('%o -> %i ms', (settings, expected) => {
+        expect(exiftoolTaskTimeoutMs(settings)).toBe(expected);
     });
 });

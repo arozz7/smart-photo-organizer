@@ -1,5 +1,6 @@
 import { FaceService } from './FaceService';
 import { ConfigService } from './ConfigService';
+import { exiftoolTaskTimeoutMs } from './scannerSettings';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -26,9 +27,10 @@ export class PhotoService {
         this._exiftoolInitPromise = (async () => {
             try {
                 logger.info('Initializing ExifTool in PhotoService...');
-                const { exiftoolProcesses } = ConfigService.getScannerSettings();
-                logger.info(`ExifTool worker processes: ${exiftoolProcesses}`);
-                const tool = new ExifTool({ taskTimeoutMillis: 5000, maxProcs: exiftoolProcesses });
+                const scanner = ConfigService.getScannerSettings();
+                const taskTimeoutMillis = exiftoolTaskTimeoutMs(scanner);
+                logger.info(`ExifTool worker processes: ${scanner.exiftoolProcesses}, task timeout: ${taskTimeoutMillis} ms`);
+                const tool = new ExifTool({ taskTimeoutMillis, maxProcs: scanner.exiftoolProcesses });
                 await tool.version();
                 this._exiftool = tool;
                 return tool;
