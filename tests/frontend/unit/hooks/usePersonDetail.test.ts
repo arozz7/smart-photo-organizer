@@ -45,7 +45,7 @@ describe('usePersonDetail', () => {
         const { result } = renderHook(() => usePersonDetail('1'), {
             wrapper: TestProviders
         });
-        await waitFor(() => !result.current.loading);
+        await waitFor(() => expect(result.current.loading).toBe(false));
 
         // Act
         act(() => {
@@ -73,7 +73,7 @@ describe('usePersonDetail', () => {
         const { result } = renderHook(() => usePersonDetail('1'), {
             wrapper: TestProviders
         });
-        await waitFor(() => !result.current.loading);
+        await waitFor(() => expect(result.current.loading).toBe(false));
 
         // Select a face
         act(() => {
@@ -105,7 +105,7 @@ describe('usePersonDetail', () => {
         const { result } = renderHook(() => usePersonDetail('1'), {
             wrapper: TestProviders
         });
-        await waitFor(() => !result.current.loading);
+        await waitFor(() => expect(result.current.loading).toBe(false));
 
         // Act
         let success = false;
