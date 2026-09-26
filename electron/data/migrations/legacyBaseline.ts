@@ -1,0 +1,862 @@
+/**
+ * FROZEN legacy schema baseline.
+ *
+ * This is the schema/data setup that shipped up to v0.8.1, moved here verbatim from `db.ts`
+ * (location change only, no logic change). It is idempotent and runs on every start, exactly as
+ * before, and it is the reason existing libraries keep working.
+ *
+ * It intentionally does NOT go through the MigrationRunner: it is async, runs VACUUM, and toggles
+ * PRAGMA foreign_keys, none of which are valid inside a migration transaction.
+ *
+ * Do not add new schema here. New changes are numbered migrations (see ./index.ts).
+ * This file is exempt from the file-size guideline because it is frozen legacy code.
+ */
+import type Database from 'better-sqlite3';
+import * as fs from 'node:fs';
+import logger from '../../logger';
+import { parseExifDate } from '../../utils/exifDate';
+
+export async function applyLegacyBaseline(db: Database.Database, onProgress?: (status: string) => void): Promise<void> {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_path TEXT UNIQUE NOT NULL,
+      file_hash TEXT,
+      preview_cache_path TEXT,
+      created_at DATETIME,
+      date_taken DATETIME,
+      width INTEGER,
+      height INTEGER,
+      blur_score REAL,
+      metadata_json TEXT,
+      description TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS photo_tags (
+      photo_id INTEGER,
+      tag_id INTEGER,
+      source TEXT,
+      PRIMARY KEY (photo_id, tag_id),
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+      FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS people (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL COLLATE NOCASE,
+      descriptor_mean_json TEXT,
+      cover_face_id INTEGER,
+      centroid_snapshot_json TEXT,
+      last_drift_check INTEGER,
+      entity_type TEXT DEFAULT 'human'
+    );
+
+    CREATE TABLE IF NOT EXISTS faces (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_id INTEGER,
+      box_json TEXT,
+      descriptor BLOB,
+      descriptor_v2 BLOB,
+      person_id INTEGER,
+      is_ignored BOOLEAN DEFAULT 0,
+      is_reference BOOLEAN DEFAULT 0,
+      score REAL,
+      blur_score REAL,
+      bucket_id INTEGER,
+      needs_bucketing INTEGER DEFAULT 0,
+      pose_yaw REAL,
+      pose_pitch REAL,
+      pose_roll REAL,
+      face_quality REAL,
+      confidence_tier TEXT DEFAULT 'unknown',
+      assignment_source TEXT DEFAULT 'manual',
+      is_confirmed BOOLEAN DEFAULT 0,
+      session_folder TEXT,
+      session_date TEXT,
+      match_distance REAL,
+      suggested_person_id INTEGER,
+      era_id INTEGER,
+      estimated_age INTEGER,
+      gender TEXT,
+      age_failure_reason TEXT,
+      entity_type TEXT DEFAULT 'human',
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS scan_errors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_id INTEGER,
+      file_path TEXT,
+      error_message TEXT,
+      stage TEXT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS scan_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_id INTEGER,
+      file_path TEXT,
+      scan_ms INTEGER,
+      tag_ms INTEGER,
+      face_count INTEGER,
+      scan_mode TEXT,
+      status TEXT,
+      error TEXT,
+      timestamp INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_faces_person_id ON faces(person_id);
+    CREATE INDEX IF NOT EXISTS idx_faces_photo_id ON faces(photo_id);
+
+    -- Phase 2.4: Era-Aware Clustering
+    CREATE TABLE IF NOT EXISTS person_eras (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      era_name TEXT,
+      user_name TEXT,
+      start_year INTEGER,
+      end_year INTEGER,
+      centroid_json TEXT,
+      face_count INTEGER DEFAULT 0,
+      is_auto_generated BOOLEAN DEFAULT 1,
+      created_at INTEGER,
+      descriptor_mean_json TEXT,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_person_eras_person_id ON person_eras(person_id);
+
+    -- Phase D: Centroid Drift Detection
+    CREATE TABLE IF NOT EXISTS person_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      descriptor_json TEXT,
+      face_count INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reason TEXT,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_person_history_person_id ON person_history(person_id);
+
+    -- Person Alerts: Store drift detection and other person-related alerts
+    CREATE TABLE IF NOT EXISTS person_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      alert_type TEXT NOT NULL,
+      message TEXT,
+      drift_distance REAL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      dismissed_at DATETIME,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_person_alerts_person_id ON person_alerts(person_id);
+    CREATE INDEX IF NOT EXISTS idx_person_alerts_dismissed ON person_alerts(dismissed_at);
+
+    -- Phase B1: Background Bucketing Schema
+    CREATE TABLE IF NOT EXISTS face_buckets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bucket_type TEXT NOT NULL DEFAULT 'discovery',
+      suggested_person_id INTEGER,
+      centroid BLOB,
+      status TEXT DEFAULT 'active',
+      session_folder TEXT,
+      session_date TEXT,
+      face_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (suggested_person_id) REFERENCES people(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_face_buckets_status ON face_buckets(status);
+    CREATE INDEX IF NOT EXISTS idx_face_buckets_type ON face_buckets(bucket_type);
+
+    -- Phase: Advanced Filtering — Smart Albums
+    CREATE TABLE IF NOT EXISTS smart_albums (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      filter_json TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- App State: Key-value store for service flags and checkpoints
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Migration for existing databases
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN blur_score REAL');
+  } catch (e) {
+    // Column likely already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN is_ignored BOOLEAN DEFAULT 0');
+  } catch (e) {
+    // Column likely already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN score REAL');
+  } catch (e) {
+    // Column likely already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN descriptor_mean_json TEXT');
+  } catch (e) {
+    // Column likely already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN blur_score REAL');
+  } catch (e) {
+    // Column likely already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE scan_history ADD COLUMN scan_mode TEXT');
+  } catch (e) {
+    // Column likely already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN description TEXT');
+  } catch (e) {
+    // Column likely already exists
+  }
+
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN cover_face_id INTEGER');
+  } catch (e) {
+    // Column likely already exists
+  }
+
+  // --- MIGRATION: Scan-Time Confidence Tiering (Feature 2) ---
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN confidence_tier TEXT DEFAULT 'unknown'");
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN suggested_person_id INTEGER');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN match_distance REAL');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: Challenging Face Recognition (Phase 5) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_yaw REAL');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_pitch REAL');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_roll REAL');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN face_quality REAL');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: Centroid Stability & Face Confirmation ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN is_confirmed BOOLEAN DEFAULT 0');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN era_id INTEGER');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN centroid_snapshot_json TEXT');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN last_drift_check INTEGER');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: Photo Session Grouping (Phase P2) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN session_folder TEXT');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN session_date TEXT');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: Pet Classification (Phase P3) ---
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN entity_type TEXT DEFAULT 'human'");
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec("ALTER TABLE people ADD COLUMN entity_type TEXT DEFAULT 'human'");
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: Auto-Assign Suggestions (Phase 40) ---
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN assignment_source TEXT DEFAULT 'manual'");
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN is_confirmed BOOLEAN DEFAULT 0");
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: Age-Based ERA Categorization (Phase 42) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN estimated_age INTEGER');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN gender TEXT');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN age_failure_reason TEXT');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: Background VLM Verification (Phase 56) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN verification_attempts INTEGER DEFAULT 0');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: User-Editable ERA Names (Phase 44) ---
+  try {
+    db.exec('ALTER TABLE person_eras ADD COLUMN user_name TEXT');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: Pose Data Storage (Phase 2.1) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_yaw REAL');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_pitch REAL');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN pose_roll REAL');
+  } catch (e) { /* Column exists */ }
+
+  // --- MIGRATION: AdaFace Embeddings (Phase 2.3) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN descriptor_v2 BLOB');
+  } catch (e) { /* Column exists */ }
+
+  // Backfill is_confirmed=1 for existing faces with a person_id
+  // Assumption: Any face already assigned to a person was manually confirmed
+  const confirmationMigrationKey = 'migration_confirmation_backfill_v1';
+  const confirmationCheck = db.prepare('SELECT value FROM app_state WHERE key = ?').get(confirmationMigrationKey);
+
+  if (!confirmationCheck) {
+    logger.info('[DB Module] Running one-time migration: Backfilling is_confirmed=1 for existing assignments...');
+    db.prepare(`
+      UPDATE faces 
+      SET is_confirmed = 1 
+      WHERE person_id IS NOT NULL 
+    `).run();
+
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(confirmationMigrationKey, '1');
+    logger.info('[DB Module] Confirmation backfill complete.');
+  }
+
+  // --- MIGRATION: Background Bucketing Columns (Phase B1) ---
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN needs_bucketing INTEGER DEFAULT 0');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('ALTER TABLE faces ADD COLUMN bucket_id INTEGER');
+  } catch (e) { /* Column exists */ }
+
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_faces_bucket_id ON faces(bucket_id)');
+  } catch (e) { /* Ignore */ }
+
+  // Backfill needs_bucketing=1 for existing unassigned/unbucketed faces
+  // This ensures old faces get picked up by the background service
+  // FIX: Make this a ONE-TIME migration to prevent resetting noise (needs_bucketing=0) on every restart
+  const bucketingMigrationKey = 'migration_bucketing_backfill_v1';
+  const migrationCheck = db.prepare('SELECT value FROM app_state WHERE key = ?').get(bucketingMigrationKey);
+
+  if (!migrationCheck) {
+    logger.info('[DB Module] Running one-time migration: Backfilling needs_bucketing=1...');
+    db.prepare(`
+      UPDATE faces 
+      SET needs_bucketing = 1 
+      WHERE person_id IS NULL 
+        AND bucket_id IS NULL 
+        AND needs_bucketing = 0
+        AND (is_ignored = 0 OR is_ignored IS NULL)
+    `).run();
+
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(bucketingMigrationKey, '1');
+    logger.info('[DB Module] Migration complete.');
+  }
+
+  // --- MIGRATION: date_taken column (Phase 91b) ---
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN date_taken DATETIME');
+  } catch (e) { /* Column exists */ }
+
+  // Create index for date_taken queries
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_photos_date_taken ON photos(date_taken)');
+  } catch (e) { /* Index exists */ }
+
+  // Backfill date_taken from EXIF metadata or file birthtime
+  const dateTakenMigrationKey = 'migration_date_taken_backfill_v1';
+  const dateTakenCheck = db.prepare('SELECT value FROM app_state WHERE key = ?').get(dateTakenMigrationKey);
+
+  if (!dateTakenCheck) {
+    logger.info('[DB Module] Running one-time migration: Backfilling date_taken from EXIF/file dates...');
+    if (onProgress) onProgress('Backfilling photo dates...');
+
+    const photos = db.prepare('SELECT id, file_path, metadata_json, created_at FROM photos WHERE date_taken IS NULL').all() as any[];
+    const updateStmt = db.prepare('UPDATE photos SET date_taken = ? WHERE id = ?');
+
+    let backfilledCount = 0;
+    const BATCH_SIZE = 500;
+
+    for (let i = 0; i < photos.length; i += BATCH_SIZE) {
+      const batch = photos.slice(i, i + BATCH_SIZE);
+      const transaction = db.transaction(() => {
+        for (const photo of batch) {
+          let dateTaken: string | null = null;
+
+          // 1. Try EXIF metadata
+          if (photo.metadata_json) {
+            try {
+              const meta = JSON.parse(photo.metadata_json);
+              const exifDate = meta.DateTimeOriginal || meta.CreateDate || meta.MediaCreateDate;
+              if (exifDate) {
+                dateTaken = parseExifDate(exifDate);
+              }
+            } catch (_) { /* invalid JSON */ }
+          }
+
+          // 2. Fallback: file system birthtime
+          if (!dateTaken && photo.file_path) {
+            try {
+              const stat = fs.statSync(photo.file_path);
+              dateTaken = stat.birthtime.toISOString();
+            } catch (_) { /* file missing */ }
+          }
+
+          // 3. Final fallback: existing created_at (import date)
+          if (!dateTaken) {
+            dateTaken = photo.created_at;
+          }
+
+          if (dateTaken) {
+            updateStmt.run(dateTaken, photo.id);
+            backfilledCount++;
+          }
+        }
+      });
+      transaction();
+
+      if (onProgress && i % 2000 === 0 && photos.length > 100) {
+        const pct = Math.round((i / photos.length) * 100);
+        onProgress(`Backfilling photo dates: ${pct}%`);
+      }
+    }
+
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(dateTakenMigrationKey, '1');
+    logger.info(`[DB Module] date_taken backfill complete: ${backfilledCount} photos updated.`);
+  }
+
+  // Initialize app_state with default values if not present
+  const initAppState = db.prepare(`INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)`);
+  initAppState.run('scan_in_progress', '0');
+  initAppState.run('scan_paused', '0');
+  initAppState.run('bucketing_dirty', '0');
+  initAppState.run('bucketing_checkpoint_offset', '0');
+  initAppState.run('bucketing_total_faces', '0');
+  initAppState.run('bucketing_last_run', null);
+  initAppState.run('shutdown_requested', '0');
+  initAppState.run('last_clean_shutdown', null);
+  initAppState.run('ignored_recheck_active', '0');
+  initAppState.run('ignored_recheck_offset', '0');
+  initAppState.run('duplicate_check_dirty', '0');
+
+  // --- MIGRATION: Smart Face Storage (BLOBs + Pruning) ---
+  try {
+    // 1. Add new columns
+    try { db.exec('ALTER TABLE faces ADD COLUMN descriptor BLOB'); } catch (e) { /* ignore */ }
+    try { db.exec('ALTER TABLE faces ADD COLUMN is_reference BOOLEAN DEFAULT 0'); } catch (e) { /* ignore */ }
+
+    // 2. Check if migration is needed (if we have descriptor_json but no descriptor)
+    let hasJson = { count: 0 };
+    try {
+      hasJson = db.prepare("SELECT count(*) as count FROM faces WHERE descriptor IS NULL AND (descriptor_json IS NOT NULL AND descriptor_json != 'NULL')").get() as { count: number };
+    } catch (e) {
+      // Likely 'no such column: descriptor_json' - Migration already done.
+    }
+
+    if (hasJson.count > 0) {
+      if (onProgress) onProgress(`Migrating ${hasJson.count} faces...`);
+      logger.info(`Starting Smart Face Storage Migration for ${hasJson.count} faces...`);
+
+      const allFaces = db.prepare('SELECT id, descriptor_json, person_id, blur_score FROM faces').all() as { id: number; descriptor_json: string | null; person_id: number | null; blur_score: number | null }[];
+
+      const updateFace = db.prepare('UPDATE faces SET descriptor = ?, is_reference = ? WHERE id = ?');
+
+      // Group by Person to find Top 100 References
+      if (onProgress) onProgress('Analyzing Face Quality...');
+      const personFaces: Record<number, any[]> = {};
+      const unknownFaces: any[] = [];
+
+      for (const face of allFaces) {
+        if (!face.person_id) {
+          unknownFaces.push(face);
+        } else {
+          if (!personFaces[face.person_id]) personFaces[face.person_id] = [];
+          personFaces[face.person_id].push(face);
+        }
+      }
+
+      let processedCount = 0;
+      const totalCount = hasJson.count;
+      const CHUNK_SIZE = 500;
+
+      const report = () => {
+        if (onProgress) {
+          const pct = Math.round((processedCount / totalCount) * 100);
+          onProgress(`Migrating Database: ${pct}%`);
+        }
+      };
+
+      // A. Handle Unknowns - Always keep vector
+      const unknownChunks = [];
+      for (let i = 0; i < unknownFaces.length; i += CHUNK_SIZE) {
+        unknownChunks.push(unknownFaces.slice(i, i + CHUNK_SIZE));
+      }
+
+      for (const chunk of unknownChunks) {
+        const transaction = db.transaction(() => {
+          for (const face of chunk) {
+            if (face.descriptor_json) {
+              try {
+                const arr = JSON.parse(face.descriptor_json);
+                const buf = Buffer.from(new Float32Array(arr).buffer);
+                updateFace.run(buf, 0, face.id);
+              } catch (e) {
+                logger.error(`Failed to migrate face ${face.id}`, e);
+              }
+            }
+          }
+        });
+        transaction();
+        processedCount += chunk.length;
+        report();
+        // Yield to event loop
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      // B. Handle Named People - Top 100 Logic
+      const personIds = Object.keys(personFaces);
+      for (let i = 0; i < personIds.length; i += 50) {
+        const pIdsChunk = personIds.slice(i, i + 50);
+
+        const transaction = db.transaction(() => {
+          for (const pid of pIdsChunk) {
+            const faces = personFaces[parseInt(pid)];
+            // Sort by blur_score DESC
+            faces.sort((a: any, b: any) => (b.blur_score || 0) - (a.blur_score || 0));
+
+            faces.forEach((face: any, index: number) => {
+              if (index < 100) {
+                // Reference
+                if (face.descriptor_json) {
+                  try {
+                    const arr = JSON.parse(face.descriptor_json);
+                    const buf = Buffer.from(new Float32Array(arr).buffer);
+                    updateFace.run(buf, 1, face.id);
+                  } catch (e) { logger.error(`Failed to migrate reference ${face.id}`, e); }
+                }
+              } else {
+                // Pruned
+                updateFace.run(null, 0, face.id);
+              }
+            });
+            processedCount += faces.length;
+          }
+        });
+        transaction();
+        report();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      logger.info('Smart Face Storage Migration: Data converted.');
+
+      // 3. Drop old column to free space
+      try {
+        if (onProgress) onProgress('Optimizing Database (VACUUM)...');
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        logger.info('Dropping old descriptor_json column...');
+        db.exec('ALTER TABLE faces DROP COLUMN descriptor_json');
+        db.exec('VACUUM');
+      } catch (e) {
+        logger.warn('Could not drop descriptor_json column (SQLite version might be old), setting to NULL instead.', e);
+        db.exec("UPDATE faces SET descriptor_json = NULL");
+        db.exec('VACUUM');
+      }
+      logger.info('Smart Face Storage Migration: Complete.');
+    }
+
+  } catch (e) {
+    logger.error('Smart Face Storage Migration Failed:', e);
+  }
+
+  // --- MIGRATION: Case-Insensitive People Uniqueness ---
+  try {
+    const getCollate = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='people'").get() as { sql: string } | undefined;
+    if (getCollate && !getCollate.sql.includes('COLLATE NOCASE')) {
+      if (onProgress) onProgress('Upgrading People Table (Uniqueness)...');
+      logger.info('Upgrading People Table to enforce case-insensitive uniqueness...');
+
+      // 1. Find and merge duplicates in ID space
+      const allPeople = db.prepare("SELECT id, name FROM people").all() as { id: number; name: string }[];
+      const seen = new Map<string, number>(); // lowercase name -> first ID
+      const merges: Map<number, number> = new Map(); // fromId -> toId
+
+      for (const p of allPeople) {
+        const lower = p.name.trim().toLowerCase();
+        if (seen.has(lower)) {
+          merges.set(p.id, seen.get(lower)!);
+        } else {
+          seen.set(lower, p.id);
+        }
+      }
+
+      db.exec('PRAGMA foreign_keys = OFF');
+      const transaction = db.transaction(() => {
+        // 2. Update faces to point to kept person IDs
+        // Using a single UPDATE for each merge is now fast due to idx_faces_person_id
+        const updateFace = db.prepare('UPDATE faces SET person_id = ? WHERE person_id = ?');
+        for (const [fromId, toId] of merges.entries()) {
+          updateFace.run(toId, fromId);
+        }
+
+        // 3. Recreate table
+        db.exec(`
+          DROP TABLE IF EXISTS people_new;
+          CREATE TABLE people_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL COLLATE NOCASE,
+            descriptor_mean_json TEXT
+          );
+        `);
+
+        // 4. Copy data (only unique entries)
+        const keptIds = [...seen.values()];
+        const insertPerson = db.prepare('INSERT INTO people_new (id, name, descriptor_mean_json) SELECT id, name, descriptor_mean_json FROM people WHERE id = ?');
+        for (const id of keptIds) {
+          insertPerson.run(id);
+        }
+
+        // 5. Swap tables
+        db.exec('DROP TABLE people');
+        db.exec('ALTER TABLE people_new RENAME TO people');
+      });
+      transaction();
+      db.exec('PRAGMA foreign_keys = ON');
+
+      // 6. Recalculate means for people who were merged into
+      // Temporarily import inline or use raw helper if we want to support this migration logic here?
+      // Since this is a "One-Time" migration that might have already run, we are keeping it.
+      // However, `recalculatePersonMean` is now extracted.
+      // We should probably instantiate PersonService or similar.
+      // BUT `db.ts` should be low level.
+      // If this migration runs, it needs to recalculate means.
+      // I will leave a TODO or comment it out if it assumes the function exists in THIS file.
+      // The original migration code called `recalculatePersonMean(db, pid)`.
+      // I'll define a mini-helper LOCALLY for this migration to avoid circular dependencies.
+
+      const localRecalc = (db: any, personId: number) => {
+        try {
+          // Minimal Recalc Logic for Migration ONLY
+          const allDescriptors = db.prepare('SELECT descriptor FROM faces WHERE person_id = ? AND is_ignored = 0 AND (blur_score IS NULL OR blur_score >= 20)').all(personId);
+          if (allDescriptors.length === 0) {
+            db.prepare('UPDATE people SET descriptor_mean_json = NULL WHERE id = ?').run(personId);
+            return;
+          }
+          const vectors: number[][] = [];
+          for (const row of allDescriptors) {
+            if (row.descriptor) {
+              vectors.push(Array.from(new Float32Array(row.descriptor.buffer, row.descriptor.byteOffset, row.descriptor.byteLength / 4)));
+            }
+          }
+          if (vectors.length == 0) return;
+          const dim = vectors[0].length;
+          const mean = new Array(dim).fill(0);
+          for (const v of vectors) for (let i = 0; i < dim; i++) mean[i] += v[i];
+          let mag = 0;
+          for (let i = 0; i < dim; i++) { mean[i] /= vectors.length; mag += mean[i] ** 2; }
+          mag = Math.sqrt(mag);
+          if (mag > 0) for (let i = 0; i < dim; i++) mean[i] /= mag;
+          db.prepare('UPDATE people SET descriptor_mean_json = ? WHERE id = ?').run(JSON.stringify(mean), personId);
+        } catch (e) { console.error("Migration Recalc failed", e); }
+      };
+
+      const toRecalc = [...new Set(merges.values())];
+      for (const pid of toRecalc) {
+        localRecalc(db, pid);
+      }
+
+      logger.info('People Table Upgrade: Complete.');
+    }
+  } catch (e) {
+    logger.error('Failed to migrate people table:', e);
+  }
+
+  try {
+    // Migration: Remove "AI Description" tag if it exists (Cleanup)
+    // console.log('Running migration: Cleanup "AI Description" tag...');
+    // 1. Get the tag ID
+    const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get('AI Description') as { id: number };
+    if (tag) {
+      // 2. Delete from photo_tags
+      db.prepare('DELETE FROM photo_tags WHERE tag_id = ?').run(tag.id);
+      // 3. Delete from tags
+      db.prepare('DELETE FROM tags WHERE id = ?').run(tag.id);
+      logger.info('Migration complete: "AI Description" tag removed.');
+    }
+  } catch (e) {
+    logger.error('Migration failed:', e);
+  }
+
+  // --- MIGRATION: PRS Repair Tracking (Phase PRS) ---
+  try {
+    db.exec('ALTER TABLE scan_errors ADD COLUMN is_unrepairable BOOLEAN DEFAULT 0');
+  } catch { /* column already exists */ }
+
+  // --- MIGRATION: Ignore Source Tracking (Phase 104) ---
+  try {
+    db.exec("ALTER TABLE faces ADD COLUMN ignore_source TEXT DEFAULT NULL CHECK(ignore_source IN ('user', 'background_verification'))");
+  } catch { /* column already exists */ }
+
+  // Backfill: all pre-104 ignored faces were user-initiated
+  const ignoreSourceBackfillKey = 'migration_ignore_source_backfill_v1';
+  const ignoreSourceCheck = db.prepare('SELECT value FROM app_state WHERE key = ?').get(ignoreSourceBackfillKey);
+  if (!ignoreSourceCheck) {
+    const result = db.prepare(`
+      UPDATE faces SET ignore_source = 'user'
+      WHERE is_ignored = 1 AND ignore_source IS NULL
+    `).run();
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(ignoreSourceBackfillKey, '1');
+    logger.info(`[DB Module] Backfilled ignore_source='user' for ${result.changes} pre-existing ignored faces.`);
+  }
+
+  // --- MIGRATION: Multi-Centroid Pose Support (Phase 105) ---
+  try {
+    db.exec("ALTER TABLE person_eras ADD COLUMN pose_type TEXT DEFAULT 'combined'");
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE person_eras ADD COLUMN pose_quality_score REAL DEFAULT 1.0');
+  } catch { /* column already exists */ }
+
+  // Store pose-specific centroids directly on people to avoid ERA system collision
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN frontal_centroid_json TEXT');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN profile_centroid_json TEXT');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN frontal_face_count INTEGER DEFAULT 0');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE people ADD COLUMN profile_face_count INTEGER DEFAULT 0');
+  } catch { /* column already exists */ }
+
+  // --- MIGRATION: GPS Cache Columns (Phase 105) ---
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN gps_lat REAL');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN gps_lon REAL');
+  } catch { /* column already exists */ }
+
+  // --- MIGRATION: Duplicate Detection (Phase 107) ---
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN sha256_hash TEXT');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN phash TEXT');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN duplicate_group_id INTEGER REFERENCES duplicate_groups(id) ON DELETE SET NULL');
+  } catch { /* column already exists */ }
+
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_photos_sha256 ON photos(sha256_hash)');
+  } catch { /* index already exists */ }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS duplicate_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL CHECK(type IN ('exact', 'near')),
+        status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending', 'resolved', 'dismissed')),
+        winner_photo_id INTEGER REFERENCES photos(id) ON DELETE SET NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch { /* table already exists */ }
+
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_photos_dup_group ON photos(duplicate_group_id)');
+  } catch { /* index already exists */ }
+
+  // Backfill GPS coordinates from metadata_json for existing photos
+  const gpsBackfillKey = 'migration_gps_cache_backfill_v1';
+  const gpsCheck = db.prepare('SELECT value FROM app_state WHERE key = ?').get(gpsBackfillKey);
+  if (!gpsCheck) {
+    const photosWithMeta = db.prepare(
+      'SELECT id, metadata_json FROM photos WHERE gps_lat IS NULL AND metadata_json IS NOT NULL'
+    ).all() as Array<{ id: number; metadata_json: string }>;
+
+    const updateGps = db.prepare('UPDATE photos SET gps_lat = ?, gps_lon = ? WHERE id = ?');
+    let gpsBackfilled = 0;
+
+    for (const photo of photosWithMeta) {
+      try {
+        const meta = JSON.parse(photo.metadata_json);
+        const lat = meta.GPSLatitude ?? meta.gpsLatitude ?? null;
+        const lon = meta.GPSLongitude ?? meta.gpsLongitude ?? null;
+        if (lat !== null && lon !== null) {
+          updateGps.run(lat, lon, photo.id);
+          gpsBackfilled++;
+        }
+      } catch { /* skip malformed JSON */ }
+    }
+
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(gpsBackfillKey, '1');
+    logger.info(`[DB Module] GPS cache backfill complete: ${gpsBackfilled} photos updated.`);
+  }
+}

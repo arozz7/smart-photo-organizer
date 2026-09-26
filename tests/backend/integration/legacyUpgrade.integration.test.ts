@@ -5,6 +5,9 @@
  * backward-compatibility promise: opening an existing library must never lose or alter user data.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { initDB, getDB, closeDB } from '../../../electron/db';
 import {
@@ -90,6 +93,12 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         expect(dupMembers.c).toBe(2);
     });
 
+    it('takes no backup and leaves user_version alone when no migrations are pending', () => {
+        // Assert
+        expect(db.pragma('user_version', { simple: true })).toBe(0);
+        expect(fs.existsSync(path.join(libraryDir, 'backups'))).toBe(false);
+    });
+
     it('is idempotent: opening the library a second time changes nothing', async () => {
         // Arrange
         const before = JSON.stringify(
@@ -106,5 +115,22 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
 
         // Assert
         expect(after).toBe(before);
+    });
+});
+
+
+describe('Fresh library', () => {
+    it('creates the full schema on an empty folder', async () => {
+        // Arrange
+        const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spo-fresh-'));
+
+        // Act
+        await initDB(libraryDir);
+        const tables = (getDB().prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map(t => t.name);
+        closeDB();
+        removeLibraryCopy(libraryDir);
+
+        // Assert
+        expect(tables).toEqual(expect.arrayContaining(['photos', 'faces', 'people', 'person_eras', 'smart_albums', 'duplicate_groups', 'app_state']));
     });
 });
