@@ -53,6 +53,15 @@ vi.mock('../../../../electron/data/repositories/PhotoRepository', () => ({
     }
 }));
 
+vi.mock('../../../../electron/data/repositories/FaceRepository', () => ({
+    FaceRepository: {
+        getFacesByPhotoIncludingIgnored: vi.fn(() => []),
+        getFacesByPhoto: vi.fn(() => []),
+        deleteFaces: vi.fn(),
+        assignFacesToPerson: vi.fn()
+    }
+}));
+
 vi.mock('../../../../electron/store', () => ({
     getLibraryPath: vi.fn(() => '/mock/library')
 }));
@@ -193,6 +202,34 @@ describe('PhotoService', () => {
                 'rotate_image',
                 expect.objectContaining({ filePath, rotation: 90 })
             );
+        });
+
+        it('should trigger a clean face re-scan after rotating a standard file', async () => {
+            // Arrange — rotated pixels invalidate old face boxes, so faces must be re-detected
+            const filePath = '/path/to/photo.jpg';
+            vi.mocked(pythonProvider.sendRequest).mockResolvedValue({ success: true } as any);
+            vi.mocked(pythonProvider.analyzeImage).mockResolvedValue({ success: true, faces: [] } as any);
+
+            // Act
+            await PhotoService.rotatePhoto(2, filePath, 90);
+
+            // Assert
+            expect(pythonProvider.analyzeImage).toHaveBeenCalledWith(
+                filePath,
+                expect.objectContaining({ photoId: 2, cleanRescan: true })
+            );
+        });
+
+        it('should not re-scan faces when the rotation fails', async () => {
+            // Arrange
+            const filePath = '/path/to/photo.jpg';
+            vi.mocked(pythonProvider.sendRequest).mockResolvedValue({ success: false, error: 'read-only' } as any);
+
+            // Act
+            await PhotoService.rotatePhoto(3, filePath, 90);
+
+            // Assert
+            expect(pythonProvider.analyzeImage).not.toHaveBeenCalled();
         });
     });
 

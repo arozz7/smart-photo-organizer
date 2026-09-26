@@ -124,9 +124,17 @@ export class BackgroundDuplicateCheckerService implements IService {
             if (this.shouldStop) break;
             try {
                 const hash = await this.hashFile(photo.file_path);
-                if (hash) PhotoRepository.updatePhotoSha256(photo.id, hash);
+                if (hash) {
+                    PhotoRepository.updatePhotoSha256(photo.id, hash);
+                } else {
+                    // Unreadable/corrupt file — record once so it stops being
+                    // retried on every backfill cycle (see getPhotosNeedingSha256).
+                    logger.warn(`[BackgroundDuplicateCheckerService] SHA-256 failed for photo ${photo.id}: file unreadable`);
+                    PhotoRepository.recordScanError(photo.id, photo.file_path, 'File unreadable for SHA-256 hashing', 'SHA256 Hash');
+                }
             } catch (e) {
                 logger.warn(`[BackgroundDuplicateCheckerService] SHA-256 failed for photo ${photo.id}:`, e);
+                PhotoRepository.recordScanError(photo.id, photo.file_path, String(e), 'SHA256 Hash');
             }
         }
 
@@ -150,10 +158,19 @@ export class BackgroundDuplicateCheckerService implements IService {
                 120_000
             );
             const results: { id: number; phash: string }[] = result?.results ?? [];
+            const succeededIds = new Set(results.map(r => r.id));
             for (const r of results) {
                 PhotoRepository.updatePhotoPhash(r.id, r.phash);
             }
             logger.info(`[BackgroundDuplicateCheckerService] pHash backfill: ${results.length}/${photos.length} succeeded.`);
+
+            // Anything requested but not returned failed (usually an unreadable/
+            // corrupt file) — record once so it stops being retried every cycle.
+            for (const photo of photos) {
+                if (!succeededIds.has(photo.id)) {
+                    PhotoRepository.recordScanError(photo.id, photo.file_path, 'File unreadable for pHash computation', 'pHash');
+                }
+            }
         } catch (e) {
             logger.error('[BackgroundDuplicateCheckerService] pHash backfill Python call failed:', e);
         }

@@ -23,15 +23,11 @@ def _get_provider():
     """Return the singleton Sam3Provider, creating it on first call."""
     global _provider
     if _provider is None:
-        from facelib.sam3_provider import Sam3Provider
+        from facelib.segmentation_factory import create_segmentation_provider
         from config import AI_CONFIG
 
         cfg = AI_CONFIG.get("segmentation", {})
-        _provider = Sam3Provider(
-            model_checkpoint=cfg.get("model_checkpoint", "models/sam3"),
-            device=cfg.get("device", "auto"),
-            max_cached_sessions=cfg.get("max_cached_sessions", 5),
-        )
+        _provider = create_segmentation_provider(cfg)
     return _provider
 
 
@@ -177,6 +173,16 @@ def apply_operation(payload: dict[str, Any], req_id: str | None = None) -> dict[
         alpha = feather_mask(mask, feather_radius)
         if invert_mask:
             alpha = 1.0 - alpha
+
+        # When chaining ops (source_image_b64 provided), a previous 'isolate' may have
+        # cropped the image to the subject bounding box, making it smaller than the mask.
+        # Resize alpha to match the actual image dimensions so all ops can composite correctly.
+        img_w, img_h = image.size  # PIL: (width, height)
+        if alpha.shape != (img_h, img_w):
+            import numpy as _np2
+            from PIL import Image as _PILResize
+            _alpha_pil = _PILResize.fromarray((_np2.clip(alpha, 0, 1) * 255).astype(_np2.uint8), mode="L")
+            alpha = _np2.array(_alpha_pil.resize((img_w, img_h), _PILResize.LANCZOS), dtype=_np2.float32) / 255.0
 
         if operation == "background-remove":
             result_image = apply_background_remove(image, alpha)

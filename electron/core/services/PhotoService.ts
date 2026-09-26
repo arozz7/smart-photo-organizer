@@ -1,5 +1,5 @@
 import { FaceService } from './FaceService';
-import { promises as fs } from 'node:fs';
+import { promises as fs, constants as fsConstants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { ExifTool } from 'exiftool-vendored';
@@ -169,7 +169,19 @@ export class PhotoService {
             logger.info(`[PhotoService] Updating Orientation: ${currentOrt} (${currentDeg}°) + ${rotationDegrees}° -> ${newDeg}° (Ort: ${newOrt})`);
 
             // 3. Write New Orientation
-            // 3. Write New Orientation
+            // Camera-imported RAW files commonly keep the read-only file
+            // attribute — clear it so the write below doesn't fail with EPERM.
+            try {
+                await fs.access(filePath, fsConstants.W_OK);
+            } catch {
+                try {
+                    await fs.chmod(filePath, 0o666);
+                    logger.info(`[PhotoService] Cleared read-only attribute on ${filePath}`);
+                } catch (chmodErr) {
+                    logger.warn(`[PhotoService] Could not clear read-only attribute on ${filePath}: ${chmodErr}`);
+                }
+            }
+
             try {
                 // Force numeric write and overwrite original
                 // '-n' disables print conversion (writes raw number)
@@ -213,7 +225,26 @@ export class PhotoService {
         } else {
             // Non-RAW: Use Python/Pillow (destructive but fine for JPG/PNG usually, or better for compat)
             logger.info(`[PhotoService] Rotating Standard file ${filePath} by ${rotationDegrees} via Python`);
-            return pythonProvider.sendRequest('rotate_image', { photoId, filePath, rotation: rotationDegrees, previewStorageDir: previewsDir });
+            const result = await pythonProvider.sendRequest('rotate_image', { photoId, filePath, rotation: rotationDegrees });
+            if (!result || result.error || result.success === false) {
+                return result;
+            }
+
+            // Trigger Face Re-Scan — the file's pixels are now physically rotated,
+            // so old face boxes/embeddings no longer align with the image.
+            logger.info(`[PhotoService] Triggering Face Re-Scan (with cleanRescan)...`);
+            await PhotoService.analyzeImage({
+                photoId,
+                filePath,
+                scanMode: 'FAST',
+                cleanRescan: true
+            });
+
+            // Force Regenerate Preview — must use the same md5(filePath)-based naming
+            // extractPreview uses everywhere else, so the UI actually picks up the change.
+            await this.extractPreview(filePath, previewsDir, true, true);
+
+            return result;
         }
     }
 

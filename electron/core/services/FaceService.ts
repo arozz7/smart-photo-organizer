@@ -134,7 +134,17 @@ export class FaceService {
         if (pendingIndices.length > 0 && options.searchFn) {
             const pendingDescriptors = pendingIndices.map(i => parsedDescriptors[i]);
             // threshold is already L2 distance, pass directly to FAISS
-            const batchFaiss = await options.searchFn(pendingDescriptors, options.topK ?? 5, threshold);
+            // A timeout/failure here must degrade to "no FAISS matches" rather
+            // than aborting the whole batch — callers (e.g. per-photo scan
+            // classification) must still complete so downstream state (queue
+            // advancement, processing flags) doesn't get stuck.
+            let batchFaiss: { id: number; distance: number }[][];
+            try {
+                batchFaiss = await options.searchFn(pendingDescriptors, options.topK ?? 5, threshold);
+            } catch (e) {
+                logger.error('[FaceService] matchBatch FAISS search failed:', e);
+                return results;
+            }
 
             // Fetch Person IDs for all matched faces in one go
             const allMatchedFaceIds = new Set<number>();

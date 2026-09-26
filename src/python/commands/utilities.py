@@ -80,7 +80,7 @@ def download_model(payload, req_id=None):
             repo_id = url[len('hf://'):]  # e.g. "facebook/sam3"
             from config import AI_CONFIG
             checkpoint_dir = AI_CONFIG.get('segmentation', {}).get(
-                'model_checkpoint', 'models/sam3'
+                'model_checkpoint', 'models/sam3.pt'
             )
             import huggingface_hub
             logger.info(f"Downloading HuggingFace model '{repo_id}' → '{checkpoint_dir}'")
@@ -118,7 +118,7 @@ def download_model(payload, req_id=None):
             if not base_url:
                 # Fallback default if not provided (should accept version from IPC though)
                 # Note: We expect IPC to provide versioned URL now.
-                base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.8.0/ai-runtime-win-x64.zip"
+                base_url = "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.8.1/ai-runtime-win-x64.zip"
 
             # Check if this is a custom override (likely single file) or standard release (multi-part)
             # Heuristic: Try .001 first. If 404, fallback to single file.
@@ -265,7 +265,7 @@ def get_system_status(req_id=None, runtime_url: str | None = None):
         status['vlm'] = {
             'loaded': (vlm.vlm_model is not None),
             'device': "cuda" if torch_lib and torch_lib.cuda.is_available() else "cpu",
-            'model': 'SmolVLM-Instruct'
+            'model': 'SmolVLM2-2.2B-Instruct'
         }
         
         # System

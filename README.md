@@ -6,7 +6,7 @@
 
 ## Overview
 
-Smart Photo Organizer uses advanced AI — **InsightFace** for people, **SmolVLM** for scene understanding — to automatically classify and organize your photo library. Unlike cloud services, **all processing happens locally** on your machine, ensuring your photos never leave your hard drive.
+Smart Photo Organizer uses advanced AI — **InsightFace** for people, **SmolVLM2** for scene understanding — to automatically classify and organize your photo library. Unlike cloud services, **all processing happens locally** on your machine, ensuring your photos never leave your hard drive.
 
 > **Slim Installer:** The installer is a lightweight (~400MB) package. Download the optional 5GB GPU Runtime separately for a 10–20x performance boost on face scanning and upscaling.
 
@@ -204,7 +204,7 @@ Build custom photo collections by combining complex filter criteria, then export
 
 ### 🏷️ Smart Tagging
 
-The app uses **SmolVLM** (a lightweight Vision-Language Model) to "read" your photos and generate searchable content.
+The app uses **SmolVLM2** (a lightweight Vision-Language Model) to "read" your photos and generate searchable content.
 
 <!-- GIF: Selecting photos → triggering Smart Tag generation → tags appearing in detail panel -->
 
@@ -498,7 +498,7 @@ npm run dev
 
 ## Releasing (Maintainers)
 
-1. **Build:** Run `npm run build`. This produces the installer (e.g., `release/0.8.0/...-Setup.7z`).
+1. **Build:** Run `npm run build`. This produces the installer (e.g., `release/0.8.1/...-Setup.7z`).
 2. **GPU Runtime:** The GPU Runtime is **not** bundled in the installer to keep it slim. Reference or create a separate `ai-runtime-win-x64.zip` containing the `bin` and `lib` directories.
 3. **GitHub Release:**
    - Create a release tagged `vX.X.X`.
@@ -513,7 +513,7 @@ This project uses a hybrid architecture:
 
 - **Frontend:** React 18 + TypeScript + Vite
 - **Main Process:** Electron (TypeScript) — file I/O, SQLite (better-sqlite3), image processing (sharp), IPC
-- **AI Backend:** Python 3.12 subprocess — InsightFace, FAISS, SmolVLM, Real-ESRGAN, GFPGAN, SAM 3
+- **AI Backend:** Python 3.12 subprocess — InsightFace, FAISS, SmolVLM2, Real-ESRGAN, GFPGAN, SAM 3
 
 See [System Architecture](docs/specs/architecture.md) and [Logic Examples](docs/specs/logic_examples.md) for detailed diagrams and flow documentation.
 

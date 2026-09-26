@@ -11,7 +11,8 @@ def load_ai_config():
     defaults = {
          'segmentation': {
              'provider': 'sam3',
-             'model_checkpoint': 'models/sam3',
+             'model_checkpoint': 'models/sam3.pt',
+             'model_checkpoint_cpu': 'models/sam3_model.safetensors',
              'device': 'auto',
              'max_cached_sessions': 5,
          },

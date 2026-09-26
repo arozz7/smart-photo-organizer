@@ -3,7 +3,7 @@ import json
 import logging
 import time
 import os
-import os
+import stat
 import cv2
 import numpy as np
 import rawpy
@@ -193,7 +193,7 @@ def handle_command(command):
             runtime_exists = os.path.exists(os.path.join(os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer')), 'ai-runtime'))
             
             # Use dynamic URL if provided, otherwise default (though default might be outdated if version mismatch)
-            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.8.0/ai-runtime-win-x64.zip")
+            runtime_url = payload.get('runtimeUrl', "https://github.com/arozz7/smart-photo-organizer/releases/download/v0.8.1/ai-runtime-win-x64.zip")
             
             models_info["AI GPU Runtime (Torch/CUDA)"] = {
                 "exists": runtime_exists,
@@ -220,11 +220,11 @@ def handle_command(command):
                 "size": 0,
                 "localPath": os.path.expanduser('~/.insightface/models/buffalo_l')
             }
-            models_info["SmolVLM-Instruct"] = {
-                "exists": os.path.exists(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')),
-                "url": "HuggingFace (SmolVLM-Instruct)",
+            models_info["SmolVLM2-2.2B-Instruct"] = {
+                "exists": os.path.exists(os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM2-2.2B-Instruct')),
+                "url": "HuggingFace (SmolVLM2-2.2B-Instruct)",
                 "size": 0,
-                "localPath": os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')
+                "localPath": os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM2-2.2B-Instruct')
             }
             response['models'] = models_info
 
@@ -542,29 +542,27 @@ def handle_command(command):
             ImageFile.LOAD_TRUNCATED_IMAGES = True
             img = Image.open(file_path)
             img = PILImageOps.exif_transpose(img)
-            
+
             angle = -int(rotation_angle)
             rotated_img = img.rotate(angle, expand=True)
-            
+
             exif = rotated_img.getexif()
-            if 0x0112 in exif: del exif[0x0112] 
-            
+            if 0x0112 in exif: del exif[0x0112]
+
+            # Photos copied from cameras/read-only media often keep the
+            # read-only file attribute — clear it so the overwrite below
+            # doesn't fail with PermissionError.
+            if not os.access(file_path, os.W_OK):
+                try:
+                    os.chmod(file_path, stat.S_IWRITE | stat.S_IREAD)
+                    logger.info(f"Cleared read-only attribute on {file_path}")
+                except Exception as chmod_e:
+                    logger.warning(f"Could not clear read-only attribute on {file_path}: {chmod_e}")
+
             rotated_img.save(file_path, quality=95, exif=exif)
             full_w, full_h = rotated_img.size
             
             logger.info(f"Successfully rotated {file_path}")
-            
-            preview_dir = payload.get('previewStorageDir')
-            if preview_dir:
-                 preview_filename = f"preview_{photo_id}.jpg"
-                 preview_path = os.path.join(preview_dir, preview_filename)
-                 max_dim = 1280
-                 if full_w > max_dim or full_h > max_dim:
-                     preview_img = rotated_img.copy()
-                     preview_img.thumbnail((max_dim, max_dim))
-                     preview_img.save(preview_path, quality=80)
-                 else:
-                     rotated_img.save(preview_path, quality=80)
 
             response = {"type": "rotate_result", "photoId": photo_id, "success": True, "width": full_w, "height": full_h}
         except Exception as e:

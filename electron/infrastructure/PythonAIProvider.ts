@@ -119,6 +119,16 @@ export class PythonAIProvider implements IAIProvider, IService {
         this.process.on('close', (code) => {
             logger.warn(`Python process exited with code ${code}`);
             this.process = null;
+
+            // If the process died unexpectedly (not via our own stop()), any
+            // in-flight request would otherwise hang until its own timeout
+            // (up to several minutes) — reject them immediately so callers
+            // (and the flags/queues that depend on them completing) don't stall.
+            if (!this.isShuttingDown && this.scanPromises.size > 0) {
+                logger.error(`[PythonAIProvider] Python process died with ${this.scanPromises.size} pending request(s) — rejecting them.`);
+                this.scanPromises.forEach(p => p.reject(new Error('Python process exited unexpectedly')));
+                this.scanPromises.clear();
+            }
         });
     }
 
@@ -152,14 +162,22 @@ export class PythonAIProvider implements IAIProvider, IService {
                     }
                 } catch (e) { /* ignore metadata parse errors */ }
 
-                await FaceService.processAnalysisResult(
-                    message.photoId,
-                    message.faces,
-                    message.width,
-                    message.height,
-                    this,
-                    { sessionFolder, sessionDate }
-                );
+                // Must not let a failure here (e.g. a FAISS search timeout) skip
+                // notifying the renderer below — that would leave the scan queue's
+                // isProcessing flag (and the AppStateRepository lock it drives)
+                // stuck true forever, freezing every other background service.
+                try {
+                    await FaceService.processAnalysisResult(
+                        message.photoId,
+                        message.faces,
+                        message.width,
+                        message.height,
+                        this,
+                        { sessionFolder, sessionDate }
+                    );
+                } catch (e) {
+                    logger.error(`[Main] processAnalysisResult failed for photo ${message.photoId}:`, e);
+                }
             }
 
             // Save global blur score, description, and pHash to photos table

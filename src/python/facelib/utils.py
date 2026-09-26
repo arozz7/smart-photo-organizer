@@ -7,6 +7,25 @@ import logging
 LIBRARY_PATH = os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer'))
 AI_RUNTIME_PATH = os.path.join(LIBRARY_PATH, 'ai-runtime')
 
+def resolve_model_path(relative_path: str) -> str:
+    """
+    Resolve a model path that may live either alongside the source tree
+    (dev / CWD-relative) or inside the downloaded AI Runtime bundle.
+
+    Mirrors the fallback pattern already used by adaface.py's init_adaface():
+    try the path as given first, then the same relative path under
+    AI_RUNTIME_PATH. Returns the original relative_path unchanged if neither
+    location has the file, so callers get a clear "not found at <path>" error
+    using the path they expected rather than a silently-wrong runtime path.
+    """
+    if os.path.exists(relative_path):
+        return relative_path
+    runtime_path = os.path.join(AI_RUNTIME_PATH, relative_path)
+    if os.path.exists(runtime_path):
+        return runtime_path
+    return relative_path
+
+
 def inject_runtime():
     """
     Scans for the AI Runtime and injects it into sys.path.
@@ -226,19 +245,36 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
         "localPath": buffalo_path
     }
 
-    # 4. SmolVLM (HuggingFace)
+    # 4. SmolVLM2 (HuggingFace)
     # Note: Path is approx, actual HF path varies by hash. We check the parent dir.
-    vlm_path = os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM-Instruct')
-    models_info["SmolVLM-Instruct"] = {
+    vlm_path = os.path.expanduser('~/.cache/huggingface/hub/models--HuggingFaceTB--SmolVLM2-2.2B-Instruct')
+    models_info["SmolVLM2-2.2B-Instruct"] = {
         "exists": os.path.exists(vlm_path),
-        "url": "HuggingFace (SmolVLM-Instruct)",
+        "url": "HuggingFace (SmolVLM2-2.2B-Instruct)",
         "size": 0,
         "localPath": vlm_path
     }
 
-    # 5. AdaFace (ONNX — low-quality face recognition)
+    # Model files can live either next to the dev source tree (models_root)
+    # or inside the downloaded AI Runtime bundle (runtime_models_root) — the
+    # slim installer ships no model weights at all, so most users only have
+    # the latter. Check both, preferring whichever actually exists.
     models_root = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'models'))
-    adaface_path = os.path.join(models_root, 'adaface_ir50_webface4m.onnx')
+    runtime_models_root = os.path.join(AI_RUNTIME_PATH, 'models')
+
+    def _first_existing(*candidates):
+        """Return the first path that exists, or the last candidate (the
+        'expected' default) if none do."""
+        for c in candidates:
+            if os.path.exists(c):
+                return c
+        return candidates[-1]
+
+    # 5. AdaFace (ONNX — low-quality face recognition)
+    adaface_path = _first_existing(
+        os.path.join(models_root, 'adaface_ir50_webface4m.onnx'),
+        os.path.join(runtime_models_root, 'adaface_ir50_webface4m.onnx'),
+    )
     models_info["AdaFace IR50 (Face Recognition)"] = {
         "exists": os.path.exists(adaface_path),
         "url": "https://huggingface.co/mk-minchul/adaface/resolve/main/adaface_ir50_webface4m.onnx",
@@ -247,10 +283,26 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
     }
 
     # 6. SAM 3 (HuggingFace — facebook/sam3)
-    # Accept either a proper HF snapshot dir (has config.json) or a bare .safetensors file.
-    sam3_dir = os.path.join(models_root, 'sam3')
-    sam3_bare = os.path.join(models_root, 'sam3_model.safetensors')
-    if os.path.isdir(sam3_dir) and os.path.exists(os.path.join(sam3_dir, 'config.json')):
+    # Two providers, two checkpoint formats: sam3.pt (GPU, Sam3PackageProvider)
+    # takes priority since it's the default when a CUDA GPU is present; fall
+    # back to the old HF snapshot dir or bare .safetensors (CPU, Sam3TransformersProvider).
+    sam3_pt = _first_existing(
+        os.path.join(models_root, 'sam3.pt'),
+        os.path.join(runtime_models_root, 'sam3.pt'),
+    )
+    sam3_dir = _first_existing(
+        os.path.join(models_root, 'sam3'),
+        os.path.join(runtime_models_root, 'sam3'),
+    )
+    sam3_bare = _first_existing(
+        os.path.join(models_root, 'sam3_model.safetensors'),
+        os.path.join(runtime_models_root, 'sam3_model.safetensors'),
+    )
+    if os.path.isfile(sam3_pt):
+        sam3_exists = True
+        sam3_local = sam3_pt
+        sam3_size = os.path.getsize(sam3_pt)
+    elif os.path.isdir(sam3_dir) and os.path.exists(os.path.join(sam3_dir, 'config.json')):
         sam3_exists = True
         sam3_local = sam3_dir
         sam3_size = sum(
@@ -264,7 +316,7 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
         sam3_size = os.path.getsize(sam3_bare)
     else:
         sam3_exists = False
-        sam3_local = sam3_dir  # default expected location
+        sam3_local = sam3_pt  # default expected location
         sam3_size = 0
     models_info["SAM 3 (Segmentation)"] = {
         "exists": sam3_exists,

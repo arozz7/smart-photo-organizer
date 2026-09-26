@@ -42,6 +42,14 @@ const heavyPackages = [
     'filelock', // Required by torch
     'typing_extensions', // Required by torch
     'fsspec',   // Required by torch
+    'sam3',     // Meta's official SAM 3 package (facebookresearch/sam3)
+    'timm',     // Required by sam3's vision backbone
+    'einops',   // Required by sam3 (not declared in its own install metadata)
+    'triton',   // Required by sam3 (installed as the triton-windows package on Windows)
+    'ftfy',     // Required by sam3's text tokenizer
+    'iopath',   // Required by sam3
+    'portalocker', // Required by sam3 (iopath dependency)
+    'pycocotools', // Required by sam3's inference-time import chain (not declared)
 ];
 
 console.log('--- AI Runtime Packager ---');
@@ -56,19 +64,26 @@ fs.mkdirSync(path.join(stagingDir, 'bin'), { recursive: true });
 // 2. Collect site-packages
 console.log('Collecting heavy libraries...');
 heavyPackages.forEach(pkg => {
-    // Copy the main package folder
-    const pkgPath = path.join(sitePackages, pkg);
-    if (fs.existsSync(pkgPath)) {
-        console.log(`Copying ${pkg}...`);
-        fs.cpSync(pkgPath, path.join(stagingDir, 'lib/site-packages', pkg), { recursive: true });
+    // Most packages are a directory; some (e.g. typing_extensions) ship as a
+    // single top-level .py module instead — check both forms.
+    const pkgDirPath = path.join(sitePackages, pkg);
+    const pkgFilePath = path.join(sitePackages, `${pkg}.py`);
 
-        // Also copy .dist-info if it exists for metadata
-        const distInfo = fs.readdirSync(sitePackages).find(f => f.startsWith(pkg.replace('-', '_')) && f.endsWith('.dist-info'));
-        if (distInfo) {
-            fs.cpSync(path.join(sitePackages, distInfo), path.join(stagingDir, 'lib/site-packages', distInfo), { recursive: true });
-        }
+    if (fs.existsSync(pkgDirPath)) {
+        console.log(`Copying ${pkg}...`);
+        fs.cpSync(pkgDirPath, path.join(stagingDir, 'lib/site-packages', pkg), { recursive: true });
+    } else if (fs.existsSync(pkgFilePath)) {
+        console.log(`Copying ${pkg}.py (single-file module)...`);
+        fs.copyFileSync(pkgFilePath, path.join(stagingDir, 'lib/site-packages', `${pkg}.py`));
     } else {
         console.warn(`Warning: Package ${pkg} not found in site-packages.`);
+        return;
+    }
+
+    // Also copy .dist-info if it exists for metadata
+    const distInfo = fs.readdirSync(sitePackages).find(f => f.startsWith(pkg.replace('-', '_')) && f.endsWith('.dist-info'));
+    if (distInfo) {
+        fs.cpSync(path.join(sitePackages, distInfo), path.join(stagingDir, 'lib/site-packages', distInfo), { recursive: true });
     }
 });
 
