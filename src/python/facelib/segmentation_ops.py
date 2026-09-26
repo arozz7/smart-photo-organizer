@@ -56,6 +56,22 @@ def _to_alpha(mask: np.ndarray) -> np.ndarray:
     return mask if mask.dtype == np.float32 else mask.astype(np.float32)
 
 
+def fit_alpha_to_image(alpha: np.ndarray, image: Image.Image) -> np.ndarray:
+    """
+    Return a float32 [H, W] alpha whose size matches `image`.
+
+    A mask can be sized for a different image than the one it is applied to, e.g. when chaining
+    operations after 'isolate' has cropped the image to the subject. Resize with LANCZOS so every
+    operation can composite without a numpy broadcast error.
+    """
+    img_w, img_h = image.size  # PIL: (width, height)
+    alpha = _to_alpha(alpha)
+    if alpha.shape == (img_h, img_w):
+        return alpha
+    alpha_img = Image.fromarray((np.clip(alpha, 0, 1) * 255).astype(np.uint8), mode="L")
+    return np.array(alpha_img.resize((img_w, img_h), Image.LANCZOS), dtype=np.float32) / 255.0
+
+
 # ---------------------------------------------------------------------------
 # Operations
 # ---------------------------------------------------------------------------

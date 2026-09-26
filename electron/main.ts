@@ -27,6 +27,8 @@ import { BackgroundDuplicateCheckerService } from './core/services/BackgroundDup
 import { AppStateRepository } from './data/repositories/AppStateRepository';
 import { BucketRepository } from './data/repositories/BucketRepository';
 import { ServiceManager } from './core/services/ServiceManager';
+import { MigrationError } from './data/migrations/types';
+import { notifyDowngrade, reportMigrationFailureAndQuit } from './windows/migrationDialogs';
 
 // Global service references for shutdown
 let bucketingService: BackgroundBucketingService | null = null;
@@ -90,9 +92,10 @@ app.whenReady().then(async () => {
 
   // Initialize DB
   try {
-    await initDB(LIBRARY_PATH, (status: string) => {
+    const migration = await initDB(LIBRARY_PATH, (status: string) => {
       WindowManager.updateSplashStatus(status);
     })
+    if (migration.downgradeDetected) notifyDowngrade(migration);
 
     // Recovery / Cleanup (B4)
     try {
@@ -103,6 +106,12 @@ app.whenReady().then(async () => {
       logger.error('[Main] Recovery cleanup failed:', err);
     }
   } catch (e) {
+    if (e instanceof MigrationError) {
+      // Fail closed: do not start any service on a library whose upgrade failed.
+      logger.error("[Main] Library upgrade failed; quitting", e);
+      reportMigrationFailureAndQuit(e);
+      return;
+    }
     logger.error("DB Init Failed", e);
   }
 

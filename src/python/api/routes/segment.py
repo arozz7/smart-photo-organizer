@@ -26,6 +26,7 @@ from facelib.segmentation_ops import (
     apply_isolate,
     apply_blur_background,
     apply_enhance,
+    fit_alpha_to_image,
 )
 
 logger = logging.getLogger("smart-photo-ai")
@@ -120,13 +121,13 @@ def _run_apply(
     """Shared logic for all /apply/* endpoints."""
     try:
         image = provider.get_session_image(session_id)
-        mask = decode_mask(mask_b64)
+        mask = fit_alpha_to_image(decode_mask(mask_b64), image)
         result = apply_fn(image, mask)
         return {"session_id": session_id, "result_b64": encode_image(result)}
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
     except Exception as e:
-        logger.error({"error": str(e)}, "apply operation failed")
+        logger.error("apply operation failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -158,7 +159,7 @@ async def set_image(
         session_id = provider.set_image(validated_path)
         return {"session_id": session_id}
     except Exception as e:
-        logger.error({"error": str(e)}, "set_image failed")
+        logger.error("set_image failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -192,7 +193,7 @@ async def predict(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error({"error": str(e)}, "predict failed")
+        logger.error("predict failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
     return result

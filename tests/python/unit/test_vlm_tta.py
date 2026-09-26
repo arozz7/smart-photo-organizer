@@ -41,7 +41,7 @@ class TestVLMTTA(unittest.TestCase):
         # Second call (180): True
         mock_analyze.side_effect = [
             {'is_face': False, 'reason': 'Not a face'}, # Upright
-            {'is_face': True, 'reason': 'Found face upside down'} # 180 deg
+            {'is_face': True, 'reason': 'Found face upside down: eyes and nose visible'} # 180 deg (evidence required by Phase 89.5)
         ]
 
         # Act
