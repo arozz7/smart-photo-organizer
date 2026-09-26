@@ -1,0 +1,958 @@
+{
+  "1_first_scan": {
+    "photos": [
+      {
+        "file_path": "<ROOT>/2019/a.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__a.jpg.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "f245bf6913791c35ae6570bbb86958c35ac200bf95291ca841ef96d4b2cdf5f6",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/b.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__b.jpg.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "6ce5fb87f75c3364a90c8a66ed563a9df44b17b729a664eeb048727255c9684f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/c.png",
+        "preview_cache_path": "<LIB>/previews/2019__c.png.jpg",
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "e91bf353492daf09720d3ff4aa2b279c71d404b94047fb59a7cb0f2382fdaf5e",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/d.jfif",
+        "preview_cache_path": "<LIB>/previews/2019__d.jfif.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "df0ddf55f6940f1f091e429da3779fbbb20de7b292fa2787c5714cb46149cfbe",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/e.ARW",
+        "preview_cache_path": "<LIB>/previews/raw__e.ARW.jpg",
+        "date_taken": "2020-05-22T10:00:00",
+        "width": 6000,
+        "height": 4000,
+        "metadata_json": "{\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:22 10:00:00\",\"Make\":\"TestCam\",\"SourceImageWidth\":6000,\"SourceImageHeight\":4000}",
+        "sha256_hash": "6a9f02624fa5eaf8e56241f2b06c1b51a2eccce2efa57a0d109a1f2017d3f58f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/f.cr2",
+        "preview_cache_path": "<LIB>/previews/raw__f.cr2.jpg",
+        "date_taken": "2020-05-19T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:19 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "9bb65762c47a66401c488ab120ce52d2b45adf021a62eacf3f8b9d49eb008cd1",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "preview_cache_path": null,
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "870761f725e36e075d56aac25cbd70413b169c2253ced35c68c292d70b73af8b",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/rotated.jpg",
+        "preview_cache_path": "<LIB>/previews/2020__rotated.jpg.jpg",
+        "date_taken": "2020-05-25T10:00:00",
+        "width": 3000,
+        "height": 4000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":6,\"DateTimeOriginal\":\"2020:05:25 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "ae1ee81a6cda487efa3c1d64d78fc0f234f993fa6a4e433a7cd51be9374acbde",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2021/deep/deeper/i.jpg",
+        "preview_cache_path": "<LIB>/previews/deeper__i.jpg.jpg",
+        "date_taken": "2020-05-20T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:20 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "cf91a91416eb6864c59a3c41d3e8aeb1dc211f0af20f6d1526488fee5041ef89",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/k.tiff",
+        "preview_cache_path": "<LIB>/previews/tree__k.tiff.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "bf7c1c06a9068850b44def69ab2e2d19ab3cfedd0db2a5f82b13e254bf9dd772",
+        "description": null
+      }
+    ],
+    "scanErrors": [
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "error_message": "preview boom",
+        "stage": "Initial Scan"
+      }
+    ],
+    "results": [
+      {
+        "file": "<ROOT>/2019/a.jpg",
+        "isNew": true,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/b.jpg",
+        "isNew": true,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/c.png",
+        "isNew": true,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/d.jfif",
+        "isNew": true,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/raw/e.ARW",
+        "isNew": true,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/raw/f.cr2",
+        "isNew": true,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2020/broken.jpg",
+        "isNew": true,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2020/rotated.jpg",
+        "isNew": true,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2021/deep/deeper/i.jpg",
+        "isNew": true,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/k.tiff",
+        "isNew": true,
+        "needsUpdate": false
+      }
+    ]
+  },
+  "2_unchanged_rescan": {
+    "photos": [
+      {
+        "file_path": "<ROOT>/2019/a.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__a.jpg.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "f245bf6913791c35ae6570bbb86958c35ac200bf95291ca841ef96d4b2cdf5f6",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/b.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__b.jpg.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "6ce5fb87f75c3364a90c8a66ed563a9df44b17b729a664eeb048727255c9684f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/c.png",
+        "preview_cache_path": "<LIB>/previews/2019__c.png.jpg",
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "e91bf353492daf09720d3ff4aa2b279c71d404b94047fb59a7cb0f2382fdaf5e",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/d.jfif",
+        "preview_cache_path": "<LIB>/previews/2019__d.jfif.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "df0ddf55f6940f1f091e429da3779fbbb20de7b292fa2787c5714cb46149cfbe",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/e.ARW",
+        "preview_cache_path": "<LIB>/previews/raw__e.ARW.jpg",
+        "date_taken": "2020-05-22T10:00:00",
+        "width": 6000,
+        "height": 4000,
+        "metadata_json": "{\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:22 10:00:00\",\"Make\":\"TestCam\",\"SourceImageWidth\":6000,\"SourceImageHeight\":4000}",
+        "sha256_hash": "6a9f02624fa5eaf8e56241f2b06c1b51a2eccce2efa57a0d109a1f2017d3f58f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/f.cr2",
+        "preview_cache_path": "<LIB>/previews/raw__f.cr2.jpg",
+        "date_taken": "2020-05-19T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:19 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "9bb65762c47a66401c488ab120ce52d2b45adf021a62eacf3f8b9d49eb008cd1",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "preview_cache_path": null,
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "870761f725e36e075d56aac25cbd70413b169c2253ced35c68c292d70b73af8b",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/rotated.jpg",
+        "preview_cache_path": "<LIB>/previews/2020__rotated.jpg.jpg",
+        "date_taken": "2020-05-25T10:00:00",
+        "width": 3000,
+        "height": 4000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":6,\"DateTimeOriginal\":\"2020:05:25 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "ae1ee81a6cda487efa3c1d64d78fc0f234f993fa6a4e433a7cd51be9374acbde",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2021/deep/deeper/i.jpg",
+        "preview_cache_path": "<LIB>/previews/deeper__i.jpg.jpg",
+        "date_taken": "2020-05-20T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:20 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "cf91a91416eb6864c59a3c41d3e8aeb1dc211f0af20f6d1526488fee5041ef89",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/k.tiff",
+        "preview_cache_path": "<LIB>/previews/tree__k.tiff.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "bf7c1c06a9068850b44def69ab2e2d19ab3cfedd0db2a5f82b13e254bf9dd772",
+        "description": null
+      }
+    ],
+    "scanErrors": [
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "error_message": "preview boom",
+        "stage": "Initial Scan"
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "error_message": "preview boom",
+        "stage": "Preview Generation"
+      }
+    ],
+    "results": [
+      {
+        "file": "<ROOT>/2019/a.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/b.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/c.png",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/d.jfif",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/raw/e.ARW",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/raw/f.cr2",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2020/broken.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2020/rotated.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2021/deep/deeper/i.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/k.tiff",
+        "isNew": false,
+        "needsUpdate": false
+      }
+    ]
+  },
+  "3_missing_previews": {
+    "photos": [
+      {
+        "file_path": "<ROOT>/2019/a.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__a.jpg.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "f245bf6913791c35ae6570bbb86958c35ac200bf95291ca841ef96d4b2cdf5f6",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/b.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__b.jpg.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "6ce5fb87f75c3364a90c8a66ed563a9df44b17b729a664eeb048727255c9684f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/c.png",
+        "preview_cache_path": "<LIB>/previews/2019__c.png.jpg",
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "e91bf353492daf09720d3ff4aa2b279c71d404b94047fb59a7cb0f2382fdaf5e",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/d.jfif",
+        "preview_cache_path": "<LIB>/previews/2019__d.jfif.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "df0ddf55f6940f1f091e429da3779fbbb20de7b292fa2787c5714cb46149cfbe",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/e.ARW",
+        "preview_cache_path": "<LIB>/previews/raw__e.ARW.jpg",
+        "date_taken": "2020-05-22T10:00:00",
+        "width": 6000,
+        "height": 4000,
+        "metadata_json": "{\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:22 10:00:00\",\"Make\":\"TestCam\",\"SourceImageWidth\":6000,\"SourceImageHeight\":4000}",
+        "sha256_hash": "6a9f02624fa5eaf8e56241f2b06c1b51a2eccce2efa57a0d109a1f2017d3f58f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/f.cr2",
+        "preview_cache_path": "<LIB>/previews/raw__f.cr2.jpg",
+        "date_taken": "2020-05-19T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:19 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "9bb65762c47a66401c488ab120ce52d2b45adf021a62eacf3f8b9d49eb008cd1",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "preview_cache_path": null,
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "870761f725e36e075d56aac25cbd70413b169c2253ced35c68c292d70b73af8b",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/rotated.jpg",
+        "preview_cache_path": "<LIB>/previews/2020__rotated.jpg.jpg",
+        "date_taken": "2020-05-25T10:00:00",
+        "width": 3000,
+        "height": 4000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":6,\"DateTimeOriginal\":\"2020:05:25 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "ae1ee81a6cda487efa3c1d64d78fc0f234f993fa6a4e433a7cd51be9374acbde",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2021/deep/deeper/i.jpg",
+        "preview_cache_path": "<LIB>/previews/deeper__i.jpg.jpg",
+        "date_taken": "2020-05-20T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:20 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "cf91a91416eb6864c59a3c41d3e8aeb1dc211f0af20f6d1526488fee5041ef89",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/k.tiff",
+        "preview_cache_path": "<LIB>/previews/tree__k.tiff.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "bf7c1c06a9068850b44def69ab2e2d19ab3cfedd0db2a5f82b13e254bf9dd772",
+        "description": null
+      }
+    ],
+    "scanErrors": [
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "error_message": "preview boom",
+        "stage": "Initial Scan"
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "error_message": "preview boom",
+        "stage": "Preview Generation"
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "error_message": "preview boom",
+        "stage": "Preview Generation"
+      }
+    ],
+    "results": [
+      {
+        "file": "<ROOT>/2019/a.jpg",
+        "isNew": false,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2019/b.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/c.png",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/d.jfif",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/raw/e.ARW",
+        "isNew": false,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2019/raw/f.cr2",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2020/broken.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2020/rotated.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2021/deep/deeper/i.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/k.tiff",
+        "isNew": false,
+        "needsUpdate": false
+      }
+    ]
+  },
+  "4_metadata_backfill": {
+    "photos": [
+      {
+        "file_path": "<ROOT>/2019/a.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__a.jpg.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "f245bf6913791c35ae6570bbb86958c35ac200bf95291ca841ef96d4b2cdf5f6",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/b.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__b.jpg.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "6ce5fb87f75c3364a90c8a66ed563a9df44b17b729a664eeb048727255c9684f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/c.png",
+        "preview_cache_path": "<LIB>/previews/2019__c.png.jpg",
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "e91bf353492daf09720d3ff4aa2b279c71d404b94047fb59a7cb0f2382fdaf5e",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/d.jfif",
+        "preview_cache_path": "<LIB>/previews/2019__d.jfif.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "df0ddf55f6940f1f091e429da3779fbbb20de7b292fa2787c5714cb46149cfbe",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/e.ARW",
+        "preview_cache_path": "<LIB>/previews/raw__e.ARW.jpg",
+        "date_taken": "2020-05-22T10:00:00",
+        "width": 6000,
+        "height": 4000,
+        "metadata_json": "{\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:22 10:00:00\",\"Make\":\"TestCam\",\"SourceImageWidth\":6000,\"SourceImageHeight\":4000}",
+        "sha256_hash": "6a9f02624fa5eaf8e56241f2b06c1b51a2eccce2efa57a0d109a1f2017d3f58f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/f.cr2",
+        "preview_cache_path": "<LIB>/previews/raw__f.cr2.jpg",
+        "date_taken": "2020-05-19T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:19 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "9bb65762c47a66401c488ab120ce52d2b45adf021a62eacf3f8b9d49eb008cd1",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "preview_cache_path": null,
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "870761f725e36e075d56aac25cbd70413b169c2253ced35c68c292d70b73af8b",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/rotated.jpg",
+        "preview_cache_path": "<LIB>/previews/2020__rotated.jpg.jpg",
+        "date_taken": "2020-05-25T10:00:00",
+        "width": 3000,
+        "height": 4000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":6,\"DateTimeOriginal\":\"2020:05:25 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "ae1ee81a6cda487efa3c1d64d78fc0f234f993fa6a4e433a7cd51be9374acbde",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2021/deep/deeper/i.jpg",
+        "preview_cache_path": "<LIB>/previews/deeper__i.jpg.jpg",
+        "date_taken": "2020-05-20T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:20 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "cf91a91416eb6864c59a3c41d3e8aeb1dc211f0af20f6d1526488fee5041ef89",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/k.tiff",
+        "preview_cache_path": "<LIB>/previews/tree__k.tiff.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "bf7c1c06a9068850b44def69ab2e2d19ab3cfedd0db2a5f82b13e254bf9dd772",
+        "description": null
+      }
+    ],
+    "scanErrors": [
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "error_message": "preview boom",
+        "stage": "Initial Scan"
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "error_message": "preview boom",
+        "stage": "Preview Generation"
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "error_message": "preview boom",
+        "stage": "Preview Generation"
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "error_message": "preview boom",
+        "stage": "Preview Generation"
+      }
+    ],
+    "results": [
+      {
+        "file": "<ROOT>/2019/a.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/b.jpg",
+        "isNew": false,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2019/c.png",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/d.jfif",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/raw/e.ARW",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2019/raw/f.cr2",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2020/broken.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2020/rotated.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/2021/deep/deeper/i.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      },
+      {
+        "file": "<ROOT>/k.tiff",
+        "isNew": false,
+        "needsUpdate": false
+      }
+    ]
+  },
+  "5_force_rescan": {
+    "photos": [
+      {
+        "file_path": "<ROOT>/2019/a.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__a.jpg.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "f245bf6913791c35ae6570bbb86958c35ac200bf95291ca841ef96d4b2cdf5f6",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/b.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__b.jpg.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "6ce5fb87f75c3364a90c8a66ed563a9df44b17b729a664eeb048727255c9684f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/c.png",
+        "preview_cache_path": "<LIB>/previews/2019__c.png.jpg",
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "e91bf353492daf09720d3ff4aa2b279c71d404b94047fb59a7cb0f2382fdaf5e",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/d.jfif",
+        "preview_cache_path": "<LIB>/previews/2019__d.jfif.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "df0ddf55f6940f1f091e429da3779fbbb20de7b292fa2787c5714cb46149cfbe",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/e.ARW",
+        "preview_cache_path": "<LIB>/previews/raw__e.ARW.jpg",
+        "date_taken": "2020-05-22T10:00:00",
+        "width": 6000,
+        "height": 4000,
+        "metadata_json": "{\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:22 10:00:00\",\"Make\":\"TestCam\",\"SourceImageWidth\":6000,\"SourceImageHeight\":4000}",
+        "sha256_hash": "6a9f02624fa5eaf8e56241f2b06c1b51a2eccce2efa57a0d109a1f2017d3f58f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/f.cr2",
+        "preview_cache_path": "<LIB>/previews/raw__f.cr2.jpg",
+        "date_taken": "2020-05-19T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:19 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "9bb65762c47a66401c488ab120ce52d2b45adf021a62eacf3f8b9d49eb008cd1",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "preview_cache_path": "<LIB>/previews/2020__broken.jpg.jpg",
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "870761f725e36e075d56aac25cbd70413b169c2253ced35c68c292d70b73af8b",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/rotated.jpg",
+        "preview_cache_path": "<LIB>/previews/2020__rotated.jpg.jpg",
+        "date_taken": "2020-05-25T10:00:00",
+        "width": 3000,
+        "height": 4000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":6,\"DateTimeOriginal\":\"2020:05:25 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "ae1ee81a6cda487efa3c1d64d78fc0f234f993fa6a4e433a7cd51be9374acbde",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2021/deep/deeper/i.jpg",
+        "preview_cache_path": "<LIB>/previews/deeper__i.jpg.jpg",
+        "date_taken": "2020-05-20T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:20 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "cf91a91416eb6864c59a3c41d3e8aeb1dc211f0af20f6d1526488fee5041ef89",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/k.tiff",
+        "preview_cache_path": "<LIB>/previews/tree__k.tiff.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "bf7c1c06a9068850b44def69ab2e2d19ab3cfedd0db2a5f82b13e254bf9dd772",
+        "description": null
+      }
+    ],
+    "scanErrors": [],
+    "results": [
+      {
+        "file": "<ROOT>/2019/a.jpg",
+        "isNew": true,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2019/b.jpg",
+        "isNew": true,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2019/c.png",
+        "isNew": true,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2019/d.jfif",
+        "isNew": true,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2019/raw/e.ARW",
+        "isNew": true,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2019/raw/f.cr2",
+        "isNew": true,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2020/broken.jpg",
+        "isNew": true,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2020/rotated.jpg",
+        "isNew": true,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2021/deep/deeper/i.jpg",
+        "isNew": true,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/k.tiff",
+        "isNew": true,
+        "needsUpdate": true
+      }
+    ]
+  },
+  "6_scan_files": {
+    "photos": [
+      {
+        "file_path": "<ROOT>/2019/a.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__a.jpg.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "f245bf6913791c35ae6570bbb86958c35ac200bf95291ca841ef96d4b2cdf5f6",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/b.jpg",
+        "preview_cache_path": "<LIB>/previews/2019__b.jpg.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "6ce5fb87f75c3364a90c8a66ed563a9df44b17b729a664eeb048727255c9684f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/c.png",
+        "preview_cache_path": "<LIB>/previews/2019__c.png.jpg",
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "e91bf353492daf09720d3ff4aa2b279c71d404b94047fb59a7cb0f2382fdaf5e",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/d.jfif",
+        "preview_cache_path": "<LIB>/previews/2019__d.jfif.jpg",
+        "date_taken": "2020-05-24T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:24 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "df0ddf55f6940f1f091e429da3779fbbb20de7b292fa2787c5714cb46149cfbe",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/e.ARW",
+        "preview_cache_path": "<LIB>/previews/raw__e.ARW.jpg",
+        "date_taken": "2020-05-22T10:00:00",
+        "width": 6000,
+        "height": 4000,
+        "metadata_json": "{\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:22 10:00:00\",\"Make\":\"TestCam\",\"SourceImageWidth\":6000,\"SourceImageHeight\":4000}",
+        "sha256_hash": "6a9f02624fa5eaf8e56241f2b06c1b51a2eccce2efa57a0d109a1f2017d3f58f",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2019/raw/f.cr2",
+        "preview_cache_path": "<LIB>/previews/raw__f.cr2.jpg",
+        "date_taken": "2020-05-19T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:19 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "9bb65762c47a66401c488ab120ce52d2b45adf021a62eacf3f8b9d49eb008cd1",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/broken.jpg",
+        "preview_cache_path": "<LIB>/previews/2020__broken.jpg.jpg",
+        "date_taken": "2020-05-23T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:23 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "870761f725e36e075d56aac25cbd70413b169c2253ced35c68c292d70b73af8b",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2020/rotated.jpg",
+        "preview_cache_path": "<LIB>/previews/2020__rotated.jpg.jpg",
+        "date_taken": "2020-05-25T10:00:00",
+        "width": 3000,
+        "height": 4000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":6,\"DateTimeOriginal\":\"2020:05:25 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "ae1ee81a6cda487efa3c1d64d78fc0f234f993fa6a4e433a7cd51be9374acbde",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/2021/deep/deeper/i.jpg",
+        "preview_cache_path": "<LIB>/previews/deeper__i.jpg.jpg",
+        "date_taken": "2020-05-20T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:20 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "cf91a91416eb6864c59a3c41d3e8aeb1dc211f0af20f6d1526488fee5041ef89",
+        "description": null
+      },
+      {
+        "file_path": "<ROOT>/k.tiff",
+        "preview_cache_path": "<LIB>/previews/tree__k.tiff.jpg",
+        "date_taken": "2020-05-04T10:00:00",
+        "width": 4000,
+        "height": 3000,
+        "metadata_json": "{\"ImageWidth\":4000,\"ImageHeight\":3000,\"Orientation\":1,\"DateTimeOriginal\":\"2020:05:04 10:00:00\",\"Make\":\"TestCam\"}",
+        "sha256_hash": "bf7c1c06a9068850b44def69ab2e2d19ab3cfedd0db2a5f82b13e254bf9dd772",
+        "description": null
+      }
+    ],
+    "scanErrors": [],
+    "results": [
+      {
+        "file": "<ROOT>/2019/c.png",
+        "isNew": false,
+        "needsUpdate": true
+      },
+      {
+        "file": "<ROOT>/2020/rotated.jpg",
+        "isNew": false,
+        "needsUpdate": false
+      }
+    ]
+  }
+}
