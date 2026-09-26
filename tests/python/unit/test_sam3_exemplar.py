@@ -56,7 +56,7 @@ def _make_mock_provider(initialized: bool = True):
     mock_model = MagicMock()
     mock_model.return_value = SimpleNamespace(pred_masks=MagicMock())
 
-    from facelib.sam3_provider import Sam3Provider
+    from facelib.sam3_provider_transformers import Sam3TransformersProvider as Sam3Provider
 
     provider = Sam3Provider.__new__(Sam3Provider)
     provider._checkpoint = "models/sam3"

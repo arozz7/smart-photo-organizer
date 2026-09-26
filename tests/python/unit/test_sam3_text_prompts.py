@@ -60,7 +60,7 @@ def _make_mock_provider(initialized: bool = True):
     mock_model = MagicMock()
     mock_model.return_value = SimpleNamespace()  # outputs (passed opaquely to post_process)
 
-    from facelib.sam3_provider import Sam3Provider
+    from facelib.sam3_provider_transformers import Sam3TransformersProvider as Sam3Provider
     provider = Sam3Provider.__new__(Sam3Provider)
     provider._checkpoint = "models/sam3"
     provider._device_pref = "cpu"
@@ -89,7 +89,7 @@ def _make_mock_provider(initialized: bool = True):
 class TestGetCapabilities:
     def test_text_prompts_true(self):
         """get_capabilities must advertise text_prompts: True."""
-        from facelib.sam3_provider import Sam3Provider
+        from facelib.sam3_provider_transformers import Sam3TransformersProvider as Sam3Provider
         provider = Sam3Provider.__new__(Sam3Provider)
         provider._checkpoint = "models/sam3"
         provider._device_pref = "cpu"
@@ -106,7 +106,7 @@ class TestGetCapabilities:
         assert caps["text_prompts"] is True
 
     def test_model_ready_false_when_checkpoint_missing(self):
-        from facelib.sam3_provider import Sam3Provider
+        from facelib.sam3_provider_transformers import Sam3TransformersProvider as Sam3Provider
         provider = Sam3Provider.__new__(Sam3Provider)
         provider._checkpoint = "/nonexistent/path/model.safetensors"
         provider._device_pref = "cpu"

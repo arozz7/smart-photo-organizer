@@ -24,7 +24,7 @@ from facelib.segmentation_ops import (
     encode_image,
     apply_background_remove,
     apply_isolate,
-    apply_blur,
+    apply_blur_background,
     apply_enhance,
 )
 
@@ -230,7 +230,7 @@ async def blur_region(
         provider,
         request.session_id,
         request.mask_b64,
-        lambda img, mask: apply_blur(img, mask, request.radius),
+        lambda img, mask: apply_blur_background(img, mask, request.radius),
     )
 
 
