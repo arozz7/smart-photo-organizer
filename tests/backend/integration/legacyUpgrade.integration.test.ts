@@ -99,6 +99,33 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         expect(fs.existsSync(path.join(libraryDir, 'backups'))).toBe(false);
     });
 
+    it('returns the migration result so callers can react (nothing pending on a legacy library)', async () => {
+        // Arrange
+        closeDB();
+
+        // Act
+        const result = await initDB(libraryDir);
+        db = getDB();
+
+        // Assert
+        expect(result).toMatchObject({ fromVersion: 0, toVersion: 0, applied: [], downgradeDetected: false });
+    });
+
+    it('reports a downgrade for a library written by a newer version, and keeps it usable', async () => {
+        // Arrange — simulate a library upgraded by a future build
+        db.pragma('user_version = 9');
+        closeDB();
+
+        // Act
+        const result = await initDB(libraryDir);
+        db = getDB();
+
+        // Assert
+        expect(result).toMatchObject({ fromVersion: 9, downgradeDetected: true, applied: [] });
+        expect((db.prepare('SELECT COUNT(*) AS c FROM people').get() as { c: number }).c).toBe(3);
+        expect(db.pragma('user_version', { simple: true })).toBe(9);
+    });
+
     it('is idempotent: opening the library a second time changes nothing', async () => {
         // Arrange
         const before = JSON.stringify(

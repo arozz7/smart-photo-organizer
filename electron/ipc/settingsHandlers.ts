@@ -6,6 +6,8 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { ConfigService } from '../core/services/ConfigService';
 import { ServiceManager } from '../core/services/ServiceManager';
+import { MigrationError } from '../data/migrations/types';
+import { describeMigrationFailure } from '../data/migrations/messages';
 
 export function registerSettingsHandlers() {
     ipcMain.handle('settings:getLibraryPath', () => {
@@ -76,6 +78,10 @@ export function registerSettingsHandlers() {
             return { success: true };
         } catch (e) {
             console.error('[Main] Move failed:', e);
+            if (e instanceof MigrationError) {
+                // initDB already closed the database (fail closed); services were not restarted.
+                return { success: false, error: describeMigrationFailure(e).message, migrationFailed: true, backupPath: e.backupPath };
+            }
             return { success: false, error: e };
         }
     });

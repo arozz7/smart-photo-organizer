@@ -45,6 +45,8 @@ export class MigrationError extends Error {
         message: string,
         readonly version: number,
         readonly cause?: unknown,
+        /** Backup taken before the failed run, when one exists. */
+        readonly backupPath?: string,
     ) {
         super(message);
     }

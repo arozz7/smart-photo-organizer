@@ -109,7 +109,7 @@ describe('MigrationRunner', () => {
         const attempt = runner.run(db);
 
         // Assert
-        await expect(attempt).rejects.toMatchObject({ name: 'MigrationError', version: 2 });
+        await expect(attempt).rejects.toMatchObject({ name: 'MigrationError', version: 2, backupPath: '/backups/x.db' });
         expect(userVersion(db)).toBe(1);
         expect(tableExists(db, 'alpha')).toBe(true);
         expect(tableExists(db, 'half_done')).toBe(false);
@@ -125,7 +125,7 @@ describe('MigrationRunner', () => {
         const attempt = runner.run(db);
 
         // Assert
-        await expect(attempt).rejects.toMatchObject({ name: 'MigrationError' });
+        await expect(attempt).rejects.toMatchObject({ name: 'MigrationError', backupPath: undefined });
         expect(userVersion(db)).toBe(0);
         expect(tableExists(db, 'alpha')).toBe(false);
     });

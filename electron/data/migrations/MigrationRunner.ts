@@ -59,7 +59,7 @@ export class MigrationRunner {
 
         const applied: string[] = [];
         for (const migration of pending) {
-            this.apply(db, migration);
+            this.apply(db, migration, backupPath);
             applied.push(migration.name);
         }
 
@@ -83,7 +83,7 @@ export class MigrationRunner {
         }
     }
 
-    private apply(db: Database.Database, migration: Migration): void {
+    private apply(db: Database.Database, migration: Migration, backupPath: string): void {
         this.logger.info(`Applying migration ${migration.version} (${migration.name})`);
         const transaction = db.transaction(() => {
             migration.up(db);
@@ -94,7 +94,7 @@ export class MigrationRunner {
             transaction();
         } catch (error) {
             this.logger.error(`Migration ${migration.version} (${migration.name}) failed and was rolled back: ${String(error)}`);
-            throw new MigrationError(`Migration ${migration.version} (${migration.name}) failed`, migration.version, error);
+            throw new MigrationError(`Migration ${migration.version} (${migration.name}) failed`, migration.version, error, backupPath);
         }
     }
 }

@@ -3,6 +3,7 @@ import path from 'node:path';
 import logger from './logger';
 import { applyLegacyBaseline } from './data/migrations/legacyBaseline';
 import { migrateDatabase } from './data/migrations';
+import type { MigrationResult } from './data/migrations/types';
 // import { getAISettings } from './store';
 // Deprecated functions are removed.
 // Deprecated functions are removed.
@@ -14,7 +15,7 @@ let db: any;
 
 export { parseExifDate } from './utils/exifDate';
 
-export async function initDB(basePath: string, onProgress?: (status: string) => void) {
+export async function initDB(basePath: string, onProgress?: (status: string) => void): Promise<MigrationResult> {
   const dbPath = path.join(basePath, 'library.db');
   if (onProgress) onProgress('Initializing Database...');
   logger.info(`[DB Module ${INSTANCE_ID}] Initializing Database at:`, dbPath);
@@ -26,9 +27,17 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
   db.pragma('journal_mode = WAL');
 
   await applyLegacyBaseline(db, onProgress);
-  await migrateDatabase(db, basePath);
+  let migration: MigrationResult;
+  try {
+    migration = await migrateDatabase(db, basePath);
+  } catch (error) {
+    // Fail closed: never leave a half-upgraded library open for the rest of the app to use.
+    closeDB();
+    throw error;
+  }
 
   logger.info('Database schema ensured.');
+  return migration;
 }
 
 export function getDB() {
