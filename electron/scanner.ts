@@ -6,6 +6,7 @@ import logger from './logger';
 import { getDB, parseExifDate } from './db';
 
 import { PhotoService } from './core/services/PhotoService';
+import { isRawLikeExtension, isSupportedImageExtension } from './utils/imageFormats';
 
 /** Compute SHA-256 hash of a file, returned as hex string. */
 async function computeSHA256(filePath: string): Promise<string | null> {
@@ -28,8 +29,6 @@ export async function getExifTool(): Promise<ExifTool | null> {
     return PhotoService.getExifTool();
 }
 
-const SUPPORTED_EXTS = ['.jpg', '.jpeg', '.png', '.jfif', '.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.tif', '.tiff'];
-
 // Helper to extract preview (delegated to PhotoService)
 export async function extractPreview(filePath: string, previewDir: string, forceRescan: boolean = false): Promise<string | null> {
     // Enable Throw on Error to capture corruption details
@@ -41,7 +40,7 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
     const { forceRescan } = options;
     const ext = path.extname(fullPath).toLowerCase();
 
-    if (!SUPPORTED_EXTS.includes(ext)) return null;
+    if (!isSupportedImageExtension(ext)) return null;
 
     const selectStmt = db.prepare('SELECT * FROM photos WHERE file_path = ?');
     const insertStmt = db.prepare(`
@@ -63,7 +62,7 @@ async function processFile(fullPath: string, previewDir: string, db: any, option
             needsUpdate = true;
         }
 
-        const isRaw = !['.jpg', '.jpeg', '.png', '.jfif'].includes(ext);
+        const isRaw = isRawLikeExtension(ext);
         let previewMissing = false;
 
         if (isRaw) {
@@ -325,7 +324,7 @@ export async function scanDirectory(dirPath: string, libraryPath: string, onProg
                         }
                     } else {
                         const ext = path.extname(entry.name).toLowerCase();
-                        if (!SUPPORTED_EXTS.includes(ext)) {
+                        if (!isSupportedImageExtension(ext)) {
                             skippedStats[ext] = (skippedStats[ext] || 0) + 1;
                         }
                     }

@@ -130,7 +130,7 @@ describe('scanner equivalence (golden snapshot)', () => {
     /** Same depth-first, readdir-order walk the scanner has always used (the ordering contract). */
     const referenceOrder = (dir: string): string[] => {
         const out: string[] = [];
-        const supported = ['.jpg', '.jpeg', '.png', '.jfif', '.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.tif', '.tiff'];
+        const supported = ['.jpg', '.jpeg', '.png', '.jfif', '.webp', '.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.tif', '.tiff'];
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) { if (!entry.name.startsWith('.')) out.push(...referenceOrder(full)); }
@@ -183,5 +183,20 @@ describe('scanner equivalence (golden snapshot)', () => {
         for (const key of Object.keys(golden)) {
             expect(steps[key], `scenario ${key}`).toEqual(golden[key]);
         }
+    });
+
+    it('ingests WEBP files as standard images', async () => {
+        // Arrange
+        fs.writeFileSync(path.join(root, '2019', 'photo.WEBP'), 'content-webp');
+
+        // Act
+        const results = await scanDirectory(root, library);
+
+        // Assert
+        const webp = results.find(r => r.file_path.endsWith('photo.WEBP'));
+        expect(webp?.isNew).toBe(true);
+        expect(webp?.sha256_hash).toBeTruthy();
+        expect(webp?.preview_cache_path).toBeTruthy();
+        expect(results.map(r => r.file_path)).toEqual(referenceOrder(root));
     });
 });

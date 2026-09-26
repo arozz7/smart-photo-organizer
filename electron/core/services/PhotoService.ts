@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import logger from '../../logger';
 import { pythonProvider } from '../../infrastructure/PythonAIProvider';
 import { getLibraryPath } from '../../store'; // Config later
+import { isRawLikeExtension } from '../../utils/imageFormats';
 import { FaceRepository } from '../../data/repositories/FaceRepository';
 import { PhotoRepository } from '../../data/repositories/PhotoRepository';
 // import { getDB } from '../../db'; // Transaction usage
@@ -48,7 +49,7 @@ export class PhotoService {
             }
 
             const ext = path.extname(filePath).toLowerCase();
-            const isRaw = !['.jpg', '.jpeg', '.png', '.jfif'].includes(ext);
+            const isRaw = isRawLikeExtension(ext);
             let rotationDegrees = 0;
             let shouldRotate = false;
 
