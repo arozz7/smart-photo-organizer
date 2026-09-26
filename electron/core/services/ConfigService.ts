@@ -1,6 +1,8 @@
 import { app } from 'electron';
 import path from 'node:path';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
+import { resolveScannerSettings, type ScannerSettings } from './scannerSettings';
 
 // Phase 104: Strict False Positive Mode — threshold constants
 // Default mode uses 0.70. When strictFalsePositiveMode is enabled (Phase 6 toggle),
@@ -120,6 +122,8 @@ export interface AppConfig {
     windowBounds: WindowBounds;
     firstRun: boolean;
     queue: QueueConfig;
+    /** Optional overrides for scan performance; see scannerSettings.ts. Missing means defaults. */
+    scanner?: Partial<ScannerSettings>;
     smartIgnore: SmartIgnoreSettings;
     dashboard: DashboardConfig;
     ai_queue: any[]; // Queue items
@@ -319,6 +323,11 @@ export class ConfigService {
         this.load();
         this.config.aiSettings = { ...this.config.aiSettings, ...settings };
         this.save();
+    }
+
+    /** Effective scan settings: defaults for this machine plus any valid overrides from config.json. */
+    static getScannerSettings(): ScannerSettings {
+        return resolveScannerSettings(this.getSettings().scanner, os.cpus().length);
     }
 
     static getAdvancedFaceSettings(): AdvancedFaceConfig {

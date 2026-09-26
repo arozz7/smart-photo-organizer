@@ -161,6 +161,46 @@ describe('PhotoService', () => {
             expect(result).not.toBeNull();
         });
 
+        it('reads Orientation from ExifTool itself when no known tags are supplied', async () => {
+            // Arrange
+            vi.mocked(fs.access).mockRejectedValueOnce(new Error('Missing'));
+            vi.mocked(fs.access).mockResolvedValue(undefined);
+            mockExifToolInstance.read.mockResolvedValue({ Orientation: 6 });
+
+            // Act
+            await PhotoService.extractPreview('/path/to/photo.jpg', '/previews');
+
+            // Assert
+            expect(mockExifToolInstance.read).toHaveBeenCalledWith('/path/to/photo.jpg', ['Orientation']);
+            expect(mockSharpInstance.rotate).toHaveBeenCalledWith(90);
+        });
+
+        it('skips the extra ExifTool call and still rotates when the caller already knows the Orientation', async () => {
+            // Arrange
+            vi.mocked(fs.access).mockRejectedValueOnce(new Error('Missing'));
+            vi.mocked(fs.access).mockResolvedValue(undefined);
+
+            // Act
+            await PhotoService.extractPreview('/path/to/photo.jpg', '/previews', false, true, { Orientation: 6 });
+
+            // Assert
+            expect(mockExifToolInstance.read).not.toHaveBeenCalled();
+            expect(mockSharpInstance.rotate).toHaveBeenCalledWith(90);
+        });
+
+        it('does not rotate when the known tags have no Orientation', async () => {
+            // Arrange
+            vi.mocked(fs.access).mockRejectedValueOnce(new Error('Missing'));
+            vi.mocked(fs.access).mockResolvedValue(undefined);
+
+            // Act
+            await PhotoService.extractPreview('/path/to/photo.jpg', '/previews', false, true, {});
+
+            // Assert
+            expect(mockExifToolInstance.read).not.toHaveBeenCalled();
+            expect(mockSharpInstance.rotate).not.toHaveBeenCalled();
+        });
+
         it('should fallback to Python if both ExifTool and Sharp fail', async () => {
             // Arrange
             const filePath = '/path/to/corrupt.jpg';

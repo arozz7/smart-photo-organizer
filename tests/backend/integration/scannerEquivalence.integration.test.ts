@@ -18,7 +18,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 // ---- Fakes for the two slow external collaborators --------------------------------------------
-const behaviour = { previewShouldFail: new Set<string>() };
+const behaviour = { previewShouldFail: new Set<string>(), exifToolAvailable: true };
 
 const fakeMetadata = (file: string): Record<string, unknown> => {
     const name = path.basename(file);
@@ -40,7 +40,7 @@ const previewNameFor = (file: string): string =>
 
 vi.mock('../../../electron/core/services/PhotoService', () => ({
     PhotoService: {
-        getExifTool: vi.fn(async () => ({ read: vi.fn(async (file: string) => fakeMetadata(file)) })),
+        getExifTool: vi.fn(async () => (behaviour.exifToolAvailable ? { read: vi.fn(async (file: string) => fakeMetadata(file)) } : null)),
         extractPreview: vi.fn(async (file: string, previewDir: string, force = false) => {
             if (behaviour.previewShouldFail.has(path.basename(file))) throw new Error('preview boom');
             const target = path.join(previewDir, previewNameFor(file));
@@ -94,6 +94,7 @@ describe('scanner equivalence (golden snapshot)', () => {
         library = path.join(base, 'lib');
         fs.mkdirSync(library);
         behaviour.previewShouldFail = new Set(['broken.jpg']);
+        behaviour.exifToolAvailable = true;
         for (const [rel, content] of Object.entries(TREE)) {
             fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
             fs.writeFileSync(path.join(root, rel), content);
@@ -198,5 +199,36 @@ describe('scanner equivalence (golden snapshot)', () => {
         expect(webp?.sha256_hash).toBeTruthy();
         expect(webp?.preview_cache_path).toBeTruthy();
         expect(results.map(r => r.file_path)).toEqual(referenceOrder(root));
+    });
+
+    it('without ExifTool: still indexes photos (empty metadata) and does not regenerate RAW previews', async () => {
+        // Arrange
+        behaviour.exifToolAvailable = false;
+        const previewDir = path.join(library, 'previews');
+
+        // Act
+        const first = await scanDirectory(root, library);
+        const standard = first.find(p => p.file_path.endsWith('a.jpg'));
+        const raw = first.find(p => p.file_path.endsWith('e.ARW'));
+
+        // Assert: indexed with no metadata/dimensions, but with hash, date and a preview
+        expect(first.length).toBeGreaterThan(0);
+        expect(standard?.metadata_json).toBe('{}');
+        expect(standard?.width).toBeNull();
+        expect(standard?.sha256_hash).toBeTruthy();
+        expect(standard?.date_taken).toBeTruthy();
+        expect(standard?.preview_cache_path).toBeTruthy();
+
+        // Arrange: previews vanish
+        fs.rmSync(path.join(previewDir, previewNameFor(path.join(root, '2019', 'a.jpg'))));
+        fs.rmSync(path.join(previewDir, previewNameFor(path.join(root, '2019', 'raw', 'e.ARW'))));
+
+        // Act
+        await scanDirectory(root, library);
+
+        // Assert: the standard preview is rebuilt (no ExifTool needed), the RAW one is left alone
+        expect(fs.existsSync(path.join(previewDir, previewNameFor(path.join(root, '2019', 'a.jpg'))))).toBe(true);
+        expect(fs.existsSync(path.join(previewDir, previewNameFor(path.join(root, '2019', 'raw', 'e.ARW'))))).toBe(false);
+        expect(raw?.file_path).toBeTruthy();
     });
 });
