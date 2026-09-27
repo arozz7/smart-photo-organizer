@@ -3,6 +3,7 @@ import { useAI } from './AIContext'
 import { useScanErrors } from '../hooks/useScanErrors'
 import { usePhotoNavigation } from '../hooks/usePhotoNavigation'
 import { useLibraryMetadata } from '../hooks/useLibraryMetadata'
+import { buildScanQueueItems } from '../utils/scanQueueItems'
 
 interface ScanContextType {
     scanning: boolean
@@ -185,18 +186,14 @@ export function ScanProvider({ children }: { children: ReactNode }) {
                 console.log(`[ScanContext] Sample photos:`, sample.map(p => ({ id: p.id, isNew: p.isNew, needsUpdate: p.needsUpdate })));
             }
 
-            // Queue Logic:
-            // If forceRescan: Queue ALL returned photos
-            // Else: Queue ONLY photos marked as isNew
-            const photosToQueue = options.forceRescan
-                ? scanResults
-                : scanResults.filter(p => p.isNew);
+            // Queue Logic (see buildScanQueueItems): new photos and photos edited outside the app,
+            // or every photo on a forced rescan; edited/forced photos get a clean rescan.
+            const queueItems = buildScanQueueItems(scanResults, options);
 
-            console.log(`[ScanContext] forceRescan=${options.forceRescan}, scanResults.length=${scanResults.length}, photosToQueue.length=${photosToQueue.length}`);
+            console.log(`[ScanContext] forceRescan=${options.forceRescan}, scanResults.length=${scanResults.length}, photosToQueue.length=${queueItems.length}`);
 
-            if (photosToQueue.length > 0) {
-                console.log(`[ScanContext] Queueing ${photosToQueue.length} photos for AI (Total Scanned: ${scanResults.length})`);
-                const queueItems = photosToQueue.map(p => ({ ...p, cleanRescan: options.forceRescan }));
+            if (queueItems.length > 0) {
+                console.log(`[ScanContext] Queueing ${queueItems.length} photos for AI (Total Scanned: ${scanResults.length})`);
                 await addToQueue(queueItems, true)
             } else {
                 console.log(`[ScanContext] No new photos to queue for AI.`);
@@ -234,7 +231,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
                 // Queue Logic: Queue ALL returned photos as they are forced/requested
                 if (scannedPhotos.length > 0) {
-                    const queueItems = scannedPhotos.map((p: any) => ({ ...p, cleanRescan: forceRescan }));
+                    const queueItems = scannedPhotos.map((p: any) => ({ ...p, cleanRescan: forceRescan || p.contentChanged === true }));
                     addToQueue(queueItems, true);
                 }
 
