@@ -10,10 +10,13 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 const previewCalls: { file: string; force: boolean }[] = [];
+/** What the fake ExifTool reports for every file; tests change it to simulate a crop or a rotation. */
+const fakeMeta = { value: {} as Record<string, unknown> };
+const originalMeta = { ImageWidth: 4000, ImageHeight: 3000, Orientation: 1, DateTimeOriginal: '2020:05:04 10:00:00' };
 
 vi.mock('../../../electron/core/services/PhotoService', () => ({
     PhotoService: {
-        getExifTool: vi.fn(async () => ({ read: vi.fn(async () => ({ ImageWidth: 4000, ImageHeight: 3000, Orientation: 1, DateTimeOriginal: '2020:05:04 10:00:00' })) })),
+        getExifTool: vi.fn(async () => ({ read: vi.fn(async () => ({ ...fakeMeta.value })) })),
         extractPreview: vi.fn(async (file: string, previewDir: string, force = false) => {
             previewCalls.push({ file: path.basename(file), force });
             const target = path.join(previewDir, `${path.basename(file)}.jpg`);
@@ -65,6 +68,7 @@ describe('scanner file identity', () => {
         photo = path.join(root, 'a.jpg');
         writeFile('original content', 1_700_000_000_000);
         previewCalls.length = 0;
+        fakeMeta.value = { ...originalMeta };
         await initDB(library);
     });
 
@@ -113,36 +117,78 @@ describe('scanner file identity', () => {
         expect(previewCalls).toEqual([]);
     });
 
-    it('detects a file edited outside the app (different size) and queues a full re-analysis', async () => {
-        // Arrange
-        await scanDirectory(root, library);
-        previewCalls.length = 0;
-        writeFile('edited content that is longer', 1_700_000_000_000 + 10 * MINUTE);
+    describe('a file edited outside the app', () => {
+        it('that keeps the same picture geometry (e.g. keywords or a rating written into the file) refreshes the record but does NOT queue re-analysis', async () => {
+            // Arrange — bigger file, same width/height/orientation: another program wrote metadata
+            await scanDirectory(root, library);
+            previewCalls.length = 0;
+            writeFile('edited content that is longer', 1_700_000_000_000 + 10 * MINUTE);
 
-        // Act
-        const [result] = await scanDirectory(root, library);
+            // Act
+            const [result] = await scanDirectory(root, library);
 
-        // Assert: flagged for AI re-analysis with a clean rescan
-        expect(result).toMatchObject({ isNew: true, needsUpdate: true, contentChanged: true });
-        // Assert: preview regenerated (forced), hash and identity refreshed, stale perceptual hash cleared
-        expect(previewCalls).toEqual([{ file: 'a.jpg', force: true }]);
-        const stored = row();
-        expect(stored.sha256_hash).toBe(sha256('edited content that is longer'));
-        expect(stored.file_size).toBe(Buffer.byteLength('edited content that is longer'));
-        expect(stored.phash).toBeNull();
-    });
+            // Assert: no AI queue, no clean rescan (that would delete ignored faces and eras)
+            expect(result).toMatchObject({ isNew: false, contentChanged: true, facesStale: false, needsUpdate: true });
+            // Assert: preview regenerated (forced), hash and identity refreshed, stale perceptual hash cleared
+            expect(previewCalls).toEqual([{ file: 'a.jpg', force: true }]);
+            const stored = row();
+            expect(stored.sha256_hash).toBe(sha256('edited content that is longer'));
+            expect(stored.file_size).toBe(Buffer.byteLength('edited content that is longer'));
+            expect(stored.phash).toBeNull();
+        });
 
-    it('detects an edit that keeps the same size (only the content hash reveals it)', async () => {
-        // Arrange
-        await scanDirectory(root, library);
-        writeFile('ORIGINAL CONTENT', 1_700_000_000_000 + 10 * MINUTE); // same length, different bytes
+        it('that keeps the same size is still detected by its content hash (and, with the same geometry, not re-analysed)', async () => {
+            // Arrange
+            await scanDirectory(root, library);
+            writeFile('ORIGINAL CONTENT', 1_700_000_000_000 + 10 * MINUTE); // same length, different bytes
 
-        // Act
-        const [result] = await scanDirectory(root, library);
+            // Act
+            const [result] = await scanDirectory(root, library);
 
-        // Assert
-        expect(result).toMatchObject({ isNew: true, contentChanged: true });
-        expect(row().sha256_hash).toBe(sha256('ORIGINAL CONTENT'));
+            // Assert
+            expect(result).toMatchObject({ isNew: false, contentChanged: true, facesStale: false });
+            expect(row().sha256_hash).toBe(sha256('ORIGINAL CONTENT'));
+        });
+
+        it('that changes the dimensions (crop or resize) makes the old face boxes invalid: queued for a clean re-analysis', async () => {
+            // Arrange
+            await scanDirectory(root, library);
+            writeFile('a cropped version of the photo', 1_700_000_000_000 + 10 * MINUTE);
+            fakeMeta.value = { ...originalMeta, ImageWidth: 3000, ImageHeight: 2000 };
+
+            // Act
+            const [result] = await scanDirectory(root, library);
+
+            // Assert
+            expect(result).toMatchObject({ isNew: true, contentChanged: true, facesStale: true, needsUpdate: true });
+            expect(getDB().prepare('SELECT width, height FROM photos WHERE file_path = ?').get(photo)).toEqual({ width: 3000, height: 2000 });
+        });
+
+        it('that changes the Orientation (rotated by another program) also invalidates the faces', async () => {
+            // Arrange — same pixel size, but now displayed rotated: stored dimensions swap
+            await scanDirectory(root, library);
+            writeFile('rotated by another program', 1_700_000_000_000 + 10 * MINUTE);
+            fakeMeta.value = { ...originalMeta, Orientation: 6 };
+
+            // Act
+            const [result] = await scanDirectory(root, library);
+
+            // Assert
+            expect(result).toMatchObject({ isNew: true, facesStale: true });
+        });
+
+        it('is treated cautiously when the previous dimensions were never recorded: refreshed, but faces are left alone', async () => {
+            // Arrange — a photo whose stored dimensions are unknown, so a change cannot be proven
+            await scanDirectory(root, library);
+            getDB().prepare('UPDATE photos SET width = NULL, height = NULL, metadata_json = ? WHERE file_path = ?').run('{}', photo);
+            writeFile('edited content that is longer', 1_700_000_000_000 + 10 * MINUTE);
+
+            // Act
+            const [result] = await scanDirectory(root, library);
+
+            // Assert
+            expect(result).toMatchObject({ contentChanged: true, facesStale: false, isNew: false });
+        });
     });
 
     it('does NOT treat a re-saved or touched file as edited when the content is identical', async () => {
@@ -185,7 +231,7 @@ describe('scanner file identity', () => {
         const [result] = await scanDirectory(root, library);
 
         // Assert
-        expect(result).toMatchObject({ isNew: false, needsUpdate: false, contentChanged: false });
+        expect(result).toMatchObject({ isNew: false, needsUpdate: false, contentChanged: false, facesStale: false });
         expect(previewCalls).toEqual([]);
     });
 

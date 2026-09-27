@@ -98,6 +98,8 @@ import { PhotoService } from '../../../../electron/core/services/PhotoService';
 import { pythonProvider } from '../../../../electron/infrastructure/PythonAIProvider';
 import { PhotoIdentityService } from '../../../../electron/core/services/PhotoIdentityService';
 import { PhotoRepository } from '../../../../electron/data/repositories/PhotoRepository';
+import { FaceRepository } from '../../../../electron/data/repositories/FaceRepository';
+import logger from '../../../../electron/logger';
 import sharp from 'sharp';
 
 describe('PhotoService', () => {
@@ -368,6 +370,41 @@ describe('PhotoService', () => {
 
             // Assert
             expect(pythonProvider.analyzeImage).toHaveBeenCalledWith('/test.jpg', options);
+        });
+
+        describe('clean rescan: naming what could not be recovered', () => {
+            const oldNamedFace = (id: number, descriptor: number[]) => ({ id, person_id: 7, descriptor, assignment_source: 'manual', is_confirmed: 1 });
+            const newFace = (id: number, descriptor: number[]) => ({ id, person_id: null, descriptor });
+
+            it('warns, with the count, when named faces cannot be re-matched to the re-detected faces', async () => {
+                // Arrange — two named faces before; after re-detection only one still matches (the other looks different now)
+                vi.mocked(FaceRepository.getFacesByPhotoIncludingIgnored).mockReturnValue([
+                    oldNamedFace(1, [0, 0, 0, 0]),
+                    oldNamedFace(2, [5, 5, 5, 5]),
+                ] as any);
+                vi.mocked(FaceRepository.getFacesByPhoto).mockReturnValue([newFace(11, [0, 0, 0, 0]), newFace(12, [9, 9, 9, 9])] as any);
+                vi.mocked(pythonProvider.analyzeImage).mockResolvedValue({ success: true, faces: [{}, {}] } as any);
+
+                // Act
+                await PhotoService.analyzeImage({ photoId: 30, filePath: '/p.jpg', cleanRescan: true });
+
+                // Assert
+                expect(FaceRepository.assignFacesToPerson).toHaveBeenCalledTimes(1);
+                expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/1 of 2 named faces could not be re-matched.*Photo 30/));
+            });
+
+            it('stays quiet when every named face was recovered', async () => {
+                // Arrange
+                vi.mocked(FaceRepository.getFacesByPhotoIncludingIgnored).mockReturnValue([oldNamedFace(1, [0, 0, 0, 0])] as any);
+                vi.mocked(FaceRepository.getFacesByPhoto).mockReturnValue([newFace(11, [0, 0, 0, 0])] as any);
+                vi.mocked(pythonProvider.analyzeImage).mockResolvedValue({ success: true, faces: [{}] } as any);
+
+                // Act
+                await PhotoService.analyzeImage({ photoId: 31, filePath: '/p.jpg', cleanRescan: true });
+
+                // Assert
+                expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('could not be re-matched'));
+            });
         });
     });
 });

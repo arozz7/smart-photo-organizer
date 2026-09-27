@@ -108,6 +108,27 @@ describe('FileIdentityBackfill', () => {
         expect(repo.saved).toHaveLength(1);
     });
 
+    it('exits (instead of waiting) when the app is shutting down, even while it would otherwise be busy', async () => {
+        // Arrange
+        const repo = makeRepository(4);
+        let aborted = false;
+        const backfill = new FileIdentityBackfill({
+            repository: repo,
+            readIdentity: async () => identityFor(1),
+            isBusy: () => true, // scans/AI would keep it waiting forever...
+            shouldAbort: () => aborted,
+            sleep: async () => { aborted = true; }, // ...but shutdown is requested while it sleeps
+            batchSize: 2,
+        });
+
+        // Act
+        const result = await backfill.run();
+
+        // Assert
+        expect(result).toEqual({ updated: 0, unreadable: 0 });
+        expect(repo.getPhotosNeedingIdentity).not.toHaveBeenCalled();
+    });
+
     it('reads files with bounded parallelism, keeping batch results in id order', async () => {
         // Arrange
         const repo = makeRepository(6);

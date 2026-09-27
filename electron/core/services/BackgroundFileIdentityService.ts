@@ -45,7 +45,8 @@ export class BackgroundFileIdentityService implements IService {
             this.backfill = new FileIdentityBackfill({
                 repository: PhotoIdentityRepository,
                 readIdentity: readFileIdentity,
-                isBusy: () => AppStateRepository.isShutdownRequested() || AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive(),
+                isBusy: () => AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive(),
+                shouldAbort: () => AppStateRepository.isShutdownRequested(),
                 sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
             });
 

@@ -12,6 +12,8 @@ export interface IdentityBackfillDependencies {
     readIdentity: (filePath: string) => Promise<FileIdentity | null>;
     /** True while a scan or AI work is running: the backfill waits, so it never competes with them. */
     isBusy: () => boolean;
+    /** True when the app is shutting down: the backfill returns at once instead of waiting for the busy state to end. */
+    shouldAbort?: () => boolean;
     sleep: (ms: number) => Promise<void>;
     /** Photos handled per database transaction. */
     batchSize?: number;
@@ -54,7 +56,7 @@ export class FileIdentityBackfill {
         const result: IdentityBackfillResult = { updated: 0, unreadable: 0 };
         let cursor = 0;
 
-        while (!this.stopRequested) {
+        while (!this.stopRequested && !this.deps.shouldAbort?.()) {
             if (this.deps.isBusy()) {
                 await this.deps.sleep(this.pauseMs);
                 continue;

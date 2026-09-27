@@ -1,5 +1,52 @@
 import { describe, it, expect, vi } from 'vitest';
-import { extractDimensions, resolveDateTaken } from '../../../../electron/scanning/imageMetadata';
+import { extractDimensions, geometryChanged, normalizeOrientation, resolveDateTaken } from '../../../../electron/scanning/imageMetadata';
+
+describe('normalizeOrientation', () => {
+    it('treats a missing or unrecognised orientation as normal (1), so an editor adding an explicit "Horizontal" is not a change', () => {
+        expect(normalizeOrientation(undefined)).toBe(1);
+        expect(normalizeOrientation(null)).toBe(1);
+        expect(normalizeOrientation('something odd')).toBe(1);
+        expect(normalizeOrientation('Horizontal (normal)')).toBe(1);
+    });
+
+    it.each([[1, 1], [3, 3], [6, 6], [8, 8]])('keeps the numeric orientation %s', (value, expected) => {
+        expect(normalizeOrientation(value)).toBe(expected);
+    });
+
+    it.each([['Rotate 180', 3], ['Rotate 90 CW', 6], ['Rotate 270 CW', 8]])('maps ExifTool text "%s" to %s', (text, expected) => {
+        expect(normalizeOrientation(text)).toBe(expected);
+    });
+});
+
+describe('geometryChanged', () => {
+    const before = { width: 4000, height: 3000, orientation: 1 };
+
+    it('is false when nothing about the picture geometry changed', () => {
+        expect(geometryChanged(before, { ...before })).toBe(false);
+    });
+
+    it('is true when the dimensions change (crop, resize)', () => {
+        expect(geometryChanged(before, { ...before, width: 3000 })).toBe(true);
+        expect(geometryChanged(before, { ...before, height: 2000 })).toBe(true);
+    });
+
+    it('is true when the orientation changes, even a 180 degree turn that keeps the dimensions', () => {
+        expect(geometryChanged(before, { ...before, orientation: 3 })).toBe(true);
+    });
+
+    it('is false when a missing orientation becomes an explicit normal one', () => {
+        expect(geometryChanged({ ...before, orientation: normalizeOrientation(undefined) }, { ...before, orientation: normalizeOrientation('Horizontal (normal)') })).toBe(false);
+    });
+
+    it('is false (cautious) when the earlier dimensions were never recorded, because a change cannot be proven', () => {
+        expect(geometryChanged({ width: null, height: null, orientation: 1 }, { ...before })).toBe(false);
+        expect(geometryChanged({ width: 4000, height: null, orientation: 1 }, { ...before })).toBe(false);
+    });
+
+    it('is false (cautious) when the new dimensions could not be read', () => {
+        expect(geometryChanged(before, { width: null, height: null, orientation: 1 })).toBe(false);
+    });
+});
 
 describe('extractDimensions', () => {
     it('prefers ImageWidth/ImageHeight, then SourceImage*, then ExifImage*', () => {

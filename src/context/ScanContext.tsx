@@ -231,7 +231,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
                 // Queue Logic: Queue ALL returned photos as they are forced/requested
                 if (scannedPhotos.length > 0) {
-                    const queueItems = scannedPhotos.map((p: any) => ({ ...p, cleanRescan: forceRescan || p.contentChanged === true }));
+                    const queueItems = scannedPhotos.map((p: any) => ({ ...p, cleanRescan: forceRescan || p.facesStale === true }));
                     addToQueue(queueItems, true);
                 }
 

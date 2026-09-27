@@ -362,6 +362,12 @@ export class PhotoService {
                     }
                 }
                 logger.info(`[PhotoService] Clean Rescan: Identity Transfer recovered ${recoveredCount} faces.`);
+
+                // Faces that had a name but could not be matched to a re-detected face are now unassigned: say so.
+                const namedBefore = oldFaces.filter(f => f.person_id).length;
+                if (namedBefore > recoveredCount) {
+                    logger.warn(`[PhotoService] Clean Rescan: ${namedBefore - recoveredCount} of ${namedBefore} named faces could not be re-matched for Photo ${photoId} and are now unassigned.`);
+                }
             }
 
             return result;

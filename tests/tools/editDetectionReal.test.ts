@@ -48,7 +48,8 @@ describe.skipIf(process.env.SCAN_BENCH !== '1')('edit detection with real tools'
             const flag = (file: string) => second.find(p => p.file_path === file)!;
 
             // Assert: flags
-            expect(flag(edited)).toMatchObject({ isNew: true, needsUpdate: true, contentChanged: true });
+            // edited.jpg went from 640x480 to 800x600, a real change of geometry
+            expect(flag(edited)).toMatchObject({ isNew: true, needsUpdate: true, contentChanged: true, facesStale: true });
             expect(flag(touched)).toMatchObject({ isNew: false, needsUpdate: false, contentChanged: false });
             expect(flag(untouched)).toMatchObject({ isNew: false, needsUpdate: false, contentChanged: false });
 
@@ -59,7 +60,24 @@ describe.skipIf(process.env.SCAN_BENCH !== '1')('edit detection with real tools'
             expect(after.file_size).not.toBe(before.file_size);
             expect((await sharp(after.preview_cache_path).metadata()).width).toBe(800);
 
-            // Assert: a third scan finds nothing to do
+            // Act/Assert: a METADATA-ONLY edit by another program (keywords written into the file) changes the bytes
+            // but not the picture, so faces must NOT be re-scanned (a clean rescan would delete ignored faces and eras).
+            const { PhotoService } = await import('../../electron/core/services/PhotoService');
+            const tool = await PhotoService.getExifTool();
+            await tool!.write(untouched, { Keywords: ['holiday'] } as never, ['-overwrite_original']);
+            const afterKeywords = await scanDirectory(root, library);
+            const keywordEdit = afterKeywords.find(p => p.file_path === untouched)!;
+            console.log(`[editreal] keyword-only edit -> ${JSON.stringify({ isNew: keywordEdit.isNew, contentChanged: keywordEdit.contentChanged, facesStale: keywordEdit.facesStale })}`);
+            expect(keywordEdit.contentChanged).toBe(true); // the bytes did change: hash, metadata and preview are refreshed
+            expect(keywordEdit.isNew).toBe(false); // ...but no re-analysis is queued
+            expect(keywordEdit.facesStale).toBe(false);
+
+            // Act/Assert: a crop changes the geometry, so old face boxes are invalid and a clean rescan IS needed
+            await makeJpeg(untouched, 400, 300, 50);
+            const afterCrop = (await scanDirectory(root, library)).find(p => p.file_path === untouched)!;
+            expect(afterCrop).toMatchObject({ isNew: true, contentChanged: true, facesStale: true });
+
+            // Assert: a further scan finds nothing to do
             const third = await scanDirectory(root, library);
             expect(third.every(p => !p.contentChanged && !p.isNew)).toBe(true);
             console.log('[editreal] edited flagged; touched and untouched left alone; third scan quiet');

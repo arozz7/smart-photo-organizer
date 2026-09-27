@@ -5,7 +5,7 @@ import { PhotoService } from '../core/services/PhotoService';
 import { isRawLikeExtension, isSupportedImageExtension } from '../utils/imageFormats';
 import { computeSHA256, isPreviewUsable } from './fileHelpers';
 import { compareIdentity, readFileIdentity, type FileIdentity } from './fileIdentity';
-import { extractDimensions, resolveDateTaken, type ExifTags } from './imageMetadata';
+import { extractDimensions, geometryChanged, normalizeOrientation, resolveDateTaken, type ExifTags, type PhotoGeometry } from './imageMetadata';
 import type { PhotoRow, ScanStatements } from './ScanStatements';
 
 export interface ProcessOptions {
@@ -14,10 +14,14 @@ export interface ProcessOptions {
 
 /**
  * A `photos` row plus the flags the scan queue and UI use.
- * `contentChanged` means the file was edited outside the app since it was indexed: the UI then queues a
- * clean re-analysis (faces are re-detected and named people are re-matched).
+ *  - `contentChanged`: the file's bytes changed outside the app since it was indexed. Hash, metadata and preview
+ *    are refreshed.
+ *  - `facesStale`: the picture GEOMETRY changed as well (crop, resize, rotation), so the old face boxes are
+ *    invalid. Only then is the photo queued for a clean re-analysis, which deletes every face on the photo
+ *    (including ignored ones) and re-matches named people by embedding. A byte-only change (keywords, a rating,
+ *    colour edits) leaves faces alone.
  */
-export type ScannedPhoto = PhotoRow & { isNew: boolean; needsUpdate: boolean; contentChanged: boolean };
+export type ScannedPhoto = PhotoRow & { isNew: boolean; needsUpdate: boolean; contentChanged: boolean; facesStale: boolean };
 
 const errorMessage = (error: unknown): string => (error instanceof Error && error.message) || String(error);
 
@@ -113,8 +117,9 @@ async function refreshKnownPhoto(photo: PhotoRow, fullPath: string, previewDir: 
         ? await checkForContentChange(photo, fullPath, current)
         : { contentChanged: false, sha256: null, refreshIdentity: false };
 
-    // An edited file is reprocessed like a forced rescan: new preview and metadata, then AI re-analysis.
+    // An edited file gets a new preview and metadata like a forced rescan; AI re-analysis is only for a geometry change.
     const redo = force || change.contentChanged;
+    const geometryBefore = geometryOf(photo);
     let needsUpdate = redo;
 
     if (redo || !(await isPreviewUsable(photo.preview_cache_path))) {
@@ -132,7 +137,21 @@ async function refreshKnownPhoto(photo: PhotoRow, fullPath: string, previewDir: 
         else if (change.refreshIdentity || force) stmts.updateIdentity(photo.id, current);
     }
 
-    return Object.assign(photo, { isNew: redo, needsUpdate, contentChanged: change.contentChanged });
+    // If the metadata could not be re-read, the geometry looks unchanged, which is the safe answer.
+    const facesStale = change.contentChanged && geometryChanged(geometryBefore, geometryOf(photo));
+
+    return Object.assign(photo, { isNew: force || facesStale, needsUpdate, contentChanged: change.contentChanged, facesStale });
+}
+
+/** Displayed size and orientation as currently stored for a photo. */
+function geometryOf(photo: PhotoRow): PhotoGeometry {
+    let orientation: unknown;
+    try {
+        orientation = photo.metadata_json ? (JSON.parse(photo.metadata_json) as ExifTags).Orientation : undefined;
+    } catch {
+        orientation = undefined;
+    }
+    return { width: photo.width, height: photo.height, orientation: normalizeOrientation(orientation) };
 }
 
 async function ingestNewPhoto(fullPath: string, previewDir: string, stmts: ScanStatements, force: boolean): Promise<ScannedPhoto | null> {
@@ -174,7 +193,7 @@ async function ingestNewPhoto(fullPath: string, previewDir: string, stmts: ScanS
         }, previewFailure);
 
         const photo = stmts.findByPath(fullPath);
-        return photo ? Object.assign(photo, { isNew: true, needsUpdate: false, contentChanged: false }) : null;
+        return photo ? Object.assign(photo, { isNew: true, needsUpdate: false, contentChanged: false, facesStale: false }) : null;
     } catch (e) {
         logger.error('Insert failed', e);
         return null;
