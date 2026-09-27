@@ -233,10 +233,17 @@ def get_system_status(req_id=None, runtime_url: str | None = None):
     """
     status = {}
     try:
+        torch_lib = utils.get_torch()
+        try:
+            torch_cuda_ready = bool(torch_lib and torch_lib.cuda.is_available())
+        except Exception:
+            torch_cuda_ready = False
+
         # Check Models (Robustly)
         try:
             status['models'] = utils.get_model_status(
-                enhance.MODEL_URLS, enhance.WEIGHTS_DIR, runtime_url=runtime_url
+                enhance.MODEL_URLS, enhance.WEIGHTS_DIR, runtime_url=runtime_url,
+                torch_cuda_ready=torch_cuda_ready
             )
         except Exception as e:
             logger.error(f"Status Check (Models) failed: {e}")
@@ -261,7 +268,6 @@ def get_system_status(req_id=None, runtime_url: str | None = None):
             status['faiss'] = {'loaded': False, 'error': str(e)}
 
         # VLM
-        torch_lib = utils.get_torch()
         status['vlm'] = {
             'loaded': (vlm.vlm_model is not None),
             'device': "cuda" if torch_lib and torch_lib.cuda.is_available() else "cpu",
