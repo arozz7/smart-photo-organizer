@@ -196,3 +196,21 @@ describe('Fresh library', () => {
         expect(tables).toEqual(expect.arrayContaining(['photos', 'faces', 'people', 'person_eras', 'smart_albums', 'duplicate_groups', 'app_state']));
     });
 });
+
+describe('Legacy library upgrade: splash progress', () => {
+    it('reports backup progress through initDB so a large library does not look hung', async () => {
+        // Arrange
+        const libraryDir = createLegacyLibraryCopy();
+        const statuses: string[] = [];
+
+        // Act
+        await initDB(libraryDir, status => statuses.push(status));
+        closeDB();
+        removeLibraryCopy(libraryDir);
+
+        // Assert
+        const backupStatuses = statuses.filter(s => s.startsWith('Backing up your library before upgrading'));
+        expect(backupStatuses.length).toBeGreaterThan(0);
+        expect(backupStatuses[backupStatuses.length - 1]).toContain('100%');
+    });
+});

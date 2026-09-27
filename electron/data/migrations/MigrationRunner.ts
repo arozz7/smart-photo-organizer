@@ -5,6 +5,7 @@ import {
     type MigrationBackup,
     type MigrationLogger,
     type MigrationResult,
+    type MigrationRunOptions,
 } from './types';
 
 /**
@@ -40,7 +41,7 @@ export class MigrationRunner {
         return this.ordered.length > 0 ? this.ordered[this.ordered.length - 1].version : 0;
     }
 
-    async run(db: Database.Database): Promise<MigrationResult> {
+    async run(db: Database.Database, options: MigrationRunOptions = {}): Promise<MigrationResult> {
         const fromVersion = db.pragma('user_version', { simple: true }) as number;
 
         if (fromVersion > this.latestVersion) {
@@ -55,7 +56,7 @@ export class MigrationRunner {
             return { fromVersion, toVersion: fromVersion, applied: [], downgradeDetected: false };
         }
 
-        const backupPath = await this.takeBackup(db, fromVersion);
+        const backupPath = await this.takeBackup(db, fromVersion, options.onBackupProgress);
 
         const applied: string[] = [];
         for (const migration of pending) {
@@ -72,14 +73,15 @@ export class MigrationRunner {
         };
     }
 
-    private async takeBackup(db: Database.Database, fromVersion: number): Promise<string> {
+    private async takeBackup(db: Database.Database, fromVersion: number, onProgress?: (percent: number) => void): Promise<string> {
         try {
-            const backupPath = await this.backup.create(db, fromVersion, this.latestVersion);
+            const backupPath = await this.backup.create(db, fromVersion, this.latestVersion, onProgress);
             this.logger.info(`Pre-migration backup written to ${backupPath}`);
             return backupPath;
         } catch (error) {
             this.logger.error(`Pre-migration backup failed; no migrations were applied: ${String(error)}`);
-            throw new MigrationError('Could not back up the database before migrating', fromVersion + 1, error);
+            const reason = error instanceof Error ? error.message : String(error);
+            throw new MigrationError(`Could not back up the database before migrating: ${reason}`, fromVersion + 1, error);
         }
     }
 

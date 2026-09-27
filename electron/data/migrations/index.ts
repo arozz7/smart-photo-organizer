@@ -27,9 +27,19 @@ const migrationLogger: MigrationLogger = {
     error: message => logger.error(`[Migrations] ${message}`),
 };
 
-/** Applies any pending migrations to an open library database, backing it up first. */
-export async function migrateDatabase(db: Database.Database, libraryDir: string): Promise<MigrationResult> {
+/**
+ * Applies any pending migrations to an open library database, backing it up first.
+ * `onStatus` receives human-readable progress (shown on the splash screen); a large library takes
+ * a few seconds to back up, and silence would look like a hang.
+ */
+export async function migrateDatabase(
+    db: Database.Database,
+    libraryDir: string,
+    onStatus?: (status: string) => void,
+): Promise<MigrationResult> {
     const backup = new DatabaseBackup(path.join(libraryDir, BACKUP_FOLDER), BACKUPS_TO_KEEP);
     const runner = new MigrationRunner(MIGRATIONS, backup, migrationLogger);
-    return runner.run(db);
+    return runner.run(db, {
+        onBackupProgress: percent => onStatus?.(`Backing up your library before upgrading… ${percent}%`),
+    });
 }

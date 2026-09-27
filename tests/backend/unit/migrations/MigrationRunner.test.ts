@@ -92,7 +92,7 @@ describe('MigrationRunner', () => {
 
         // Assert
         expect(backup.create).toHaveBeenCalledTimes(1);
-        expect(backup.create).toHaveBeenCalledWith(db, 0, 2);
+        expect(backup.create).toHaveBeenCalledWith(db, 0, 2, undefined); // 4th argument: optional progress callback
         expect(backupTakenBeforeFirstMigration).toBe(true);
     });
 
@@ -156,5 +156,36 @@ describe('MigrationRunner', () => {
 
         // Assert
         expect(runner.latestVersion).toBe(3);
+    });
+});
+
+describe('MigrationRunner: backup progress and failure detail', () => {
+    it('forwards backup progress to the caller', async () => {
+        // Arrange
+        const db = new Database(':memory:');
+        const backup = { create: vi.fn(async (_db: unknown, _from: number, _to: number, onProgress?: (p: number) => void) => { onProgress?.(40); onProgress?.(100); return '/b.db'; }) };
+        const runner = new MigrationRunner([createTable(1, 'alpha')], backup, silentLogger);
+        const seen: number[] = [];
+
+        // Act
+        await runner.run(db, { onBackupProgress: p => seen.push(p) });
+
+        // Assert
+        expect(seen).toEqual([40, 100]);
+        db.close();
+    });
+
+    it("includes the backup problem's own reason in the error message (e.g. disk full)", async () => {
+        // Arrange
+        const db = new Database(':memory:');
+        const backup = { create: vi.fn().mockRejectedValue(new Error('Not enough free disk space for the backup')) };
+        const runner = new MigrationRunner([createTable(1, 'alpha')], backup, silentLogger);
+
+        // Act
+        const attempt = runner.run(db);
+
+        // Assert
+        await expect(attempt).rejects.toThrow(/Could not back up the database before migrating.*Not enough free disk space/);
+        db.close();
     });
 });
