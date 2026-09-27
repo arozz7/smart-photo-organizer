@@ -3,7 +3,7 @@
 ## Summary
 Every photo now remembers its file's size, modified time and file id, so the app can tell that a file was **edited outside the app** (and re-analyse it) and, in Phase 131, that a file was **moved or renamed**. This is also the first real migration, which exercised the backup and fail-closed machinery from Phase 128 on real data. The planned folder-modified-time skip was deliberately not built (see "Scope change").
 
-## Scope change (needs your decision)
+## Scope change (decision 2026-09-26: keep the folder skip deferred)
 The roadmap called for skipping unchanged folders on rescan. Phase 129 already made an unchanged rescan cost ~0.02 ms/file, so the skip would save roughly a second per 100k photos, while adding risk: repairs (missing previews, empty metadata) would stop happening in skipped folders, and edits there would go undetected without dirty marks and a periodic stat pass. Comparing size/time on every visit detects edits everywhere with none of that, so that was built instead. The skip can be added later as an opt-in setting if a real library (e.g. a network share) shows rescans are slow. Dropped with it: the `scan_folders` table, the periodic stat pass, dirty marks, the folder-skip "full rescan" option and the walked/skipped result contract.
 
 ## Files created
