@@ -127,32 +127,25 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 
 ---
 
-### Phase 130 — File Identity Columns & Incremental Folder Scanning
+### Phase 130 — File Identity & Edit Detection (folder skip deferred)
 
-**Tasks**
-1. **Migration 001:** Add to `photos`: `file_size INTEGER`, `file_mtime INTEGER`, `file_id TEXT` (from `fs.stat(..., {bigint:true}).ino`, which is the NTFS file index on Windows), `missing_since DATETIME`. Add the new table `scan_folders(path TEXT PRIMARY KEY, mtime INTEGER, last_scanned_at DATETIME)`. Put the new repository code in `PhotoIdentityRepository.ts`, not in `PhotoRepository.ts`.
-2. **Backfill service** `BackgroundFileIdentityService`: stat files in batches of 500 and fill in the three columns. Unreachable files are left NULL. The service is cheap and pauses during scans.
-3. **Folder skip:** When scanning a folder whose stored `mtime` equals its current mtime, skip processing its *direct files* but **still recurse into subfolders**. A directory's mtime only changes when its direct entries are added, removed or renamed. **Editing a file's contents does not change it.**
-4. **Modified-file detection:** If a *visited* known file's `size` or `mtime` differs from the stored values, mark it for reprocessing: re-hash, regenerate the preview and re-run the face scan. Reuse the rotation re-scan path from Phase 125 (`PhotoService.analyzeImage` with `cleanRescan`). It deletes the old faces and then recovers named assignments **on a best-effort basis** by matching embeddings (distance < 0.35). Faces that don't match fall back to unassigned, so this phase adds a test that measures how many are recovered and reports any lost names in the scan summary. Because content edits don't change the folder mtime, edits inside **skipped** folders are only caught by:
-   - a **Full rescan**, or
-   - an **explicit dirty mark** from in-app writes (rotation, Creative Tools saves, and later XMP embedded writes), which clears the folder's stored mtime, or
-   - an optional **periodic stat pass** by `BackgroundFileIdentityService` (idle-time, configurable interval, default weekly) that compares stored size and mtime without reading file contents.
-5. **Deep scan option:** "Full rescan" in the UI ignores folder mtimes.
-6. **Scan result contract for Phase 131:** The scanner returns the set of folders it actually *walked* (direct files processed), separate from the set it *skipped*. Missing-file detection must only use walked folders.
-7. Handle the network-drive and exFAT edge cases, where `ino` may be 0 or unstable. Treat `0` as NULL.
+**Status:** Implemented, with one scope change (below). See `aiChangeLog/phase-130-file-identity.md`.
 
-**Tests first**
-- A folder with an unchanged mtime is skipped but its subfolders are visited.
-- An added file changes the folder's mtime, so the folder is scanned.
-- In a *walked* folder, an edited file with the same path and a different size or mtime is flagged for reprocessing.
-- In a *skipped* folder, an edited file is **not** detected by a normal scan, **is** detected by a Full rescan, and **is** detected by the periodic stat pass.
-- An in-app rotation clears the folder's stored mtime.
-- The scan result reports walked and skipped folders correctly.
-- Rows with NULL identity columns are always checked.
-- A zero `ino` is stored as NULL.
-- Benchmark: a second scan of an unchanged tree is dominated by directory listing only (Phase 129 already made per-file cost ~0.02 ms; the remaining win is skipping the walk and stat calls for unchanged folders).
+**Scope change — folder-mtime skip deferred (decision needed).** Phase 129 made an unchanged rescan cost ~0.02 ms/file, so skipping unchanged folders would save roughly a second per 100k photos. In return it would add risk: repairs such as missing previews would no longer happen on rescans of skipped folders, edits inside skipped folders would go undetected without extra machinery (dirty marks, a periodic stat pass), and Phase 131 would need the walked/skipped contract. Comparing size and modified time on **every visit** gives edit detection everywhere with none of those gaps, so that is what was built. The skip can still be added later as an opt-in setting if a real library shows rescans are slow (e.g. network shares).
 
-**Backward compat:** The first scan after upgrade is a full walk (no `scan_folders` rows yet), exactly like today, and it establishes the baseline. Older builds ignore the new columns.
+**What was built**
+1. **Migration 001** (`electron/data/migrations/001_fileIdentity.ts`): nullable `file_size`, `file_mtime`, `file_id`, `missing_since` on `photos`, plus an index on `file_id`. The `scan_folders` table was **not** created (nothing uses it without the folder skip).
+2. **First real use of the Phase 128 safety net:** backup progress on the splash screen ("Backing up your library before upgrading… N%") and a free-disk-space check (10% headroom over database + WAL) that refuses with a clear message instead of failing midway. The production library is ~600 MB, so this matters.
+3. **Identity captured** for every photo at ingest (read *before* any content) and on every visit, via `electron/scanning/fileIdentity.ts`.
+4. **Edit detection on visit:** size differs -> edited; only the timestamp moved beyond a 2 s tolerance -> the content hash decides edited vs merely touched/copied; no stored hash to compare -> assume not edited (a false "edited" triggers a destructive face re-scan); nothing recorded yet -> fill in, not an edit. An edited file gets a forced preview, fresh metadata and hash, a cleared perceptual hash, and is returned with `contentChanged`.
+5. **Renderer:** photos flagged `contentChanged` are queued for AI with `cleanRescan` (old face boxes replaced, named people re-matched); brand new photos are not. The decision is a small tested function (`src/utils/scanQueueItems.ts`).
+6. **In-app writes refresh identity** (`PhotoIdentityService.refreshAfterRewrite`), called after a successful rotation (both the RAW and standard paths), so the app's own edits are not mistaken for outside edits.
+7. **Background backfill** (`BackgroundFileIdentityService` + `FileIdentityBackfill`) records identity for existing photos once per session, yielding to scans and AI work.
+8. **`file_id` = `volume:index`, stored only when both are known.** Node 22 on Windows reports volume 0 while Electron 30's Node 20 reports the real serial; `0:index` would collide across drives, so an unknown volume or index leaves it NULL and Phase 131 falls back to content hashes.
+
+**Dropped from the original plan:** the folder skip, `scan_folders`, the periodic stat pass, dirty marks, the "Full rescan ignores folder mtimes" option and the walked/skipped result contract (all only needed by the folder skip). The existing "Force rescan" already reprocesses everything.
+
+**Backward compat:** existing libraries upgrade to schema v1 on first launch with one automatic backup (`<library>/backups/library.v0-to-v1.<timestamp>.db`). New columns are NULL until a scan or the backfill fills them; nothing is guessed at upgrade time. Older builds ignore the new columns.
 
 ---
 
@@ -163,8 +156,8 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 **Problem:** `photos.file_path` is the only identity. If a user renames or moves a file or folder outside the app, the next scan inserts a *new* row with no face assignments, and the *old* row (holding the person names) points at a missing file. The same faces are then detected again as unknowns.
 
 **Tasks**
-1. **Missing detection:** Only **walked** folders are considered (Phase 130 scan-result contract). A known row is marked `missing_since` when its folder was walked and the file wasn't found. Rows in skipped folders are **never** marked missing.
-   - **Vanished folders:** When a walked parent no longer contains a subfolder that is in `scan_folders`, the rows under that subfolder are marked missing and its `scan_folders` entries are removed.
+1. **Missing detection:** Every scan lists every folder under the scanned root (Phase 130 deliberately did not add a folder skip), so the set of files found on disk is complete for that root. A known row under the scanned root is marked `missing_since` when its file was not found. **If a folder skip is ever added later, missing detection must consider only folders that were actually listed, never rows in skipped folders.**
+   - **Vanished folders:** rows under a folder that no longer exists are marked missing the same way. (Folders are not tracked separately; a missing folder simply means none of its files were found.)
    - **Guard:** If the scan root itself is unreachable (offline, removable or network drive), mark nothing.
 2. **Relink matcher** (pure function, `electron/core/services/relink/RelinkMatcher.ts`): for each *new* path, try in order:
    1. `file_id` + `file_size` match a missing row → confident relink.
@@ -196,8 +189,8 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 - Two identical candidate files are flagged as ambiguous and not linked.
 - A re-root dry run reports correct counts, and the commit is atomic.
 - The preview file is renamed and the path updated.
-- **An unchanged (skipped) folder's rows are NOT marked missing.**
-- A vanished subfolder under a walked parent marks its rows missing.
+- Rows outside the scanned root, and every row when the root is unreachable, are NOT marked missing.
+- A vanished subfolder marks its rows missing.
 - Repair wizard on the legacy fixture seeded with ghost pairs: names are restored and nothing is deleted without confirmation.
 - Repair wizard finds a NULL-hash ghost through the pHash + dimensions + date fallback, and lists it as review-only (not pre-selected).
 - Wizard reassignment updates person centroids and era data the same way a manual assignment does (asserted through the service, not raw rows).
@@ -470,7 +463,7 @@ All migrations are additive (Policy A.1).
 
 | Risk | Mitigation |
 |---|---|
-| Folder skip combined with missing detection marks unchanged folders as missing | Missing detection uses walked folders only (Phase 130 contract), with an explicit test |
+| Missing detection wrongly marks files missing (offline drive, partial scan) | Never mark anything missing when the scan root is unreachable; only scans of a whole root count; explicit tests. (Only relevant to folder skipping if that is added later.) |
 | Duplicates cleanup deletes ghost rows that hold names | `missing_since` rows are excluded from Duplicates deletion. The Repair wizard is suggested first |
 | Wrong relink attaches names to the wrong photo | Only link when confident (ID+size or exact hash). Ambiguous cases go to the user. Repair wizard shows a preview and needs confirmation |
 | Folder-mtime skip misses changes on some filesystems | Recurse always, "Full rescan" option, and treat NULL/0 identity values as unknown |
