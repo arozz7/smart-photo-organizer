@@ -201,7 +201,7 @@ def get_faiss():
     except ImportError:
         return None
 
-def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
+def get_model_status(model_urls, weights_dir, runtime_url: str | None = None, torch_cuda_ready: bool = False):
     """
     Returns a dictionary of model status information.
     Required by ModelDownloader.tsx.
@@ -211,19 +211,25 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
         weights_dir:  Directory where .pth enhancement models are stored.
         runtime_url:  Version-correct AI Runtime download URL passed from Electron (uses
                       app.getVersion()). Falls back to a placeholder when not provided.
+        torch_cuda_ready: True when CUDA PyTorch is already usable in this Python process (e.g. a
+                      source checkout whose virtualenv has it). Then the GPU runtime download is
+                      not needed, so the card is reported Ready even without an ai-runtime folder.
     """
     models_info = {}
 
     # 1. AI Runtime (Special Case)
     library_path = os.environ.get('LIBRARY_PATH', os.path.expanduser('~/.smart-photo-organizer'))
     runtime_path = os.path.join(library_path, 'ai-runtime')
+    runtime_folder_exists = os.path.exists(runtime_path)
     models_info["AI GPU Runtime (Torch/CUDA)"] = {
-        "exists": os.path.exists(runtime_path),
+        "exists": runtime_folder_exists or torch_cuda_ready,
         "url": runtime_url or "https://github.com/arozz7/smart-photo-organizer/releases/download/latest/ai-runtime-win-x64.zip",
         "size": 5800000000, # Approx 5.8GB
         "localPath": runtime_path,
         "isRuntime": True
     }
+    if torch_cuda_ready and not runtime_folder_exists:
+        models_info["AI GPU Runtime (Torch/CUDA)"]["note"] = "Using CUDA PyTorch from the Python environment"
 
     # 2. Enhancement Models (GFPGAN, etc) from enhance module
     for name, url in model_urls.items():
@@ -259,6 +265,10 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
     # or inside the downloaded AI Runtime bundle (runtime_models_root) — the
     # slim installer ships no model weights at all, so most users only have
     # the latter. Check both, preferring whichever actually exists.
+    # Same search order the loaders use (resolve_model_path): the models/ folder of the current
+    # directory first (a dev checkout runs from the repo root), then the downloaded runtime.
+    # The source-tree models/ next to this package is kept as an extra candidate.
+    cwd_models_root = os.path.abspath('models')
     models_root = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'models'))
     runtime_models_root = os.path.join(AI_RUNTIME_PATH, 'models')
 
@@ -272,6 +282,7 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
 
     # 5. AdaFace (ONNX — low-quality face recognition)
     adaface_path = _first_existing(
+        os.path.join(cwd_models_root, 'adaface_ir50_webface4m.onnx'),
         os.path.join(models_root, 'adaface_ir50_webface4m.onnx'),
         os.path.join(runtime_models_root, 'adaface_ir50_webface4m.onnx'),
     )
@@ -287,14 +298,17 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None):
     # takes priority since it's the default when a CUDA GPU is present; fall
     # back to the old HF snapshot dir or bare .safetensors (CPU, Sam3TransformersProvider).
     sam3_pt = _first_existing(
+        os.path.join(cwd_models_root, 'sam3.pt'),
         os.path.join(models_root, 'sam3.pt'),
         os.path.join(runtime_models_root, 'sam3.pt'),
     )
     sam3_dir = _first_existing(
+        os.path.join(cwd_models_root, 'sam3'),
         os.path.join(models_root, 'sam3'),
         os.path.join(runtime_models_root, 'sam3'),
     )
     sam3_bare = _first_existing(
+        os.path.join(cwd_models_root, 'sam3_model.safetensors'),
         os.path.join(models_root, 'sam3_model.safetensors'),
         os.path.join(runtime_models_root, 'sam3_model.safetensors'),
     )
