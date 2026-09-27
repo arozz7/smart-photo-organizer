@@ -89,9 +89,12 @@ export function verifyIngest(rows: StoredRow[]): BenchVerification {
 }
 
 export async function runScanBench(options: BenchOptions): Promise<BenchResult> {
-    const { initDB, getDB, closeDB } = await import('../../electron/db');
-    const { scanDirectory } = await import('../../electron/scanner');
-    const { ConfigService } = await import('../../electron/core/services/ConfigService');
+    // SPO_ELECTRON_DIR points at another checkout of electron/ (e.g. an older commit) to compare versions
+    const electronDir = process.env.SPO_ELECTRON_DIR ?? path.resolve(__dirname, '../../electron');
+    const load = (relative: string) => import(/* @vite-ignore */ path.join(electronDir, relative));
+    const { initDB, getDB, closeDB } = await load('db');
+    const { scanDirectory } = await load('scanner');
+    const { ConfigService } = await load('core/services/ConfigService');
 
     // Override IN MEMORY only (ConfigService.updateSettings would persist to config.json).
     // Must happen before ExifTool is first used: its process count is fixed at start-up.

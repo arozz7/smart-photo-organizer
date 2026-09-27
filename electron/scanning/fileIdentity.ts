@@ -18,12 +18,16 @@ export const MTIME_TOLERANCE_MS = 2000;
 
 /**
  * Volume serial + file index, e.g. "5:281474976710695". The volume is included so equal indexes on two
- * different drives never look like the same file. Some filesystems (network shares, certain exFAT setups)
- * report an index of 0, which is not usable, so it becomes null.
+ * different drives never look like the same file.
+ *
+ * Both parts must be known, otherwise the id is null (and re-linking falls back to content hashes):
+ *  - an index of 0 is reported by some filesystems (network shares, certain exFAT setups)
+ *  - a volume of 0 is what Node 22 reports on Windows (Electron 30's Node 20 reports the real serial);
+ *    "0:index" would be identical for files on different drives, which is worse than no id
  * BigInt keeps 64-bit indexes exact; a JavaScript number would silently round them.
  */
 export function toFileId(dev: bigint, ino: bigint): string | null {
-    return ino === 0n ? null : `${dev}:${ino}`;
+    return dev === 0n || ino === 0n ? null : `${dev}:${ino}`;
 }
 
 /** Reads a file's identity, or null if it cannot be stat'ed (missing, no permission, offline drive). */

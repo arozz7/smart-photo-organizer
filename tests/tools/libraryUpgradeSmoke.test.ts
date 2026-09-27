@@ -60,3 +60,39 @@ describe.skipIf(!source)('real library upgrade smoke test', () => {
         }
     });
 });
+
+describe.skipIf(!source)('real library: file identity backfill', () => {
+    it('records identity for every photo whose file still exists, on a copy of the library', async () => {
+        // Arrange
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spo-smoke-id-'));
+        fs.copyFileSync(source as string, path.join(dir, 'library.db'));
+        await initDB(dir);
+
+        try {
+            const { FileIdentityBackfill } = await import('../../electron/core/services/FileIdentityBackfill');
+            const { PhotoIdentityRepository } = await import('../../electron/data/repositories/PhotoIdentityRepository');
+            const { readFileIdentity } = await import('../../electron/scanning/fileIdentity');
+            const before = PhotoIdentityRepository.countPhotosNeedingIdentity();
+
+            // Act
+            const t0 = performance.now();
+            const result = await new FileIdentityBackfill({
+                repository: PhotoIdentityRepository,
+                readIdentity: readFileIdentity,
+                isBusy: () => false,
+                sleep: async () => undefined,
+            }).run();
+            const ms = Math.round(performance.now() - t0);
+            const after = PhotoIdentityRepository.countPhotosNeedingIdentity();
+
+            // Assert
+            expect(result.updated + result.unreadable).toBe(before);
+            expect(after).toBe(result.unreadable);
+            const sample = getDB().prepare('SELECT file_size, file_mtime, file_id FROM photos WHERE file_size IS NOT NULL LIMIT 1').get();
+            console.log(`[smoke] identity backfill: pending=${before} updated=${result.updated} unreadable=${result.unreadable} in ${ms} ms; sample=${JSON.stringify(sample)}`);
+        } finally {
+            closeDB();
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});

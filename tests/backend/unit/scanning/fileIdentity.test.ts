@@ -18,6 +18,11 @@ describe('toFileId', () => {
         expect(toFileId(5n, 0n)).toBeNull();
     });
 
+    it('is null when the volume is unknown (Node 22 on Windows reports volume 0), because "0:index" would collide across drives', () => {
+        expect(toFileId(0n, 77n)).toBeNull();
+        expect(toFileId(0n, 0n)).toBeNull();
+    });
+
     it('keeps 64-bit file indexes exact (they exceed what a JavaScript number can hold)', () => {
         expect(toFileId(1n, 9007199254740993n)).toBe('1:9007199254740993');
     });
