@@ -22,7 +22,7 @@ const rowCounts = (db: Database.Database): Record<string, number> =>
     );
 
 describe.skipIf(!source)('real library upgrade smoke test', () => {
-    it('opens a copy without losing rows, changing user_version or creating backups', async () => {
+    it('upgrades a copy without losing rows, and leaves a backup that matches the pre-upgrade library', async () => {
         // Arrange
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spo-smoke-'));
         fs.copyFileSync(source as string, path.join(dir, 'library.db'));
@@ -33,18 +33,28 @@ describe.skipIf(!source)('real library upgrade smoke test', () => {
 
         try {
             // Act
+            const t0 = performance.now();
             const result = await initDB(dir);
+            const upgradeMs = Math.round(performance.now() - t0);
             const countsAfter = rowCounts(getDB());
             const versionAfter = getDB().pragma('user_version', { simple: true });
             closeDB();
 
-            // Assert
+            // Assert: no rows lost, schema advanced only if a migration was pending
             const lost = Object.keys(countsBefore).filter(t => (countsAfter[t] ?? 0) < countsBefore[t]);
             expect(lost, `tables that lost rows: ${lost.join(', ')}`).toEqual([]);
-            expect(versionAfter).toBe(versionBefore);
-            expect(result.applied).toEqual([]);
-            expect(fs.existsSync(path.join(dir, 'backups'))).toBe(false);
-            console.log(`[smoke] ${Object.keys(countsBefore).length} tables, photos=${countsBefore.photos}, faces=${countsBefore.faces}, people=${countsBefore.people}`);
+            expect(versionAfter).toBe(result.toVersion);
+
+            // Assert: a backup exists exactly when something was applied, and it is the pre-upgrade library
+            if (result.applied.length > 0) {
+                const backup = new Database(result.backupPath as string, { readonly: true });
+                expect(backup.pragma('user_version', { simple: true })).toBe(versionBefore);
+                expect(rowCounts(backup)).toEqual(countsBefore);
+                backup.close();
+            } else {
+                expect(fs.existsSync(path.join(dir, 'backups'))).toBe(false);
+            }
+            console.log(`[smoke] ${Object.keys(countsBefore).length} tables, photos=${countsBefore.photos}, faces=${countsBefore.faces}, people=${countsBefore.people}; applied=${JSON.stringify(result.applied)}; v${versionBefore}->v${versionAfter}; upgrade took ${upgradeMs} ms`);
         } finally {
             fs.rmSync(dir, { recursive: true, force: true });
         }
