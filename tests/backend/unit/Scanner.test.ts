@@ -16,7 +16,9 @@ const mockDBPrepare = {
 };
 
 const mockDB = {
-    prepare: vi.fn(() => mockDBPrepare)
+    prepare: vi.fn(() => mockDBPrepare),
+    // better-sqlite3 transaction(fn) returns a function that runs fn inside a transaction
+    transaction: vi.fn((fn: (...args: unknown[]) => unknown) => fn)
 };
 
 vi.mock('../../../electron/db', () => ({

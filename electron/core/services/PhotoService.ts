@@ -1,4 +1,6 @@
 import { FaceService } from './FaceService';
+import { ConfigService } from './ConfigService';
+import { exiftoolTaskTimeoutMs } from './scannerSettings';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -7,6 +9,7 @@ import sharp from 'sharp';
 import logger from '../../logger';
 import { pythonProvider } from '../../infrastructure/PythonAIProvider';
 import { getLibraryPath } from '../../store'; // Config later
+import { isRawLikeExtension } from '../../utils/imageFormats';
 import { FaceRepository } from '../../data/repositories/FaceRepository';
 import { PhotoRepository } from '../../data/repositories/PhotoRepository';
 // import { getDB } from '../../db'; // Transaction usage
@@ -24,7 +27,10 @@ export class PhotoService {
         this._exiftoolInitPromise = (async () => {
             try {
                 logger.info('Initializing ExifTool in PhotoService...');
-                const tool = new ExifTool({ taskTimeoutMillis: 5000, maxProcs: 1 });
+                const scanner = ConfigService.getScannerSettings();
+                const taskTimeoutMillis = exiftoolTaskTimeoutMs(scanner);
+                logger.info(`ExifTool worker processes: ${scanner.exiftoolProcesses}, task timeout: ${taskTimeoutMillis} ms`);
+                const tool = new ExifTool({ taskTimeoutMillis, maxProcs: scanner.exiftoolProcesses });
                 await tool.version();
                 this._exiftool = tool;
                 return tool;
@@ -37,7 +43,11 @@ export class PhotoService {
     }
 
     // --- PREVIEW GENERATION ---
-    static async extractPreview(filePath: string, previewDir: string, forceRescan = false, throwOnError = false): Promise<string | null> {
+    /**
+     * @param knownTags Tags the caller already read from this file. When given, Orientation is taken from
+     *   here instead of asking ExifTool again (each ExifTool round-trip costs ~30 ms).
+     */
+    static async extractPreview(filePath: string, previewDir: string, forceRescan = false, throwOnError = false, knownTags?: { Orientation?: unknown }): Promise<string | null> {
         const normalizedPath = filePath.replace(/\\/g, '/');
         const hash = createHash('md5').update(normalizedPath).digest('hex');
         const previewPath = path.join(previewDir, `${hash}.jpg`);
@@ -48,23 +58,21 @@ export class PhotoService {
             }
 
             const ext = path.extname(filePath).toLowerCase();
-            const isRaw = !['.jpg', '.jpeg', '.png', '.jfif'].includes(ext);
+            const isRaw = isRawLikeExtension(ext);
             let rotationDegrees = 0;
             let shouldRotate = false;
 
             // Orientation Check
             let orientation = 1;
             try {
-                const tool = await this.getExifTool();
-                if (tool) {
-                    const tags = await tool.read(filePath, ['Orientation']);
-                    if (tags?.Orientation) {
-                        orientation = tags.Orientation as number; // Keep raw value for Python
-                        const val = tags.Orientation as any;
-                        if (val === 3 || val.toString().includes('180')) { rotationDegrees = 180; shouldRotate = true; }
-                        else if (val === 6 || val.toString().includes('90 CW')) { rotationDegrees = 90; shouldRotate = true; }
-                        else if (val === 8 || val.toString().includes('270 CW')) { rotationDegrees = 270; shouldRotate = true; }
-                    }
+                const tool = knownTags ? null : await this.getExifTool();
+                const tags = knownTags ?? (tool ? await tool.read(filePath, ['Orientation']) : undefined);
+                if (tags?.Orientation) {
+                    orientation = tags.Orientation as number; // Keep raw value for Python
+                    const val = tags.Orientation as any;
+                    if (val === 3 || val.toString().includes('180')) { rotationDegrees = 180; shouldRotate = true; }
+                    else if (val === 6 || val.toString().includes('90 CW')) { rotationDegrees = 90; shouldRotate = true; }
+                    else if (val === 8 || val.toString().includes('270 CW')) { rotationDegrees = 270; shouldRotate = true; }
                 }
             } catch (e) { }
 

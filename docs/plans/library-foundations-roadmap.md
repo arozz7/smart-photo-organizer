@@ -110,24 +110,22 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 
 ## Step 1 — Quick Fixes & Scanner Efficiency
 
-### Phase 129 — WEBP Support & Scanner Hot-Path Optimization
+### Phase 129 — WEBP Support & Scanner Hot-Path Optimization — DONE
 
-**Tasks**
-1. Add `.webp` to `SUPPORTED_EXTS` (`electron/scanner.ts:31`) and confirm that the preview and face pipeline decode it (sharp and Python). The README already advertises WEBP.
-2. Add a benchmark script `scripts/bench/scan-bench.ts` (synthetic tree of 10k small JPEGs) and record the baseline. **Before changing the scanner**, capture a golden snapshot of the `photos` rows that the *current* scanner produces for the fixture tree (`tests/fixtures/scan-golden.json`). The equivalence test compares against this snapshot, because the old code won't exist afterward.
-3. Prepare statements **once per scan** instead of per file (`processFile` currently calls `db.prepare` on every file). Inject a `ScanStatements` object.
-4. Per folder, load known paths for that folder into a `Map` with a single query instead of one `SELECT` per file.
-5. Batch inserts in one transaction per folder.
-6. Use a bounded concurrency pool (config `scanner.concurrency`, default 4) for per-file work (EXIF, preview extraction). DB writes stay on one path.
-7. Rerun the benchmark and record the numbers.
+**Result (measured, 500 files):** ingest 56.1 -> ~10.4 ms/file (5.4x), unchanged rescan 1.48 -> 0.02 ms/file. See `aiChangeLog/phase-129-scanner-performance.md`.
 
-**Tests first**
-- `.webp` files are discovered and inserted, and unsupported extensions are still counted as skipped.
-- `db.prepare` call count is independent of the number of files.
-- The concurrency limit is never exceeded (deterministic counter, no timers).
-- **Equivalence test:** Scanning the same fixture tree with the old and new code gives identical `photos` rows.
+**What was actually done (revised after profiling)**
+1. `.webp` scanned; image-format rules centralised in `electron/utils/imageFormats.ts` (also fixes a latent "anything not jpg/png is RAW" rule that would have misclassified WEBP).
+2. Benchmark (`SCAN_BENCH=1`) and a golden-snapshot equivalence test captured from the ORIGINAL scanner before any change.
+3. Statements prepared once per scan; one transaction per new photo. (This is the rescan win.)
+4. **Profiling showed ingest is dominated by ExifTool** (`maxProcs: 1`, and called twice per new file). Added: reuse of the already-read Orientation (`extractPreview(..., knownTags)`), configurable ExifTool processes (default by CPU count, max 4), and a bounded worker pool (default 4). These produce the ingest speed-up.
+5. **Dropped:** the per-folder known-paths map (no measurable gain once statements are prepared; memory risk on large root folders).
 
-**Backward compat:** No schema change. Existing libraries pick up their WEBP files on the next scan.
+**Tests:** golden equivalence over six scenarios (first scan, unchanged rescan, missing previews, metadata backfill, forced rescan, scanFiles), ordering contract, WEBP, ExifTool unavailable, pool bounds, settings validation.
+
+**Backward compat:** No schema change. Existing libraries pick up WEBP files on the next scan. New optional `scanner` block in `config.json` (`concurrency`, `exiftoolProcesses`); missing or invalid values fall back to defaults.
+
+---
 
 ### Phase 130 — File Identity Columns & Incremental Folder Scanning
 
@@ -152,7 +150,7 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 - The scan result reports walked and skipped folders correctly.
 - Rows with NULL identity columns are always checked.
 - A zero `ino` is stored as NULL.
-- Benchmark: a second scan of an unchanged 100k tree is at least 5× faster than the Phase 129 number (target, recorded not enforced).
+- Benchmark: a second scan of an unchanged tree is dominated by directory listing only (Phase 129 already made per-file cost ~0.02 ms; the remaining win is skipping the walk and stat calls for unchanged folders).
 
 **Backward compat:** The first scan after upgrade is a full walk (no `scan_folders` rows yet), exactly like today, and it establishes the baseline. Older builds ignore the new columns.
 

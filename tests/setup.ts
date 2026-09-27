@@ -12,7 +12,8 @@ import '@testing-library/jest-dom';
 // that call app.getPath() don't crash in the vitest (non-Electron) environment.
 vi.mock('electron', () => ({
     app: {
-        getPath: vi.fn(() => '/tmp/test-user-data'),
+        // System temp folder (a bare '/tmp/...' resolved to the drive root, e.g. J:\tmp, outside the repo)
+        getPath: vi.fn(() => `${process.env.TEMP ?? process.env.TMPDIR ?? '/tmp'}/spo-test-user-data`),
         getVersion: vi.fn(() => '0.0.0-test'),
         isReady: vi.fn(() => true),
         on: vi.fn(),

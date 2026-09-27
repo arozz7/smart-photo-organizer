@@ -19,7 +19,8 @@ vi.mock('sharp', () => ({
     default: vi.fn(() => mockSharpInstance)
 }));
 
-// 2. Mock ExifTool as a class
+// 2. Mock ExifTool as a class (records constructor options)
+const exifToolCtorArgs: unknown[] = [];
 const mockExifToolInstance = {
     version: vi.fn().mockResolvedValue('12.00'),
     read: vi.fn(),
@@ -29,7 +30,8 @@ const mockExifToolInstance = {
 vi.mock('exiftool-vendored', () => {
     return {
         // Using a regular function to ensure it can be used as a constructor
-        ExifTool: function () {
+        ExifTool: function (options: unknown) {
+            exifToolCtorArgs.push(options);
             return mockExifToolInstance;
         }
     };
@@ -107,6 +109,22 @@ describe('PhotoService', () => {
     // ==========================================
     // extractPreview
     // ==========================================
+    describe('getExifTool', () => {
+        it('starts ExifTool with the configured process count and a timeout that budgets for queue wait', async () => {
+            // Arrange
+            exifToolCtorArgs.length = 0;
+            const { ConfigService } = await import('../../../../electron/core/services/ConfigService');
+            const { exiftoolTaskTimeoutMs } = await import('../../../../electron/core/services/scannerSettings');
+            const settings = ConfigService.getScannerSettings();
+
+            // Act
+            await PhotoService.getExifTool();
+
+            // Assert
+            expect(exifToolCtorArgs).toEqual([{ maxProcs: settings.exiftoolProcesses, taskTimeoutMillis: exiftoolTaskTimeoutMs(settings) }]);
+        });
+    });
+
     describe('extractPreview', () => {
         it('should return existing preview if found and no rescan forced', async () => {
             // Arrange
@@ -159,6 +177,46 @@ describe('PhotoService', () => {
             expect(mockExifToolInstance.extractPreview).not.toHaveBeenCalled();
             expect(sharp).toHaveBeenCalledWith(filePath, { failOnError: false });
             expect(result).not.toBeNull();
+        });
+
+        it('reads Orientation from ExifTool itself when no known tags are supplied', async () => {
+            // Arrange
+            vi.mocked(fs.access).mockRejectedValueOnce(new Error('Missing'));
+            vi.mocked(fs.access).mockResolvedValue(undefined);
+            mockExifToolInstance.read.mockResolvedValue({ Orientation: 6 });
+
+            // Act
+            await PhotoService.extractPreview('/path/to/photo.jpg', '/previews');
+
+            // Assert
+            expect(mockExifToolInstance.read).toHaveBeenCalledWith('/path/to/photo.jpg', ['Orientation']);
+            expect(mockSharpInstance.rotate).toHaveBeenCalledWith(90);
+        });
+
+        it('skips the extra ExifTool call and still rotates when the caller already knows the Orientation', async () => {
+            // Arrange
+            vi.mocked(fs.access).mockRejectedValueOnce(new Error('Missing'));
+            vi.mocked(fs.access).mockResolvedValue(undefined);
+
+            // Act
+            await PhotoService.extractPreview('/path/to/photo.jpg', '/previews', false, true, { Orientation: 6 });
+
+            // Assert
+            expect(mockExifToolInstance.read).not.toHaveBeenCalled();
+            expect(mockSharpInstance.rotate).toHaveBeenCalledWith(90);
+        });
+
+        it('does not rotate when the known tags have no Orientation', async () => {
+            // Arrange
+            vi.mocked(fs.access).mockRejectedValueOnce(new Error('Missing'));
+            vi.mocked(fs.access).mockResolvedValue(undefined);
+
+            // Act
+            await PhotoService.extractPreview('/path/to/photo.jpg', '/previews', false, true, {});
+
+            // Assert
+            expect(mockExifToolInstance.read).not.toHaveBeenCalled();
+            expect(mockSharpInstance.rotate).not.toHaveBeenCalled();
         });
 
         it('should fallback to Python if both ExifTool and Sharp fail', async () => {
