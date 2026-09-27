@@ -64,6 +64,10 @@ vi.mock('../../../../electron/data/repositories/FaceRepository', () => ({
     }
 }));
 
+vi.mock('../../../../electron/core/services/PhotoIdentityService', () => ({
+    PhotoIdentityService: { refreshAfterRewrite: vi.fn().mockResolvedValue(undefined) }
+}));
+
 vi.mock('../../../../electron/store', () => ({
     getLibraryPath: vi.fn(() => '/mock/library')
 }));
@@ -92,6 +96,7 @@ vi.mock('node:fs', async (importOriginal) => {
 
 import { PhotoService } from '../../../../electron/core/services/PhotoService';
 import { pythonProvider } from '../../../../electron/infrastructure/PythonAIProvider';
+import { PhotoIdentityService } from '../../../../electron/core/services/PhotoIdentityService';
 import { PhotoRepository } from '../../../../electron/data/repositories/PhotoRepository';
 import sharp from 'sharp';
 
@@ -276,6 +281,29 @@ describe('PhotoService', () => {
                 filePath,
                 expect.objectContaining({ photoId: 2, cleanRescan: true })
             );
+        });
+
+        it('refreshes the stored file identity after rotating a standard file, so the next scan does not see an outside edit', async () => {
+            // Arrange
+            vi.mocked(pythonProvider.sendRequest).mockResolvedValue({ success: true } as any);
+            vi.mocked(pythonProvider.analyzeImage).mockResolvedValue({ success: true, faces: [] } as any);
+
+            // Act
+            await PhotoService.rotatePhoto(4, '/path/to/photo.jpg', 90);
+
+            // Assert
+            expect(PhotoIdentityService.refreshAfterRewrite).toHaveBeenCalledWith(4, '/path/to/photo.jpg');
+        });
+
+        it('does not touch the stored identity when the rotation fails (the file was not rewritten)', async () => {
+            // Arrange
+            vi.mocked(pythonProvider.sendRequest).mockResolvedValue({ success: false, error: 'read-only' } as any);
+
+            // Act
+            await PhotoService.rotatePhoto(5, '/path/to/photo.jpg', 90);
+
+            // Assert
+            expect(PhotoIdentityService.refreshAfterRewrite).not.toHaveBeenCalled();
         });
 
         it('should not re-scan faces when the rotation fails', async () => {
