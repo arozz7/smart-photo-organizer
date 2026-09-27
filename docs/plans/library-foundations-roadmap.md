@@ -18,7 +18,7 @@ Work is ordered in six steps. Each step is independently shippable.
 |---|---|---|
 | 0 | Migration framework & safety net (prerequisite) | 128 |
 | 1 | Quick fixes & scanner efficiency | 129, 130 |
-| 2 | Data safety: file identity, re-linking, XMP write-back | 131, 132 |
+| 2 | Data safety: file identity, re-linking, **library folders & auto-refresh (131b)**, XMP write-back | 131, 131b, 132 |
 | 3 | Semantic search (CLIP embeddings) + FLUX.2 background generation | 133, 134, 135 |
 | 4 | Library essentials & UX polish | 136–143 |
 | 5 | Places: offline geocoding & Map view | 144, 145 |
@@ -199,6 +199,49 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 - The IoU face matcher handles rotated images (Phase 125 orientation rules).
 
 **Backward compat:** Uses the Phase 130 columns. For rows still NULL (backfill pending), the hash fallback applies. Relinking is enabled by default because it only preserves data. Removal is always manual.
+
+### Phase 131b — Library Folders & Auto-Refresh
+
+**Goal:** the library keeps itself up to date. New files are found and edited files re-indexed without the user re-scanning by hand.
+
+**Why it is needed (verified in the code, 2026-09-26):** a scan is started only by the user typing or browsing to a folder in Library and clicking Scan. There is no file watcher, no scan at startup, and no saved list of scanned folders (the folder box defaults to `D:\Photos`). A scan walks the whole tree, so a manual rescan already finds new and edited files, but nothing triggers it. New AI queueing also happens in the renderer (`ScanContext`) after a manual scan returns, so a scan started by the main process would currently never reach the AI queue.
+
+**Why it comes after Phase 131:** unattended scans must not turn a moved file into "a new photo plus a missing photo" (faces re-detected, names lost). Re-linking (131) and the "unreachable root marks nothing missing" guard must be proven first.
+
+**Scope:** steps 1 and 2 below (agreed 2026-09-26). Live file watching is recorded as deferred; build it only if instant updates are wanted after using 1 and 2.
+
+#### 131b-1 — Library folders and a one-click Refresh (small to medium)
+
+1. **Migration (next free number):** `library_folders(id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, added_at DATETIME, last_scan_at DATETIME, last_scan_status TEXT)`. Additive; existing libraries are unaffected until they use it. New repository/service code in `LibraryFolderRepository` / `LibraryFolderService` (not in the oversized `PhotoRepository`).
+2. **Registering folders:** a successful manual scan of a folder registers it. Roots are normalised (trailing slashes, case on Windows) and overlaps are merged (a folder inside a registered folder is not added separately).
+3. **Existing libraries (seeding):** the first time the Folders panel opens, propose the roots implied by existing photo paths (longest common parent per drive) as a **list to confirm or edit**. Nothing is registered, and nothing is scanned, without the user confirming.
+4. **UI:** a Folders panel in Library listing each folder with status (last refreshed, new/edited counts, **offline**), add / remove / disable, a per-folder refresh, and **Refresh library** (all enabled folders). Removing a folder from the list never removes photos.
+5. **One path for AI queueing:** the main process pushes a `scan:completed` event (folder, results); the renderer queues AI work from that event for **every** scan, manual or automatic, using the existing tested `buildScanQueueItems`. The manual flow is moved onto the same event, so there is a single implementation.
+6. **Tests first:** root normalisation and overlap merging (pure); registration on scan; seeding proposal from photo paths (incl. multiple drives); Refresh runs enabled folders only, in order, through the existing scan queue; the event drives AI queueing; legacy libraries show no folders until confirmed.
+
+#### 131b-2 — Automatic refresh (medium)
+
+1. **`LibraryRefreshService`** (an `IService`, dependencies injected): refreshes enabled folders a short time after startup (default 60 s) and whenever an offline folder becomes reachable again. Optional periodic refresh while the app is open (default **off**). Setting `library.autoRefresh`: `off` | `startup` (default) | `startup+periodic` with an interval.
+2. **Only after the user has confirmed their folders** (131b-1): no automatic scan of a path the user did not approve.
+3. **Offline drives (USB disks, network shares):** before scanning a root, check it is reachable with a short timeout. If not, mark it **offline**, skip it quietly (no error dialog), and retry every minute (cheap access check). An unreachable root never marks anything missing (reuses the Phase 131 guard, with its own test).
+4. **Good citizen:** goes through the existing serial scan queue; a user-started scan takes priority; uses a lower concurrency than a manual scan (setting, default 2); pauses while the AI pipeline is busy; cancellable and stops on shutdown.
+5. **Feedback without nagging:** the status bar shows progress; when finished, one summary such as "Library refreshed: 12 new, 3 edited" (nothing at all when nothing changed); problems go to the existing Queues/scan errors view.
+6. **Cost note:** a cold rescan on a USB hard disk costs about 0.75 ms per file for the extra `stat` (roughly 75 s per 100k photos, once per cold cache). This runs in the background, which is why it is not a blocker; the deferred folder-mtime skip (Phase 130 decision) is the lever if it ever matters.
+7. **Tests first (fake clock, scan runner and reachability):** startup delay honoured; offline root skipped then picked up when it returns; no overlapping refreshes; user scan takes priority; each `autoRefresh` mode; nothing marked missing for an unreachable root; stops on shutdown; summary only when something changed.
+
+#### Deferred: live file watching (only if wanted later)
+Recursive `fs.watch` on chosen local folders with debouncing (~5 s quiet), ignoring partial files (`.tmp`, `.crdownload`, files whose size is still changing), targeted `scanFiles` for small batches and a folder refresh for large ones or on watcher overflow. Known limits: unreliable on network shares, USB spin-up, event storms on bulk copies, and Windows reports a USB disk as a fixed drive so it cannot be told apart automatically (it would be a per-folder opt-in). Not planned unless 131b-1/2 leave a real gap.
+
+**Open decisions (answer before starting):**
+1. Default `library.autoRefresh`: `startup` (recommended) or `off` until enabled?
+2. Startup delay and periodic interval defaults (60 s; periodic off).
+3. Background scan concurrency default (2).
+
+**Backward compat:** one additive table; nothing runs automatically until the user confirms their folders; the whole feature can be turned off with one setting; the feature only reads files and never writes to or deletes them.
+
+**Risks:** an unattended scan wrongly reports files missing (offline drive, partial listing) — guarded by the Phase 131 rules and explicit tests; a background scan makes the machine sluggish — lower concurrency and yielding to AI/manual work; surprise scans of unexpected paths — folders must be confirmed; notification fatigue — summaries only when something changed.
+
+---
 
 ### Phase 132 — XMP Metadata Write-Back (Sidecar-First, Coexisting with Existing Sidecars)
 
@@ -448,7 +491,8 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 | Migration | Phase | Change |
 |---|---|---|
 | — | 128 | Legacy baseline (frozen, runs every start outside the runner). Runner + backup added; registry empty, existing libraries stay at `user_version = 0` |
-| 001 | 130 | `photos` identity columns, `scan_folders` |
+| 001 | 130 | `photos` identity columns (no `scan_folders`: the folder skip was deferred) |
+| next free | 131b | `library_folders` (numbers below are indicative; the real number is the next free one when it merges) |
 | 002 | 132 | `photos.metadata_dirty` |
 | 003 | 133 | `photo_embeddings` |
 | 004 | 136 | rating / favorite / cull_flag |
@@ -483,3 +527,5 @@ All migrations are additive (Policy A.1).
 | 4 | Video scope (Phase 148) | **Option C:** 148a–c + keyframe CLIP search. Faces in video (148d) deferred |
 | 5 | Branching | Merge `feature/phases-117-118-119` via PR and **cut a release before** the roadmap version bump |
 | 6 | FLUX.2 | Fitted in as **Phase 135** (Step 3) |
+| 7 | Folder-mtime skip (Phase 130) | **Keep deferred** (2026-09-26); revisit if production rescans feel slow |
+| 8 | Auto-refresh (Phase 131b) | **Steps 1 and 2** (library folders + automatic refresh) after Phase 131; live file watching deferred (2026-09-26) |
