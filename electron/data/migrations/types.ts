@@ -18,7 +18,17 @@ export interface Migration {
 
 /** Takes a restorable copy of the database before migrations run. */
 export interface MigrationBackup {
-    create(db: Database.Database, fromVersion: number, toVersion: number): Promise<string>;
+    create(
+        db: Database.Database,
+        fromVersion: number,
+        toVersion: number,
+        onProgress?: (percent: number) => void,
+    ): Promise<string>;
+}
+
+export interface MigrationRunOptions {
+    /** Called with 0-100 while the pre-migration backup is being written (large libraries take a while). */
+    onBackupProgress?: (percent: number) => void;
 }
 
 export interface MigrationLogger {

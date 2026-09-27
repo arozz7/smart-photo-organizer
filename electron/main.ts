@@ -24,6 +24,7 @@ import { BackgroundBucketingService } from './core/services/BackgroundBucketingS
 import { BackgroundVerificationService } from './core/services/BackgroundVerificationService';
 import { BackgroundPropagationService } from './core/services/BackgroundPropagationService';
 import { BackgroundDuplicateCheckerService } from './core/services/BackgroundDuplicateCheckerService';
+import { BackgroundFileIdentityService } from './core/services/BackgroundFileIdentityService';
 import { AppStateRepository } from './data/repositories/AppStateRepository';
 import { BucketRepository } from './data/repositories/BucketRepository';
 import { ServiceManager } from './core/services/ServiceManager';
@@ -135,6 +136,10 @@ app.whenReady().then(async () => {
   const duplicateCheckerService = new BackgroundDuplicateCheckerService(pythonProvider);
   duplicateCheckerService.start();
 
+  // Start Background File Identity Service (Phase 130): records size / modified time / file id for older photos
+  const fileIdentityService = new BackgroundFileIdentityService();
+  fileIdentityService.start();
+
   // Register Services
   const serviceManager = ServiceManager.getInstance();
   serviceManager.register('PythonAIProvider', pythonProvider);
@@ -142,6 +147,7 @@ app.whenReady().then(async () => {
   serviceManager.register('BackgroundVerificationService', verificationService);
   serviceManager.register('BackgroundPropagationService', propagationService);
   serviceManager.register('BackgroundDuplicateCheckerService', duplicateCheckerService);
+  serviceManager.register('BackgroundFileIdentityService', fileIdentityService);
   serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();

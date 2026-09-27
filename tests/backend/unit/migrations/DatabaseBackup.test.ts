@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DatabaseBackup } from '../../../../electron/data/migrations/DatabaseBackup';
+import { DatabaseBackup, hasRoomForBackup } from '../../../../electron/data/migrations/DatabaseBackup';
 
 describe('DatabaseBackup', () => {
     let workDir: string;
@@ -75,5 +75,72 @@ describe('DatabaseBackup', () => {
     it('rejects a retention count below 1 so a backup can never delete itself', () => {
         // Act / Assert
         expect(() => new DatabaseBackup(path.join(workDir, 'b'), 0, clock)).toThrow(/at least 1/i);
+    });
+});
+
+describe('DatabaseBackup: progress and disk space', () => {
+    let workDir: string;
+    let db: Database.Database;
+    const MB = 1024 * 1024;
+
+    beforeEach(() => {
+        workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spo-backup2-'));
+        db = new Database(path.join(workDir, 'library.db'));
+        db.exec('CREATE TABLE blobs (id INTEGER PRIMARY KEY, data BLOB)');
+        const insert = db.prepare('INSERT INTO blobs (data) VALUES (?)');
+        for (let i = 0; i < 300; i++) insert.run(Buffer.alloc(4096, i % 256)); // ~1.2 MB, many pages
+    });
+
+    afterEach(() => {
+        db.close();
+        fs.rmSync(workDir, { recursive: true, force: true });
+    });
+
+    it('reports increasing progress from 0 to 100 percent while copying', async () => {
+        // Arrange
+        const backup = new DatabaseBackup(path.join(workDir, 'backups'), 3);
+        const seen: number[] = [];
+
+        // Act
+        await backup.create(db, 0, 1, percent => seen.push(percent));
+
+        // Assert
+        expect(seen.length).toBeGreaterThan(1);
+        expect(seen.every(p => p >= 0 && p <= 100)).toBe(true);
+        expect([...seen].sort((a, b) => a - b)).toEqual(seen); // never goes backwards
+        expect(seen[seen.length - 1]).toBe(100);
+    });
+
+    it('refuses, with a clear message and without writing anything, when the disk is too full', async () => {
+        // Arrange
+        const backupDir = path.join(workDir, 'backups');
+        const backup = new DatabaseBackup(backupDir, 3, () => new Date(), { freeBytes: () => 100 });
+
+        // Act
+        const attempt = backup.create(db, 0, 1);
+
+        // Assert
+        await expect(attempt).rejects.toThrow(/not enough free disk space/i);
+        expect(fs.existsSync(backupDir) ? fs.readdirSync(backupDir).filter(f => f.endsWith('.db')) : []).toEqual([]);
+    });
+
+    it('proceeds when there is comfortably enough room', async () => {
+        // Arrange
+        const backup = new DatabaseBackup(path.join(workDir, 'backups'), 3, () => new Date(), { freeBytes: () => 500 * MB });
+
+        // Act / Assert
+        await expect(backup.create(db, 0, 1)).resolves.toMatch(/\.db$/);
+    });
+});
+
+describe('hasRoomForBackup', () => {
+    it.each([
+        [1000, 1000, false], // exactly the size is not enough: need headroom
+        [1100, 1000, true],
+        [999, 1000, false],
+        [5_000_000_000, 594_000_000, true],
+        [0, 1, false],
+    ])('free %i bytes for a %i byte database -> %s', (free, size, expected) => {
+        expect(hasRoomForBackup(free, size)).toBe(expected);
     });
 });

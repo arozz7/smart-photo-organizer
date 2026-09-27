@@ -4,15 +4,24 @@ import logger from '../logger';
 import { PhotoService } from '../core/services/PhotoService';
 import { isRawLikeExtension, isSupportedImageExtension } from '../utils/imageFormats';
 import { computeSHA256, isPreviewUsable } from './fileHelpers';
-import { extractDimensions, resolveDateTaken, type ExifTags } from './imageMetadata';
+import { compareIdentity, readFileIdentity, type FileIdentity } from './fileIdentity';
+import { extractDimensions, geometryChanged, normalizeOrientation, resolveDateTaken, type ExifTags, type PhotoGeometry } from './imageMetadata';
 import type { PhotoRow, ScanStatements } from './ScanStatements';
 
 export interface ProcessOptions {
     forceRescan?: boolean;
 }
 
-/** A `photos` row plus the flags the scan queue and UI use. */
-export type ScannedPhoto = PhotoRow & { isNew: boolean; needsUpdate: boolean };
+/**
+ * A `photos` row plus the flags the scan queue and UI use.
+ *  - `contentChanged`: the file's bytes changed outside the app since it was indexed. Hash, metadata and preview
+ *    are refreshed.
+ *  - `facesStale`: the picture GEOMETRY changed as well (crop, resize, rotation), so the old face boxes are
+ *    invalid. Only then is the photo queued for a clean re-analysis, which deletes every face on the photo
+ *    (including ignored ones) and re-matches named people by embedding. A byte-only change (keywords, a rating,
+ *    colour edits) leaves faces alone.
+ */
+export type ScannedPhoto = PhotoRow & { isNew: boolean; needsUpdate: boolean; contentChanged: boolean; facesStale: boolean };
 
 const errorMessage = (error: unknown): string => (error instanceof Error && error.message) || String(error);
 
@@ -69,22 +78,87 @@ async function backfillMetadata(photo: PhotoRow, fullPath: string, stmts: ScanSt
     }
 }
 
-async function refreshKnownPhoto(photo: PhotoRow, fullPath: string, previewDir: string, stmts: ScanStatements, force: boolean): Promise<ScannedPhoto> {
-    let needsUpdate = force;
+interface ChangeCheck {
+    /** True only when the content really differs from what was indexed. */
+    contentChanged: boolean;
+    /** Hash of the current content, when it was computed for the check. */
+    sha256: string | null;
+    /** True when the recorded size/time should be brought up to date (filled in, or a harmless timestamp change). */
+    refreshIdentity: boolean;
+}
 
-    if (force || !(await isPreviewUsable(photo.preview_cache_path))) {
-        if (await regeneratePreview(photo, fullPath, previewDir, stmts, force)) needsUpdate = true;
+/**
+ * Decides whether a known photo was edited outside the app. Cheap first (size and time); the content hash is
+ * only computed when the size matches but the time moved, to tell "touched/copied" (same bytes) from "edited".
+ * Being wrong towards "edited" triggers a face re-scan, so when there is no stored hash to compare against we
+ * assume "not edited" rather than guess.
+ */
+async function checkForContentChange(photo: PhotoRow, fullPath: string, current: FileIdentity): Promise<ChangeCheck> {
+    const verdict = compareIdentity({ size: photo.file_size, mtime: photo.file_mtime }, current);
+
+    switch (verdict) {
+        case 'unchanged':
+            return { contentChanged: false, sha256: null, refreshIdentity: false };
+        case 'identity-missing':
+            return { contentChanged: false, sha256: null, refreshIdentity: true };
+        case 'changed':
+            return { contentChanged: true, sha256: await computeSHA256(fullPath), refreshIdentity: true };
+        case 'needs-hash-check': {
+            const sha256 = await computeSHA256(fullPath);
+            const edited = sha256 !== null && photo.sha256_hash !== null && sha256 !== photo.sha256_hash;
+            return { contentChanged: edited, sha256, refreshIdentity: true };
+        }
+    }
+}
+
+async function refreshKnownPhoto(photo: PhotoRow, fullPath: string, previewDir: string, stmts: ScanStatements, force: boolean): Promise<ScannedPhoto> {
+    const current = await readFileIdentity(fullPath);
+    const change: ChangeCheck = current
+        ? await checkForContentChange(photo, fullPath, current)
+        : { contentChanged: false, sha256: null, refreshIdentity: false };
+
+    // An edited file gets a new preview and metadata like a forced rescan; AI re-analysis is only for a geometry change.
+    const redo = force || change.contentChanged;
+    const geometryBefore = geometryOf(photo);
+    let needsUpdate = redo;
+
+    if (redo || !(await isPreviewUsable(photo.preview_cache_path))) {
+        if (await regeneratePreview(photo, fullPath, previewDir, stmts, redo)) needsUpdate = true;
     }
 
-    if (force || !photo.metadata_json || photo.metadata_json === '{}') {
+    if (redo || !photo.metadata_json || photo.metadata_json === '{}') {
         if (await backfillMetadata(photo, fullPath, stmts)) needsUpdate = true;
     }
 
-    return Object.assign(photo, { isNew: force, needsUpdate });
+    // Recorded even if the preview failed: otherwise a file that keeps failing would be re-analysed on every scan
+    // (the failure is visible in the scan errors).
+    if (current) {
+        if (change.contentChanged) stmts.recordContentChange(photo.id, change.sha256, current);
+        else if (change.refreshIdentity || force) stmts.updateIdentity(photo.id, current);
+    }
+
+    // If the metadata could not be re-read, the geometry looks unchanged, which is the safe answer.
+    const facesStale = change.contentChanged && geometryChanged(geometryBefore, geometryOf(photo));
+
+    return Object.assign(photo, { isNew: force || facesStale, needsUpdate, contentChanged: change.contentChanged, facesStale });
+}
+
+/** Displayed size and orientation as currently stored for a photo. */
+function geometryOf(photo: PhotoRow): PhotoGeometry {
+    let orientation: unknown;
+    try {
+        orientation = photo.metadata_json ? (JSON.parse(photo.metadata_json) as ExifTags).Orientation : undefined;
+    } catch {
+        orientation = undefined;
+    }
+    return { width: photo.width, height: photo.height, orientation: normalizeOrientation(orientation) };
 }
 
 async function ingestNewPhoto(fullPath: string, previewDir: string, stmts: ScanStatements, force: boolean): Promise<ScannedPhoto | null> {
     logger.debug(`[Scanner] New photo found: ${path.basename(fullPath)}`);
+
+    // Identity before any content is read: if the file changes while it is being processed, the next scan sees a mismatch.
+    const identity = await readFileIdentity(fullPath);
 
     // Read metadata first: its Orientation lets preview generation skip a second ExifTool call.
     const metadata = await readMetadata(fullPath);
@@ -113,10 +187,13 @@ async function ingestNewPhoto(fullPath: string, previewDir: string, stmts: ScanS
             width,
             height,
             sha256_hash: await computeSHA256(fullPath),
+            file_size: identity?.size ?? null,
+            file_mtime: identity?.mtime ?? null,
+            file_id: identity?.fileId ?? null,
         }, previewFailure);
 
         const photo = stmts.findByPath(fullPath);
-        return photo ? Object.assign(photo, { isNew: true, needsUpdate: false }) : null;
+        return photo ? Object.assign(photo, { isNew: true, needsUpdate: false, contentChanged: false, facesStale: false }) : null;
     } catch (e) {
         logger.error('Insert failed', e);
         return null;

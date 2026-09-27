@@ -18,7 +18,7 @@ Work is ordered in six steps. Each step is independently shippable.
 |---|---|---|
 | 0 | Migration framework & safety net (prerequisite) | 128 |
 | 1 | Quick fixes & scanner efficiency | 129, 130 |
-| 2 | Data safety: file identity, re-linking, XMP write-back | 131, 132 |
+| 2 | Data safety: file identity, re-linking, **library folders & auto-refresh (131b)**, XMP write-back | 131, 131b, 132 |
 | 3 | Semantic search (CLIP embeddings) + FLUX.2 background generation | 133, 134, 135 |
 | 4 | Library essentials & UX polish | 136–143 |
 | 5 | Places: offline geocoding & Map view | 144, 145 |
@@ -127,32 +127,26 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 
 ---
 
-### Phase 130 — File Identity Columns & Incremental Folder Scanning
+### Phase 130 — File Identity & Edit Detection (folder skip deferred)
 
-**Tasks**
-1. **Migration 001:** Add to `photos`: `file_size INTEGER`, `file_mtime INTEGER`, `file_id TEXT` (from `fs.stat(..., {bigint:true}).ino`, which is the NTFS file index on Windows), `missing_since DATETIME`. Add the new table `scan_folders(path TEXT PRIMARY KEY, mtime INTEGER, last_scanned_at DATETIME)`. Put the new repository code in `PhotoIdentityRepository.ts`, not in `PhotoRepository.ts`.
-2. **Backfill service** `BackgroundFileIdentityService`: stat files in batches of 500 and fill in the three columns. Unreachable files are left NULL. The service is cheap and pauses during scans.
-3. **Folder skip:** When scanning a folder whose stored `mtime` equals its current mtime, skip processing its *direct files* but **still recurse into subfolders**. A directory's mtime only changes when its direct entries are added, removed or renamed. **Editing a file's contents does not change it.**
-4. **Modified-file detection:** If a *visited* known file's `size` or `mtime` differs from the stored values, mark it for reprocessing: re-hash, regenerate the preview and re-run the face scan. Reuse the rotation re-scan path from Phase 125 (`PhotoService.analyzeImage` with `cleanRescan`). It deletes the old faces and then recovers named assignments **on a best-effort basis** by matching embeddings (distance < 0.35). Faces that don't match fall back to unassigned, so this phase adds a test that measures how many are recovered and reports any lost names in the scan summary. Because content edits don't change the folder mtime, edits inside **skipped** folders are only caught by:
-   - a **Full rescan**, or
-   - an **explicit dirty mark** from in-app writes (rotation, Creative Tools saves, and later XMP embedded writes), which clears the folder's stored mtime, or
-   - an optional **periodic stat pass** by `BackgroundFileIdentityService` (idle-time, configurable interval, default weekly) that compares stored size and mtime without reading file contents.
-5. **Deep scan option:** "Full rescan" in the UI ignores folder mtimes.
-6. **Scan result contract for Phase 131:** The scanner returns the set of folders it actually *walked* (direct files processed), separate from the set it *skipped*. Missing-file detection must only use walked folders.
-7. Handle the network-drive and exFAT edge cases, where `ino` may be 0 or unstable. Treat `0` as NULL.
+**Status:** Implemented, with one scope change (below). See `aiChangeLog/phase-130-file-identity.md`.
 
-**Tests first**
-- A folder with an unchanged mtime is skipped but its subfolders are visited.
-- An added file changes the folder's mtime, so the folder is scanned.
-- In a *walked* folder, an edited file with the same path and a different size or mtime is flagged for reprocessing.
-- In a *skipped* folder, an edited file is **not** detected by a normal scan, **is** detected by a Full rescan, and **is** detected by the periodic stat pass.
-- An in-app rotation clears the folder's stored mtime.
-- The scan result reports walked and skipped folders correctly.
-- Rows with NULL identity columns are always checked.
-- A zero `ino` is stored as NULL.
-- Benchmark: a second scan of an unchanged tree is dominated by directory listing only (Phase 129 already made per-file cost ~0.02 ms; the remaining win is skipping the walk and stat calls for unchanged folders).
+**Scope change — folder-mtime skip deferred (decision 2026-09-26: keep it deferred).** Phase 129 made an unchanged rescan cost ~0.02 ms/file, so skipping unchanged folders would save roughly a second per 100k photos. In return it would add risk: repairs such as missing previews would no longer happen on rescans of skipped folders, edits inside skipped folders would go undetected without extra machinery (dirty marks, a periodic stat pass), and Phase 131 would need the walked/skipped contract. Comparing size and modified time on **every visit** gives edit detection everywhere with none of those gaps, so that is what was built. **Measured cost of not skipping:** the photo drive `M:` is a WD Elements external USB hard disk. A `stat` there costs 18 us when cached but ~744 us on first touch, so one extra `stat` per photo on a *cold* 100k-photo rescan is roughly 75 s (once per cold cache; later rescans hit the OS cache). The skip can still be added later as an opt-in setting if that proves annoying on the production library.
 
-**Backward compat:** The first scan after upgrade is a full walk (no `scan_folders` rows yet), exactly like today, and it establishes the baseline. Older builds ignore the new columns.
+**What was built**
+1. **Migration 001** (`electron/data/migrations/001_fileIdentity.ts`): nullable `file_size`, `file_mtime`, `file_id`, `missing_since` on `photos`, plus an index on `file_id`. The `scan_folders` table was **not** created (nothing uses it without the folder skip).
+2. **First real use of the Phase 128 safety net:** backup progress on the splash screen ("Backing up your library before upgrading… N%") and a free-disk-space check (10% headroom over database + WAL) that refuses with a clear message instead of failing midway. The production library is ~600 MB, so this matters.
+3. **Identity captured** for every photo at ingest (read *before* any content) and on every visit, via `electron/scanning/fileIdentity.ts`.
+4. **Edit detection on visit:** size differs -> edited; only the timestamp moved beyond a 2 s tolerance -> the content hash decides edited vs merely touched/copied; no stored hash to compare -> assume not edited; nothing recorded yet -> fill in, not an edit. An edited file gets a forced preview, fresh metadata and hash, a cleared perceptual hash, and is returned with `contentChanged`.
+   **Faces are only re-detected when the picture geometry changed** (`facesStale`: width, height or normalised orientation differ from what was stored). A byte-only change (keywords, ratings, "write metadata to file" by other programs) refreshes the record and queues nothing, because a clean rescan deletes every face on the photo (ignored ones too) and re-attaches only named faces, which would violate "never auto-delete user data" (Policy A.7).
+5. **Renderer:** photos with `facesStale` are queued for AI with `cleanRescan`; brand new photos are queued without one; a byte-only change is not queued. The decision is a small tested function (`src/utils/scanQueueItems.ts`). A clean rescan now logs how many named faces could not be re-matched.
+6. **In-app writes refresh identity** (`PhotoIdentityService.refreshAfterRewrite`), called after a successful rotation (both the RAW and standard paths), so the app's own edits are not mistaken for outside edits.
+7. **Background backfill** (`BackgroundFileIdentityService` + `FileIdentityBackfill`) records identity for existing photos once per session, yielding to scans and AI work.
+8. **`file_id` = `volume:index`, stored only when both are known.** Node 22 on Windows reports volume 0 while Electron 30's Node 20 reports the real serial; `0:index` would collide across drives, so an unknown volume or index leaves it NULL and Phase 131 falls back to content hashes.
+
+**Dropped from the original plan:** the folder skip, `scan_folders`, the periodic stat pass, dirty marks, the "Full rescan ignores folder mtimes" option and the walked/skipped result contract (all only needed by the folder skip). The existing "Force rescan" already reprocesses everything.
+
+**Backward compat:** existing libraries upgrade to schema v1 on first launch with one automatic backup (`<library>/backups/library.v0-to-v1.<timestamp>.db`). New columns are NULL until a scan or the backfill fills them; nothing is guessed at upgrade time. Older builds ignore the new columns.
 
 ---
 
@@ -163,8 +157,8 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 **Problem:** `photos.file_path` is the only identity. If a user renames or moves a file or folder outside the app, the next scan inserts a *new* row with no face assignments, and the *old* row (holding the person names) points at a missing file. The same faces are then detected again as unknowns.
 
 **Tasks**
-1. **Missing detection:** Only **walked** folders are considered (Phase 130 scan-result contract). A known row is marked `missing_since` when its folder was walked and the file wasn't found. Rows in skipped folders are **never** marked missing.
-   - **Vanished folders:** When a walked parent no longer contains a subfolder that is in `scan_folders`, the rows under that subfolder are marked missing and its `scan_folders` entries are removed.
+1. **Missing detection:** Every scan lists every folder under the scanned root (Phase 130 deliberately did not add a folder skip), so the set of files found on disk is complete for that root. A known row under the scanned root is marked `missing_since` when its file was not found. **If a folder skip is ever added later, missing detection must consider only folders that were actually listed, never rows in skipped folders.**
+   - **Vanished folders:** rows under a folder that no longer exists are marked missing the same way. (Folders are not tracked separately; a missing folder simply means none of its files were found.)
    - **Guard:** If the scan root itself is unreachable (offline, removable or network drive), mark nothing.
 2. **Relink matcher** (pure function, `electron/core/services/relink/RelinkMatcher.ts`): for each *new* path, try in order:
    1. `file_id` + `file_size` match a missing row → confident relink.
@@ -196,8 +190,8 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 - Two identical candidate files are flagged as ambiguous and not linked.
 - A re-root dry run reports correct counts, and the commit is atomic.
 - The preview file is renamed and the path updated.
-- **An unchanged (skipped) folder's rows are NOT marked missing.**
-- A vanished subfolder under a walked parent marks its rows missing.
+- Rows outside the scanned root, and every row when the root is unreachable, are NOT marked missing.
+- A vanished subfolder marks its rows missing.
 - Repair wizard on the legacy fixture seeded with ghost pairs: names are restored and nothing is deleted without confirmation.
 - Repair wizard finds a NULL-hash ghost through the pHash + dimensions + date fallback, and lists it as review-only (not pre-selected).
 - Wizard reassignment updates person centroids and era data the same way a manual assignment does (asserted through the service, not raw rows).
@@ -205,6 +199,49 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 - The IoU face matcher handles rotated images (Phase 125 orientation rules).
 
 **Backward compat:** Uses the Phase 130 columns. For rows still NULL (backfill pending), the hash fallback applies. Relinking is enabled by default because it only preserves data. Removal is always manual.
+
+### Phase 131b — Library Folders & Auto-Refresh
+
+**Goal:** the library keeps itself up to date. New files are found and edited files re-indexed without the user re-scanning by hand.
+
+**Why it is needed (verified in the code, 2026-09-26):** a scan is started only by the user typing or browsing to a folder in Library and clicking Scan. There is no file watcher, no scan at startup, and no saved list of scanned folders (the folder box defaults to `D:\Photos`). A scan walks the whole tree, so a manual rescan already finds new and edited files, but nothing triggers it. New AI queueing also happens in the renderer (`ScanContext`) after a manual scan returns, so a scan started by the main process would currently never reach the AI queue.
+
+**Why it comes after Phase 131:** unattended scans must not turn a moved file into "a new photo plus a missing photo" (faces re-detected, names lost). Re-linking (131) and the "unreachable root marks nothing missing" guard must be proven first.
+
+**Scope:** steps 1 and 2 below (agreed 2026-09-26). Live file watching is recorded as deferred; build it only if instant updates are wanted after using 1 and 2.
+
+#### 131b-1 — Library folders and a one-click Refresh (small to medium)
+
+1. **Migration (next free number):** `library_folders(id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, added_at DATETIME, last_scan_at DATETIME, last_scan_status TEXT)`. Additive; existing libraries are unaffected until they use it. New repository/service code in `LibraryFolderRepository` / `LibraryFolderService` (not in the oversized `PhotoRepository`).
+2. **Registering folders:** a successful manual scan of a folder registers it. Roots are normalised (trailing slashes, case on Windows) and overlaps are merged (a folder inside a registered folder is not added separately).
+3. **Existing libraries (seeding):** the first time the Folders panel opens, propose the roots implied by existing photo paths (longest common parent per drive) as a **list to confirm or edit**. Nothing is registered, and nothing is scanned, without the user confirming.
+4. **UI:** a Folders panel in Library listing each folder with status (last refreshed, new/edited counts, **offline**), add / remove / disable, a per-folder refresh, and **Refresh library** (all enabled folders). Removing a folder from the list never removes photos.
+5. **One path for AI queueing:** the main process pushes a `scan:completed` event (folder, results); the renderer queues AI work from that event for **every** scan, manual or automatic, using the existing tested `buildScanQueueItems`. The manual flow is moved onto the same event, so there is a single implementation.
+6. **Tests first:** root normalisation and overlap merging (pure); registration on scan; seeding proposal from photo paths (incl. multiple drives); Refresh runs enabled folders only, in order, through the existing scan queue; the event drives AI queueing; legacy libraries show no folders until confirmed.
+
+#### 131b-2 — Automatic refresh (medium)
+
+1. **`LibraryRefreshService`** (an `IService`, dependencies injected): refreshes enabled folders a short time after startup (default 60 s) and whenever an offline folder becomes reachable again. Optional periodic refresh while the app is open (default **off**). Setting `library.autoRefresh`: `off` | `startup` (default) | `startup+periodic` with an interval.
+2. **Only after the user has confirmed their folders** (131b-1): no automatic scan of a path the user did not approve.
+3. **Offline drives (USB disks, network shares):** before scanning a root, check it is reachable with a short timeout. If not, mark it **offline**, skip it quietly (no error dialog), and retry every minute (cheap access check). An unreachable root never marks anything missing (reuses the Phase 131 guard, with its own test).
+4. **Good citizen:** goes through the existing serial scan queue; a user-started scan takes priority; uses a lower concurrency than a manual scan (setting, default 2); pauses while the AI pipeline is busy; cancellable and stops on shutdown.
+5. **Feedback without nagging:** the status bar shows progress; when finished, one summary such as "Library refreshed: 12 new, 3 edited" (nothing at all when nothing changed); problems go to the existing Queues/scan errors view.
+6. **Cost note:** a cold rescan on a USB hard disk costs about 0.75 ms per file for the extra `stat` (roughly 75 s per 100k photos, once per cold cache). This runs in the background, which is why it is not a blocker; the deferred folder-mtime skip (Phase 130 decision) is the lever if it ever matters.
+7. **Tests first (fake clock, scan runner and reachability):** startup delay honoured; offline root skipped then picked up when it returns; no overlapping refreshes; user scan takes priority; each `autoRefresh` mode; nothing marked missing for an unreachable root; stops on shutdown; summary only when something changed.
+
+#### Deferred: live file watching (only if wanted later)
+Recursive `fs.watch` on chosen local folders with debouncing (~5 s quiet), ignoring partial files (`.tmp`, `.crdownload`, files whose size is still changing), targeted `scanFiles` for small batches and a folder refresh for large ones or on watcher overflow. Known limits: unreliable on network shares, USB spin-up, event storms on bulk copies, and Windows reports a USB disk as a fixed drive so it cannot be told apart automatically (it would be a per-folder opt-in). Not planned unless 131b-1/2 leave a real gap.
+
+**Decisions (confirmed 2026-09-26):**
+1. Default `library.autoRefresh` is `startup`.
+2. Startup delay 60 s; periodic refresh off by default.
+3. Background scan concurrency 2 (manual scans keep the normal default of 4).
+
+**Backward compat:** one additive table; nothing runs automatically until the user confirms their folders; the whole feature can be turned off with one setting; the feature only reads files and never writes to or deletes them.
+
+**Risks:** an unattended scan wrongly reports files missing (offline drive, partial listing) — guarded by the Phase 131 rules and explicit tests; a background scan makes the machine sluggish — lower concurrency and yielding to AI/manual work; surprise scans of unexpected paths — folders must be confirmed; notification fatigue — summaries only when something changed.
+
+---
 
 ### Phase 132 — XMP Metadata Write-Back (Sidecar-First, Coexisting with Existing Sidecars)
 
@@ -454,7 +491,8 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 | Migration | Phase | Change |
 |---|---|---|
 | — | 128 | Legacy baseline (frozen, runs every start outside the runner). Runner + backup added; registry empty, existing libraries stay at `user_version = 0` |
-| 001 | 130 | `photos` identity columns, `scan_folders` |
+| 001 | 130 | `photos` identity columns (no `scan_folders`: the folder skip was deferred) |
+| next free | 131b | `library_folders` (numbers below are indicative; the real number is the next free one when it merges) |
 | 002 | 132 | `photos.metadata_dirty` |
 | 003 | 133 | `photo_embeddings` |
 | 004 | 136 | rating / favorite / cull_flag |
@@ -470,7 +508,7 @@ All migrations are additive (Policy A.1).
 
 | Risk | Mitigation |
 |---|---|
-| Folder skip combined with missing detection marks unchanged folders as missing | Missing detection uses walked folders only (Phase 130 contract), with an explicit test |
+| Missing detection wrongly marks files missing (offline drive, partial scan) | Never mark anything missing when the scan root is unreachable; only scans of a whole root count; explicit tests. (Only relevant to folder skipping if that is added later.) |
 | Duplicates cleanup deletes ghost rows that hold names | `missing_since` rows are excluded from Duplicates deletion. The Repair wizard is suggested first |
 | Wrong relink attaches names to the wrong photo | Only link when confident (ID+size or exact hash). Ambiguous cases go to the user. Repair wizard shows a preview and needs confirmation |
 | Folder-mtime skip misses changes on some filesystems | Recurse always, "Full rescan" option, and treat NULL/0 identity values as unknown |
@@ -489,3 +527,5 @@ All migrations are additive (Policy A.1).
 | 4 | Video scope (Phase 148) | **Option C:** 148a–c + keyframe CLIP search. Faces in video (148d) deferred |
 | 5 | Branching | Merge `feature/phases-117-118-119` via PR and **cut a release before** the roadmap version bump |
 | 6 | FLUX.2 | Fitted in as **Phase 135** (Step 3) |
+| 7 | Folder-mtime skip (Phase 130) | **Keep deferred** (2026-09-26); revisit if production rescans feel slow |
+| 8 | Auto-refresh (Phase 131b) | **Steps 1 and 2** (library folders + automatic refresh) after Phase 131; live file watching deferred. Defaults: refresh at startup, 60 s delay, periodic off, background concurrency 2 (2026-09-26) |

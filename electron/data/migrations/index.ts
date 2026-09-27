@@ -3,6 +3,7 @@ import path from 'node:path';
 import logger from '../../logger';
 import { DatabaseBackup } from './DatabaseBackup';
 import { MigrationRunner } from './MigrationRunner';
+import { fileIdentityMigration } from './001_fileIdentity';
 import type { Migration, MigrationLogger, MigrationResult } from './types';
 
 /**
@@ -12,9 +13,10 @@ import type { Migration, MigrationLogger, MigrationResult } from './types';
  * (new tables / nullable or defaulted columns), synchronous, and transaction-safe:
  * no VACUUM, no PRAGMA foreign_keys changes, no dropping or renaming existing columns.
  *
- * Existing libraries have `user_version = 0` (the frozen legacy baseline predates versioning).
+ * Existing libraries have `user_version = 0` (the frozen legacy baseline predates versioning) until
+ * migration 1 runs on first launch of a version that includes it.
  */
-export const MIGRATIONS: readonly Migration[] = [];
+export const MIGRATIONS: readonly Migration[] = [fileIdentityMigration];
 
 const BACKUP_FOLDER = 'backups';
 const BACKUPS_TO_KEEP = 3;
@@ -25,9 +27,19 @@ const migrationLogger: MigrationLogger = {
     error: message => logger.error(`[Migrations] ${message}`),
 };
 
-/** Applies any pending migrations to an open library database, backing it up first. */
-export async function migrateDatabase(db: Database.Database, libraryDir: string): Promise<MigrationResult> {
+/**
+ * Applies any pending migrations to an open library database, backing it up first.
+ * `onStatus` receives human-readable progress (shown on the splash screen); a large library takes
+ * a few seconds to back up, and silence would look like a hang.
+ */
+export async function migrateDatabase(
+    db: Database.Database,
+    libraryDir: string,
+    onStatus?: (status: string) => void,
+): Promise<MigrationResult> {
     const backup = new DatabaseBackup(path.join(libraryDir, BACKUP_FOLDER), BACKUPS_TO_KEEP);
     const runner = new MigrationRunner(MIGRATIONS, backup, migrationLogger);
-    return runner.run(db);
+    return runner.run(db, {
+        onBackupProgress: percent => onStatus?.(`Backing up your library before upgrading… ${percent}%`),
+    });
 }

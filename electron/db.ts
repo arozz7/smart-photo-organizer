@@ -29,7 +29,7 @@ export async function initDB(basePath: string, onProgress?: (status: string) => 
   await applyLegacyBaseline(db, onProgress);
   let migration: MigrationResult;
   try {
-    migration = await migrateDatabase(db, basePath);
+    migration = await migrateDatabase(db, basePath, onProgress);
   } catch (error) {
     // Fail closed: never leave a half-upgraded library open for the rest of the app to use.
     closeDB();

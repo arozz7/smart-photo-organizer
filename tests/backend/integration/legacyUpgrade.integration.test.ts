@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { initDB, getDB, closeDB } from '../../../electron/db';
+import type { MigrationResult } from '../../../electron/data/migrations/types';
 import {
     createLegacyLibraryCopy,
     loadLegacySnapshot,
@@ -19,10 +20,11 @@ import {
 describe('Legacy library upgrade (v0.8.1 fixture)', () => {
     let libraryDir: string;
     let db: Database.Database;
+    let firstOpen: MigrationResult;
 
     beforeEach(async () => {
         libraryDir = createLegacyLibraryCopy();
-        await initDB(libraryDir);
+        firstOpen = await initDB(libraryDir);
         db = getDB();
     });
 
@@ -93,22 +95,55 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         expect(dupMembers.c).toBe(2);
     });
 
-    it('takes no backup and leaves user_version alone when no migrations are pending', () => {
+    it('upgrades to schema v1 on first open, taking exactly one backup first', () => {
         // Assert
-        expect(db.pragma('user_version', { simple: true })).toBe(0);
-        expect(fs.existsSync(path.join(libraryDir, 'backups'))).toBe(false);
+        expect(firstOpen).toMatchObject({ fromVersion: 0, toVersion: 1, applied: ['file_identity'], downgradeDetected: false });
+        expect(db.pragma('user_version', { simple: true })).toBe(1);
+        const backups = fs.readdirSync(path.join(libraryDir, 'backups')).filter(f => f.endsWith('.db'));
+        expect(backups).toHaveLength(1);
+        expect(backups[0]).toMatch(/^library\.v0-to-v1\./);
+        expect(firstOpen.backupPath).toBe(path.join(libraryDir, 'backups', backups[0]));
     });
 
-    it('returns the migration result so callers can react (nothing pending on a legacy library)', async () => {
+    it('the backup is the untouched pre-upgrade library (old schema, all rows) and can be opened on its own', async () => {
+        // Arrange
+        const { rowCounts } = loadLegacySnapshot();
+        const { default: Database } = await import('better-sqlite3');
+
+        // Act
+        const backup = new Database(firstOpen.backupPath as string, { readonly: true });
+        const columns = (backup.prepare('PRAGMA table_info(photos)').all() as { name: string }[]).map(c => c.name);
+        const version = backup.pragma('user_version', { simple: true });
+        const counts = Object.fromEntries(
+            Object.keys(rowCounts).map(t => [t, (backup.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get() as { c: number }).c]),
+        );
+        backup.close();
+
+        // Assert
+        expect(version).toBe(0);
+        expect(columns).not.toContain('file_size');
+        expect(counts).toEqual(rowCounts);
+    });
+
+    it('adds the identity columns as NULL for every existing photo (nothing is guessed at upgrade time)', () => {
+        // Act
+        const filled = db.prepare('SELECT COUNT(*) AS c FROM photos WHERE file_size IS NOT NULL OR file_mtime IS NOT NULL OR file_id IS NOT NULL OR missing_since IS NOT NULL').get() as { c: number };
+
+        // Assert
+        expect(filled.c).toBe(0);
+    });
+
+    it('does nothing and takes no second backup when the library is opened again', async () => {
         // Arrange
         closeDB();
 
         // Act
-        const result = await initDB(libraryDir);
+        const second = await initDB(libraryDir);
         db = getDB();
 
         // Assert
-        expect(result).toMatchObject({ fromVersion: 0, toVersion: 0, applied: [], downgradeDetected: false });
+        expect(second).toMatchObject({ fromVersion: 1, toVersion: 1, applied: [], downgradeDetected: false });
+        expect(fs.readdirSync(path.join(libraryDir, 'backups')).filter(f => f.endsWith('.db'))).toHaveLength(1);
     });
 
     it('reports a downgrade for a library written by a newer version, and keeps it usable', async () => {
@@ -159,5 +194,23 @@ describe('Fresh library', () => {
 
         // Assert
         expect(tables).toEqual(expect.arrayContaining(['photos', 'faces', 'people', 'person_eras', 'smart_albums', 'duplicate_groups', 'app_state']));
+    });
+});
+
+describe('Legacy library upgrade: splash progress', () => {
+    it('reports backup progress through initDB so a large library does not look hung', async () => {
+        // Arrange
+        const libraryDir = createLegacyLibraryCopy();
+        const statuses: string[] = [];
+
+        // Act
+        await initDB(libraryDir, status => statuses.push(status));
+        closeDB();
+        removeLibraryCopy(libraryDir);
+
+        // Assert
+        const backupStatuses = statuses.filter(s => s.startsWith('Backing up your library before upgrading'));
+        expect(backupStatuses.length).toBeGreaterThan(0);
+        expect(backupStatuses[backupStatuses.length - 1]).toContain('100%');
     });
 });

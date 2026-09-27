@@ -1,6 +1,7 @@
 import { FaceService } from './FaceService';
 import { ConfigService } from './ConfigService';
 import { exiftoolTaskTimeoutMs } from './scannerSettings';
+import { PhotoIdentityService } from './PhotoIdentityService';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -210,6 +211,9 @@ export class PhotoService {
                 logger.info(`[PhotoService] Verified Orientation Updated to ${vOrt}`);
             }
 
+            // The Orientation tag was rewritten in the file: record its new identity (see the standard-file path below).
+            await PhotoIdentityService.refreshAfterRewrite(photoId, filePath);
+
             // 2. Trigger Face Re-Scan
             // The file has physical dimensions of the original sensor (Landscape), but metadata says Portrait.
             // main.py needs 'orientation' to know to rotate the cv2 buffer before detection.
@@ -237,6 +241,10 @@ export class PhotoService {
             if (!result || result.error || result.success === false) {
                 return result;
             }
+
+            // The file's bytes changed on purpose: record its new identity so the next scan does not
+            // mistake this for an edit made outside the app (which would queue a second re-analysis).
+            await PhotoIdentityService.refreshAfterRewrite(photoId, filePath);
 
             // Trigger Face Re-Scan — the file's pixels are now physically rotated,
             // so old face boxes/embeddings no longer align with the image.
@@ -354,6 +362,12 @@ export class PhotoService {
                     }
                 }
                 logger.info(`[PhotoService] Clean Rescan: Identity Transfer recovered ${recoveredCount} faces.`);
+
+                // Faces that had a name but could not be matched to a re-detected face are now unassigned: say so.
+                const namedBefore = oldFaces.filter(f => f.person_id).length;
+                if (namedBefore > recoveredCount) {
+                    logger.warn(`[PhotoService] Clean Rescan: ${namedBefore - recoveredCount} of ${namedBefore} named faces could not be re-matched for Photo ${photoId} and are now unassigned.`);
+                }
             }
 
             return result;
