@@ -232,10 +232,10 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 #### Deferred: live file watching (only if wanted later)
 Recursive `fs.watch` on chosen local folders with debouncing (~5 s quiet), ignoring partial files (`.tmp`, `.crdownload`, files whose size is still changing), targeted `scanFiles` for small batches and a folder refresh for large ones or on watcher overflow. Known limits: unreliable on network shares, USB spin-up, event storms on bulk copies, and Windows reports a USB disk as a fixed drive so it cannot be told apart automatically (it would be a per-folder opt-in). Not planned unless 131b-1/2 leave a real gap.
 
-**Open decisions (answer before starting):**
-1. Default `library.autoRefresh`: `startup` (recommended) or `off` until enabled?
-2. Startup delay and periodic interval defaults (60 s; periodic off).
-3. Background scan concurrency default (2).
+**Decisions (confirmed 2026-09-26):**
+1. Default `library.autoRefresh` is `startup`.
+2. Startup delay 60 s; periodic refresh off by default.
+3. Background scan concurrency 2 (manual scans keep the normal default of 4).
 
 **Backward compat:** one additive table; nothing runs automatically until the user confirms their folders; the whole feature can be turned off with one setting; the feature only reads files and never writes to or deletes them.
 
@@ -528,4 +528,4 @@ All migrations are additive (Policy A.1).
 | 5 | Branching | Merge `feature/phases-117-118-119` via PR and **cut a release before** the roadmap version bump |
 | 6 | FLUX.2 | Fitted in as **Phase 135** (Step 3) |
 | 7 | Folder-mtime skip (Phase 130) | **Keep deferred** (2026-09-26); revisit if production rescans feel slow |
-| 8 | Auto-refresh (Phase 131b) | **Steps 1 and 2** (library folders + automatic refresh) after Phase 131; live file watching deferred (2026-09-26) |
+| 8 | Auto-refresh (Phase 131b) | **Steps 1 and 2** (library folders + automatic refresh) after Phase 131; live file watching deferred. Defaults: refresh at startup, 60 s delay, periodic off, background concurrency 2 (2026-09-26) |
