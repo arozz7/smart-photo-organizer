@@ -161,7 +161,7 @@ describe('PhotoService', () => {
 
             // Assert
             expect(result).not.toBeNull();
-            expect(sharp).toHaveBeenCalledWith(filePath, { failOnError: false });
+            expect(sharp).toHaveBeenCalledWith(filePath, { failOn: 'none' });
             expect(mockSharpInstance.toFile).toHaveBeenCalled();
         });
 
@@ -182,7 +182,7 @@ describe('PhotoService', () => {
 
             // Assert — ExifTool extractPreview is NOT called; sharp receives the RAW path
             expect(mockExifToolInstance.extractPreview).not.toHaveBeenCalled();
-            expect(sharp).toHaveBeenCalledWith(filePath, { failOnError: false });
+            expect(sharp).toHaveBeenCalledWith(filePath, { failOn: 'none' });
             expect(result).not.toBeNull();
         });
 
