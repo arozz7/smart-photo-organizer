@@ -100,7 +100,7 @@ describe('SendToService', () => {
     it('fails when the target is not registered', async () => {
         const { service } = build({ rows: [row(1)] });
 
-        const outcome = await service.send({ targetId: 'darktable', source: { kind: 'photos', ids: [1] } });
+        const outcome = await service.send({ targetId: 'not-registered', source: { kind: 'photos', ids: [1] } });
 
         expect(outcome).toMatchObject({ status: 'failed', reason: 'unknown_target' });
     });

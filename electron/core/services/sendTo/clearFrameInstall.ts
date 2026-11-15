@@ -44,14 +44,20 @@ export interface WaitForWindowDeps {
  */
 export async function waitForClearFrameWindow(deps: WaitForWindowDeps): Promise<boolean> {
     const deadline = deps.now() + deps.timeoutMs;
-    while (true) {
-        try {
-            const titles = await deps.listWindowTitles();
-            if (titles.some(title => title.toLowerCase().includes(CLEARFRAME_WINDOW_TITLE.toLowerCase()))) return true;
-        } catch {
-            // A failed listing counts as "not ready yet"; the deadline ends the wait.
-        }
-        if (deps.now() >= deadline) return false;
+    let ready = await hasClearFrameWindow(deps);
+    while (!ready && deps.now() < deadline) {
         await deps.sleep(deps.pollMs);
+        ready = await hasClearFrameWindow(deps);
+    }
+    return ready;
+}
+
+async function hasClearFrameWindow(deps: WaitForWindowDeps): Promise<boolean> {
+    try {
+        const titles = await deps.listWindowTitles();
+        return titles.some(title => title.toLowerCase().includes(CLEARFRAME_WINDOW_TITLE.toLowerCase()));
+    } catch {
+        // A failed listing counts as "not ready yet"; the deadline ends the wait.
+        return false;
     }
 }

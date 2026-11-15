@@ -199,6 +199,19 @@ Build custom photo collections by combining complex filter criteria, then export
 - **Complex Multi-Person Filters:** Find photos containing multiple specific people (e.g., "Mom AND Dad, tagged 'birthday'").
 - **Staging Set:** Browse filter results and cherry-pick individual photos into your Current Set.
 - **Export Album:** Export the entire set to an organized folder on your computer — ready for printing, sharing, or archiving.
+- **Send to ClearFrame:** Open the set in ClearFrame (enhance) without making any copies — see below.
+
+---
+
+### 📨 Send to ClearFrame
+
+Open photos in the **ClearFrame** enhancer straight from the app. Only the **file paths** of your originals are handed over: no photo is copied, no staging folder or ZIP is made, and no metadata is written.
+
+- **Where:** a selection in the Library (Select mode), a Smart Album in the filter panel, or the Current Set in the Create view.
+- **Missing files:** photos marked missing, or whose file is gone, are skipped and counted in the result message.
+- **Large sends:** you are asked to confirm when a send is larger than a limit. Default 50 photos; change it in **Settings → Integrations → Send to… (ClearFrame)**, where you can also set where ClearFrame is installed (default `%LOCALAPPDATA%\ClearFrame\cf-app.exe`).
+- **Command-line limit:** Windows limits a command line to about 32,000 characters. The set is sent in one launch when it fits; otherwise in several launches, and ClearFrame may not show the batches in order.
+- **Enhanced results:** ClearFrame saves results beside the originals (for example `photo_enhanced_4x.png`). After the next scan they appear as new photos and, being near-identical, are likely to be listed with the original in **Duplicates** — check which one you keep before resolving such a group.
 
 ---
 

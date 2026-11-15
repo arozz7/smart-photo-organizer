@@ -17,7 +17,7 @@ export type TargetSendResult =
 /**
  * A program that photos can be sent to. Implementations only pass existing file paths on: they must
  * never copy a photo, stage it in a folder or write metadata (decisions L-001, L-026, L-031).
- * A new target (for example darktable through a list file) is added by implementing this and
+ * A new target (for example another editor that reads a list file) is added by implementing this and
  * registering it; nothing else changes.
  */
 export interface SendTarget {

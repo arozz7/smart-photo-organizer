@@ -8,6 +8,7 @@ import { useFlexZoom } from '../hooks/useFlexZoom'
 // import AIStatus from '../components/AIStatus'
 import ScanErrorsModal from '../components/ScanErrorsModal'
 import SettingsModal from '../components/SettingsModal'
+import SendToButton from '../components/SendToButton'
 import { GearIcon, ChevronDownIcon, Cross2Icon, ImageIcon, MagnifyingGlassIcon, MixerHorizontalIcon } from '@radix-ui/react-icons'
 import { EmptyState } from '../components/ui/EmptyState'
 
@@ -349,6 +350,10 @@ export default function Library() {
                         >
                             Rescan ({selectedIds.size})
                         </button>
+                    )}
+
+                    {isSelectionMode && selectedIds.size > 0 && (
+                        <SendToButton source={{ kind: 'photos', ids: Array.from(selectedIds) }} />
                     )}
                     {!isSelectionMode && (
                         <div className="relative flex items-center">

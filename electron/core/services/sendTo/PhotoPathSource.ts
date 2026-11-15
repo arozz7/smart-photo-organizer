@@ -72,14 +72,17 @@ export class DbPhotoPathSource implements PhotoPathSource {
         const getPage = stored.compound ? this.deps.getCompoundPage : this.deps.getSimplePage;
         const rows: PhotoPathRow[] = [];
         let offset = 0;
+        let total = Number.POSITIVE_INFINITY;
 
-        while (true) {
+        while (offset < total) {
             const page = getPage(stored.filter, offset, this.deps.pageSize);
+            // An empty page ends the loop even if the total claims more, so a stale count cannot spin forever.
+            if (page.photos.length === 0) break;
             rows.push(...page.photos.map(toRow));
             offset += page.photos.length;
-            // An empty page ends the loop even if the total claims more, so a stale count cannot spin forever.
-            if (page.photos.length === 0 || offset >= page.total) return rows;
+            total = page.total;
         }
+        return rows;
     }
 
     private parseFilter(filterJson: string): { compound: boolean; filter: unknown } | null {

@@ -152,6 +152,12 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 
 ## Step 2 — Data Safety
 
+### Phase 131a — Send to ClearFrame (side phase, no photo copies)
+
+**Status:** Implemented. See `aiChangeLog/phase-131a-send-to-editors.md`. Requested by the photo-suite coordinator; approved as a one-feature exception while Phase 131 stays paused.
+
+A "Send to…" action for a Library selection, a Smart Album and the Create-view set. It passes only the file paths of the originals to ClearFrame (`cf-app.exe`): nothing is copied, staged or zipped, and no metadata is written. Missing photos are skipped and counted, sends above a configurable threshold (default 50) ask first, and the target list is extensible. Enhanced results saved beside the originals are not linked automatically; they will normally appear in Duplicates as near-duplicates of the original.
+
 ### Phase 131 — Path Re-linking & Missing Files Reconciliation
 
 **Problem:** `photos.file_path` is the only identity. If a user renames or moves a file or folder outside the app, the next scan inserts a *new* row with no face assignments, and the *old* row (holding the person names) points at a missing file. The same faces are then detected again as unknowns.
