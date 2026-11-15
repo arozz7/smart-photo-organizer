@@ -3,6 +3,7 @@ import path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { resolveScannerSettings, type ScannerSettings } from './scannerSettings';
+import type { SendToSettings } from './sendTo/sendToSettings';
 
 // Phase 104: Strict False Positive Mode — threshold constants
 // Default mode uses 0.70. When strictFalsePositiveMode is enabled (Phase 6 toggle),
@@ -129,6 +130,8 @@ export interface AppConfig {
     ai_queue: any[]; // Queue items
     faissStaleCount?: number; // Tracks faces removed that need FAISS rebuild
     prsExecutablePath?: string; // Path to the Photo Repair Shop executable
+    /** "Send to..." overrides (confirm threshold, ClearFrame path); see sendTo/sendToSettings.ts. Missing means defaults. */
+    sendTo?: Partial<SendToSettings>;
 }
 
 // Default Config
