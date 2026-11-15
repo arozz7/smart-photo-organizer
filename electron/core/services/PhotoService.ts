@@ -108,7 +108,7 @@ export class PhotoService {
             // 2. Sharp
             if (!extracted) {
                 try {
-                    const pipeline = sharp(filePath, { failOnError: false });
+                    const pipeline = sharp(filePath, { failOn: 'none' });
                     if (shouldRotate) pipeline.rotate(rotationDegrees);
                     await pipeline.resize(2560, 2560, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(previewPath);
                     extracted = true;

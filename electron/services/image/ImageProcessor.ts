@@ -6,7 +6,7 @@ export class SharpImageProcessor implements IImageProcessor {
     async process(filePath: string, options: ProcessingOptions, dbOrientation: number = 1): Promise<Buffer> {
         // [Phase 83] Relax Error Handling
         // Metadata warnings (e.g. "ASCII value ... contains null byte") should not fail the pipeline
-        const pipeline = sharp(filePath, { failOnError: false });
+        const pipeline = sharp(filePath, { failOn: 'none' });
         return this.processPipeline(pipeline, options, dbOrientation, false);
     }
 
@@ -84,7 +84,7 @@ export class SharpImageProcessor implements IImageProcessor {
     }
 
     async convertRaw(filePath: string): Promise<Buffer> {
-        return await sharp(filePath, { failOnError: false })
+        return await sharp(filePath, { failOn: 'none' })
             .rotate()
             .toFormat('jpeg', { quality: 80 })
             .toBuffer();
