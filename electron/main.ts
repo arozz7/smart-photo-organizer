@@ -11,6 +11,7 @@ import { registerDashboardHandlers } from './ipc/dashboardHandlers';
 import { registerCollageHandlers } from './ipc/collageHandlers';
 import { registerPrsHandlers } from './ipc/prsHandlers';
 import { registerSendToHandlers } from './ipc/sendToHandlers';
+import { registerAlbumHandlers } from './ipc/albumHandlers';
 import { registerCompositeHandlers } from './ipc/compositeHandlers';
 import { registerAdjustmentHandlers } from './ipc/adjustmentHandlers';
 import { scanQueue } from './scanQueue';
@@ -160,6 +161,7 @@ app.whenReady().then(async () => {
   registerCollageHandlers();
   registerPrsHandlers();
   registerSendToHandlers();
+  registerAlbumHandlers();
   registerCompositeHandlers();
   registerAdjustmentHandlers();
 
