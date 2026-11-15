@@ -27,6 +27,13 @@ Requested by the photo-suite coordinator session and approved by the user on 202
 - **Honest count:** "sent" means handed to the operating system. The process is detached, so SPO cannot see whether ClearFrame accepted each file.
 - Logging records counts only, never file paths.
 
+## Same-named files
+Files are identified by their **full path, never by file name**. Photos with the same name in different folders (a wrapped camera counter), or a RAW and a JPEG sharing a name, are all sent, in one launch or across a batch boundary (`SendToService.sameName.test.ts`). The same file stored twice under different letter cases (possible because `photos.file_path` is a case-sensitive `UNIQUE` column and the scanner does not normalise case) is sent once on Windows; it is not counted as missing.
+
+## Related fixes made in this branch
+- **Export Album restored.** The Create view's Export Album called `os:createAlbum`, whose handler was lost in the v0.4.0 main-process split (commit `911cfb7`), so the button silently did nothing useful. Restored as `electron/ipc/albumHandlers.ts` + `electron/core/services/albumExport/` (`AlbumExportService`, `uniqueFileName`, `albumExportRequest`) + `electron/lib/albumExport/copyWithoutOverwrite.ts`. Unlike the original, it **never overwrites**: a taken name gets a counter (`IMG_0001 (2).jpg`), so same-named photos from different folders are both kept. Payload validated with Zod (ids, absolute folder). Tests: `tests/backend/unit/albumExport/*`.
+- **Lint errors on main fixed** (all behaviour-neutral): `let` to `const` (`BackgroundBucketingService`, `ConfigService`, `PhotoService`, `aiHandlers` x3 via a `requestedFilePath` alias, `useCompositor`), explanatory comments in empty `catch` blocks (`FaceOutlierService` x2, `FaceService`, `PhotoService` x2, `FaceRepository`, `settingsHandlers` x2), an intentional `eslint-disable` on the disabled Phase 53 RAW branch in `PhotoService`, the pointless try/catch and an unnecessary regex escape in `ImageService`, and `Function` types in two test setups.
+
 ## Duplicates and enhanced results
 ClearFrame writes `<stem>_enhanced_<N>x.<ext>` beside each original (folder changeable in ClearFrame). After a scan the result is a new photo: different bytes, so no exact-duplicate match, but near-identical, so the near pass (pHash Hamming distance ≤ 10) will normally group it with the original. **Nothing is linked automatically in this phase.** README tells the user to check which file to keep before resolving such a group. An "enhanced version of" relation is a possible later feature; the output folder is user-changeable, so it cannot assume the same folder.
 

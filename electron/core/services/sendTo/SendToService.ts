@@ -38,6 +38,12 @@ export interface SendToDeps {
     targets: readonly SendTarget[];
     /** Read on every send, so a changed setting applies without a restart. */
     getSettings(): SendToSettings;
+    /**
+     * True when two paths that differ only in letter case are the same file (Windows). The library can hold
+     * such a file twice, for example when a folder was scanned once as d:\photos and once as D:\Photos.
+     * Defaults to the current platform.
+     */
+    caseInsensitivePaths?: boolean;
 }
 
 const EXISTENCE_CHECKS_AT_ONCE = 32;
@@ -50,9 +56,11 @@ const NOTHING: SendCounts = { requested: 0, missing: 0, sent: 0 };
  */
 export class SendToService {
     private readonly targets: Map<string, SendTarget>;
+    private readonly caseInsensitivePaths: boolean;
 
     constructor(private readonly deps: SendToDeps) {
         this.targets = new Map(deps.targets.map(target => [target.id, target]));
+        this.caseInsensitivePaths = deps.caseInsensitivePaths ?? process.platform === 'win32';
     }
 
     listTargets(): { id: string; label: string }[] {
@@ -66,8 +74,9 @@ export class SendToService {
         const resolved = this.resolve(request.source);
         if (!resolved) return { status: 'failed', reason: 'unknown_source', counts: NOTHING };
 
-        const paths = await this.existingPaths(resolved.rows);
-        const counts: SendCounts = { requested: resolved.requested, missing: resolved.requested - paths.length, sent: 0 };
+        const { paths, duplicates } = await this.existingPaths(resolved.rows);
+        const missing = resolved.requested - paths.length - duplicates;
+        const counts: SendCounts = { requested: resolved.requested, missing, sent: 0 };
 
         if (paths.length === 0) return { status: 'failed', reason: 'nothing_to_send', counts };
 
@@ -93,9 +102,19 @@ export class SendToService {
         return rows ? { rows, requested: rows.length } : null;
     }
 
-    /** Paths of healthy photos whose file is still on disk, each once, in order. */
-    private async existingPaths(rows: readonly PhotoPathRow[]): Promise<string[]> {
-        const candidates = [...new Set(rows.filter(row => row.missingSince === null).map(row => row.filePath))];
+    /**
+     * Paths of healthy photos whose file is still on disk, each file once, in order. Files are told apart
+     * by their FULL path, never by their name: different photos often share a name (a wrapped camera
+     * counter, or a RAW and a JPEG). `duplicates` counts rows that were the same file as an earlier row.
+     */
+    private async existingPaths(rows: readonly PhotoPathRow[]): Promise<{ paths: string[]; duplicates: number }> {
+        const healthy = rows.filter(row => row.missingSince === null).map(row => row.filePath);
+        const unique = new Map<string, string>();
+        for (const filePath of healthy) {
+            const key = this.caseInsensitivePaths ? filePath.toLowerCase() : filePath;
+            if (!unique.has(key)) unique.set(key, filePath);
+        }
+        const candidates = [...unique.values()];
         const present: string[] = [];
 
         for (let start = 0; start < candidates.length; start += EXISTENCE_CHECKS_AT_ONCE) {
@@ -103,6 +122,6 @@ export class SendToService {
             const found = await Promise.all(chunk.map(filePath => this.deps.fileExists(filePath)));
             chunk.forEach((filePath, index) => { if (found[index]) present.push(filePath); });
         }
-        return present;
+        return { paths: present, duplicates: healthy.length - candidates.length };
     }
 }
