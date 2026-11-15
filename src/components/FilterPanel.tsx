@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import SendToButton from './SendToButton'
 import type { PhotoFilter, FilterMetadata, SmartAlbum } from '../types/filterTypes'
 
 interface FilterPanelProps {
@@ -403,6 +404,7 @@ export default function FilterPanel({
                                 >
                                     {album.name}
                                 </button>
+                                {album.id && <SendToButton compact source={{ kind: 'smartAlbum', albumId: album.id }} />}
                                 <button
                                     onClick={() => album.id && onDeleteAlbum(album.id)}
                                     className="text-xs text-red-400 hover:text-red-300 ml-2 shrink-0"

@@ -126,7 +126,7 @@ export function registerSettingsHandlers() {
                         const s = await fs.stat(path.join(previewDir, file));
                         count++;
                         size += s.size;
-                    } catch { }
+                    } catch { /* skip a preview that cannot be read */ }
                 }
             }
             return { success: true, count, size };
@@ -156,7 +156,7 @@ export function registerSettingsHandlers() {
                         deletedCount++;
                         deletedSize += stats.size;
                     }
-                } catch { }
+                } catch { /* skip a preview that cannot be removed */ }
             }
             return { success: true, deletedCount, deletedSize };
         } catch (e: any) {

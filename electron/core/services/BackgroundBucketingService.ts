@@ -103,7 +103,7 @@ export class BackgroundBucketingService implements IService {
 
                 // 3. Check if there's work to do (dirty flag or recheck mode)
                 const isRecheckMode = AppStateRepository.isRecheckActive();
-                let isDirty = AppStateRepository.isBucketingDirty();
+                const isDirty = AppStateRepository.isBucketingDirty();
                 let hasPending = false;
 
                 // If not strictly dirty, check if we actually have pending items (failsafe)

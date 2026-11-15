@@ -55,7 +55,7 @@ export class PhotoService {
 
         try {
             if (!forceRescan) {
-                try { await fs.access(previewPath); return previewPath; } catch { }
+                try { await fs.access(previewPath); return previewPath; } catch { /* no preview yet: fall through and create it */ }
             }
 
             const ext = path.extname(filePath).toLowerCase();
@@ -75,13 +75,14 @@ export class PhotoService {
                     else if (val === 6 || val.toString().includes('90 CW')) { rotationDegrees = 90; shouldRotate = true; }
                     else if (val === 8 || val.toString().includes('270 CW')) { rotationDegrees = 270; shouldRotate = true; }
                 }
-            } catch (e) { }
+            } catch (e) { /* orientation unreadable: treat as not rotated */ }
 
             let extracted = false;
 
             // 1. RAW Extraction (ExifTool)
             // [Phase 53] Skip ExifTool extraction for RAWs to force High Quality Python conversion (and correct rotation)
             // ExifTool often extracts small/embedded thumbnails which user reported as "bad quality".
+            // eslint-disable-next-line no-constant-condition -- intentionally disabled (Phase 53); kept for reference
             if (isRaw && !['.tif', '.tiff'].includes(ext) && false) {
                 try {
                     const toolResult = await this.getExifTool();
@@ -101,7 +102,7 @@ export class PhotoService {
                             logger.warn(`[PhotoService] ExifTool extracted small preview (${meta.width}x${meta.height}) for ${path.basename(filePath)}. Ignoring.`);
                         }
                     }
-                    try { await fs.unlink(tempPreviewPath); } catch { }
+                    try { await fs.unlink(tempPreviewPath); } catch { /* best effort: remove the temporary file */ }
                 } catch (e) { /* Fallback */ }
             }
 
@@ -168,7 +169,7 @@ export class PhotoService {
             const ortToDeg: Record<number, number> = { 1: 0, 6: 90, 3: 180, 8: 270 };
             const degToOrt: Record<number, number> = { 0: 1, 90: 6, 180: 3, 270: 8 };
 
-            let currentDeg = ortToDeg[currentOrt] || 0;
+            const currentDeg = ortToDeg[currentOrt] || 0;
             // Add rotation (ensure positive mod 360)
             let newDeg = (currentDeg + rotationDegrees) % 360;
             if (newDeg < 0) newDeg += 360;

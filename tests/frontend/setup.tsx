@@ -13,7 +13,7 @@ vi.mock('html-encoding-sniffer', () => ({
 }));
 
 // Define the Mock type for ipcRenderer
-const listeners = new Map<string, Set<Function>>();
+const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
 
 const mockIpcRenderer = {
     invoke: vi.fn(),

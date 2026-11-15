@@ -5,6 +5,7 @@ import { useAI } from '../context/AIContext';
 import { useAlert } from '../context/AlertContext';
 import { usePeople } from '../context/PeopleContext';
 import { FaceDataHealthCard } from '../components/FaceDataHealthCard';
+import SendToSettingsCard from '../components/SendToSettingsCard';
 
 function SettingsToggle({ label, description, value, onChange }: { label: string, description: string, value: boolean, onChange: (val: boolean) => void }) {
     return (
@@ -800,6 +801,7 @@ export default function Settings() {
                         </p>
                     </div>
                 </div>
+                <SendToSettingsCard />
             </section>
 
             {/* Scan Errors / Warnings */}

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { useScan } from '../context/ScanContext'
 import { useAlert } from '../context/AlertContext'
+import SendToButton from '../components/SendToButton'
 import { VirtuosoGrid } from 'react-virtuoso'
 import { Cross2Icon, PlusIcon, FilePlusIcon, MagnifyingGlassIcon } from '@radix-ui/react-icons'
 
@@ -327,6 +328,12 @@ export default function Create() {
                     >
                         <FilePlusIcon /> Export Album
                     </button>
+                    <div className="mt-2 flex flex-col [&>button]:w-full [&>button]:py-2 [&>button]:font-medium">
+                        <SendToButton
+                            source={{ kind: 'photos', ids: currentSet.map(p => p.id) }}
+                            disabled={currentSet.length === 0}
+                        />
+                    </div>
                     {currentSet.length > 0 && (
                         <button
                             onClick={() => setCurrentSet([])}

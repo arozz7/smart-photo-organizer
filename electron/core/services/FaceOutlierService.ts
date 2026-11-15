@@ -128,7 +128,7 @@ export class FaceOutlierService {
 
                 if (distance > adaptiveThreshold) {
                     let box = { x: 0, y: 0, width: 100, height: 100 };
-                    try { box = JSON.parse(face.box_json); } catch { }
+                    try { box = JSON.parse(face.box_json); } catch { /* unreadable box_json: keep the default box */ }
 
                     outliers.push({
                         faceId: face.id,
@@ -222,7 +222,7 @@ export class FaceOutlierService {
             if (avgDist > outlierThreshold) {
                 const face = facesWithParsed[idx];
                 let box = { x: 0, y: 0, width: 100, height: 100 };
-                try { box = JSON.parse(face.box_json); } catch { }
+                try { box = JSON.parse(face.box_json); } catch { /* unreadable box_json: keep the default box */ }
 
                 outliers.push({
                     faceId: face.id,

@@ -38,7 +38,8 @@ export function registerAIHandlers() {
         try {
             console.log(`[IPC] ai:analyzeImage options keys: ${Object.keys(options).join(',')}`);
             if (options.cleanRescan) console.log(`[IPC] cleanRescan=TRUE received!`);
-            let { photoId, filePath, ...rest } = options;
+            const { photoId, filePath: requestedFilePath, ...rest } = options;
+            let filePath = requestedFilePath;
 
             if (!filePath && photoId) {
                 // const photo = PhotoRepository.getPhotoById(photoId); // Unused
@@ -78,7 +79,8 @@ export function registerAIHandlers() {
 
     // Alias for analyzeImage used by Blur Calculation and older contexts
     ipcMain.handle('ai:scanImage', async (_event, options) => {
-        let { photoId, filePath, ...rest } = options;
+        const { photoId, filePath: requestedFilePath, ...rest } = options;
+        let filePath = requestedFilePath;
         if (!filePath && photoId) {
             const db = getDB();
             const row = db.prepare('SELECT file_path FROM photos WHERE id = ?').get(photoId) as any;
@@ -115,7 +117,8 @@ export function registerAIHandlers() {
     });
 
     ipcMain.handle('ai:rotateImage', async (_event, options) => {
-        let { photoId, filePath, rotation } = options;
+        const { photoId, filePath: requestedFilePath, rotation } = options;
+        let filePath = requestedFilePath;
         if (!filePath && photoId) {
             const db = getDB();
             const row = db.prepare('SELECT file_path FROM photos WHERE id = ?').get(photoId) as any;
@@ -726,7 +729,7 @@ export function registerAIHandlers() {
     // Debug clustering - run clustering with detailed distance info
     ipcMain.handle('ai:debugCluster', async (_event, options) => {
         try {
-            let faces = FaceRepository.getUnassignedDescriptors();
+            const faces = FaceRepository.getUnassignedDescriptors();
 
             // Map threshold to eps
             let eps = 0.45;

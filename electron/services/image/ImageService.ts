@@ -346,12 +346,8 @@ export class ImageService {
         }
 
         // Standard File
-        try {
-            await fs.access(filePath);
-            return await net.fetch(pathToFileURL(filePath).toString());
-        } catch (fsErr) {
-            throw fsErr;
-        }
+        await fs.access(filePath);
+        return await net.fetch(pathToFileURL(filePath).toString());
     }
 
     private async handleGlobalError(e: any, decodedPath: string, request: Request): Promise<Response> {
@@ -361,7 +357,7 @@ export class ImageService {
         // RECOVERY: Preview -> Original
         // If we requested a Preview file directly (not via DB lookup, but literally the path to a preview file) and it failed.
         if (msg.includes('ERR_FILE_NOT_FOUND') || msg.includes('ENOENT')) {
-            const match = decodedPath.match(/previews[\\\/]([a-f0-9]+)\.jpg/);
+            const match = decodedPath.match(/previews[\\/]([a-f0-9]+)\.jpg/);
             if (match && match[1]) {
                 try {
                     const srcPath = await this.repo.getFilePathFromPreview(match[1]);

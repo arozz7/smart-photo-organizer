@@ -152,6 +152,12 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 
 ## Step 2 — Data Safety
 
+### Phase 131a — Send to ClearFrame (side phase, no photo copies)
+
+**Status:** Implemented. See `aiChangeLog/phase-131a-send-to-editors.md`. Requested by the photo-suite coordinator; approved as a one-feature exception while Phase 131 stays paused.
+
+A "Send to…" action for a Library selection, a Smart Album and the Create-view set. It passes only the file paths of the originals to ClearFrame (`cf-app.exe`): nothing is copied, staged or zipped, and no metadata is written. Missing photos are skipped and counted, sends above a configurable threshold (default 50) ask first, and the target list is extensible. Enhanced results saved beside the originals are not linked automatically; they will normally appear in Duplicates as near-duplicates of the original.
+
 ### Phase 131 — Path Re-linking & Missing Files Reconciliation
 
 **Problem:** `photos.file_path` is the only identity. If a user renames or moves a file or folder outside the app, the next scan inserts a *new* row with no face assignments, and the *old* row (holding the person names) points at a missing file. The same faces are then detected again as unknowns.
@@ -165,6 +171,7 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
    2. `file_size` matches a missing row → compute SHA-256 of the new file only, and relink when it equals `sha256_hash`.
    3. Several candidates → **ambiguous**. Do not link. Queue it for user review.
    - If both the old and new paths exist (a copy, not a move), do not relink. The new row is treated as a duplicate and the existing duplicate detection handles it.
+   - **The file name is never a match key**, alone or as a fallback. A camera counter that wraps produces the same names (for example `DSC00001.ARW`) for unrelated pictures, so a name match could silently attach someone's names to the wrong photo. Matching uses only `file_id`, `file_size` and `sha256_hash`; anything else is ambiguous and goes to user review.
 3. **Relink operation** (single transaction): `UPDATE photos SET file_path = ?, missing_since = NULL`. The photo `id` is kept, so faces, people, tags, eras and duplicate groups carry over automatically. Rename the preview cache file to the md5 of the new path (`PhotoService.extractPreview` names previews by path hash) and update `preview_cache_path`.
 4. **Bulk re-root:** "This folder moved" → prefix replacement (`D:\Photos\` → `E:\Photos\`), verified per file by size and ID before commit. A dry-run preview shows the counts.
 5. **Missing Files view** (Settings → Library health, or a Library header badge): list missing rows grouped by folder, with actions Locate folder (re-root), Keep (e.g. an offline drive), and Remove from library (confirmed; deletes DB rows only, never files).
@@ -186,6 +193,7 @@ Every phase starts with a full test run to confirm the baseline (`node scripts/r
 - A moved folder (same volume) is relinked by `file_id`.
 - A cross-drive move (new `file_id`) is relinked by hash.
 - A copy (both paths exist) is not relinked.
+- Two unrelated files with the same name (in different folders) are never relinked to each other.
 - An offline root marks nothing missing.
 - Two identical candidate files are flagged as ambiguous and not linked.
 - A re-root dry run reports correct counts, and the commit is atomic.
