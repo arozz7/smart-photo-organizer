@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // 1. Setup mocks BEFORE imports
-const mockHandlers = new Map<string, Function>();
+const mockHandlers = new Map<string, (...args: unknown[]) => unknown>();
 
 vi.mock('electron', () => ({
     app: {

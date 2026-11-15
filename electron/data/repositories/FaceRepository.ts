@@ -11,7 +11,7 @@ export class FaceRepository {
                 const meta = JSON.parse(row.metadata_json);
                 original_width = original_width || meta.ImageWidth || meta.SourceImageWidth || meta.ExifImageWidth;
                 original_height = original_height || meta.ImageHeight || meta.SourceImageHeight || meta.ExifImageHeight;
-            } catch (e) { }
+            } catch (e) { /* metadata is only a fallback: keep the stored size */ }
         }
         return {
             ...row,

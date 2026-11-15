@@ -522,7 +522,7 @@ export class FaceService {
         }
 
         if (width && height) {
-            try { db.prepare('UPDATE photos SET width = ?, height = ? WHERE id = ?').run(width, height, photoId); } catch (e) { }
+            try { db.prepare('UPDATE photos SET width = ?, height = ? WHERE id = ?').run(width, height, photoId); } catch (e) { /* best effort: the stored size is only a cache */ }
         }
 
         const insertedIds: number[] = [];

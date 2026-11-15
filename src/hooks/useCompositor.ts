@@ -83,8 +83,8 @@ export function useCompositor() {
             }
 
             // If this is the first layer, size the canvas to match it
-            let nextWidth = s.canvasWidth
-            let nextHeight = s.canvasHeight
+            const nextWidth = s.canvasWidth
+            const nextHeight = s.canvasHeight
             if (s.layers.length === 0 && spec.sourceImageB64) {
                 // Canvas dimensions are set by the caller via setCanvasDimensions before addLayer,
                 // so we just use whatever is current here.

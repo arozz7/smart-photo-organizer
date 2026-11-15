@@ -259,7 +259,7 @@ export class ConfigService {
             }
 
             // 1. Apply User Config on top of Base
-            let intermediateConfig = { ...baseConfig, ...userConfig };
+            const intermediateConfig = { ...baseConfig, ...userConfig };
             // Deep merge nested objects
             intermediateConfig.aiSettings = { ...baseConfig.aiSettings, ...(userConfig as any).aiSettings || {} };
             intermediateConfig.advancedFace = { ...baseConfig.advancedFace, ...(userConfig as any).advancedFace || {} };
