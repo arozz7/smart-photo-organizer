@@ -10,6 +10,7 @@ import { AIStatusIndicator } from './AIStatusIndicator'
 import { useScan } from '../context/ScanContext'
 import { useDashboard } from '../context/DashboardContext'
 import PhotoDetail from './PhotoDetail'
+import { useAppVersion } from '../hooks/useAppVersion'
 
 interface SidebarLinkProps {
     to: string
@@ -62,6 +63,7 @@ function useDuplicateCount() {
 export default function Layout() {
     const { viewingPhoto, setViewingPhoto, navigateToPhoto } = useScan()
     const { hasNewMemories } = useDashboard()
+    const appVersion = useAppVersion()
     const duplicateCount = useDuplicateCount()
     return (
         <div className="flex h-screen bg-gray-900 text-gray-100 overflow-hidden font-sans">
@@ -120,7 +122,7 @@ export default function Layout() {
                         className="text-xs text-gray-500 hover:text-gray-300 transition-colors cursor-pointer"
                         title="View changelog"
                     >
-                        v0.7.5
+                        {appVersion}
                     </button>
                 </div>
             </aside>

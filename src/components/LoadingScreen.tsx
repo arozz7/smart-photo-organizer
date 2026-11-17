@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useAppVersion } from '../hooks/useAppVersion'
 
 export default function LoadingScreen({ onReady }: { onReady: () => void }) {
     const [status, setStatus] = useState('Initializing...')
     const [progress, setProgress] = useState(0)
+    const appVersion = useAppVersion()
 
     useEffect(() => {
         // Simulate startup sequence or listen to real events
@@ -71,7 +73,7 @@ export default function LoadingScreen({ onReady }: { onReady: () => void }) {
             </div>
 
             <div className="absolute bottom-4 text-gray-600 text-[10px]">
-                v0.7.5
+                {appVersion}
             </div>
         </div>
     )

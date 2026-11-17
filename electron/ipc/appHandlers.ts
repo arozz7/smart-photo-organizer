@@ -1,7 +1,9 @@
-import { ipcMain, shell, BrowserWindow } from 'electron';
+import { ipcMain, shell, app, BrowserWindow } from 'electron';
 import logger from '../logger';
 
 export function registerAppHandlers(getMainWindow: () => BrowserWindow | null) {
+    ipcMain.handle('app:getVersion', () => app.getVersion());
+
     ipcMain.handle('app:focusWindow', () => {
         const win = getMainWindow();
         if (win) {
