@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { resolveScannerSettings, type ScannerSettings } from './scannerSettings';
 import type { SendToSettings } from './sendTo/sendToSettings';
+import type { PickerFolders } from './pickerFolders';
 
 // Phase 104: Strict False Positive Mode — threshold constants
 // Default mode uses 0.70. When strictFalsePositiveMode is enabled (Phase 6 toggle),
@@ -132,6 +133,8 @@ export interface AppConfig {
     prsExecutablePath?: string; // Path to the Photo Repair Shop executable
     /** "Send to..." overrides (confirm threshold, ClearFrame path); see sendTo/sendToSettings.ts. Missing means defaults. */
     sendTo?: Partial<SendToSettings>;
+    /** Where the folder and file pickers last succeeded; see pickerFolders.ts. Missing means the OS default. */
+    lastPickerFolders?: PickerFolders;
 }
 
 // Default Config
