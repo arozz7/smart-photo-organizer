@@ -7,9 +7,10 @@
       1. Type check          (tsc --noEmit)
       2. Lint                (eslint; errors fail, warnings may not exceed the recorded baseline)
       3. File size           (no file over 900 lines; files already over may not grow)
-      4. Build               (vite build of the renderer)
-      5. TypeScript tests    (node scripts/run-tests.cjs, which handles the better-sqlite3 rebuild)
-      6. Python tests        (pytest in the project venv)
+      4. Build               (vite build of the renderer and the Electron main process)
+      5. Build output        (native modules such as better-sqlite3 must not be bundled into dist-electron)
+      6. TypeScript tests    (node scripts/run-tests.cjs, which handles the better-sqlite3 rebuild)
+      7. Python tests        (pytest in the project venv)
 
     There is no code formatter configured in this repo, so there is no formatting step.
     Limits live in scripts/dev/verify-baseline.json. They only ever go DOWN: fix warnings or
@@ -119,6 +120,8 @@ Invoke-Step "File size (limit $hardLineLimit lines)" {
 }
 
 Invoke-Step 'Build (vite)' { node ./node_modules/vite/bin/vite.js build }
+
+Invoke-Step 'Build output (native modules stay external)' { node scripts/dev/check-build-output.cjs }
 
 Invoke-Step 'TypeScript tests' { node scripts/run-tests.cjs }
 

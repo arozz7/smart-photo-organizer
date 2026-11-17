@@ -20,7 +20,10 @@ export default defineConfig({
             include: [], // react-window removed
           },
           build: {
-            rollupOptions: {
+            // Vite 8 (Rolldown) reads `rolldownOptions`; the old `rollupOptions` key is ignored here, which
+            // bundled better-sqlite3 into dist-electron and broke loading its native binding in the built app.
+            // scripts/dev/check-build-output.cjs fails the verify run if that happens again.
+            rolldownOptions: {
               external: ['better-sqlite3', 'exiftool-vendored', 'sharp'],
             },
           },
