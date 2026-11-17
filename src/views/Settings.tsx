@@ -10,12 +10,12 @@ import SendToSettingsCard from '../components/SendToSettingsCard';
 import SettingsToggle from '../components/settings/SettingsToggle';
 import SettingsSection from '../components/settings/SettingsSection';
 import PreviewManager from '../components/settings/PreviewManager';
+import LibraryStorageSection from '../components/settings/LibraryStorageSection';
+import SmartAssignmentSection from '../components/settings/SmartAssignmentSection';
 
 export default function Settings() {
     const [clearing, setClearing] = useState(false)
-    const [movingLibrary, setMovingLibrary] = useState(false)
     const [message, setMessage] = useState('')
-    const [libraryPath, setLibraryPath] = useState(localStorage.getItem('libraryPath') || '')
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [showWarningsModal, setShowWarningsModal] = useState(false);
     const [prsExecutablePath, setPrsExecutablePath] = useState('');
@@ -28,12 +28,6 @@ export default function Settings() {
     const [eraConfig, setEraConfig] = useState<{ minFaces: number, mergeThreshold: number }>({ minFaces: 50, mergeThreshold: 0.75 });
 
     useEffect(() => {
-        // @ts-ignore
-        window.ipcRenderer.invoke('settings:getLibraryPath').then(path => {
-            setLibraryPath(path)
-            localStorage.setItem('libraryPath', path)
-        });
-
         // @ts-ignore
         window.ipcRenderer.invoke('ai:getSettings').then((settings: any) => {
             if (settings) {
@@ -79,24 +73,6 @@ export default function Settings() {
 
     const [showResetConfirm, setShowResetConfirm] = useState(false)
     const [resetInput, setResetInput] = useState('')
-    const [propagating, setPropagating] = useState(false)
-    const [propagateResult, setPropagateResult] = useState<{ propagated: number; skipped: number } | null>(null)
-
-    const handleBatchPropagate = async () => {
-        setPropagating(true);
-        setPropagateResult(null);
-        try {
-            // @ts-ignore
-            const res = await window.ipcRenderer.invoke('db:batchPropagateLabels');
-            if (res.success) {
-                setPropagateResult({ propagated: res.propagated, skipped: res.skipped });
-            } else {
-                showAlert({ title: 'Propagation Failed', description: res.error, variant: 'danger' });
-            }
-        } finally {
-            setPropagating(false);
-        }
-    };
 
     const handleFactoryReset = async () => {
         if (resetInput !== 'RESET') return
@@ -145,72 +121,7 @@ export default function Settings() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl w-full">
                 {/* Left Column */}
                 <div className="space-y-8">
-                    {/* Library Storage Config */}
-                    <section className="space-y-4">
-                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Library Storage</h3>
-
-                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
-                            <div>
-                                <h4 className="font-medium text-white">Current Location</h4>
-                                <p className="text-sm text-gray-400 mt-1 mb-2 break-all bg-black/30 p-2 rounded font-mono">
-                                    {libraryPath || 'Loading...'}
-                                </p>
-                                <p className="text-xs text-gray-500 mb-4">
-                                    This folder contains your database, generated previews, and AI indices.
-                                </p>
-                            </div>
-
-                            <div className="flex gap-4">
-                                <button
-                                    onClick={async () => {
-                                        // @ts-ignore
-                                        const path = await window.ipcRenderer.invoke('dialog:openDirectory')
-                                        if (path) {
-                                            showConfirm({
-                                                title: 'Move Library',
-                                                description: `Move library to:\n${path}\n\nThis may take several minutes for large libraries. The application will pause while moving files.`,
-                                                confirmLabel: 'Move Library',
-                                                onConfirm: async () => {
-                                                    setClearing(true); // Re-using clearing state or add new one? 
-                                                    // Let's create a dedicated state for blocking modal below
-                                                    setMovingLibrary(true);
-
-                                                    try {
-                                                        // @ts-ignore
-                                                        const res = await window.ipcRenderer.invoke('settings:moveLibrary', path)
-                                                        if (res.success) {
-                                                            showAlert({
-                                                                title: 'Move Complete',
-                                                                description: 'Library moved successfully. The view will now reload.',
-                                                                onConfirm: () => window.location.reload()
-                                                            });
-                                                        } else {
-                                                            showAlert({
-                                                                title: 'Move Failed',
-                                                                description: res.error,
-                                                                variant: 'danger'
-                                                            });
-                                                        }
-                                                    } catch (e) {
-                                                        showAlert({
-                                                            title: 'Error',
-                                                            description: 'Move operation failed: ' + String(e),
-                                                            variant: 'danger'
-                                                        });
-                                                    } finally {
-                                                        setMovingLibrary(false);
-                                                    }
-                                                }
-                                            });
-                                        }
-                                    }}
-                                    className="px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
-                                >
-                                    Move Library
-                                </button>
-                            </div>
-                        </div>
-                    </section>
+                    <LibraryStorageSection onMoveStarted={() => setClearing(true)} />
 
                     {/* AI Performance Profile */}
                     <section className="space-y-4">
@@ -433,38 +344,7 @@ export default function Settings() {
                         </div>
                     </section>
 
-                    {/* Smart Assignment (Phase 105-4) */}
-                    <section className="space-y-4">
-                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Smart Assignment</h3>
-
-                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
-                            <div>
-                                <h4 className="font-medium text-white mb-1">Contextual Label Propagation</h4>
-                                <p className="text-sm text-gray-400 mb-3">
-                                    Assign unrecognised hard-pose or blurry faces by consensus — if ≥70% of
-                                    high-confidence frontal faces nearby (same session or GPS ≤100 m) agree on
-                                    one person, that person is assigned to the difficult face.
-                                </p>
-                                <div className="flex items-center gap-4 flex-wrap">
-                                    <button
-                                        onClick={handleBatchPropagate}
-                                        disabled={propagating}
-                                        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${propagating
-                                            ? 'bg-gray-600 cursor-not-allowed opacity-50 text-white'
-                                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                                        }`}
-                                    >
-                                        {propagating ? 'Propagating…' : 'Run for Entire Library'}
-                                    </button>
-                                    {propagateResult && (
-                                        <span className="text-sm text-green-400">
-                                            Done — {propagateResult.propagated} face{propagateResult.propagated !== 1 ? 's' : ''} assigned
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </section>
+                    <SmartAssignmentSection />
                 </div>
 
                 {/* Right Column */}
@@ -756,22 +636,6 @@ export default function Settings() {
                 )
             }
 
-            {/* Move Library Blocking Modal */}
-            {movingLibrary && (
-                <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100]">
-                    <div className="bg-gray-800 p-8 rounded-lg border border-indigo-500/50 max-w-md w-full shadow-2xl text-center space-y-6">
-                        <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                        <div>
-                            <h3 className="text-xl font-bold text-white mb-2">Moving Library...</h3>
-                            <p className="text-gray-300 text-sm">
-                                Please wait while we move your files and database.
-                                <br />
-                                <span className="text-xs text-gray-500 mt-2 block">Do not close the application.</span>
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     )
 }
