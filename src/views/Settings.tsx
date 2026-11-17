@@ -7,130 +7,9 @@ import { usePeople } from '../context/PeopleContext';
 import { FaceDataHealthCard } from '../components/FaceDataHealthCard';
 import SendToSettingsCard from '../components/SendToSettingsCard';
 
-function SettingsToggle({ label, description, value, onChange }: { label: string, description: string, value: boolean, onChange: (val: boolean) => void }) {
-    return (
-        <div className="flex items-center justify-between">
-            <div>
-                <h4 className="font-medium text-white">{label}</h4>
-                <p className="text-sm text-gray-400 max-w-sm">{description}</p>
-            </div>
-            <button
-                onClick={() => onChange(!value)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${value ? 'bg-indigo-600' : 'bg-gray-700'}`}
-            >
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${value ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
-        </div>
-    );
-}
-
-function PreviewManager() {
-    const [stats, setStats] = useState<{ count: number, size: number } | null>(null)
-    const [loading, setLoading] = useState(false)
-    const { showAlert, showConfirm } = useAlert()
-
-    const loadStats = async () => {
-        // @ts-ignore
-        const res = await window.ipcRenderer.invoke('settings:getPreviewStats')
-        if (res.success) {
-            setStats({ count: res.count, size: res.size })
-        }
-    }
-
-    useEffect(() => {
-        loadStats()
-    }, [])
-
-    const handleCleanup = async (days: number) => {
-        showConfirm({
-            title: 'Clear Preview Cache',
-            description: `Delete previews older than ${days} days?`,
-            confirmLabel: 'Clear Cache',
-            variant: days === 0 ? 'danger' : 'primary',
-            onConfirm: async () => {
-                setLoading(true)
-                try {
-                    // @ts-ignore
-                    const res = await window.ipcRenderer.invoke('settings:cleanupPreviews', { days })
-                    if (res.success) {
-                        showAlert({
-                            title: 'Cleanup Complete',
-                            description: `Deleted: ${res.deletedCount} files\nFreed: ${(res.deletedSize / 1024 / 1024).toFixed(2)} MB`
-                        });
-                        loadStats()
-                    } else {
-                        showAlert({
-                            title: 'Cleanup Failed',
-                            description: res.error,
-                            variant: 'danger'
-                        });
-                    }
-                } catch (e) {
-                    showAlert({
-                        title: 'Error',
-                        description: String(e),
-                        variant: 'danger'
-                    });
-                } finally {
-                    setLoading(false)
-                }
-            }
-        });
-    }
-
-    const formatSize = (bytes: number) => {
-        if (bytes === 0) return '0 B'
-        const k = 1024
-        const sizes = ['B', 'KB', 'MB', 'GB']
-        const i = Math.floor(Math.log(bytes) / Math.log(k))
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-    }
-
-    return (
-        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
-            <div>
-                <h4 className="font-medium text-white">Cache Statistics</h4>
-                {stats ? (
-                    <div className="text-sm text-gray-400 mt-1 flex gap-6">
-                        <span><strong>Files:</strong> {stats.count}</span>
-                        <span><strong>Size:</strong> {formatSize(stats.size)}</span>
-                    </div>
-                ) : (
-                    <p className="text-sm text-gray-500">Loading stats...</p>
-                )}
-            </div>
-
-            <div className="flex gap-3 flex-wrap">
-                <button
-                    disabled={loading}
-                    onClick={() => handleCleanup(30)}
-                    className="px-3 py-1.5 rounded text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white transition-colors"
-                >
-                    Clear {'\u003e'} 30 Days
-                </button>
-                <button
-                    disabled={loading}
-                    onClick={() => handleCleanup(7)}
-                    className="px-3 py-1.5 rounded text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white transition-colors"
-                >
-                    Clear {'\u003e'} 7 Days
-                </button>
-                <button
-                    disabled={loading}
-                    onClick={() => handleCleanup(0)}
-                    className="px-3 py-1.5 rounded text-xs font-medium bg-red-900/40 hover:bg-red-900/60 text-red-200 border border-red-800/50 transition-colors"
-                >
-                    Clear All
-                </button>
-            </div>
-            <p className="text-xs text-gray-500">
-                Clearing previews will not delete original photos. Previews will be regenerated as needed.
-            </p>
-        </div>
-    )
-}
-
-// FaceDataUpgradeManager removed - replaced by FaceDataHealthCard
+import SettingsToggle from '../components/settings/SettingsToggle';
+import SettingsSection from '../components/settings/SettingsSection';
+import PreviewManager from '../components/settings/PreviewManager';
 
 export default function Settings() {
     const [clearing, setClearing] = useState(false)
@@ -591,10 +470,9 @@ export default function Settings() {
                 {/* Right Column */}
                 <div className="space-y-8">
                     {/* Preview Cache Management */}
-                    <section className="space-y-4">
-                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Preview Cache</h3>
+                    <SettingsSection title="Preview Cache">
                         <PreviewManager />
-                    </section>
+                    </SettingsSection>
 
                     {/* Database Management Section */}
                     <section className="space-y-4">
