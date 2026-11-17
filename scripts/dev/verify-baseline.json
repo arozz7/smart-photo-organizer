@@ -1,0 +1,12 @@
+﻿{
+    "maxLintWarnings":  61,
+    "oversizedFiles":  {
+                           "electron/core/services/FaceService.ts":  915,
+                           "electron/data/repositories/FaceRepository.ts":  1194,
+                           "electron/ipc/dbHandlers.ts":  1216,
+                           "src/context/AIContext.tsx":  912,
+                           "src/python/main_backup.py":  1787,
+                           "src/views/People.tsx":  1350,
+                           "tests/backend/unit/repositories/FaceRepository.test.ts":  936
+                       }
+}
