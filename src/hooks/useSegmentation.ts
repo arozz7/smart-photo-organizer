@@ -112,7 +112,7 @@ export function useSegmentation() {
         } catch (e: any) {
             setState(s => ({ ...s, isApplying: false, error: e.message }))
         }
-    }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [])
 
     // Auto re-predict (debounced) when confidence/mask thresholds change in text mode.
     useEffect(() => {
