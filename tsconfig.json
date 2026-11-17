@@ -28,6 +28,9 @@
     "src",
     "electron"
   ],
+  "exclude": [
+    "src/deprecated"
+  ],
   "references": [
     {
       "path": "./tsconfig.node.json"
