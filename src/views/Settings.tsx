@@ -1,45 +1,29 @@
 import { useState, useEffect } from 'react'
-import SettingsModal from '../components/SettingsModal';
 import ScanWarningsModal from '../components/ScanWarningsModal';
 import { useAI } from '../context/AIContext';
 import { useAlert } from '../context/AlertContext';
-import { usePeople } from '../context/PeopleContext';
 import { FaceDataHealthCard } from '../components/FaceDataHealthCard';
 import SendToSettingsCard from '../components/SendToSettingsCard';
 
-import SettingsToggle from '../components/settings/SettingsToggle';
 import SettingsSection from '../components/settings/SettingsSection';
 import PreviewManager from '../components/settings/PreviewManager';
 import LibraryStorageSection from '../components/settings/LibraryStorageSection';
 import SmartAssignmentSection from '../components/settings/SmartAssignmentSection';
+import AiPerformanceSection from '../components/settings/AiPerformanceSection';
+import PersonIdentificationSection from '../components/settings/PersonIdentificationSection';
+import EraGenerationSection from '../components/settings/EraGenerationSection';
+import { useAiSettings } from '../hooks/useAiSettings';
 
 export default function Settings() {
     const [clearing, setClearing] = useState(false)
     const [message, setMessage] = useState('')
-    const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [showWarningsModal, setShowWarningsModal] = useState(false);
     const [prsExecutablePath, setPrsExecutablePath] = useState('');
     const { calculatingBlur, blurProgress, calculateBlurScores } = useAI();
     const { showAlert, showConfirm } = useAlert();
-    const { smartIgnoreSettings, updateSmartIgnoreSettings } = usePeople();
-
-    const [aiProfile, setAiProfile] = useState<'balanced' | 'high'>('balanced');
-    const [vlmEnabled, setVlmEnabled] = useState(false);
-    const [eraConfig, setEraConfig] = useState<{ minFaces: number, mergeThreshold: number }>({ minFaces: 50, mergeThreshold: 0.75 });
+    const ai = useAiSettings();
 
     useEffect(() => {
-        // @ts-ignore
-        window.ipcRenderer.invoke('ai:getSettings').then((settings: any) => {
-            if (settings) {
-                if (settings.aiProfile) setAiProfile(settings.aiProfile);
-                if (settings.vlmEnabled !== undefined) setVlmEnabled(settings.vlmEnabled);
-                setEraConfig({
-                    minFaces: settings.minFacesForEra ?? 50,
-                    mergeThreshold: settings.eraMergeThreshold ?? 0.75
-                });
-            }
-        });
-
         // @ts-ignore
         window.ipcRenderer.invoke('settings:get').then((cfg: any) => {
             if (cfg?.prsExecutablePath) setPrsExecutablePath(cfg.prsExecutablePath);
@@ -108,11 +92,6 @@ export default function Settings() {
                 <span>Settings</span>
             </h2>
 
-            <SettingsModal
-                open={showSettingsModal}
-                onOpenChange={setShowSettingsModal}
-            />
-
             <ScanWarningsModal
                 isOpen={showWarningsModal}
                 onClose={() => setShowWarningsModal(false)}
@@ -123,226 +102,20 @@ export default function Settings() {
                 <div className="space-y-8">
                     <LibraryStorageSection onMoveStarted={() => setClearing(true)} />
 
-                    {/* AI Performance Profile */}
-                    <section className="space-y-4">
-                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">AI Performance Profile</h3>
+                    <AiPerformanceSection
+                        aiProfile={ai.aiProfile}
+                        vlmEnabled={ai.vlmEnabled}
+                        onProfileChange={ai.changeProfile}
+                        onVlmToggle={ai.toggleVlm}
+                    />
 
-                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
-                            <div className="flex justify-between items-center gap-4 flex-wrap">
-                                <div>
-                                    <h4 className="font-medium text-white">Model Selection</h4>
-                                    <p className="text-sm text-gray-400 mt-1">
-                                        Choose the balance between speed and accuracy.
-                                    </p>
-                                </div>
-                                <select
-                                    className="bg-gray-700 text-white text-sm px-3 py-2 rounded focus:ring-1 focus:ring-indigo-500 outline-none border border-gray-600"
-                                    value={aiProfile}
-                                    onChange={async (e) => {
-                                        const newProfile = e.target.value as 'balanced' | 'high';
-                                        setAiProfile(newProfile);
+                    <PersonIdentificationSection />
 
-                                        // Fetch current settings to merge
-                                        // @ts-ignore
-                                        const current = await window.ipcRenderer.invoke('ai:getSettings');
-                                        const updated = { ...current, aiProfile: newProfile };
-
-                                        // @ts-ignore
-                                        await window.ipcRenderer.invoke('ai:saveSettings', updated);
-
-                                        showConfirm({
-                                            title: 'Reload Required',
-                                            description: 'Changing the AI profile requires a reload to load the new models. Reload now?',
-                                            confirmLabel: 'Reload Now',
-                                            onConfirm: () => window.location.reload()
-                                        });
-                                    }}
-                                >
-                                    <option value="balanced">Balanced (Faster)</option>
-                                    <option value="high">High Accuracy (Requires ~2GB+ VRAM/RAM)</option>
-                                </select>
-                            </div>
-                            <div className="text-xs text-gray-500 bg-black/20 p-3 rounded">
-                                <ul className="list-disc list-inside space-y-1">
-                                    <li><strong>Balanced:</strong> Uses standard models. Good for most users. Fast scanning.</li>
-                                    <li><strong>High Accuracy:</strong> Uses <code>clip-vit-large</code> for superior tagging. Scanning will be slower.</li>
-                                </ul>
-                            </div>
-
-                            {/* Smart Tags Toggle (Added for visibility) */}
-                            <div className="flex items-center justify-between pt-4 border-t border-gray-700">
-                                <div className="flex flex-col gap-1">
-                                    <h4 className="font-medium text-white">Smart Tags (VLM)</h4>
-                                    <p className="text-sm text-gray-400">
-                                        Use AI (SmolVLM) to describe photos and generate search tags.
-                                    </p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className={`text-xs font-bold ${vlmEnabled ? 'text-green-500' : 'text-gray-500'}`}>
-                                        {vlmEnabled ? 'ENABLED' : 'DISABLED'}
-                                    </span>
-                                    <button
-                                        onClick={async () => {
-                                            const newState = !vlmEnabled;
-                                            setVlmEnabled(newState);
-                                            // @ts-ignore
-                                            const current = await window.ipcRenderer.invoke('ai:getSettings');
-                                            const updated = { ...current, vlmEnabled: newState };
-                                            // @ts-ignore
-                                            await window.ipcRenderer.invoke('ai:saveSettings', updated);
-
-                                            showConfirm({
-                                                title: 'Reload Required',
-                                                description: `You have ${newState ? 'Enabled' : 'Disabled'} Smart Tags. Please reload the application to apply this change.`,
-                                                confirmLabel: 'Reload Now',
-                                                onConfirm: () => window.location.reload()
-                                            });
-                                        }}
-                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${vlmEnabled ? 'bg-indigo-600' : 'bg-gray-700'
-                                            }`}
-                                    >
-                                        <span
-                                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${vlmEnabled ? 'translate-x-6' : 'translate-x-1'
-                                                }`}
-                                        />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Advanced Configuration (Moved from Header) */}
-                            <div className="flex items-center justify-between pt-4 border-t border-gray-700">
-                                <div>
-                                    <h4 className="font-medium text-white">Advanced Configuration</h4>
-                                    <p className="text-sm text-gray-400">
-                                        Manage downloaded models and fine-tune detection thresholds.
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={() => setShowSettingsModal(true)}
-                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm font-medium transition-colors border border-blue-500/50"
-                                >
-                                    Configure Models
-                                </button>
-                            </div>
-                        </div>
-                    </section>
-
-                    {/* Person Identification Settings */}
-                    <section className="space-y-4">
-                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Person Identification</h3>
-
-                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
-                            <SettingsToggle
-                                label="AI Name Suggestions"
-                                description="Suggest names for unknown faces based on visual similarity."
-                                value={smartIgnoreSettings?.enableAiSuggestions ?? true}
-                                onChange={(val) => updateSmartIgnoreSettings({ enableAiSuggestions: val })}
-                            />
-
-                            <div className="pt-4 border-t border-gray-700">
-                                <label className="block text-sm font-medium text-white mb-1">
-                                    Suggestion Strength: <span className="text-indigo-400">{(smartIgnoreSettings?.aiSuggestionThreshold ?? 0.6).toFixed(2)}</span>
-                                </label>
-                                <p className="text-xs text-gray-400 mb-3">
-                                    Higher values require stronger matches for suggestions. Lower values suggest more liberally.
-                                </p>
-                                <input
-                                    type="range"
-                                    min="0.3"
-                                    max="0.85"
-                                    step="0.01"
-                                    value={smartIgnoreSettings?.aiSuggestionThreshold ?? 0.6}
-                                    onChange={(e) => updateSmartIgnoreSettings({ aiSuggestionThreshold: parseFloat(e.target.value) })}
-                                    className="w-full accent-indigo-500"
-                                />
-                                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                                    <span>Liberal (0.3)</span>
-                                    <span>Strict (0.85)</span>
-                                </div>
-                            </div>
-
-                            <div className="pt-4 border-t border-gray-700">
-                                <label className="block text-sm font-medium text-white mb-1">
-                                    Ungroupable Distance: <span className="text-indigo-400">{(smartIgnoreSettings?.ungroupableDistanceThreshold ?? 1.0).toFixed(2)}</span>
-                                </label>
-                                <p className="text-xs text-gray-400 mb-3">
-                                    Faces farther than this from any named person are shown separately for quick ignore. Higher = more aggressive filtering.
-                                </p>
-                                <input
-                                    type="range"
-                                    min="0.7"
-                                    max="1.3"
-                                    step="0.05"
-                                    value={smartIgnoreSettings?.ungroupableDistanceThreshold ?? 1.0}
-                                    onChange={(e) => updateSmartIgnoreSettings({ ungroupableDistanceThreshold: parseFloat(e.target.value) })}
-                                    className="w-full accent-indigo-500"
-                                />
-                                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                                    <span>Conservative (0.7)</span>
-                                    <span>Aggressive (1.3)</span>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    {/* Era Generation Settings */}
-                    <section className="space-y-4">
-                        <h3 className="text-xl font-semibold text-indigo-400 border-b border-gray-700 pb-2">Era Generation</h3>
-
-                        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-6">
-                            <div>
-                                <h4 className="font-medium text-white mb-1">Merge Similarity Threshold</h4>
-                                <p className="text-sm text-gray-400 mb-3">
-                                    How similar two eras must be to merge. (0.6 = Strict, 1.3+ = Force Merge).
-                                </p>
-                                <div className="flex items-center gap-4">
-                                    <input
-                                        type="range"
-                                        min="0.5"
-                                        max="2.0"
-                                        step="0.05"
-                                        value={eraConfig.mergeThreshold}
-                                        onChange={async (e) => {
-                                            const val = parseFloat(e.target.value);
-                                            setEraConfig(prev => ({ ...prev, mergeThreshold: val }));
-                                            // @ts-ignore
-                                            const current = await window.ipcRenderer.invoke('ai:getSettings');
-                                            // @ts-ignore
-                                            await window.ipcRenderer.invoke('ai:saveSettings', { ...current, eraMergeThreshold: val });
-                                        }}
-                                        className="w-full accent-indigo-500"
-                                    />
-                                    <span className="text-sm font-mono text-indigo-400 w-12 text-right">{eraConfig.mergeThreshold.toFixed(2)}</span>
-                                </div>
-                            </div>
-
-                            <div>
-                                <h4 className="font-medium text-white mb-1">Minimum Faces per Era</h4>
-                                <p className="text-sm text-gray-400 mb-3">
-                                    Minimum number of confirmed faces required to justify creating a separate Era.
-                                </p>
-                                <div className="flex items-center gap-4">
-                                    <input
-                                        type="range"
-                                        min="10"
-                                        max="500"
-                                        step="10"
-                                        value={eraConfig.minFaces}
-                                        onChange={async (e) => {
-                                            const val = parseInt(e.target.value);
-                                            setEraConfig(prev => ({ ...prev, minFaces: val }));
-                                            // @ts-ignore
-                                            const current = await window.ipcRenderer.invoke('ai:getSettings');
-                                            // @ts-ignore
-                                            await window.ipcRenderer.invoke('ai:saveSettings', { ...current, minFacesForEra: val });
-                                        }}
-                                        className="w-full accent-indigo-500"
-                                    />
-                                    <span className="text-sm font-mono text-indigo-400 w-12 text-right">{eraConfig.minFaces}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
+                    <EraGenerationSection
+                        eraConfig={ai.eraConfig}
+                        onMergeThresholdChange={ai.changeEraMergeThreshold}
+                        onMinFacesChange={ai.changeEraMinFaces}
+                    />
 
                     <SmartAssignmentSection />
                 </div>
