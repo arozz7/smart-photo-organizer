@@ -80,7 +80,7 @@ export default function CreativeOperationsBar({
         } else {
             onApplyOp(op, extra)
         }
-    }, [isActive, onApplyOp, onDeactivateOp]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [isActive, onApplyOp, onDeactivateOp])
 
     // Debounced slider re-apply for a compound button that is already active.
     function sliderChange(
