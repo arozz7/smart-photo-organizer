@@ -2,16 +2,8 @@ import { useState, useEffect } from 'react'
 import { useAlert } from '../../context/AlertContext';
 import SettingsSection from './SettingsSection';
 
-interface LibraryStorageSectionProps {
-    /**
-     * Called when the user confirms a library move. The Settings screen uses it to set the
-     * shared "busy" flag that also disables Clear Tags (existing behaviour, kept as is).
-     */
-    onMoveStarted: () => void
-}
-
 /** Library Storage: shows the library location and moves it to another folder. */
-export default function LibraryStorageSection({ onMoveStarted }: LibraryStorageSectionProps) {
+export default function LibraryStorageSection() {
     const { showAlert, showConfirm } = useAlert();
     const [movingLibrary, setMovingLibrary] = useState(false)
     const [libraryPath, setLibraryPath] = useState(localStorage.getItem('libraryPath') || '')
@@ -49,7 +41,6 @@ export default function LibraryStorageSection({ onMoveStarted }: LibraryStorageS
                                         description: `Move library to:\n${path}\n\nThis may take several minutes for large libraries. The application will pause while moving files.`,
                                         confirmLabel: 'Move Library',
                                         onConfirm: async () => {
-                                            onMoveStarted();
                                             setMovingLibrary(true);
 
                                             try {

@@ -30,7 +30,8 @@ New shared piece: `components/settings/SettingsSection.tsx` (the titled `<sectio
 - AI settings are still read once on mount (shared `useAiSettings`), not once per section.
 - Each AI change is still saved merged with the stored settings (`ai:getSettings`, then `ai:saveSettings`).
 - The Factory Reset dialog is mounted only while open, so its input starts empty each time, as before.
-- **Existing quirk kept on purpose:** starting a library move sets the same "busy" flag as Clear Tags, and nothing resets it. After a failed move the Clear Tags button stays on "Clearing...". A test documents this. It is a separate bug to fix in its own change, not part of a move.
+- **Bug fixed in a follow-up commit:** starting a library move used to set the Clear Tags busy flag and nothing reset it, so after a failed move Clear Tags stayed on "Clearing...". The flag now belongs only to Clear Tags (`useDatabaseMaintenance`); the move has its own blocking modal. The test that documented the quirk now asserts Clear Tags stays available after a failed move.
+- Also removed two unused `eslint-disable` directives (`CreativeOperationsBar.tsx`, `useSegmentation.ts`) that made `npm run lint` report 2 errors on `main`.
 
 ## Assumptions and risks
 - No manual check in the running app yet: the test environment is happy-dom, so real layout is unverified. Checklist: open Settings, confirm both columns and the full-width Integrations / Health blocks look as before, open the models dialog, scan warnings dialog and Factory Reset dialog.

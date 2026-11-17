@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import SettingsSection from '../components/settings/SettingsSection';
 import PreviewManager from '../components/settings/PreviewManager';
 import LibraryStorageSection from '../components/settings/LibraryStorageSection';
@@ -12,8 +11,6 @@ import HealthLogsSection from '../components/settings/HealthLogsSection';
 import { useAiSettings } from '../hooks/useAiSettings';
 
 export default function Settings() {
-    // Shared busy flag: set while Clear Tags runs and (existing behaviour) when a library move starts.
-    const [clearing, setClearing] = useState(false)
     const ai = useAiSettings();
 
     return (
@@ -25,7 +22,7 @@ export default function Settings() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl w-full">
                 {/* Left Column */}
                 <div className="space-y-8">
-                    <LibraryStorageSection onMoveStarted={() => setClearing(true)} />
+                    <LibraryStorageSection />
 
                     <AiPerformanceSection
                         aiProfile={ai.aiProfile}
@@ -51,7 +48,7 @@ export default function Settings() {
                         <PreviewManager />
                     </SettingsSection>
 
-                    <DatabaseManagementSection clearing={clearing} onClearingChange={setClearing} />
+                    <DatabaseManagementSection />
                 </div>
             </div>
 

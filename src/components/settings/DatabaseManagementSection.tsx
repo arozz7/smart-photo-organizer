@@ -5,16 +5,10 @@ import SettingsSection from './SettingsSection';
 import FactoryResetModal from './FactoryResetModal';
 import { useDatabaseMaintenance } from '../../hooks/useDatabaseMaintenance';
 
-interface DatabaseManagementSectionProps {
-    /** True while Clear Tags (or a library move) is running; disables the Clear Tags button. */
-    clearing: boolean
-    onClearingChange: (clearing: boolean) => void
-}
-
 /** Database Management: tag cleanup, face maintenance, factory reset, blur scores and face data health. */
-export default function DatabaseManagementSection({ clearing, onClearingChange }: DatabaseManagementSectionProps) {
+export default function DatabaseManagementSection() {
     const { calculatingBlur, blurProgress, calculateBlurScores } = useAI();
-    const { message, clearAiTags, cleanupTags, removeDuplicateFaces } = useDatabaseMaintenance(onClearingChange);
+    const { message, clearing, clearAiTags, cleanupTags, removeDuplicateFaces } = useDatabaseMaintenance();
     const [showResetConfirm, setShowResetConfirm] = useState(false)
 
     return (

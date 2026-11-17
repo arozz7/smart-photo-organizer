@@ -5,12 +5,12 @@ import { useAlert } from '../context/AlertContext'
  * Confirmed database maintenance actions from the Settings screen:
  * clear AI tags, normalise tags and remove duplicate faces.
  *
- * `onBusyChange` reports the "clearing" state of Clear Tags to the screen, which shares that flag
- * with the library move (see LibraryStorageSection).
+ * `clearing` is true while Clear Tags is running.
  */
-export function useDatabaseMaintenance(onBusyChange: (busy: boolean) => void) {
+export function useDatabaseMaintenance() {
     const { showAlert, showConfirm } = useAlert();
     const [message, setMessage] = useState('')
+    const [clearing, setClearing] = useState(false)
 
     const clearAiTags = () => {
         showConfirm({
@@ -19,7 +19,7 @@ export function useDatabaseMaintenance(onBusyChange: (busy: boolean) => void) {
             confirmLabel: 'Delete All Tags',
             variant: 'danger',
             onConfirm: async () => {
-                onBusyChange(true)
+                setClearing(true)
                 try {
                     // @ts-ignore
                     const result = await window.ipcRenderer.invoke('db:clearAITags')
@@ -31,7 +31,7 @@ export function useDatabaseMaintenance(onBusyChange: (busy: boolean) => void) {
                 } catch (error) {
                     setMessage('Error invoking command: ' + error)
                 } finally {
-                    onBusyChange(false)
+                    setClearing(false)
                 }
             }
         });
@@ -94,5 +94,5 @@ export function useDatabaseMaintenance(onBusyChange: (busy: boolean) => void) {
         });
     }
 
-    return { message, clearAiTags, cleanupTags, removeDuplicateFaces }
+    return { message, clearing, clearAiTags, cleanupTags, removeDuplicateFaces }
 }

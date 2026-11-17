@@ -298,9 +298,8 @@ describe('Settings view', () => {
         expect(showConfirm).not.toHaveBeenCalled();
     });
 
-    // Current behaviour, kept on purpose: starting a library move sets the Clear Tags busy flag
-    // and nothing resets it, so after a failed move the button stays on "Clearing...".
-    it('leaves Clear Tags busy after a failed library move (existing behaviour)', async () => {
+    // A library move has its own blocking modal; it must not touch the Clear Tags busy state.
+    it('keeps Clear Tags available after a failed library move', async () => {
         installIpc({
             'dialog:openDirectory': () => 'E:\\NewLibrary',
             'settings:moveLibrary': () => ({ success: false, error: 'disk full' }),
@@ -311,7 +310,8 @@ describe('Settings view', () => {
         await waitFor(() => expect(showConfirm).toHaveBeenCalled());
         await showConfirm.mock.calls[0][0].onConfirm();
 
-        await waitFor(() => expect(screen.getByRole('button', { name: 'Clearing...' })).toBeDisabled());
+        await waitFor(() => expect(showAlert).toHaveBeenCalledWith(expect.objectContaining({ title: 'Move Failed' })));
+        expect(screen.getByRole('button', { name: 'Clear Tags' })).toBeEnabled();
     });
 
     it('stores the chosen Photo Repair Shop executable', async () => {
