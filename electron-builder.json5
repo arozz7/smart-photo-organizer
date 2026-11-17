@@ -28,7 +28,8 @@
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {
-    "icon": "build/icon.png",
+    // build/icon.png is really a JPEG; electron-builder 26 requires a real PNG, so use the converted copy.
+    "icon": "build/icon-1024.png",
     "target": [
       {
         "target": "7z",
