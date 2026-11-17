@@ -12,6 +12,8 @@
     "dist",
     "dist-electron"
   ],
+  // Removes better-sqlite3 binaries for other operating systems from the packaged copy (see the script).
+  "afterPack": "scripts/release/afterPack.cjs",
   "extraResources": [
     {
       "from": "python-dist",

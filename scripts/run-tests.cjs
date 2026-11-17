@@ -74,13 +74,16 @@ try {
 
 // --- Step 3: Restore Electron binary ---
 console.log('[run-tests] Restoring Electron binary...');
+let restoreFailed = false;
 try {
     execFileSync(process.execPath, [electronRebuildCli, '-f', '-w', 'better-sqlite3'], {
         cwd: root,
         stdio: 'inherit',
     });
 } catch (e) {
-    console.warn('[run-tests] electron-rebuild failed (app may need a manual rebuild):', e.message);
+    restoreFailed = true;
+    console.error('[run-tests] electron-rebuild FAILED: the app is left with a Node-built better-sqlite3 and will not start until it is rebuilt.', e.message);
 }
 
-process.exit(vitestExitCode);
+// A broken Electron build must fail the run too, even when every test passed.
+process.exit(vitestExitCode || (restoreFailed ? 2 : 0));

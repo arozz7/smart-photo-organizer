@@ -61,6 +61,8 @@ models/
 dist/
 dist-electron/
 release/
+# scripts/release/ holds source (packaging hooks), not build output
+!/scripts/release/
 python-dist/
 build-temp/
 *.exe
