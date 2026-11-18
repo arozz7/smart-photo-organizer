@@ -27,6 +27,8 @@ import { BackgroundVerificationService } from './core/services/BackgroundVerific
 import { BackgroundPropagationService } from './core/services/BackgroundPropagationService';
 import { BackgroundDuplicateCheckerService } from './core/services/BackgroundDuplicateCheckerService';
 import { BackgroundFileIdentityService } from './core/services/BackgroundFileIdentityService';
+import { BackgroundFaissSyncService } from './core/services/BackgroundFaissSyncService';
+import { createFaissSyncDeps } from './core/services/FaissIndexService';
 import { AppStateRepository } from './data/repositories/AppStateRepository';
 import { BucketRepository } from './data/repositories/BucketRepository';
 import { ServiceManager } from './core/services/ServiceManager';
@@ -142,6 +144,10 @@ app.whenReady().then(async () => {
   const fileIdentityService = new BackgroundFileIdentityService();
   fileIdentityService.start();
 
+  // Start Background FAISS Sync Service: keeps the face search index in step with the named faces
+  const faissSyncService = new BackgroundFaissSyncService(createFaissSyncDeps());
+  faissSyncService.start();
+
   // Register Services
   const serviceManager = ServiceManager.getInstance();
   serviceManager.register('PythonAIProvider', pythonProvider);
@@ -150,6 +156,7 @@ app.whenReady().then(async () => {
   serviceManager.register('BackgroundPropagationService', propagationService);
   serviceManager.register('BackgroundDuplicateCheckerService', duplicateCheckerService);
   serviceManager.register('BackgroundFileIdentityService', fileIdentityService);
+  serviceManager.register('BackgroundFaissSyncService', faissSyncService);
   serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();

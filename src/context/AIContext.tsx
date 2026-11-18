@@ -448,21 +448,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                         }))
                     });
 
-                    // 2. Add to Vector Index (Immediate)
-                    if (dbFaces.success && dbFaces.ids && dbFaces.ids.length === faces.length) {
-                        const newVectors = faces.map((f: any) => f.descriptor);
-                        const newIds = dbFaces.ids;
-
-                        // @ts-ignore
-                        window.ipcRenderer.invoke('ai:addFacesToVectorIndex', {
-                            vectors: newVectors,
-                            ids: newIds
-                        }).then(() => {
-                            // Refresh status to show updated count immediately
-                            fetchSystemStatus();
-                        }).catch((err: any) => console.error("Failed to update in-memory index:", err));
-                    }
-
+                    // 2. The vector index is NOT updated here. It holds only faces that belong to named people, and a
+                    // freshly scanned face has none yet. (This used to call ai:addFacesToVectorIndex with a payload
+                    // the AI backend ignored, so it never did anything.) BackgroundFaissSyncService keeps the index
+                    // in step with the named faces.
 
                 }
 
