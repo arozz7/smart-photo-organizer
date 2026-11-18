@@ -15,8 +15,9 @@ import logger from '../../logger';
  *   2. Near pass   — groups photos whose pHash Hamming distance ≤ threshold
  *                    (delegated to Python group_near_duplicates).
  *
- * Runs once per app session after a startup delay, then again whenever new
- * photos are scanned (triggered by the `duplicateCheckDirty` app-state flag).
+ * Runs after a startup delay only if a full check has never completed on this library, and again whenever new
+ * hashes were computed (new photos) or the user asks for it (the `duplicate_check_dirty` app-state flag).
+ * It does not repeat at every launch: the near pass compares every pair of photos.
  */
 export class BackgroundDuplicateCheckerService implements IService {
     private isRunning = false;
@@ -30,6 +31,11 @@ export class BackgroundDuplicateCheckerService implements IService {
     private readonly sha256BatchSize = 100;      // SHA-256 is fast — large batches OK
     private readonly phashBatchSize = 20;        // pHash calls Python — keep batches small
     private readonly nearDuplicateThreshold = 10; // Hamming distance (0–64)
+    private readonly nearPassTimeoutMs = 300_000;   // Python handles one request at a time; allow for large libraries
+    private readonly failedCheckRetryDelayMs = 30 * 60_000; // wait this long before retrying a failed check
+
+    /** Do not start another duplicate check before this time (set after a failed one). */
+    private retryNotBeforeMs = 0;
 
     constructor(private readonly aiProvider: PythonAIProvider) {}
 
@@ -53,8 +59,11 @@ export class BackgroundDuplicateCheckerService implements IService {
     }
 
     private async loop() {
-        // Seed the dirty flag so the first run always executes
-        AppStateRepository.markDuplicateCheckDirty();
+        // A library that has never finished a full check gets one (this also covers libraries whose near
+        // pass only ever timed out). Otherwise only new hashes or an explicit request trigger a check.
+        if (!AppStateRepository.hasCompletedDuplicateCheck()) {
+            AppStateRepository.markDuplicateCheckDirty();
+        }
 
         while (!this.shouldStop) {
             try {
@@ -82,7 +91,7 @@ export class BackgroundDuplicateCheckerService implements IService {
                 }
 
                 // --- Duplicate detection (only when signalled) ---
-                if (!AppStateRepository.isDuplicateCheckDirty()) {
+                if (!AppStateRepository.isDuplicateCheckDirty() || Date.now() < this.retryNotBeforeMs) {
                     await this.sleep(this.idleIntervalMs);
                     continue;
                 }
@@ -94,9 +103,17 @@ export class BackgroundDuplicateCheckerService implements IService {
                 await this.sleep(2000);
                 if (this.shouldStop) break;
 
-                await this.runNearPass();
-
-                logger.info('[BackgroundDuplicateCheckerService] Duplicate check complete.');
+                const nearPassOk = await this.runNearPass();
+                if (nearPassOk) {
+                    AppStateRepository.markDuplicateCheckCompleted();
+                    logger.info('[BackgroundDuplicateCheckerService] Duplicate check complete.');
+                } else {
+                    // Keep it pending, but not before a long pause: a failing check must not block the AI
+                    // backend again every minute.
+                    AppStateRepository.markDuplicateCheckDirty();
+                    this.retryNotBeforeMs = Date.now() + this.failedCheckRetryDelayMs;
+                    logger.warn('[BackgroundDuplicateCheckerService] Duplicate check did not finish; will retry later.');
+                }
                 await this.sleep(this.idleIntervalMs);
 
             } catch (error) {
@@ -120,12 +137,14 @@ export class BackgroundDuplicateCheckerService implements IService {
 
         logger.info(`[BackgroundDuplicateCheckerService] SHA-256 backfill: processing ${photos.length} photos…`);
 
+        let anyHashed = false;
         for (const photo of photos) {
             if (this.shouldStop) break;
             try {
                 const hash = await this.hashFile(photo.file_path);
                 if (hash) {
                     PhotoRepository.updatePhotoSha256(photo.id, hash);
+                    anyHashed = true;
                 } else {
                     // Unreadable/corrupt file — record once so it stops being
                     // retried on every backfill cycle (see getPhotosNeedingSha256).
@@ -137,6 +156,7 @@ export class BackgroundDuplicateCheckerService implements IService {
                 PhotoRepository.recordScanError(photo.id, photo.file_path, String(e), 'SHA256 Hash');
             }
         }
+        if (anyHashed) AppStateRepository.markDuplicateCheckDirty(); // new hashes: duplicates may have appeared
 
         return photos.length;
     }
@@ -162,6 +182,7 @@ export class BackgroundDuplicateCheckerService implements IService {
             for (const r of results) {
                 PhotoRepository.updatePhotoPhash(r.id, r.phash);
             }
+            if (results.length > 0) AppStateRepository.markDuplicateCheckDirty(); // new hashes: duplicates may have appeared
             logger.info(`[BackgroundDuplicateCheckerService] pHash backfill: ${results.length}/${photos.length} succeeded.`);
 
             // Anything requested but not returned failed (usually an unreadable/
@@ -220,9 +241,9 @@ export class BackgroundDuplicateCheckerService implements IService {
      * Near pass: fetch all pHashes, delegate Hamming clustering to Python,
      * then create groups for clusters of ≥ 2 un-grouped photos.
      */
-    private async runNearPass() {
+    private async runNearPass(): Promise<boolean> {
         const entries = PhotoRepository.getPhotosWithPhash();
-        if (entries.length < 2) return;
+        if (entries.length < 2) return true;
 
         logger.info(`[BackgroundDuplicateCheckerService] Near pass: clustering ${entries.length} pHashes (threshold=${this.nearDuplicateThreshold})...`);
 
@@ -231,11 +252,11 @@ export class BackgroundDuplicateCheckerService implements IService {
             result = await this.aiProvider.sendRequest(
                 'group_near_duplicates',
                 { entries, threshold: this.nearDuplicateThreshold },
-                60_000
+                this.nearPassTimeoutMs
             );
         } catch (e) {
             logger.error('[BackgroundDuplicateCheckerService] Near-duplicate Python call failed:', e);
-            return;
+            return false;
         }
 
         const clusters: number[][] = result?.groups ?? [];
@@ -260,6 +281,7 @@ export class BackgroundDuplicateCheckerService implements IService {
             PhotoRepository.setDuplicateGroup(ungrouped, groupId);
             logger.info(`[BackgroundDuplicateCheckerService] Created near group ${groupId} with ${ungrouped.length} photos.`);
         }
+        return !this.shouldStop; // stopped part-way: not complete, so it runs again next time
     }
 
     private sleep(ms: number) {
