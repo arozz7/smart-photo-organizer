@@ -7,7 +7,10 @@ logger = logging.getLogger('ai_engine.faces')
 
 # --- GLOBALS & CONFIG ---
 app = None
-AI_MODE = "CPU"
+# AI_MODE is only known for sure once face detection has initialised. Until then it holds this marker, and
+# get_ai_mode() predicts the mode the same way init_insightface will decide it.
+UNINITIALISED_MODE = "UNKNOWN"
+AI_MODE = UNINITIALISED_MODE
 CURRENT_PROVIDERS = None
 ALLOWED_MODULES = None
 LAST_CONFIG = None
@@ -134,6 +137,23 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
         logger.error(f"Failed to init InsightFace: {e}")
         import traceback
         traceback.print_exc()
+
+def get_ai_mode() -> str:
+    """
+    The AI mode to show: "GPU", "CPU" or "SAFE_MODE".
+
+    After face detection has initialised this is the real mode. Before that (a fresh session with no photo
+    processed yet) it is predicted exactly as init_insightface decides: the CUDA provider is used when PyTorch
+    reports CUDA available. The first call may load PyTorch, which the AI backend loads for the vision model anyway.
+    """
+    if AI_MODE != UNINITIALISED_MODE:
+        return AI_MODE
+    try:
+        torch_lib = get_torch()
+        return "GPU" if torch_lib is not None and torch_lib.cuda.is_available() else "CPU"
+    except Exception:
+        return "CPU"
+
 
 def calculate_mean_embedding(descriptors):
     """

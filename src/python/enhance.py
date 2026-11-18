@@ -18,6 +18,8 @@ def get_heavy_libs():
 import tqdm
 import piexif
 
+from facelib import utils as runtime_utils
+
 # Model Weights URLs
 MODEL_URLS = {
     'RealESRGAN_x4plus': 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth',
@@ -40,10 +42,13 @@ class Enhancer:
         if not url:
             raise ValueError(f"Unknown model: {model_name}")
         
-        save_path = os.path.join(WEIGHTS_DIR, f"{model_name}.pth")
-        if os.path.exists(save_path):
-            return save_path
-            
+        existing = runtime_utils.find_enhancement_weights(model_name, WEIGHTS_DIR)
+        if existing:
+            return existing
+
+        save_path = runtime_utils.enhancement_weights_save_path(model_name, WEIGHTS_DIR)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
         print(f"Downloading {model_name} from {url}...")
         response = requests.get(url, stream=True)
         response.raise_for_status()
@@ -86,8 +91,8 @@ class Enhancer:
         if self.current_model_name == model_name and self.upsampler:
             return
 
-        model_path = os.path.join(WEIGHTS_DIR, f"{model_name}.pth")
-        if not os.path.exists(model_path):
+        model_path = runtime_utils.find_enhancement_weights(model_name, WEIGHTS_DIR)
+        if not model_path:
              # Auto-download or raise error? Plan said "On-Demand Download" via UI.
              # But here we might want to fail if not found so UI knows to prompt download.
              # OR: self._download_model(model_name) if we want convenience. 
@@ -108,8 +113,8 @@ class Enhancer:
         self.current_model_name = model_name
 
     def load_gfpgan(self):
-        model_path = os.path.join(WEIGHTS_DIR, 'GFPGANv1.4.pth')
-        if not os.path.exists(model_path):
+        model_path = runtime_utils.find_enhancement_weights('GFPGANv1.4', WEIGHTS_DIR)
+        if not model_path:
              raise FileNotFoundError("GFPGANv1.4 model not found.")
         
         RRDBNet, RealESRGANer, GFPGANer, torch = get_heavy_libs()

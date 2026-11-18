@@ -58,7 +58,7 @@ async def health_check():
         import facelib.faces as faces
         health["models"]["insightface"] = {
             "loaded": faces.app is not None,
-            "mode": faces.AI_MODE if hasattr(faces, "AI_MODE") else "unknown"
+            "mode": faces.get_ai_mode() if hasattr(faces, "get_ai_mode") else "unknown"
         }
     except Exception as e:
         health["models"]["insightface"] = {"loaded": False, "error": str(e)}
