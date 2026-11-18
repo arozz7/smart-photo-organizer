@@ -172,7 +172,7 @@ def handle_command(command):
         response = {
             "type": "pong", 
             "timestamp": time.time(),
-            "aiMode": faces.AI_MODE,
+            "aiMode": faces.get_ai_mode(),
             "vlmEnabled": vlm.VLM_ENABLED if hasattr(vlm, 'VLM_ENABLED') else (utils.get_torch() is not None)
         }
 
@@ -204,8 +204,9 @@ def handle_command(command):
             }
 
             for name, url in enhance.MODEL_URLS.items():
-                m_path = os.path.join(enhance.WEIGHTS_DIR, f"{name}.pth")
-                exists = os.path.exists(m_path)
+                found = utils.find_enhancement_weights(name, enhance.WEIGHTS_DIR)
+                exists = found is not None
+                m_path = found if exists else utils.enhancement_weights_save_path(name, enhance.WEIGHTS_DIR)
                 models_info[name] = {
                     "exists": exists,
                     "url": url,

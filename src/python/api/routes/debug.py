@@ -211,7 +211,7 @@ async def get_config():
             "temperature": vlm.VLM_TEMP if hasattr(vlm, "VLM_TEMP") else 0.1,
             "max_tokens": vlm.VLM_MAX_TOKENS if hasattr(vlm, "VLM_MAX_TOKENS") else 100,
         },
-        "ai_mode": faces.AI_MODE if hasattr(faces, "AI_MODE") else "unknown",
+        "ai_mode": faces.get_ai_mode() if hasattr(faces, "get_ai_mode") else "unknown",
     }
 
 
