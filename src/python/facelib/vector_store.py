@@ -14,6 +14,18 @@ id_map = {} # FAISS ID Map
 index_file = os.path.join(LIBRARY_PATH, 'vectors.index')
 id_map_file = os.path.join(LIBRARY_PATH, 'id_map.pkl')
 
+# An IVF index visits only "nprobe" of its lists per search. FAISS defaults to 1 and does not store the setting in the
+# file, so a search missed neighbours near a list's edge: on a real 3,407-face library it found the true nearest face
+# 86% of the time at 1, 99% at 4 and 100% at 10. 16 is cheap at this scale and leaves room for larger libraries.
+IVF_SEARCH_LISTS = 16
+
+
+def _set_search_depth(idx):
+    """Makes an IVF index visit more than one list per search. Other index types are left unchanged."""
+    nlist = getattr(idx, 'nlist', None)
+    if nlist:
+        idx.nprobe = min(int(nlist), IVF_SEARCH_LISTS)
+
 def init_faiss():
     global index, id_map
     logger.info("Initializing FAISS...")
@@ -25,6 +37,7 @@ def init_faiss():
     try:
         if os.path.exists(index_file):
             index = faiss_lib.read_index(index_file)
+            _set_search_depth(index)
             if os.path.exists(id_map_file):
                 with open(id_map_file, 'rb') as f:
                     id_map = pickle.load(f)
@@ -180,6 +193,7 @@ def rebuild_index(descriptors, ids):
         for i, face_id in enumerate(ids):
             new_id_map[i] = face_id
             
+    _set_search_depth(new_index)
     index = new_index
     id_map = new_id_map
     save_faiss()

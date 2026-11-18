@@ -95,6 +95,8 @@ def cluster_faces(payload, req_id=None):
                 f"min_cohesion={min_cohesion}, max_spread={max_spread}"
             )
             cohesive_clusters = []
+            # Per-group details are DEBUG: a whole-library run has thousands of groups, and one INFO line each
+            # (also forwarded into the app log) made the logs rotate within an hour.
             for idx, cluster in enumerate(cluster_list):
                 member_idxs = [id_to_idx[fid] for fid in cluster if fid in id_to_idx]
                 if not member_idxs:
@@ -107,22 +109,26 @@ def cluster_faces(payload, req_id=None):
                 distances = np.linalg.norm(cluster_descriptors - centroid, axis=1)
                 spread = float(np.max(distances))
 
-                logger.info(
+                logger.debug(
                     f"  Cluster {idx}: size={len(cluster)}, "
                     f"magnitude={magnitude:.3f}, spread={spread:.3f}"
                 )
 
                 if min_cohesion > 0.0 and magnitude < min_cohesion:
-                    logger.info(
+                    logger.debug(
                         f"  -> DEMOTED (magnitude {magnitude:.3f} < {min_cohesion})"
                     )
                     continue
                 if max_spread > 0.0 and spread > max_spread:
-                    logger.info(
+                    logger.debug(
                         f"  -> DEMOTED (spread {spread:.3f} > {max_spread})"
                     )
                     continue
                 cohesive_clusters.append(cluster)
+            logger.info(
+                f"Cluster quality filter kept {len(cohesive_clusters)} of {len(cluster_list)} clusters "
+                f"({len(cluster_list) - len(cohesive_clusters)} demoted)"
+            )
             cluster_list = cohesive_clusters
 
         # Identify singles (all IDs not in flattened cluster list)

@@ -9,6 +9,8 @@ import { getDB, getDBLock } from '../db';
 import { FaceRepository } from '../data/repositories/FaceRepository';
 import { FaceService } from '../core/services/FaceService';
 import { ConfigService } from '../core/services/ConfigService';
+import { rebuildFaceIndexFromNamedFaces } from '../core/services/FaissIndexService';
+import { toIndexFaces } from '../core/services/faissSync';
 
 const REVIEW_NEEDED_MIN_COHESION = 0.40;
 
@@ -281,57 +283,8 @@ export function registerAIHandlers() {
 
     ipcMain.handle('ai:rebuildIndex', async () => {
         try {
-            // CRITICAL: Only index faces that belong to named people
-            // This ensures FAISS matches return valid person IDs for auto-assign
-            const faces = FaceRepository.getNamedFaceDescriptors();
-            logger.info(`[Main] Rebuilding FAISS index with ${faces.length} named person faces`);
-
-            // Use streaming JSON write to avoid RangeError with large arrays
-            // JSON.stringify() on 53K+ faces exceeds JavaScript's string length limit
-            const fsSync = await import('fs');
-            const fs = await import('fs/promises');
-            const os = await import('os');
-            const path = await import('path');
-
-            const dataPath = path.join(os.tmpdir(), `spo_rebuild_index_${Date.now()}.json`);
-
-            let result: any;
-            try {
-                // Stream JSON to file - write each face individually to avoid memory limit
-                const writeStream = fsSync.createWriteStream(dataPath, { encoding: 'utf-8' });
-
-                await new Promise<void>((resolve, reject) => {
-                    writeStream.on('error', reject);
-
-                    writeStream.write('{"faces":[');
-
-                    for (let i = 0; i < faces.length; i++) {
-                        const face = faces[i];
-                        const faceJson = JSON.stringify({ id: face.id, descriptor: face.descriptor });
-
-                        if (i > 0) writeStream.write(',');
-                        writeStream.write(faceJson);
-                    }
-
-                    writeStream.write(']}');
-                    writeStream.end(() => resolve());
-                });
-
-                logger.info(`[Main] Wrote ${faces.length} faces to temp file for rebuild`);
-                result = await pythonProvider.sendRequest('rebuild_index', { dataPath }, 600000);
-            } finally {
-                // Cleanup temp file
-                try { await fs.unlink(dataPath); } catch { /* ignore */ }
-            }
-
-            // Reset stale count after successful rebuild
-            if (result && result.success !== false) {
-                const { resetFaissStaleCount } = await import('../store');
-                resetFaissStaleCount();
-                logger.info('[Main] FAISS stale count reset after successful rebuild');
-            }
-
-            return result;
+            // Only faces that belong to named people are indexed (see FaissIndexService).
+            return await rebuildFaceIndexFromNamedFaces();
         } catch (e) {
             logger.error(`[Main] FAISS rebuild failed: ${e}`);
             return { success: false, error: String(e) };
@@ -365,7 +318,8 @@ export function registerAIHandlers() {
     });
 
     ipcMain.handle('ai:addFacesToVectorIndex', async (_event, { vectors, ids }) => {
-        return await pythonProvider.sendRequest('add_faces_to_vector_index', { vectors, ids }, 180000);
+        // The AI backend reads { faces: [{ id, descriptor }] }; it ignores any other shape and still reports success.
+        return await pythonProvider.sendRequest('add_faces_to_vector_index', { faces: toIndexFaces(vectors, ids) }, 180000);
     });
 
     ipcMain.handle('ai:getUnassignedCount', async () => {
