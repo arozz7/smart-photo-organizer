@@ -511,7 +511,8 @@ npm run dev
 
 ## Releasing (Maintainers)
 
-1. **Build:** Run `npm run build`. This produces the installer (e.g., `release/0.8.1/...-Setup.7z`).
+0. **Bump the version first, for every build you will run.** Output goes to `release/<version>/`, so an unchanged version overwrites the previous build, and the version shown inside the app comes from `package.json`. Use `npm version <x.y.z> --no-git-tag-version` (updates `package.json` and the lockfile). For a real GitHub release also update the fallback runtime URLs in `src/python/commands/utilities.py` and `src/python/main.py` to the new tag, since the runtime asset is downloaded from the release with that tag.
+1. **Build:** Run `npm run build`. This produces the installer (e.g., `release/0.8.2/...-Setup.7z`). From a bash shell, run the steps by hand instead: `node scripts/build-python.js`, `node node_modules/typescript/bin/tsc`, `node node_modules/vite/bin/vite.js build`, `node node_modules/electron-builder/cli.js --win --x64`. Smoke-test the built app against a scratch data folder (`--user-data-dir=<folder>`) before touching a real library.
 2. **GPU Runtime:** The GPU Runtime is **not** bundled in the installer to keep it slim. Reference or create a separate `ai-runtime-win-x64.zip` containing the `bin` and `lib` directories.
 3. **GitHub Release:**
    - Create a release tagged `vX.X.X`.
