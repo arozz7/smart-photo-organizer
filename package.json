@@ -1,7 +1,7 @@
 {
   "name": "smart-photo-organizer",
   "private": true,
-  "version": "0.8.1",
+  "version": "0.8.4",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "scripts": {
@@ -30,7 +30,6 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "@tensorflow/tfjs": "^4.22.0",
     "@vladmandic/face-api": "^1.7.15",
     "@vladmandic/human": "^3.3.6",
     "better-sqlite3": "13.2.0",

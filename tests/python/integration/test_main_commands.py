@@ -34,6 +34,17 @@ def test_ping_command(mocker):
     assert "aiMode" in response
     assert "vlmEnabled" in response
 
+
+def test_ping_reports_a_real_ai_mode_even_before_any_photo_was_processed(mocker):
+    # A fresh backend has not initialised face detection yet; the mode must still be a real one, never a
+    # hard-coded "CPU" or the "Starting AI..." marker, so the status badge is right from the first ping.
+    mocker.patch.object(main.faces, "AI_MODE", main.faces.UNINITIALISED_MODE)
+    mocker.patch.object(main.faces, "get_torch", return_value=None)
+
+    response = main.handle_command({"type": "ping", "payload": {}})
+
+    assert response["aiMode"] in ("GPU", "CPU", "SAFE_MODE")
+
 def test_health_check_command(mock_ai_modules):
     cmd = {"type": "health_check", "payload": {}}
     response = main.handle_command(cmd)

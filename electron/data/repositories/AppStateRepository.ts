@@ -210,4 +210,17 @@ export class AppStateRepository {
     static clearDuplicateCheckDirty(): void {
         this.setFlag('duplicate_check_dirty', '0');
     }
+
+    /**
+     * True once a full duplicate check (exact and near pass) has finished on this library.
+     * The "_v2" marks the vectorised near pass: a library whose near pass only ever timed out on the old
+     * implementation gets exactly one fresh run.
+     */
+    static hasCompletedDuplicateCheck(): boolean {
+        return this.getFlag('duplicate_check_completed_v2') === '1';
+    }
+
+    static markDuplicateCheckCompleted(): void {
+        this.setFlag('duplicate_check_completed_v2', '1');
+    }
 }

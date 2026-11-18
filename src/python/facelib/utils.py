@@ -201,6 +201,31 @@ def get_faiss():
     except ImportError:
         return None
 
+def find_enhancement_weights(model_name: str, legacy_dir: str):
+    """
+    Path of an existing enhancement model file (RealESRGAN / GFPGAN, `<model_name>.pth`), or None.
+
+    Looks in the AI runtime's models folder first (next to AdaFace and SAM 3; it survives every new version
+    folder), then in `legacy_dir`, the folder next to the code where earlier versions saved them.
+    """
+    candidates = (
+        os.path.join(AI_RUNTIME_PATH, 'models', f"{model_name}.pth"),
+        os.path.join(legacy_dir, f"{model_name}.pth"),
+    )
+    return next((path for path in candidates if os.path.exists(path)), None)
+
+
+def enhancement_weights_save_path(model_name: str, legacy_dir: str) -> str:
+    """
+    Where a new enhancement model download is saved: the AI runtime's models folder when the AI runtime is
+    installed, otherwise `legacy_dir`. Never creates the runtime folder itself: its existence is what marks the
+    GPU runtime as installed.
+    """
+    if os.path.isdir(AI_RUNTIME_PATH):
+        return os.path.join(AI_RUNTIME_PATH, 'models', f"{model_name}.pth")
+    return os.path.join(legacy_dir, f"{model_name}.pth")
+
+
 def get_model_status(model_urls, weights_dir, runtime_url: str | None = None, torch_cuda_ready: bool = False):
     """
     Returns a dictionary of model status information.
@@ -208,7 +233,8 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None, to
 
     Args:
         model_urls:   Dict of enhancement model name → download URL (from enhance.MODEL_URLS).
-        weights_dir:  Directory where .pth enhancement models are stored.
+        weights_dir:  Legacy directory (next to the code) where earlier versions stored the .pth enhancement
+                      models; they are also looked for in the AI runtime's models folder.
         runtime_url:  Version-correct AI Runtime download URL passed from Electron (uses
                       app.getVersion()). Falls back to a placeholder when not provided.
         torch_cuda_ready: True when CUDA PyTorch is already usable in this Python process (e.g. a
@@ -233,8 +259,9 @@ def get_model_status(model_urls, weights_dir, runtime_url: str | None = None, to
 
     # 2. Enhancement Models (GFPGAN, etc) from enhance module
     for name, url in model_urls.items():
-        m_path = os.path.join(weights_dir, f"{name}.pth")
-        exists = os.path.exists(m_path)
+        found = find_enhancement_weights(name, weights_dir)
+        exists = found is not None
+        m_path = found if exists else enhancement_weights_save_path(name, weights_dir)
         models_info[name] = {
             "exists": exists,
             "url": url,
