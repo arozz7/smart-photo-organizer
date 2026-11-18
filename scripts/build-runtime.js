@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import runtimeModelFiles from './lib/runtime-model-files.cjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -91,7 +92,15 @@ heavyPackages.forEach(pkg => {
 const modelsDir = path.join(__dirname, '../models');
 if (fs.existsSync(modelsDir)) {
     console.log('Copying AI model files...');
-    fs.cpSync(modelsDir, path.join(stagingDir, 'models'), { recursive: true });
+    const skippedModelFiles = runtimeModelFiles.modelFilesToSkip(fs.readdirSync(modelsDir));
+    for (const name of skippedModelFiles) {
+        const sizeMiB = Math.round(fs.statSync(path.join(modelsDir, name)).size / 1048576);
+        console.log(`Leaving out ${name} (${sizeMiB} MiB): a duplicate the CPU SAM 3 provider recreates on first use.`);
+    }
+    fs.cpSync(modelsDir, path.join(stagingDir, 'models'), {
+        recursive: true,
+        filter: (source) => !(path.resolve(path.dirname(source)) === path.resolve(modelsDir) && skippedModelFiles.includes(path.basename(source))),
+    });
 } else {
     console.warn('Warning: models/ directory not found. AdaFace ONNX model will be missing from runtime.');
 }
