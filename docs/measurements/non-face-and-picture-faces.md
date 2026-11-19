@@ -1,6 +1,6 @@
 # Phase A measurement: non-face detections and pictures of faces
 
-**Date:** 2026-11-19. **Plan:** `docs/plans/non-face-and-picture-faces-plan.md` (Phase A). **Status:** measured; the labels (made by the assistant) are waiting for the user's review, so every number can still move.
+**Date:** 2026-11-19. **Plan:** `docs/plans/non-face-and-picture-faces-plan.md` (Phase A). **Status:** measured; labels reviewed by the user on 2026-11-19 (section 7). Sections 2 to 6 are the numbers with the assistant's original labels; section 7 has the corrected numbers, which are the ones to use.
 Read-only on the real library. No private images or face ids are stored in the repository; the review sheets live outside it (`J:\Projects\spo-phaseA-review`).
 
 ## 1. Method
@@ -62,3 +62,30 @@ Cut-outs score lower than true pictures (median 1.7 against 3.3) but not low eno
 - Single labeller (the assistant), 15 pictures, thresholds read off the same sample (in-sample): expect the numbers to shrink somewhat on new data. The 160 + 300 face earlier sets were not labelled and are kept as a held-out check.
 - The segmentation-based test (SAM 3) from the plan was **not run**: the model questions already reach AUC 0.95 for pictures. It stays an option if the cut-out flag rate must come down.
 - Review sheets and `labels.csv` in `J:\Projects\spo-phaseA-review` (outside the repository: private photos).
+
+## 7. After the user's review (2026-11-19)
+The user changed 25 of the 600 labels: 13 of my 59 "not a face" and 10 of my 30 "unsure" were real faces, and 2 of my "real" were not (tile 51: the box is on a pitcher, my error; tile 460: a turned face, mostly hair, borderline). Corrected queue counts: 417 real, 48 not a face, 15 picture, 20 unsure (the re-matched 100 stay real).
+The user's note on most of the changes: side profile, turned or looking down, or blurry and noisy.
+
+| Class | Count | Share of 480 labelled | Extrapolated to 55,665 |
+|---|---|---|---|
+| Not a face | 48 | 10.0% (7.6% to 13.0%) | about 5,600 (4,200 to 7,200) |
+| Picture of a face | 15 | 3.1% (1.9% to 5.1%) | about 1,700 |
+| Real face with |yaw| of 45 degrees or more | 116 of 417 real | 28% of real faces, about 13,000 faces |
+
+**Junk signals got better, not worse** (the removed confusion was real profiles): not a face versus real, detector score AUC 0.95 (was 0.93); Q3 + detector AUC 0.97 with 10 of the top 10, 18 of the top 20 and 33 of the top 40 non-faces (82%). Detector score below 0.55 flags 41 of 480 (8.5%): 28 non-faces, 3 pictures, 10 real (precision 68% for non-faces, recall 58%). Only 2 of those 10 real faces are profiles; the rest are looking down, covered, partial or blurry. Pictures are unchanged (Q1 + Q2 + detector: 12 of 15 in the top 20).
+
+**Profile and blurry faces do not match, and this is a separate problem from junk:**
+| Group (queue, labelled real unless noted) | n | median distance to nearest confirmed face | within 0.90 |
+|---|---|---|---|
+| Real, agreed | 394 | 1.21 | 25% |
+| I said not a face, user said real (mostly profiles) | 13 | 1.29 | 0% |
+| I said unsure, user said real (blurry, noisy) | 10 | 1.29 | 0% |
+| Not a face (final) | 48 | 1.29 | 0% |
+| Re-matched (for reference) | 100 | 0.64 | 100% |
+
+- The corrected profile faces sit as far from every named person as non-faces do (random unit vectors are about 1.41 apart). Distance to a centroid or an index cannot tell them from junk.
+- Confirmed library faces: 2,544 at |yaw| under 15, 1,298 at 15 to 30, 216 at 30 to 45, **93 at 45 or more (2%)**. A person's own face against their own frontal centroid (leave one out): median 0.56 at under 30, 0.66 at 30 to 45, **0.97 at 45 or more (6% within 0.70, 36% within 0.90)**.
+- Profile faces of the same person do cluster with each other: 120 confirmed faces with |yaw| of 40 or more (10 people): same-person pairs median 0.85, different-person pairs 1.40; at distance 1.0, 89% of same-person pairs and 0% of different-person pairs. Caveat: 10 people only, and burst shots from one moment can inflate the same-person pairs.
+- The matching code already has a per-person profile centroid (`profile_centroid_json`), but only 11 of 38 people have one, and scan-time FAISS matching compares against individual faces, of which only 2% are profiles.
+- Reading: the profile faces are not junk and must never go in an ignore list. They are not matched because the named side has almost no profile examples, so they stay in the queue. Needs its own plan (profile-aware matching), see the plan's change log.
