@@ -1,6 +1,6 @@
 # Review Queue: Non-Face Detections and Pictures of Faces (Implementation Plan)
 
-**Status:** DRAFT, awaiting approval of the phases. No code written. A first measurement was done read-only on 2026-11-19 (section 2). The user's answers to the open questions (2026-11-19) are in section 8 and are built into the phases.
+**Status:** Phases approved 2026-11-19. **Phase A measured** (`docs/measurements/non-face-and-picture-faces.md`); the assistant's labels await the user's review. No app code written yet. A first measurement was done read-only on 2026-11-19 (section 2). The user's answers to the open questions (2026-11-19) are in section 8 and are built into the phases.
 **Date:** 2026-11-19
 **Goal:** Take two kinds of junk out of the review queue without ignoring or deleting anything by itself:
 1. **Non-face detections:** the detector boxed something that is not a face (dark blobs, backs of heads, hair, crowd texture, grass).
@@ -23,8 +23,7 @@ it already ran on about 51,500 of the 55,700 queue faces (`verification_attempts
 | Small vision-language model (SmolVLM2 2.2B, already shipped) asked two differently worded "is this a picture?" questions, scores combined | On those 160: all 6 pictures in the top 6. **On 300 new faces: about 5 real pictures in the top 40, about 3 in the top 10.** | The first result was tuned on 6 examples and is **not** trustworthy; the second is the honest one |
 | What the false hits were | Real people with a picture behind them (billboard, mural, framed portrait on the wall). The same shape as the cardboard cut-out case. | Seen directly |
 | Cost of the model question | about 0.6 s per face per question on the RTX 4070 Ti SUPER with the app idle: one question over 56,000 faces is about 8 hours, two about 17 hours | Measured on 460 faces |
-| Detector score for 8 non-faces | 0.42 to 0.85 (queue median 0.84): it does **not** separate them | 8 examples |
-| Stored embedding size (norm) for the same 8 | two clearly low (9.8, 11.6), the rest near the lower quartile (18); stored norms are a mix of raw (about 21) and unit-length (1.0) values | Weak signal, 8 examples |
+| **Phase A (600 labelled faces, 2026-11-19):** detector score separates non-faces from real faces with AUC 0.93; model question Q3 "is a clear face visible" 0.94, both together 0.96; picture check Q1 (real or picture) AUC 0.96, Q1+Q2+detector 0.97 | See `docs/measurements/non-face-and-picture-faces.md`. **This replaces the earlier 8-example rows on the detector score and embedding norm, which were wrong** (the 8 were picked from a list already selected for picture scores). | Medium: one labeller, 15 pictures |
 | Head-through-cardboard cut-outs (the user's example): 9 stock images in `M:\SamplePicturesCardCutouts` (scarecrows, sunflowers, witch, monster; 13 real faces) | The app's detector finds all 13 faces. **7 of the 13 score above the cut-off of the top 40 of the 300 held-out faces** (the "possible picture" list). The painted board around a real face looks like a picture to the model. | 13 faces, stock images, not the user's library |
 
 Conclusion: a zero-shot model question is a usable *ranking* but not a clean classifier, and cut-outs show it cannot tell "a picture of a face" from "a real face inside a painted board".
@@ -47,7 +46,8 @@ Both buckets must be review lists with a human decision, and the picture list **
 
 ## 5. Phases
 
-### Phase A: ground truth and measurement (no app code; about one session)
+### Phase A: ground truth and measurement (no app code; DONE 2026-11-19, labels under review)
+**Result:** non-faces are about 13% of the queue (about 7,200 faces), pictures about 3% (about 1,800). Detector score below 0.55 flags 3,846 faces at about 71% precision for free; with the model question Q3 the top 8.8% of the queue is about 80% non-faces. The picture check (Q1+Q2+detector) is 60% correct at its top 20 of 455 (about 2,450 faces) and flags 3 of 13 cut-out faces. Both buckets pass the go/no-go for a **review list**; neither qualifies for an unseen bulk ignore yet. Details: `docs/measurements/non-face-and-picture-faces.md`.
 - Build a labelled set of about 600 random queue faces plus the cut-out images. Classes: `real`, `non_face`, `picture`, `cutout` (a real face in a cut-out board, to be kept).
   **The assistant labels from contact sheets, the user reviews** (every label can be overruled; the number of overrules is reported as the label error rate).
 - Score every signal on it: stored signals (detector score, quality, blur, pose, size, embedding norm), the two model questions, and a segmentation-based test ("is the face inside a frame / poster / screen / painting region", using the installed SAM 3).
@@ -56,6 +56,7 @@ Both buckets must be review lists with a human decision, and the picture list **
 - Output: `docs/measurements/non-face-and-picture-faces.md` and the chosen scorers. Tests: none (analysis); scripts kept under `scripts/dev/` if reusable.
 
 ### Phase B: "not a face" suggestions
+- **Revised by the Phase A result:** ship the **detector-score list first** (stored score below a cut-off the user can set, default 0.55; 3,846 faces now; no model, no GPU, no background run needed), then add the Q3 model question as a second pass that re-ranks the next faces (below 0.75) and finds non-faces with a good detector score.
 - Likely candidates (decided by A): stored signals combined (cheap, no GPU), a stricter model question on a tight crop, embedding norm.
 - Tasks, each test-first:
   1. Migration 003 `face_flags`; test: applies once, idempotent, legacy upgrade path 0 to 3 (extend `legacyUpgrade.integration.test.ts`).
