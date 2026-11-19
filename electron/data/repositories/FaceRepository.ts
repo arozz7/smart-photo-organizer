@@ -82,7 +82,7 @@ export class FaceRepository {
         return rows.map((r: any) => this.parseFace(r));
     }
 
-    static ignoreFaces(ids: number[], source: 'user' | 'background_verification' | 'non_face_review' = 'user') {
+    static ignoreFaces(ids: number[], source: 'user' | 'background_verification' = 'user') {
         const db = getDB();
         if (ids.length === 0) return;
         const placeholders = ids.map(() => '?').join(',');
