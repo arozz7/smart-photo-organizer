@@ -7,7 +7,7 @@ export function createNonFaceDeps(): NonFaceDeps {
     return {
         countBelow: cutoffs => FlagRepository.countNonFaceBelow(cutoffs),
         list: (cutoff, offset, limit) => FlagRepository.listNonFace(cutoff, offset, limit),
-        ignore: (ids, cutoff) => FlagRepository.ignoreNonFace(ids, cutoff),
+        ignore: (ids, cutoff, at) => FlagRepository.ignoreNonFace(ids, cutoff, at),
         dismiss: (ids, cutoff, at) => FlagRepository.dismissNonFace(ids, cutoff, at),
         restore: ids => FlagRepository.restoreNonFace(ids),
         countIgnored: () => FlagRepository.countIgnoredByNonFace(),

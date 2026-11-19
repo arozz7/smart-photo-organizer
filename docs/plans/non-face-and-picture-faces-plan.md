@@ -34,7 +34,7 @@ Both buckets must be review lists with a human decision, and the picture list **
 - **Nothing is ignored or deleted automatically.** A flag is a suggestion. The user confirms in bulk (select page, ignore) or dismisses.
 - **Real people in front of a picture are real.** A cut-out with a real head, or a person in front of a billboard, must not be offered for bulk ignore as a "picture". Evaluated explicitly in Phase C.
 - **Everything configurable in the app** (project rule): on/off switches, score cut-offs, background run on/off, how much of the GPU time it may use. No setting lives only in a config file.
-- **Reversible:** bulk ignores carry their own `ignore_source` (`non_face_review`, `picture_review`) and an Undo like the re-match card.
+- **Reversible:** bulk ignores use the normal ignore (`faces.ignore_source` only accepts `user` and `background_verification`; the legacy CHECK cannot change without rebuilding the faces table) and remember that the list did it in `face_flags` (kinds `non_face_ignored`, `picture_ignored`), with an exact-batch Undo like the re-match card. Found when the first build failed on its own new value (see `aiChangeLog/feat-non-face-suggestions.md`).
 - **Measure first.** Phase A decides which detector goes into B and C, with go/no-go numbers agreed up front.
 - **Idle only and resumable,** like `RematchService`: pauses for scans and AI work, resumes after a restart. The Python process is single-threaded, so work goes in small batches with timeouts (a long call blocks every other command).
 
@@ -72,7 +72,7 @@ Both buckets must be review lists with a human decision, and the picture list **
 ### Phase C: "possibly a picture" suggestions
 - Uses the Phase A winner (the two model questions are the baseline; the segmentation test is the main alternative because it can say *where* the frame is).
 - Extra tasks over B: the scorer behind the Python provider with a timeout and batch size; GPU memory check before loading; the `cutout` class is part of the acceptance test (the baseline flags 7 of 13 cut-out faces, so there is no unseen bulk ignore for pictures; Phase A/C try to lower that flag rate, for example with the segmentation test or a question about the face and its body); filter "Possible pictures (suggested)".
-- **Pictures of named people (decided):** also scan unconfirmed `auto_rematch` faces (the re-match attaches a framed portrait of a named person to that person). A face flagged as a picture of a named person is offered as **"picture of {name}"**: confirming it removes the face from the person and marks it as a picture, remembering whose picture it is (`ignore_source = picture_review`, `suggested_person_id` kept), reversible.
+- **Pictures of named people (decided):** also scan unconfirmed `auto_rematch` faces (the re-match attaches a framed portrait of a named person to that person). A face flagged as a picture of a named person is offered as **"picture of {name}"**: confirming it removes the face from the person and marks it as a picture, remembering whose picture it is (a `picture_ignored` flag in `face_flags`, `suggested_person_id` kept), reversible.
 - **Cut-outs:** the acceptance test includes the cut-out images. The list shows the face with its surroundings so the user can tell a real face in a board from a picture; "Keep" teaches the cut-off (Phase E).
 
 ### Phase D: background runner and cost control
