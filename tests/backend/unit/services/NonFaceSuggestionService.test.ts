@@ -8,15 +8,26 @@ import {
     MAX_IDS_PER_ACTION,
     type NonFaceDeps,
 } from '../../../../electron/core/services/NonFaceSuggestionService';
+import { DEFAULT_LIKELIHOOD, LIKELIHOOD_CHOICES, MIN_LIKELIHOOD, MAX_LIKELIHOOD, logitForLikelihood, likelihoodOf } from '../../../../electron/core/services/visibilityModel';
 import type { NonFaceCount, NonFaceTile } from '../../../../electron/data/repositories/FlagRepository';
+import type { RankedCount, RankedTile } from '../../../../electron/data/repositories/RankedNonFaceRepository';
 
-/** An in-memory stand-in for the database: scores by face id, plus the lists the repository would keep. */
-function makeWorld(scores: Record<number, number>) {
+/**
+ * An in-memory stand-in for the database. Faces have a detector score; some also have a "ranking number" (the log-odds of
+ * not being a face that the model and detector give together), which is what the model list cuts on.
+ */
+function makeWorld(scores: Record<number, number>, logits: Record<number, number> = {}) {
     const flags = new Map<string, string>();
     const ignored = new Set<number>();
     const kept = new Set<number>();
-    const calls = { ignore: [] as number[][], dismiss: [] as number[][], restore: [] as number[][], list: [] as number[][] };
-    const suggested = (cutoff: number) => Object.keys(scores).map(Number).filter(id => scores[id] < cutoff && !ignored.has(id) && !kept.has(id));
+    const calls = {
+        ignore: [] as number[][], dismiss: [] as number[][], restore: [] as number[][], list: [] as number[][],
+        rankedIgnore: [] as unknown[][], rankedKeep: [] as unknown[][], rankedList: [] as number[][],
+    };
+    const open = (id: number) => !ignored.has(id) && !kept.has(id);
+    const suggested = (cutoff: number) => Object.keys(scores).map(Number).filter(id => scores[id] < cutoff && open(id));
+    const rankedSuggested = (minLogit: number) =>
+        Object.keys(logits).map(Number).filter(id => open(id) && logits[id] >= minLogit).sort((a, b) => logits[b] - logits[a]);
     const deps: NonFaceDeps = {
         countBelow: cutoffs => cutoffs.map((cutoff): NonFaceCount => ({ cutoff, total: suggested(cutoff).length, turned: 0 })),
         list: (cutoff, offset, limit) => {
@@ -27,6 +38,16 @@ function makeWorld(scores: Record<number, number>) {
         dismiss: (ids, cutoff) => { calls.dismiss.push(ids); const ok = ids.filter(id => suggested(cutoff).includes(id)); ok.forEach(id => kept.add(id)); return ok.length; },
         restore: ids => { calls.restore.push(ids); const ok = ids.filter(id => ignored.has(id)); ok.forEach(id => ignored.delete(id)); return ok; },
         countIgnored: () => ignored.size,
+        ranked: {
+            countAtLeast: minLogits => minLogits.map((minLogit): RankedCount => ({ minLogit, total: rankedSuggested(minLogit).length, turned: 1 })),
+            list: (minLogit, offset, limit) => {
+                calls.rankedList.push([minLogit, offset, limit]);
+                return rankedSuggested(minLogit).slice(offset, offset + limit).map(id => ({ faceId: id, score: scores[id] ?? 0.3, modelScore: 2, logit: logits[id] }) as RankedTile);
+            },
+            ignore: (ids, minLogit, at) => { calls.rankedIgnore.push([ids, minLogit, at]); const ok = ids.filter(id => rankedSuggested(minLogit).includes(id)); ok.forEach(id => ignored.add(id)); return ok; },
+            keep: (ids, minLogit, at) => { calls.rankedKeep.push([ids, minLogit, at]); const ok = ids.filter(id => rankedSuggested(minLogit).includes(id)); ok.forEach(id => kept.add(id)); return ok.length; },
+        },
+        visibilityCounts: () => ({ candidates: 100, scored: 40, failed: 2 }),
         readFlag: key => flags.get(key) ?? null,
         writeFlag: (key, value) => { if (value === null) flags.delete(key); else flags.set(key, value); },
         now: () => '2026-11-19T10:00:00Z',
@@ -42,16 +63,18 @@ describe('NonFaceSuggestionService', () => {
         service = new NonFaceSuggestionService(world.deps);
     });
 
-    describe('overview', () => {
-        it('starts at the default cut-off and reports its count, the counts of the other choices and nothing ignored yet', () => {
+    describe('overview (detector list)', () => {
+        it('starts in detector mode at the default cut-off and reports its count, the counts of the other choices and nothing ignored yet', () => {
             const overview = service.getOverview();
 
-            expect(overview.cutoff).toBe(DEFAULT_CUTOFF);
+            expect(overview.mode).toBe('detector');
+            expect(overview.model).toBeNull();
+            expect(overview.detector?.cutoff).toBe(DEFAULT_CUTOFF);
             expect(overview.current.total).toBe(3);
-            expect(overview.choices.map(c => c.cutoff)).toEqual([...CUTOFF_CHOICES]);
-            expect(overview.choices.find(c => c.cutoff === 0.65)?.total).toBe(4);
+            expect(overview.detector?.choices.map(c => c.cutoff)).toEqual([...CUTOFF_CHOICES]);
+            expect(overview.detector?.choices.find(c => c.cutoff === 0.65)?.total).toBe(4);
             expect(overview.ignoredFromList).toBe(0);
-            expect(overview).toMatchObject({ minCutoff: MIN_CUTOFF, maxCutoff: MAX_CUTOFF, defaultCutoff: DEFAULT_CUTOFF });
+            expect(overview.detector).toMatchObject({ minCutoff: MIN_CUTOFF, maxCutoff: MAX_CUTOFF, defaultCutoff: DEFAULT_CUTOFF });
         });
 
         it('reports a saved cut-off that is not one of the choices', () => {
@@ -59,14 +82,14 @@ describe('NonFaceSuggestionService', () => {
 
             const overview = service.getOverview();
 
-            expect(overview.cutoff).toBe(0.62);
+            expect(overview.detector?.cutoff).toBe(0.62);
             expect(overview.current.total).toBe(4);
         });
 
         it('falls back to the default when the saved value is missing, not a number, or out of range', () => {
             for (const saved of ['', 'abc', '0.05', '3', 'NaN']) {
                 world.flags.set('nonface_cutoff', saved);
-                expect(service.getOverview().cutoff).toBe(DEFAULT_CUTOFF);
+                expect(service.getOverview().detector?.cutoff).toBe(DEFAULT_CUTOFF);
             }
         });
     });
@@ -130,6 +153,93 @@ describe('NonFaceSuggestionService', () => {
 
             expect(world.calls.ignore).toEqual([[1, 2]]);
             expect(() => service.ignore(Array.from({ length: MAX_IDS_PER_ACTION + 1 }, (_, i) => i + 1))).toThrow(/too many/i);
+        });
+    });
+
+    describe('model list', () => {
+        const cut = (percent: number) => logitForLikelihood(percent);
+
+        beforeEach(() => {
+            world = makeWorld({ 1: 0.3, 2: 0.5, 3: 0.52, 4: 0.6, 5: 0.9 }, { 10: cut(95), 11: cut(85), 12: cut(75), 13: cut(65), 14: cut(55), 15: cut(10) });
+            service = new NonFaceSuggestionService(world.deps);
+        });
+
+        it('defaults to the detector list; the mode is a saved setting', () => {
+            expect(service.getOverview().mode).toBe('detector');
+
+            expect(service.setMode('model')).toBe(true);
+
+            expect(service.getOverview().mode).toBe('model');
+            expect(world.flags.get('nonface_mode')).toBe('model');
+        });
+
+        it.each(['', 'ranked', 'MODEL', 'detector '])('refuses the mode %j', mode => {
+            expect(service.setMode(mode)).toBe(false);
+            expect(service.getOverview().mode).toBe('detector');
+        });
+
+        it('falls back to the detector list when the saved mode is unusable', () => {
+            world.flags.set('nonface_mode', 'bogus');
+
+            expect(service.getOverview().mode).toBe('detector');
+        });
+
+        it('reports the likelihood choices with their counts, the checked progress, and only the model details', () => {
+            service.setMode('model');
+
+            const overview = service.getOverview();
+
+            expect(overview.detector).toBeNull();
+            expect(overview.model?.minLikelihood).toBe(DEFAULT_LIKELIHOOD);
+            expect(overview.model?.choices.map(c => c.likelihood)).toEqual([...LIKELIHOOD_CHOICES]);
+            expect(overview.model?.choices.find(c => c.likelihood === 90)?.total).toBe(1);
+            expect(overview.model?.choices.find(c => c.likelihood === 50)?.total).toBe(5);
+            expect(overview.current.total).toBe(3);
+            expect(overview.model?.checked).toBe(42);
+            expect(overview.model?.candidates).toBe(100);
+            expect(overview.model).toMatchObject({ minAllowed: MIN_LIKELIHOOD, maxAllowed: MAX_LIKELIHOOD, defaultLikelihood: DEFAULT_LIKELIHOOD });
+        });
+
+        it('saves a valid likelihood and the list follows it; a value outside the range is refused', () => {
+            service.setMode('model');
+
+            expect(service.setMinLikelihood(60)).toBe(true);
+            expect(service.getOverview().current.total).toBe(4);
+            for (const bad of [MIN_LIKELIHOOD - 1, MAX_LIKELIHOOD + 1, 72.5, Number.NaN]) {
+                expect(service.setMinLikelihood(bad)).toBe(false);
+            }
+            expect(service.getOverview().model?.minLikelihood).toBe(60);
+        });
+
+        it('lists the most likely first and gives every tile its likelihood in percent', () => {
+            service.setMode('model');
+
+            const tiles = service.list(0, 10);
+
+            expect(tiles.map(t => t.faceId)).toEqual([10, 11, 12]);
+            expect(tiles[0].likelihood).toBeCloseTo(95, 6);
+            expect(tiles[0].likelihood).toBeCloseTo(likelihoodOf(cut(95)) * 100, 6);
+            expect(tiles[0]).toMatchObject({ modelScore: 2, score: 0.3 });
+        });
+
+        it('ignores and keeps through the model list with its cut-off, and undo is the same as for the detector list', () => {
+            service.setMode('model');
+
+            expect(service.ignore([10, 13]).ignoredIds).toEqual([10]);
+            expect(service.keep([11, 14])).toEqual({ kept: 1 });
+            expect(world.calls.rankedIgnore[0]).toEqual([[10, 13], cut(DEFAULT_LIKELIHOOD), '2026-11-19T10:00:00Z']);
+            expect(world.calls.ignore).toEqual([]);
+            expect(service.undo([10])).toEqual({ restoredIds: [10] });
+        });
+
+        it('does not touch the store for an empty list in model mode either', () => {
+            service.setMode('model');
+
+            service.ignore([]);
+            service.keep([]);
+
+            expect(world.calls.rankedIgnore).toEqual([]);
+            expect(world.calls.rankedKeep).toEqual([]);
         });
     });
 });

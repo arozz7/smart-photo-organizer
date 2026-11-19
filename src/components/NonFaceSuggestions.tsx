@@ -1,7 +1,12 @@
 import FaceThumbnail from './FaceThumbnail'
 import { FloatingActionBar, FloatingActionButton } from './FloatingActionBar'
-import type { NonFaceSuggestionsController, NonFaceTile } from '../hooks/useNonFaceSuggestions'
+import type { ListMode, NonFaceSuggestionsController, NonFaceTile } from '../hooks/useNonFaceSuggestions'
 import { describePose } from '../utils/nonFacePose'
+
+const MODES: { mode: ListMode; label: string }[] = [
+    { mode: 'detector', label: 'Detector score' },
+    { mode: 'model', label: 'Model + detector' },
+]
 
 const formatCount = (count: number) => count.toLocaleString('en-US')
 const plural = (count: number) => `${formatCount(count)} ${count === 1 ? 'face' : 'faces'}`
@@ -15,7 +20,14 @@ interface TileProps {
 
 function SuggestionTile({ tile, selected, onToggle, onViewPhoto }: TileProps) {
     const pose = describePose(tile.yaw)
-    const details = [`Detector score ${tile.score.toFixed(2)}`, tile.quality !== null ? `quality ${tile.quality.toFixed(2)}` : null, tile.blur !== null ? `sharpness ${Math.round(tile.blur)}` : null]
+    const badge = tile.likelihood !== undefined ? `${Math.round(tile.likelihood)}%` : tile.score.toFixed(2)
+    const details = [
+        tile.likelihood !== undefined ? `${Math.round(tile.likelihood)}% likely not a face` : null,
+        tile.modelScore !== undefined ? `model ${tile.modelScore.toFixed(2)}` : null,
+        `Detector score ${tile.score.toFixed(2)}`,
+        tile.quality !== null ? `quality ${tile.quality.toFixed(2)}` : null,
+        tile.blur !== null ? `sharpness ${Math.round(tile.blur)}` : null,
+    ]
     return (
         <div
             data-testid={`nonface-tile-${tile.faceId}`}
@@ -31,7 +43,7 @@ function SuggestionTile({ tile, selected, onToggle, onViewPhoto }: TileProps) {
                 useServerCrop={true}
                 className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
             />
-            <div className="absolute top-1 right-1 bg-black/60 backdrop-blur rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono">{tile.score.toFixed(2)}</div>
+            <div className="absolute top-1 right-1 bg-black/60 backdrop-blur rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono">{badge}</div>
             <div className={`absolute bottom-1 left-1 rounded px-1.5 py-0.5 text-[10px] font-mono backdrop-blur ${pose.turned ? 'bg-amber-500/80 text-black' : 'bg-black/60 text-gray-300'}`}>{pose.text}</div>
             {tile.quality !== null && <div className="absolute top-1 left-1 bg-black/60 backdrop-blur rounded px-1.5 py-0.5 text-[10px] text-gray-400 font-mono">Q {tile.quality.toFixed(2)}</div>}
             {selected && <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">✓</div>}
@@ -64,31 +76,78 @@ interface NonFaceSuggestionsProps {
 export default function NonFaceSuggestions({ ctrl, onViewPhoto }: NonFaceSuggestionsProps) {
     const { overview, tiles, selectedIds, undoBatch, busy } = ctrl
     const current = overview?.current
+    const detector = overview?.detector
+    const model = overview?.model
 
     return (
         <div className="space-y-4">
             <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50 space-y-3">
                 <div className="flex flex-wrap items-center gap-3 text-sm text-gray-300">
-                    <label htmlFor="nonface-cutoff" className="text-gray-400">Detector score below</label>
-                    <select
-                        id="nonface-cutoff"
-                        value={overview ? String(overview.cutoff) : ''}
-                        disabled={!overview || busy}
-                        onChange={(event) => ctrl.setCutoff(Number(event.target.value))}
-                        className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-sm text-gray-200"
-                    >
-                        {overview && !overview.choices.some(choice => choice.cutoff === overview.cutoff) && (
-                            <option value={String(overview.cutoff)}>{overview.cutoff.toFixed(2)} ({plural(overview.current.total)})</option>
-                        )}
-                        {overview?.choices.map(choice => (
-                            <option key={choice.cutoff} value={String(choice.cutoff)}>{choice.cutoff.toFixed(2)} ({plural(choice.total)})</option>
+                    <div className="flex rounded-lg overflow-hidden border border-gray-700" role="group" aria-label="Ranking">
+                        {MODES.map(({ mode, label }) => (
+                            <button
+                                key={mode}
+                                onClick={() => overview?.mode !== mode && ctrl.setMode(mode)}
+                                disabled={!overview || busy}
+                                aria-pressed={overview?.mode === mode}
+                                className={`px-3 py-1 text-xs font-medium ${overview?.mode === mode ? 'bg-orange-500/20 text-orange-300' : 'bg-gray-900 text-gray-400 hover:text-gray-200'}`}
+                            >
+                                {label}
+                            </button>
                         ))}
-                    </select>
+                    </div>
+                    {detector && (
+                        <>
+                            <label htmlFor="nonface-cutoff" className="text-gray-400">Detector score below</label>
+                            <select
+                                id="nonface-cutoff"
+                                value={String(detector.cutoff)}
+                                disabled={busy}
+                                onChange={(event) => ctrl.setCutoff(Number(event.target.value))}
+                                className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-sm text-gray-200"
+                            >
+                                {!detector.choices.some(choice => choice.cutoff === detector.cutoff) && current && (
+                                    <option value={String(detector.cutoff)}>{detector.cutoff.toFixed(2)} ({plural(current.total)})</option>
+                                )}
+                                {detector.choices.map(choice => (
+                                    <option key={choice.cutoff} value={String(choice.cutoff)}>{choice.cutoff.toFixed(2)} ({plural(choice.total)})</option>
+                                ))}
+                            </select>
+                        </>
+                    )}
+                    {model && (
+                        <>
+                            <label htmlFor="nonface-likelihood" className="text-gray-400">Likely not a face, at least</label>
+                            <select
+                                id="nonface-likelihood"
+                                value={String(model.minLikelihood)}
+                                disabled={busy}
+                                onChange={(event) => ctrl.setLikelihood(Number(event.target.value))}
+                                className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-sm text-gray-200"
+                            >
+                                {!model.choices.some(choice => choice.likelihood === model.minLikelihood) && current && (
+                                    <option value={String(model.minLikelihood)}>{model.minLikelihood}% ({plural(current.total)})</option>
+                                )}
+                                {model.choices.map(choice => (
+                                    <option key={choice.likelihood} value={String(choice.likelihood)}>{choice.likelihood}% ({plural(choice.total)})</option>
+                                ))}
+                            </select>
+                        </>
+                    )}
                     {current && <span>{plural(current.total)} are suggested at this cut-off.</span>}
                 </div>
+                {model && (
+                    <p className="text-xs text-gray-400">
+                        The vision model has looked at {formatCount(model.checked)} of {formatCount(model.candidates)} uncertain faces; more appear here as the check runs
+                        (Settings &gt; Database Management &gt; Check Uncertain Faces). The percentage is an estimate from the model's answer and the detector score,
+                        fitted on the faces you reviewed; it leans against faces seen from the side, so look at the turned ones twice.
+                    </p>
+                )}
                 <p className="text-xs text-gray-500">
-                    The detector gives every box a confidence score; low scores are often dark blobs, backs of heads or hair, but also real faces that are turned,
-                    looking down, partly covered or blurry. {current && current.turned > 0 && <span className="text-amber-400">{formatCount(current.turned)} of them are turned 45° or more.</span>}{' '}
+                    {detector
+                        ? 'The detector gives every box a confidence score; low scores are often dark blobs, backs of heads or hair, but also real faces that are turned, looking down, partly covered or blurry.'
+                        : 'Faces the model answered "no clear face" for, most likely first. Real faces that are turned, looking down, partly covered or blurry can be in it too.'}
+                    {' '}{current && current.turned > 0 && <span className="text-amber-400">{formatCount(current.turned)} of them are turned 45° or more.</span>}{' '}
                     Check the thumbnails: nothing is ignored until you choose, and Keep tells the app these are faces.
                 </p>
             </div>

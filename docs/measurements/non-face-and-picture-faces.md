@@ -89,3 +89,44 @@ The user's note on most of the changes: side profile, turned or looking down, or
 - Profile faces of the same person do cluster with each other: 120 confirmed faces with |yaw| of 40 or more (10 people): same-person pairs median 0.85, different-person pairs 1.40; at distance 1.0, 89% of same-person pairs and 0% of different-person pairs. Caveat: 10 people only, and burst shots from one moment can inflate the same-person pairs.
 - The matching code already has a per-person profile centroid (`profile_centroid_json`), but only 11 of 38 people have one, and scan-time FAISS matching compares against individual faces, of which only 2% are profiles.
 - Reading: the profile faces are not junk and must never go in an ignore list. They are not matched because the named side has almost no profile examples, so they stay in the queue. Needs its own plan (profile-aware matching), see the plan's change log.
+
+## 8. The model question on the production code path (Phase B part 2, 2026-11-19)
+The Phase A model numbers came from a scratch script (bfloat16, default attention). The app loads the same model with `facelib.vlm.init_vlm` (**fp16, eager attention**), so the question was re-measured through the new engine command
+(`commands/face_visibility.py`, the same crop: a square of 1.8 times the box on the preview image, 384 px) on the same 480 labelled queue faces with the user's corrected labels (48 non-faces). 0.7 s a face, no failures.
+
+| Wording of the question | Model alone (AUC) | Model + detector (AUC) | Detector alone (AUC) |
+|---|---|---|---|
+| **A**: "clearly visible human face (eyes, nose and mouth, not the back **or side** of the head, not hair, not an object)" (the Phase A wording) | 0.930 | **0.972** | 0.946 |
+| **B**: "a human face ... a face that is turned, seen from the side, looking down, partly covered, small, dark or blurry still counts ... NO only if there is no face at all" | 0.800 | 0.939 | 0.946 |
+| Phase A path (bfloat16) for comparison | 0.930 | 0.970 | |
+
+So the production path reproduces Phase A for wording A (the precision and dtype change nothing). Wording B, written to be fair to profile faces, **loses most of the signal**: with the detector it is no better than the detector alone.
+
+**Wording A leans against turned faces, as its text says (it excludes "the side of the head").** The median model score (higher = "no face") is 2.61 for non-faces, -1.39 for frontal real faces and **+0.43 for real faces turned 45 degrees or more**: the model is half way to "no face" for them.
+In the combined ranking this shows in the wider lists: of the top 20 by the combined score 18 are non-faces (1 turned real face); top 40: 30 (3 turned real); top 60: 38 non-faces and 10 turned real faces; top 80: 45 and 21.
+
+**Calibrated likelihood** (logistic regression on the model score and the detector score, 5-fold cross-validated, AUC 0.968), wording A (wording C below is the same to within one face):
+| Likelihood of not a face at least | Faces (share of the queue) | Non-faces | Turned real faces |
+|---|---|---|---|
+| 50% | 35 (7.3%) | 27 (77%) | 4 |
+| 60% | 32 (6.7%) | 27 (84%) | 3 |
+| 70% | 27 (5.6%) | 25 (93%) | 0 |
+| 80% | 23 (4.8%) | 21 (91%) | 0 |
+| 90% | 20 (4.2%) | 19 (95%) | 0 |
+
+Against the detector list at a similar recall (detector score below 0.50: 36 faces, 26 non-faces = 72%), the 70% likelihood list holds about the same number of non-faces (25) with **93% instead of 72% precision** and no turned real face in this sample.
+Caveats: 48 non-faces, in-sample cut-offs (cross-validated for the probabilities, not for the weights), one labeller; the lists at 70% and above hold about 27 of 480 faces, so the 93% is 25 of 27 (95% range about 76% to 99%).
+
+### Two more wordings, and what ships
+| Wording | Model alone (AUC) | Model + detector (AUC) | Median score, turned real faces | Calibrated list at 70% |
+|---|---|---|---|---|
+| A (original, "not the back or side of the head") | 0.930 | 0.972 | +0.43 | 27 faces, 25 non-faces, 0 turned real |
+| **C**: A without "or side" ("not only the back of the head, not hair, not an object") | 0.930 | **0.971** | +0.40 | 27 faces, 25 non-faces, 0 turned real |
+| D: "a human face ... seen from the front or from the side? NO only if the back of a head, hair, a hand, clothing, bare skin or an object" | 0.842 | 0.961 | +0.06 (but non-faces only +0.58) | 24 faces, 21 non-faces, 1 turned real |
+| B (turned, side, looking down ... still counts) | 0.800 | 0.939 | -1.53 | 24 faces, 18 non-faces, 1 turned real |
+
+- Removing "or side" changes nothing measurable: **the lean against turned faces belongs to the model, not to the wording** (turned real faces score about +0.4 under A and C, against -1.2 to -1.4 for frontal real faces and +2.5 for non-faces).
+  The wordings that make turned faces score lower do so by flattening the whole scale (B, D), and lose the separation.
+- **C ships**: same strength as A without a pose exclusion written into the question. Fitted weights (model, detector, intercept): 1.123, -7.312, 2.126.
+- What this means for the lists: the model list is safe at 70% likelihood and above in this sample (no turned real face in 27), and the wider lists (60% and below) start to bring in turned real faces (2 to 4 of 30 to 35 at 50 to 60%; 10 of the top 60 by raw rank).
+  The list therefore shows pose on every tile, counts the turned faces in its header, and says that the model leans against faces seen from the side. Profile matching (Phase F) does not depend on this list.
