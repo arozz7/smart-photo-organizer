@@ -13,6 +13,7 @@ export const STRICT_SCORE_THRESHOLD_ACCEPT = 0.75;
 
 // Define Schema Interfaces
 export interface AISettings {
+    /** Match distance (L2, lower = stricter) for re-checks and single-face matching. Default 0.65. */
     faceSimilarityThreshold: number;
     faceBlurThreshold: number;
     minFaceSize: number;
@@ -90,9 +91,9 @@ export interface SmartIgnoreSettings {
     centroidDistanceThreshold: number;
     /** Distance threshold for outlier (misassigned face) detection. Default: 1.2 */
     outlierThreshold: number;
-    /** Confidence threshold for auto-assigning High Tier faces (e.g. 0.4). Default: 0.4 */
+    /** @deprecated Not read by anything. Scans use `aiSettings.autoAssignThreshold` (Settings > AI Performance). Kept so old config files still load. */
     autoAssignThreshold: number;
-    /** Confidence threshold for Review Tier faces (e.g. 0.6). Default: 0.6 */
+    /** @deprecated Not read by anything. Scans use `aiSettings.reviewThreshold` (Settings > AI Performance). Kept so old config files still load. */
     reviewThreshold: number;
     /** Whether to enable scan-time auto-tiering. Default: true */
     enableAutoTiering: boolean;
@@ -164,7 +165,9 @@ export const DEFAULT_CONFIG: AppConfig = {
         useGpu: true,
         vlmEnabled: false, // Default to off for performance
         vlmVerificationThreshold: 0.85, // Phase 56: VLM Verification threshold
-        runtimeUrl: undefined
+        runtimeUrl: undefined,
+        autoAssignThreshold: 0.7,       // Scan-time auto-assign distance (what the code already fell back to)
+        reviewThreshold: 0.9            // Scan-time review tier distance (what the code already fell back to)
     },
     windowBounds: { width: 1200, height: 800, x: 0, y: 0 },
     firstRun: true,
@@ -232,7 +235,7 @@ export class ConfigService {
                         },
                         aiSettings: {
                             vlmVerificationThreshold: aiJson.vlm?.verification_threshold ?? 0.85,
-                            faceSimilarityThreshold: aiJson.face_detection?.score_threshold_confident ?? 0.85, // Use confident threshold as similarity baseline
+                            // faceSimilarityThreshold is a match DISTANCE; score_threshold_confident is a face detection score, so it is not mapped.
                             faceBlurThreshold: aiJson.face_detection?.face_blur_threshold ?? 15,
                             vlmEnabled: aiJson.vlm?.enabled ?? false
                         }
@@ -261,30 +264,20 @@ export class ConfigService {
                 // But we still want to apply enterprise defaults below
             }
 
-            // 1. Apply User Config on top of Base
+            // 1. Start values: hardcoded defaults, then ai-config.json on top of them.
+            // 2. Values saved by the user in the app win over both (everything must stay configurable in the app).
+            const shippedAdvancedFace = { ...baseConfig.advancedFace, ...((enterpriseDefaults as any).advancedFace || {}) };
+            const shippedAiSettings = { ...baseConfig.aiSettings, ...((enterpriseDefaults as any).aiSettings || {}) };
             const intermediateConfig = { ...baseConfig, ...userConfig };
             // Deep merge nested objects
-            intermediateConfig.aiSettings = { ...baseConfig.aiSettings, ...(userConfig as any).aiSettings || {} };
-            intermediateConfig.advancedFace = { ...baseConfig.advancedFace, ...(userConfig as any).advancedFace || {} };
+            intermediateConfig.aiSettings = { ...shippedAiSettings, ...(userConfig as any).aiSettings || {} };
+            intermediateConfig.advancedFace = { ...shippedAdvancedFace, ...(userConfig as any).advancedFace || {} };
             intermediateConfig.queue = { ...baseConfig.queue, ...(userConfig as any).queue || {} };
             intermediateConfig.smartIgnore = { ...baseConfig.smartIgnore, ...(userConfig as any).smartIgnore || {} };
             intermediateConfig.dashboard = { ...baseConfig.dashboard, ...(userConfig as any).dashboard || {} };
             // Preserve widget array from user config if present, otherwise use defaults
             if ((userConfig as any).dashboard?.widgets) {
                 intermediateConfig.dashboard.widgets = (userConfig as any).dashboard.widgets;
-            }
-
-            // 2. Apply Enterprise Defaults (ai-config.json) as FINAL OVERRIDE for specific tuned keys
-            if (enterpriseDefaults) {
-                // Deep merge specific sections
-                intermediateConfig.advancedFace = {
-                    ...intermediateConfig.advancedFace,
-                    ...((enterpriseDefaults as any).advancedFace || {})
-                };
-                intermediateConfig.aiSettings = {
-                    ...intermediateConfig.aiSettings,
-                    ...((enterpriseDefaults as any).aiSettings || {})
-                };
             }
 
             this.config = intermediateConfig as AppConfig;
