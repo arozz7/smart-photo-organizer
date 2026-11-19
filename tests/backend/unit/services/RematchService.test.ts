@@ -33,6 +33,8 @@ function setup(partial: Partial<Setup> = {}, overrides: Partial<RematchDeps> = {
         tried: new Set(partial.tried ?? []),
         people: partial.people ?? [{ id: 7 }],
         busy: false,
+        /** The scan Auto-Assign distance setting (Settings > AI Performance). */
+        autoAssign: 0.65,
         fingerprint: 'people-v1',
         flags: new Map<string, string>(),
         saved: [] as RematchMatch[],
@@ -70,6 +72,7 @@ function setup(partial: Partial<Setup> = {}, overrides: Partial<RematchDeps> = {
         undoUnconfirmed: () => world.undone,
         countUndoable: () => world.undoable,
         isBusy: () => world.busy,
+        autoAssignDistance: () => world.autoAssign,
         readFlag: key => world.flags.get(key) ?? null,
         writeFlag: (key, value) => { world.flags.set(key, value); },
         now: () => world.now,
@@ -304,9 +307,71 @@ describe('RematchService', () => {
     });
 
     describe('distance', () => {
-        it('is 0.65 until the user chooses another', () => {
+        it('is 0.65 when the Auto-Assign setting is 0.65 and the user chose nothing', () => {
             const { service } = setup();
             expect(service.getStatus().threshold).toBe(0.65);
+        });
+
+        it('follows the Auto-Assign setting until the user chooses another', () => {
+            const { world, service } = setup();
+            world.autoAssign = 0.7;
+
+            expect(service.getStatus()).toMatchObject({ threshold: 0.7, followsAutoAssign: true });
+        });
+
+        it.each([[1.0, 0.8], [0.9, 0.8], [0.3, 0.4]])('limits an Auto-Assign value of %s to %s', (autoAssign, expected) => {
+            const { world, service } = setup();
+            world.autoAssign = autoAssign;
+
+            expect(service.getStatus().threshold).toBe(expected);
+        });
+
+        it.each([Number.NaN, 0, -1])('uses 0.65 when the Auto-Assign value is %s', autoAssign => {
+            const { world, service } = setup();
+            world.autoAssign = autoAssign;
+
+            expect(service.getStatus().threshold).toBe(0.65);
+        });
+
+        it('a distance the user chose wins over the Auto-Assign setting', () => {
+            const { world, service } = setup();
+            world.autoAssign = 0.7;
+            service.setDistance(0.55);
+
+            expect(service.getStatus()).toMatchObject({ threshold: 0.55, followsAutoAssign: false });
+        });
+
+        it('goes back to following the Auto-Assign setting when the choice is cleared', () => {
+            const { world, service } = setup();
+            world.autoAssign = 0.7;
+            service.setDistance(0.55);
+
+            expect(service.setDistance(null)).toBe(true);
+            expect(service.getStatus()).toMatchObject({ threshold: 0.7, followsAutoAssign: true });
+        });
+
+        it('runs with the Auto-Assign distance as it is when the run starts', async () => {
+            const { world, service } = setup({ answers: { 1: { personId: 7, distance: 0.69 } } });
+            world.autoAssign = 0.7;
+            service.startRun();
+            world.autoAssign = 0.5;
+            await runToEnd(service);
+
+            expect(world.saved).toEqual([{ faceId: 1, personId: 7, distance: 0.69 }]);
+        });
+
+        it('starts an automatic run when the Auto-Assign setting changed since the last run', async () => {
+            const { world, service } = setup();
+            service.startRun();
+            await runToEnd(service);
+            world.now += 31 * MINUTE;
+            await service.tick();
+            expect(service.getStatus().running).toBe(false);
+
+            world.autoAssign = 0.7;
+            await service.tick();
+
+            expect(service.getStatus().running).toBe(true);
         });
 
         it('keeps the chosen distance across a restart', () => {

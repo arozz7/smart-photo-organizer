@@ -3,13 +3,20 @@
  *
  * Unassigned faces are matched against the people the user has named, again, because people named after a face was first
  * processed never got a look at it. Matches are assigned unconfirmed (reviewed on the person's page) and can be undone.
- * The match distance (default 0.65) is its own setting here, not the Face Similarity Threshold. See docs/plans/review-queue-parking-plan.md, Phase 2.
+ * The match distance follows the scan Auto-Assign setting (Settings > AI Performance) unless a value is pinned here.
+ * See docs/plans/review-queue-parking-plan.md, Phase 2.
  */
 
 import { useRematch } from '../hooks/useRematch'
 
 /** Choices for the match distance (the service accepts 0.4 to 0.8). */
 const DISTANCES = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
+const FOLLOW_AUTO_ASSIGN = 'auto'
+
+/** The select sends 'auto' to follow the Auto-Assign setting, or a distance to pin. */
+function toDistance(value: string): number | null {
+    return value === FOLLOW_AUTO_ASSIGN ? null : Number(value)
+}
 
 export function RematchCard() {
     const { status, message, run, undo, setAuto, setDistance } = useRematch()
@@ -47,18 +54,23 @@ export function RematchCard() {
             <label className="flex items-center gap-2 text-sm text-gray-300 mb-2">
                 Match distance
                 <select
-                    value={status?.threshold ?? 0.65}
+                    value={!status || status.followsAutoAssign ? FOLLOW_AUTO_ASSIGN : status.threshold}
                     disabled={!status || status.running}
-                    onChange={event => void setDistance(Number(event.target.value))}
+                    onChange={event => void setDistance(toDistance(event.target.value))}
                     className="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white"
                 >
+                    <option value={FOLLOW_AUTO_ASSIGN}>
+                        Same as Auto-Assign{status ? ` (${status.autoAssignDistance.toFixed(2)})` : ''}
+                    </option>
                     {DISTANCES.map(distance => (
                         <option key={distance} value={distance}>
-                            {distance.toFixed(2)}{distance === 0.65 ? ' (default)' : ''}
+                            {distance.toFixed(2)}
                         </option>
                     ))}
                 </select>
-                <span className="text-xs text-gray-500">Used by the next run (locked while a run is under way).</span>
+                <span className="text-xs text-gray-500">
+                    Auto-Assign is set in Settings &gt; AI Performance (limited here to 0.40 - 0.80). Used by the next run; locked while a run is under way.
+                </span>
             </label>
 
             <label className="flex items-center gap-2 text-sm text-gray-300 mb-3">

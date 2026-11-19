@@ -5,7 +5,8 @@ import { getRematchService } from '../core/services/RematchDeps';
 import { MAX_DISTANCE, MIN_DISTANCE } from '../core/services/RematchService';
 
 const setAutoSchema = z.object({ enabled: z.boolean() }).strict();
-const setDistanceSchema = z.object({ distance: z.number().finite() }).strict();
+/** A number pins the distance; null goes back to following the Auto-Assign setting. */
+const setDistanceSchema = z.object({ distance: z.number().finite().nullable() }).strict();
 
 /** Settings card for the background re-match of unassigned faces (docs/plans/review-queue-parking-plan.md, Phase 2). */
 export function registerRematchHandlers() {

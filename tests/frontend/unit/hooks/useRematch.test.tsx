@@ -11,6 +11,8 @@ const idle = {
     running: false,
     autoEnabled: true,
     threshold: 0.65,
+    followsAutoAssign: true,
+    autoAssignDistance: 0.65,
     checked: 0,
     total: 0,
     matched: 0,
@@ -95,6 +97,17 @@ describe('useRematch', () => {
 
         expect(invoke).toHaveBeenCalledWith('rematch:setDistance', { distance: 0.7 });
         expect(result.current.status?.threshold).toBe(0.7);
+    });
+
+    it('goes back to following Auto-Assign when told to clear the pinned distance', async () => {
+        invoke.mockImplementation(async (channel: string) => ({ success: true, status: { ...idle, followsAutoAssign: channel === 'rematch:setDistance' } }));
+        const { result } = renderHook(() => useRematch());
+        await waitFor(() => expect(result.current.status).not.toBeNull());
+
+        await act(async () => { await result.current.setDistance(null); });
+
+        expect(invoke).toHaveBeenCalledWith('rematch:setDistance', { distance: null });
+        expect(result.current.status?.followsAutoAssign).toBe(true);
     });
 
     it('shows why a distance was refused and keeps the old status', async () => {

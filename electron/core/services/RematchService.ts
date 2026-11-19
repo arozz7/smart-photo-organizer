@@ -10,9 +10,10 @@ const AUTO_KEY = 'rematch_auto';
 const DISTANCE_KEY = 'rematch_distance';
 
 /**
- * How close (L2 between unit descriptors) a face must be to a named person to be matched. 0.65 was measured on the
- * real library: no face the user ignored lies within 0.8 of a named person, and 0.65 keeps the review list manageable.
- * Its own setting, not the Face Similarity Threshold (which also steers scan-time matching and may be far looser).
+ * How close (L2 between unit descriptors) a face must be to a named person to be matched. By default it follows the
+ * scan "Auto-Assign" distance (Settings > AI Performance), so one setting decides what is matched automatically; the
+ * card can pin a different value. 0.65 is the fallback if that setting is unusable; it was measured on the real library:
+ * no face the user ignored lies within 0.8 of a named person. (Not the Face Match Distance, which is a different setting.)
  */
 export const DEFAULT_DISTANCE = 0.65;
 export const MIN_DISTANCE = 0.4;
@@ -48,6 +49,8 @@ export interface RematchDeps {
     countUndoable(): number;
     /** A scan or AI work is running, or the app is shutting down. */
     isBusy(): boolean;
+    /** The scan Auto-Assign distance setting, as the user has it (may be outside the range a re-match accepts). */
+    autoAssignDistance(): number;
     readFlag(key: string): string | null;
     writeFlag(key: string, value: string): void;
     now(): number;
@@ -90,6 +93,10 @@ export interface RematchStatus {
     autoEnabled: boolean;
     /** The distance in use (the run's own while running). */
     threshold: number;
+    /** True when the distance is the Auto-Assign setting (the user has not pinned a value on the card). */
+    followsAutoAssign: boolean;
+    /** What "same as Auto-Assign" means right now (the setting limited to 0.40 - 0.80). */
+    autoAssignDistance: number;
     checked: number;
     total: number;
     matched: number;
@@ -156,6 +163,8 @@ export class RematchService implements IService {
             running: state !== null,
             autoEnabled: this.isAutoEnabled(),
             threshold: state?.threshold ?? this.getDistance(),
+            followsAutoAssign: this.pinnedDistance() === null,
+            autoAssignDistance: this.followedDistance(),
             checked: state?.checked ?? 0,
             total: state?.total ?? 0,
             matched: state?.matched ?? 0,
@@ -179,19 +188,37 @@ export class RematchService implements IService {
     }
 
     /**
-     * Chooses how close a face must be to a named person to be matched. Returns false (and changes nothing) outside
-     * MIN_DISTANCE to MAX_DISTANCE. A run in progress keeps the distance it started with.
+     * Pins how close a face must be to a named person to be matched, or (null) goes back to following the Auto-Assign
+     * setting. Returns false (and changes nothing) outside MIN_DISTANCE to MAX_DISTANCE. A run in progress keeps the
+     * distance it started with.
      */
-    setDistance(distance: number): boolean {
+    setDistance(distance: number | null): boolean {
+        if (distance === null) {
+            this.deps.writeFlag(DISTANCE_KEY, '');
+            return true;
+        }
         if (!Number.isFinite(distance) || distance < MIN_DISTANCE || distance > MAX_DISTANCE) return false;
         this.deps.writeFlag(DISTANCE_KEY, String(distance));
         return true;
     }
 
+    /** The distance the user pinned on the card, or null (nothing stored, cleared, or not usable). */
+    private pinnedDistance(): number | null {
+        const raw = this.deps.readFlag(DISTANCE_KEY);
+        if (raw === null || raw === '') return null;
+        const stored = Number(raw);
+        return Number.isFinite(stored) && stored >= MIN_DISTANCE && stored <= MAX_DISTANCE ? stored : null;
+    }
+
+    /** The Auto-Assign setting limited to the range a re-match accepts, or 0.65 if it is unusable. */
+    private followedDistance(): number {
+        const auto = this.deps.autoAssignDistance();
+        if (!Number.isFinite(auto) || auto <= 0) return DEFAULT_DISTANCE;
+        return Math.min(MAX_DISTANCE, Math.max(MIN_DISTANCE, auto));
+    }
+
     private getDistance(): number {
-        const stored = Number(this.deps.readFlag(DISTANCE_KEY));
-        const valid = this.deps.readFlag(DISTANCE_KEY) !== null && Number.isFinite(stored) && stored >= MIN_DISTANCE && stored <= MAX_DISTANCE;
-        return valid ? stored : DEFAULT_DISTANCE;
+        return this.pinnedDistance() ?? this.followedDistance();
     }
 
     /**

@@ -88,8 +88,7 @@ Reliability evidence: 0 of 2,781 human faces you ignored yourself are within 0.8
 Why these faces were missed: the background grouping matches a face once, when it is first processed; people named afterwards are never compared against faces already processed.
 
 **Design (approved 2026-11-18: default 0.65 from the existing setting, automatic with a switch):**
-- **Distance: its own setting, default 0.65, 0.4 to 0.8, chosen on the card** (stored in app state as `rematch_distance`). The plan first said to reuse the Face Similarity Threshold, but the value stored in the installed app is **0.85** (a legacy fallback), which would have
-  made the re-match far looser than the approved 0.65 and tied it to scan-time matching. A run keeps the distance it started with.
+- **Distance: follows the scan Auto-Assign setting (0.70 by default, limited to 0.4 - 0.8); the card can pin another value** (stored in app state as `rematch_distance`). First built with its own default 0.65 (approved 2026-11-18); changed on 2026-11-19 at the user's request to use the existing setting. The Face Match Distance setting is not used (it was stored as **0.85**, a legacy fallback). A run keeps the distance it started with.
 - **Automatic:** a background service checks every minute. When no scan or AI work is active, it starts a run if (a) it never ran, or (b) the named people's centroids or the threshold changed since the last run, and at least 30 minutes have passed since the last run.
   A switch "Run automatically" (default on) and a "Run now" button sit in a new card in Settings > Database Management, next to the Parked card, together with progress, the last result and "Undo re-match".
 - A run matches each unassigned, not ignored, human face with a descriptor against the named people (same `FaceService.matchAgainstCentroids`, same centroids incl. eras and poses as the background grouping) and assigns matches **unconfirmed**,

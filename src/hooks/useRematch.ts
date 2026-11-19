@@ -4,7 +4,11 @@ import { useCallback, useEffect, useState } from 'react'
 export interface RematchStatus {
     running: boolean
     autoEnabled: boolean
-    /** The distance in use (the Face Similarity Threshold setting). */
+    /** True while the distance follows the Auto-Assign setting (the user has not pinned one on the card). */
+    followsAutoAssign: boolean;
+    /** What "same as Auto-Assign" means right now (the setting limited to 0.40 - 0.80). */
+    autoAssignDistance: number;
+    /** The distance in use (the Auto-Assign setting unless pinned on the card). */
     threshold: number
     checked: number
     total: number
@@ -30,8 +34,8 @@ export interface RematchState {
     run: () => Promise<void>
     undo: () => Promise<void>
     setAuto: (enabled: boolean) => Promise<void>
-    /** Chooses how close a face must be to a named person to be matched (applies to the next run). */
-    setDistance: (distance: number) => Promise<void>
+    /** Pins how close a face must be to a named person to be matched (applies to the next run); null follows Auto-Assign again. */
+    setDistance: (distance: number | null) => Promise<void>
 }
 
 const REFRESH_WHILE_RUNNING_MS = 3000
@@ -108,7 +112,7 @@ export function useRematch(): RematchState {
         await act('rematch:setAuto', { enabled })
     }, [act])
 
-    const setDistance = useCallback(async (distance: number) => {
+    const setDistance = useCallback(async (distance: number | null) => {
         await act('rematch:setDistance', { distance })
     }, [act])
 

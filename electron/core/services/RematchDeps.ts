@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { AppStateRepository } from '../../data/repositories/AppStateRepository';
 import { PersonRepository } from '../../data/repositories/PersonRepository';
 import { RematchRepository } from '../../data/repositories/RematchRepository';
+import { ConfigService } from './ConfigService';
 import { FaceService } from './FaceService';
 import { collectCentroids } from './parkedFaces';
 import { RematchService, type RematchDeps } from './RematchService';
@@ -30,6 +31,8 @@ export function createRematchDeps(): RematchDeps {
         countUndoable: () => RematchRepository.countUndoable(),
         isBusy: () =>
             AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive() || AppStateRepository.isShutdownRequested(),
+        // same fallback the scans use when the setting is absent (FaceService.classifyAndAssign: autoAssignThreshold || 0.7)
+        autoAssignDistance: () => ConfigService.getAISettings().autoAssignThreshold || 0.7,
         readFlag: key => AppStateRepository.getFlag(key),
         writeFlag: (key, value) => AppStateRepository.setFlag(key, value),
         now: () => Date.now(),
