@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAI } from '../../context/AIContext';
 import { FaceDataHealthCard } from '../FaceDataHealthCard';
 import { ParkedFacesCard } from '../ParkedFacesCard';
+import { RematchCard } from '../RematchCard';
 import SettingsSection from './SettingsSection';
 import FactoryResetModal from './FactoryResetModal';
 import { useDatabaseMaintenance } from '../../hooks/useDatabaseMaintenance';
@@ -109,6 +110,11 @@ export default function DatabaseManagementSection() {
                     {/* Read-only count of faces that would be set aside from review (docs/plans/review-queue-parking-plan.md) */}
                     <div className="border-t border-gray-700 pt-4 mt-4">
                         <ParkedFacesCard />
+                    </div>
+
+                    {/* Matches unassigned faces against people named since they were scanned (unconfirmed, undoable) */}
+                    <div className="border-t border-gray-700 pt-4 mt-4">
+                        <RematchCard />
                     </div>
                 </div>
             </SettingsSection>

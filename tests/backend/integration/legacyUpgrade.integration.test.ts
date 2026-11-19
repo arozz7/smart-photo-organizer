@@ -95,13 +95,13 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         expect(dupMembers.c).toBe(2);
     });
 
-    it('upgrades to schema v1 on first open, taking exactly one backup first', () => {
+    it('upgrades to the latest schema on first open, taking exactly one backup first', () => {
         // Assert
-        expect(firstOpen).toMatchObject({ fromVersion: 0, toVersion: 1, applied: ['file_identity'], downgradeDetected: false });
-        expect(db.pragma('user_version', { simple: true })).toBe(1);
+        expect(firstOpen).toMatchObject({ fromVersion: 0, toVersion: 2, applied: ['file_identity', 'rematch_log'], downgradeDetected: false });
+        expect(db.pragma('user_version', { simple: true })).toBe(2);
         const backups = fs.readdirSync(path.join(libraryDir, 'backups')).filter(f => f.endsWith('.db'));
         expect(backups).toHaveLength(1);
-        expect(backups[0]).toMatch(/^library\.v0-to-v1\./);
+        expect(backups[0]).toMatch(/^library\.v0-to-v2\./);
         expect(firstOpen.backupPath).toBe(path.join(libraryDir, 'backups', backups[0]));
     });
 
@@ -133,6 +133,14 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         expect(filled.c).toBe(0);
     });
 
+    it('adds the empty re-match log without touching any face', () => {
+        // Act
+        const log = db.prepare('SELECT COUNT(*) AS c FROM rematch_log').get() as { c: number };
+
+        // Assert
+        expect(log.c).toBe(0);
+    });
+
     it('does nothing and takes no second backup when the library is opened again', async () => {
         // Arrange
         closeDB();
@@ -142,7 +150,7 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         db = getDB();
 
         // Assert
-        expect(second).toMatchObject({ fromVersion: 1, toVersion: 1, applied: [], downgradeDetected: false });
+        expect(second).toMatchObject({ fromVersion: 2, toVersion: 2, applied: [], downgradeDetected: false });
         expect(fs.readdirSync(path.join(libraryDir, 'backups')).filter(f => f.endsWith('.db'))).toHaveLength(1);
     });
 

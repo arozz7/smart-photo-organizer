@@ -394,7 +394,7 @@ export class FaceRepository {
             SELECT f.id, f.descriptor 
             FROM faces f 
             JOIN people p ON f.person_id = p.id 
-            WHERE f.descriptor IS NOT NULL AND f.person_id IS NOT NULL AND f.is_ignored = 0
+            WHERE f.descriptor IS NOT NULL AND f.person_id IS NOT NULL AND f.is_ignored = 0 AND NOT (f.assignment_source = 'auto_rematch' AND COALESCE(f.is_confirmed, 0) = 0) -- unconfirmed re-matches stay out until confirmed (same set as NamedFaceFingerprintRepository)
         `).all() as any[];
         return rows.map(r => ({
             id: r.id,
