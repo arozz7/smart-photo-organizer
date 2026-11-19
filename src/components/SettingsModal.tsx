@@ -240,11 +240,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onOpenChange }) => 
                                     />
 
                                     <SettingSlider
-                                        label="Face Recognition Confidence"
+                                        label="Face Match Distance"
                                         value={settings.faceSimilarityThreshold || 0.65}
-                                        min={0.1} max={0.99} step={0.01}
+                                        min={0.3} max={1.0} step={0.01}
                                         onChange={(v) => handleChange('faceSimilarityThreshold', v)}
-                                        tooltip="Minimum similarity (0.0 - 1.0) required to match a face to a known person. Higher values require closer matches. Default: 0.65."
+                                        tooltip="Largest distance (0.30 - 1.00) at which a face still matches a known person. This is a distance, so LOWER values are stricter and higher values are looser. Used when unassigned faces are re-checked and when a single face is matched without its own setting. Scans use the two thresholds below. Default: 0.65."
                                     />
 
                                     <SettingSlider

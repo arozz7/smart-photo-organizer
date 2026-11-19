@@ -37,6 +37,9 @@ vi.mock('../../../../src/components/ScanWarningsModal', () => ({
 vi.mock('../../../../src/components/FaceDataHealthCard', () => ({
     FaceDataHealthCard: () => <div>Face Data Health Card</div>,
 }));
+vi.mock('../../../../src/components/RematchCard', () => ({
+    RematchCard: () => <div>Rematch Card</div>,
+}));
 vi.mock('../../../../src/components/SendToSettingsCard', () => ({
     default: () => <div>Send To Settings Card</div>,
 }));

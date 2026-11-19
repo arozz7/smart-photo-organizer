@@ -4,6 +4,7 @@ import logger from '../../logger';
 import { DatabaseBackup } from './DatabaseBackup';
 import { MigrationRunner } from './MigrationRunner';
 import { fileIdentityMigration } from './001_fileIdentity';
+import { rematchLogMigration } from './002_rematchLog';
 import type { Migration, MigrationLogger, MigrationResult } from './types';
 
 /**
@@ -16,7 +17,7 @@ import type { Migration, MigrationLogger, MigrationResult } from './types';
  * Existing libraries have `user_version = 0` (the frozen legacy baseline predates versioning) until
  * migration 1 runs on first launch of a version that includes it.
  */
-export const MIGRATIONS: readonly Migration[] = [fileIdentityMigration];
+export const MIGRATIONS: readonly Migration[] = [fileIdentityMigration, rematchLogMigration];
 
 const BACKUP_FOLDER = 'backups';
 const BACKUPS_TO_KEEP = 3;

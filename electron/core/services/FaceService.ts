@@ -57,8 +57,7 @@ export class FaceService {
 
         // 2. Fallback to FAISS (Individual Face matching)
         if (options.searchFn) {
-            const distThreshold = (1 / Math.max(0.01, threshold)) - 1;
-            const faissResults = await options.searchFn([descArray], options.topK ?? 5, distThreshold);
+            const faissResults = await options.searchFn([descArray], options.topK ?? 5, threshold * threshold); // FAISS reports squared L2
 
             if (faissResults.length > 0 && faissResults[0].length > 0) {
                 const matches = faissResults[0];
@@ -76,12 +75,13 @@ export class FaceService {
 
                 if (rows.length > 0) {
                     const bestMatch = matches[0]; // Already sorted by distance
+                    const distance = Math.sqrt(bestMatch?.distance ?? 0); // squared L2 from FAISS -> L2
 
                     return {
                         personId: rows[0].person_id,
                         personName: rows[0].name,
-                        similarity: 1 / (1 + (bestMatch?.distance ?? 0)),
-                        distance: bestMatch?.distance ?? 0,
+                        similarity: 1 / (1 + distance),
+                        distance,
                         matchType: 'faiss'
                     };
                 }
@@ -133,7 +133,7 @@ export class FaceService {
         logger.info(`[FaceService] FAISS fallback: ${pendingIndices.length} of ${parsedDescriptors.length} need FAISS lookup`);
         if (pendingIndices.length > 0 && options.searchFn) {
             const pendingDescriptors = pendingIndices.map(i => parsedDescriptors[i]);
-            // threshold is already L2 distance, pass directly to FAISS
+            // NOTE: FAISS compares/returns SQUARED L2; matchFace converts, this scan path does not (see aiChangeLog/fix-match-distance-setting.md)
             // A timeout/failure here must degrade to "no FAISS matches" rather
             // than aborting the whole batch — callers (e.g. per-photo scan
             // classification) must still complete so downstream state (queue

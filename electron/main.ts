@@ -13,6 +13,8 @@ import { registerPrsHandlers } from './ipc/prsHandlers';
 import { registerSendToHandlers } from './ipc/sendToHandlers';
 import { registerAlbumHandlers } from './ipc/albumHandlers';
 import { registerParkedFaceHandlers } from './ipc/parkedFaceHandlers';
+import { registerRematchHandlers } from './ipc/rematchHandlers';
+import { getRematchService } from './core/services/RematchDeps';
 import { registerCompositeHandlers } from './ipc/compositeHandlers';
 import { registerAdjustmentHandlers } from './ipc/adjustmentHandlers';
 import { scanQueue } from './scanQueue';
@@ -149,6 +151,10 @@ app.whenReady().then(async () => {
   const faissSyncService = new BackgroundFaissSyncService(createFaissSyncDeps());
   faissSyncService.start();
 
+  // Start Rematch Service: matches unassigned faces against people named since they were first processed (unconfirmed, undoable)
+  const rematchService = getRematchService();
+  rematchService.start();
+
   // Register Services
   const serviceManager = ServiceManager.getInstance();
   serviceManager.register('PythonAIProvider', pythonProvider);
@@ -158,6 +164,7 @@ app.whenReady().then(async () => {
   serviceManager.register('BackgroundDuplicateCheckerService', duplicateCheckerService);
   serviceManager.register('BackgroundFileIdentityService', fileIdentityService);
   serviceManager.register('BackgroundFaissSyncService', faissSyncService);
+  serviceManager.register('RematchService', rematchService);
   serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();
@@ -171,6 +178,7 @@ app.whenReady().then(async () => {
   registerSendToHandlers();
   registerAlbumHandlers();
   registerParkedFaceHandlers();
+  registerRematchHandlers();
   registerCompositeHandlers();
   registerAdjustmentHandlers();
 
