@@ -659,6 +659,11 @@ def handle_command(command):
         from commands import clustering
         response = clustering.cluster_faces(payload, req_id)
 
+    elif cmd_type == 'face_neighbour_counts':
+        # Parked-faces plan, Phase 0: read-only twin counts for the review-queue summary
+        from commands import neighbour_counts
+        response = neighbour_counts.face_neighbour_counts(payload, req_id)
+
     elif cmd_type == 'find_ungroupable_faces':
         faces_data = payload.get('faces', [])
         centroids = payload.get('centroids', [])
