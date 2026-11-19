@@ -1,6 +1,6 @@
 # Review Queue: Non-Face Detections and Pictures of Faces (Implementation Plan)
 
-**Status:** Phases approved 2026-11-19. **Phase A measured** (`docs/measurements/non-face-and-picture-faces.md`); the assistant's labels await the user's review. No app code written yet. A first measurement was done read-only on 2026-11-19 (section 2). The user's answers to the open questions (2026-11-19) are in section 8 and are built into the phases.
+**Status:** Phases approved 2026-11-19. **Phase A measured and the user's label review done** (`docs/measurements/non-face-and-picture-faces.md`, section 7). **Phase F (profile matching) added 2026-11-19, draft, needs approval.** No app code written yet. A first measurement was done read-only on 2026-11-19 (section 2). The user's answers to the open questions (2026-11-19) are in section 8 and are built into the phases.
 **Date:** 2026-11-19
 **Goal:** Take two kinds of junk out of the review queue without ignoring or deleting anything by itself:
 1. **Non-face detections:** the detector boxed something that is not a face (dark blobs, backs of heads, hair, crowd texture, grass).
@@ -47,7 +47,7 @@ Both buckets must be review lists with a human decision, and the picture list **
 ## 5. Phases
 
 ### Phase A: ground truth and measurement (no app code; DONE 2026-11-19, labels under review)
-**Result:** non-faces are about 13% of the queue (about 7,200 faces), pictures about 3% (about 1,800). Detector score below 0.55 flags 3,846 faces at about 71% precision for free; with the model question Q3 the top 8.8% of the queue is about 80% non-faces. The picture check (Q1+Q2+detector) is 60% correct at its top 20 of 455 (about 2,450 faces) and flags 3 of 13 cut-out faces. Both buckets pass the go/no-go for a **review list**; neither qualifies for an unseen bulk ignore yet. Details: `docs/measurements/non-face-and-picture-faces.md`.
+**Result (after the user's review of the labels: 25 of 600 changed, mostly side-profile and blurry faces I had called non-faces):** non-faces are about 10% of the queue (about 5,600 faces), pictures about 3% (about 1,700). Detector score below 0.55 flags 3,846 faces at about 68% precision (non-faces; another 7% are pictures) for free; with the model question Q3 the top 40 of 480 labelled faces are 82% non-faces. The picture check (Q1+Q2+detector) is 60% correct at its top 20 of 455 (about 2,450 faces) and flags 3 of 13 cut-out faces. Both buckets pass the go/no-go for a **review list**; neither qualifies for an unseen bulk ignore yet. Details: `docs/measurements/non-face-and-picture-faces.md`.
 - Build a labelled set of about 600 random queue faces plus the cut-out images. Classes: `real`, `non_face`, `picture`, `cutout` (a real face in a cut-out board, to be kept).
   **The assistant labels from contact sheets, the user reviews** (every label can be overruled; the number of overrules is reported as the label error rate).
 - Score every signal on it: stored signals (detector score, quality, blur, pose, size, embedding norm), the two model questions, and a segmentation-based test ("is the face inside a frame / poster / screen / painting region", using the installed SAM 3).
@@ -58,6 +58,7 @@ Both buckets must be review lists with a human decision, and the picture list **
 ### Phase B: "not a face" suggestions
 - **Revised by the Phase A result:** ship the **detector-score list first** (stored score below a cut-off the user can set, default 0.55; 3,846 faces now; no model, no GPU, no background run needed), then add the Q3 model question as a second pass that re-ranks the next faces (below 0.75) and finds non-faces with a good detector score.
 - Likely candidates (decided by A): stored signals combined (cheap, no GPU), a stricter model question on a tight crop, embedding norm.
+- **Profile and hard faces are real (user review, 2026-11-19):** side-profile, turned, looking-down, partly covered and blurry faces are real faces, not junk. Consequences for B: (a) the list shows the pose and quality next to each thumbnail and can be filtered by them; (b) a face is never flagged *because of* its pose (pose is not a scoring input); (c) the cut-off preview tells the user how many flagged faces are turned 45 degrees or more; (d) a face with no visible face (back of head, hair, a turned head showing only hair, e.g. tile 460) stays a non-face; (e) acceptance test: on the labelled set, at most about a quarter of the default list is real faces, and the real ones in it are shown, not hidden.
 - Tasks, each test-first:
   1. Migration 003 `face_flags`; test: applies once, idempotent, legacy upgrade path 0 to 3 (extend `legacyUpgrade.integration.test.ts`).
   2. `FlagRepository` (upsert, list by kind and score, dismiss, count, undo of a bulk ignore); tests on real in-memory SQLite.
@@ -84,6 +85,18 @@ Both buckets must be review lists with a human decision, and the picture list **
   5. setting **Run when: Off / Only when I am away / Whenever nothing else is running**, plus a daily time budget, all on the card.
 - Estimated cost with the current model: about 8 hours of idle GPU for one question over the whole queue; Phase A decides whether a cheaper first pass (stored signals, tight crop) can cut that by most.
 
+### Phase F: profile-aware matching (DRAFT, needs approval; separate from the junk lists)
+**Why (Phase A review, `docs/measurements/non-face-and-picture-faces.md` section 7):** 28% of the real queue faces (about 13,000) are turned 45 degrees or more. They are not junk but they do not match: their distance to every named person is about 1.29, the same as non-faces. Only 93 of 4,151 confirmed faces (2%) are profiles, and a person's profile face sits at a median 0.97 from their own frontal centroid (frontal: 0.56). Profile faces of the same person do cluster with each other (89% of same-person pairs within 1.0, 0% of different-person pairs, 10 people, 120 faces). Only 11 of 38 people have a profile centroid.
+**Principles:** profile faces are never offered for ignore; nothing is assigned without the user; scan-time matching is not changed until measured and approved.
+**Phases (each with its own approval):**
+- **F0 Measure:** more profile ground truth from the user's own confirmations (leave-one-out on confirmed profile faces; per-person pose bins), false-pair rate of profile-to-profile at distance 0.8 to 1.0 against the whole queue (not only 10 people), and how many queue profiles each person's profile examples would reach. Output: a measurement note, go/no-go: held-out precision of at least 95% at the suggested distance.
+- **F1 Profile examples per person (low risk, user in the loop):** on a person, "Find profile views": suggests unassigned faces with |yaw| of 40 or more that are close to that person's confirmed profile faces (profile-to-profile), shown as a page to confirm in bulk (like the re-match review), Undo. Each confirmation adds profile examples and rebuilds that person's profile centroid.
+- **F2 Profile groups in the queue:** a filter "Profiles (grouped)": cluster the unassigned profile faces among themselves, so one name applies to a whole group.
+- **F3 Scan-time pose-aware matching:** a separate profile threshold and the per-person profile centroid in `matchBatch`; changes what scans assign, so only after F0 to F2 show enough examples, behind a setting, with a before/after count on the real library.
+- **Open dependency:** `matchBatch` compares FAISS squared distances with an L2 threshold (scan matches are looser than the setting says, effective L2 about 0.84 at 0.70). Decide this before F3 because profile distances sit near 0.8 to 1.0.
+- **Not in F:** blurry and noisy faces. They are real but their embeddings carry little identity; they belong in the parking plan (`review-queue-parking-plan.md`, Phase 1), not in matching.
+- **Tests:** profile-centroid builder and the F1 suggestion query on real in-memory SQLite with fixtures built from synthetic unit vectors; service tests with fake store; hook and card tests like `useRematch`.
+
 ### Phase E: learn from the user's decisions (optional)
 - Every bulk ignore and dismissal is a new label. Re-measure precision on them and offer a suggested cut-off ("at 0.4 you keep 95% of what you ignore"). Cut-off changes stay a user choice.
 
@@ -94,6 +107,7 @@ scorer tests against the labelled fixtures; IPC schema tests; hook and card test
 ## 7. Risks
 - **Model quality** (see section 2): mitigated by review-only buckets and the go/no-go in Phase A.
 - **GPU and Python contention:** a long model call blocks the single Python process and can time out scans. Mitigation: idle only, small batches, per-call timeout, abort on scan start.
+- **Profile and hard faces flagged as junk:** 10 of 41 faces under the default detector cut-off are real (looking down, covered, partial, blurry). Mitigation: review list, pose and quality shown, no bulk ignore without the thumbnails, Undo.
 - **Cut-outs and pictures behind people:** may be flagged as pictures. Mitigation: `cutout` class in the acceptance test, per-item review only if it fails.
 - **Model availability:** SmolVLM2 is cached locally today; the feature must degrade to "off" when it is missing (no crash, a clear message on the card).
 - **Disk and time:** flags are small; the cost is GPU hours, shown on the card.
@@ -107,6 +121,7 @@ scorer tests against the labelled fixtures; IPC schema tests; hook and card test
 4. **When it may run:** idle-only, or at low usage. Mechanism in Phase D (what exists today and what is added).
 5. **Order:** B (non-faces) before C (pictures), as proposed.
 6. **Pictures of named people:** offered as "picture of {name}" (Phase C), not left matched to the person.
+7. **Label review (2026-11-19):** the user changed 25 labels (13 not-a-face and 10 unsure became real, mostly profile or blurry faces). Tile 460 (a turned head showing only hair) stays "not a face" (user: "technically turned but you cannot see the face"). Profile faces are real; they get Phase F, not an ignore list. User: "proceed with plan changes".
 
 ## 9. Change log and docs
 Each phase writes `aiChangeLog/feat-<phase>.md` (files, behaviour, tests, assumptions and risks) and updates README settings notes. Version bump per released phase.
