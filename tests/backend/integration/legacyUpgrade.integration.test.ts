@@ -97,11 +97,11 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
 
     it('upgrades to the latest schema on first open, taking exactly one backup first', () => {
         // Assert
-        expect(firstOpen).toMatchObject({ fromVersion: 0, toVersion: 2, applied: ['file_identity', 'rematch_log'], downgradeDetected: false });
-        expect(db.pragma('user_version', { simple: true })).toBe(2);
+        expect(firstOpen).toMatchObject({ fromVersion: 0, toVersion: 3, applied: ['file_identity', 'rematch_log', 'face_flags'], downgradeDetected: false });
+        expect(db.pragma('user_version', { simple: true })).toBe(3);
         const backups = fs.readdirSync(path.join(libraryDir, 'backups')).filter(f => f.endsWith('.db'));
         expect(backups).toHaveLength(1);
-        expect(backups[0]).toMatch(/^library\.v0-to-v2\./);
+        expect(backups[0]).toMatch(/^library\.v0-to-v3\./);
         expect(firstOpen.backupPath).toBe(path.join(libraryDir, 'backups', backups[0]));
     });
 
@@ -141,6 +141,14 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         expect(log.c).toBe(0);
     });
 
+    it('adds the empty face flags table without touching any face', () => {
+        // Act
+        const flags = db.prepare('SELECT COUNT(*) AS c FROM face_flags').get() as { c: number };
+
+        // Assert
+        expect(flags.c).toBe(0);
+    });
+
     it('does nothing and takes no second backup when the library is opened again', async () => {
         // Arrange
         closeDB();
@@ -150,7 +158,7 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         db = getDB();
 
         // Assert
-        expect(second).toMatchObject({ fromVersion: 2, toVersion: 2, applied: [], downgradeDetected: false });
+        expect(second).toMatchObject({ fromVersion: 3, toVersion: 3, applied: [], downgradeDetected: false });
         expect(fs.readdirSync(path.join(libraryDir, 'backups')).filter(f => f.endsWith('.db'))).toHaveLength(1);
     });
 

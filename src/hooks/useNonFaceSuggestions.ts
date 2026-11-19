@@ -1,0 +1,218 @@
+import { useCallback, useEffect, useState } from 'react'
+import { usePeople } from '../context/PeopleContext'
+import { useToast } from '../context/ToastContext'
+
+/** Faces loaded per page of the "Not a face (suggested)" list. */
+export const PAGE_SIZE = 150
+
+export interface NonFaceTile {
+    faceId: number
+    /** The detector's confidence that the box holds a face; the list is sorted by it, lowest first. */
+    score: number
+    quality: number | null
+    blur: number | null
+    /** Degrees; null when the pose is unknown. */
+    yaw: number | null
+    pitch: number | null
+    box: { x: number; y: number; width: number; height: number }
+    photoId: number
+    filePath: string | null
+    previewPath: string | null
+    photoWidth: number | null
+    photoHeight: number | null
+}
+
+export interface NonFaceCount {
+    cutoff: number
+    total: number
+    /** How many of `total` are turned 45 degrees or more (real faces seen from the side). */
+    turned: number
+}
+
+export interface NonFaceOverview {
+    cutoff: number
+    defaultCutoff: number
+    minCutoff: number
+    maxCutoff: number
+    current: NonFaceCount
+    choices: NonFaceCount[]
+    ignoredFromList: number
+}
+
+interface Response {
+    success: boolean
+    error?: string
+    overview?: NonFaceOverview
+    faces?: NonFaceTile[]
+    ignoredIds?: number[]
+    kept?: number
+    restoredIds?: number[]
+}
+
+function errorText(error: unknown): string {
+    return error instanceof Error ? error.message : String(error)
+}
+
+async function call(channel: string, payload?: unknown): Promise<Response> {
+    try {
+        return (await window.ipcRenderer.invoke(channel, payload)) as Response
+    } catch (error) {
+        return { success: false, error: errorText(error) }
+    }
+}
+
+const plural = (count: number) => `${count} ${count === 1 ? 'face' : 'faces'}`
+
+/**
+ * The "Not a face (suggested)" list: faces the detector was unsure about. The overview (for the count on the tab) loads
+ * with the page; the faces load when the list is opened. Nothing is ignored except what the user selects.
+ */
+export function useNonFaceSuggestions({ enabled }: { enabled: boolean }) {
+    const { loadFaces, loadPeople } = usePeople()
+    const { addToast } = useToast()
+
+    const [overview, setOverview] = useState<NonFaceOverview | null>(null)
+    const [tiles, setTiles] = useState<NonFaceTile[]>([])
+    const [loading, setLoading] = useState(false)
+    const [busy, setBusy] = useState(false)
+    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+    /** The faces the last "Ignore selected" ignored, so Undo restores exactly those. */
+    const [undoBatch, setUndoBatch] = useState<number[] | null>(null)
+
+    const fail = useCallback((what: string, error?: string) => {
+        addToast({ type: 'error', description: `Could not ${what}: ${error ?? 'unknown error'}` })
+    }, [addToast])
+
+    const refreshOverview = useCallback(async () => {
+        const response = await call('nonface:getOverview')
+        if (response.success && response.overview) setOverview(response.overview)
+    }, [])
+
+    const reloadList = useCallback(async () => {
+        setLoading(true)
+        setSelectedIds(new Set())
+        const response = await call('nonface:list', { offset: 0, limit: PAGE_SIZE })
+        if (response.success && response.faces) setTiles(response.faces)
+        else fail('load the list', response.error)
+        setLoading(false)
+    }, [fail])
+
+    const refreshQueue = useCallback(() => {
+        loadFaces({ unnamed: true })
+        loadPeople()
+    }, [loadFaces, loadPeople])
+
+    useEffect(() => { void refreshOverview() }, [refreshOverview])
+    useEffect(() => { if (enabled) void reloadList() }, [enabled, reloadList])
+
+    const loadMore = useCallback(async () => {
+        if (loading) return
+        setLoading(true)
+        const response = await call('nonface:list', { offset: tiles.length, limit: PAGE_SIZE })
+        if (response.success && response.faces) {
+            const more = response.faces
+            setTiles(prev => [...prev, ...more.filter(face => !prev.some(shown => shown.faceId === face.faceId))])
+        } else {
+            fail('load more faces', response.error)
+        }
+        setLoading(false)
+    }, [loading, tiles.length, fail])
+
+    const toggle = useCallback((faceId: number) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev)
+            if (!next.delete(faceId)) next.add(faceId)
+            return next
+        })
+    }, [])
+    const selectAllLoaded = useCallback(() => setSelectedIds(new Set(tiles.map(tile => tile.faceId))), [tiles])
+    const selectNone = useCallback(() => setSelectedIds(new Set()), [])
+
+    const removeFromList = useCallback((faceIds: number[]) => {
+        const gone = new Set(faceIds)
+        setTiles(prev => prev.filter(tile => !gone.has(tile.faceId)))
+    }, [])
+
+    const ignoreSelected = useCallback(async () => {
+        if (selectedIds.size === 0 || busy) return
+        setBusy(true)
+        const response = await call('nonface:ignore', { faceIds: [...selectedIds] })
+        if (response.success && response.ignoredIds) {
+            removeFromList(response.ignoredIds)
+            setSelectedIds(new Set())
+            setUndoBatch(response.ignoredIds.length > 0 ? response.ignoredIds : null)
+            addToast({ type: 'success', description: `Ignored ${plural(response.ignoredIds.length)}` })
+            void refreshOverview()
+            refreshQueue()
+        } else {
+            fail('ignore the selected faces', response.error)
+        }
+        setBusy(false)
+    }, [selectedIds, busy, removeFromList, addToast, fail, refreshOverview, refreshQueue])
+
+    const keepSelected = useCallback(async () => {
+        if (selectedIds.size === 0 || busy) return
+        setBusy(true)
+        const faceIds = [...selectedIds]
+        const response = await call('nonface:keep', { faceIds })
+        if (response.success) {
+            removeFromList(faceIds)
+            setSelectedIds(new Set())
+            addToast({ type: 'success', description: `Kept ${plural(response.kept ?? faceIds.length)} in the review queue; they will not be suggested again` })
+            void refreshOverview()
+        } else {
+            fail('keep the selected faces', response.error)
+        }
+        setBusy(false)
+    }, [selectedIds, busy, removeFromList, addToast, fail, refreshOverview])
+
+    const undoLast = useCallback(async () => {
+        if (!undoBatch || busy) return
+        setBusy(true)
+        const response = await call('nonface:undo', { faceIds: undoBatch })
+        if (response.success) {
+            setUndoBatch(null)
+            addToast({ type: 'success', description: `Returned ${plural(response.restoredIds?.length ?? 0)} to the review queue` })
+            await Promise.all([reloadList(), refreshOverview()])
+            refreshQueue()
+        } else {
+            fail('undo', response.error)
+        }
+        setBusy(false)
+    }, [undoBatch, busy, addToast, fail, reloadList, refreshOverview, refreshQueue])
+
+    const setCutoff = useCallback(async (cutoff: number) => {
+        if (busy) return
+        setBusy(true)
+        const response = await call('nonface:setCutoff', { cutoff })
+        if (response.success && response.overview) {
+            setOverview(response.overview)
+            setUndoBatch(null)
+            await reloadList()
+        } else {
+            fail('change the cut-off', response.error)
+        }
+        setBusy(false)
+    }, [busy, fail, reloadList])
+
+    return {
+        overview,
+        tiles,
+        total: overview?.current.total ?? 0,
+        hasMore: tiles.length < (overview?.current.total ?? 0),
+        loading,
+        busy,
+        selectedIds,
+        undoBatch,
+        loadMore,
+        toggle,
+        selectAllLoaded,
+        selectNone,
+        ignoreSelected,
+        keepSelected,
+        undoLast,
+        setCutoff,
+    }
+}
+
+export type NonFaceSuggestionsController = ReturnType<typeof useNonFaceSuggestions>

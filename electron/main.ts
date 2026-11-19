@@ -14,6 +14,7 @@ import { registerSendToHandlers } from './ipc/sendToHandlers';
 import { registerAlbumHandlers } from './ipc/albumHandlers';
 import { registerParkedFaceHandlers } from './ipc/parkedFaceHandlers';
 import { registerRematchHandlers } from './ipc/rematchHandlers';
+import { registerNonFaceHandlers } from './ipc/nonFaceHandlers';
 import { getRematchService } from './core/services/RematchDeps';
 import { registerCompositeHandlers } from './ipc/compositeHandlers';
 import { registerAdjustmentHandlers } from './ipc/adjustmentHandlers';
@@ -179,6 +180,7 @@ app.whenReady().then(async () => {
   registerAlbumHandlers();
   registerParkedFaceHandlers();
   registerRematchHandlers();
+  registerNonFaceHandlers();
   registerCompositeHandlers();
   registerAdjustmentHandlers();
 

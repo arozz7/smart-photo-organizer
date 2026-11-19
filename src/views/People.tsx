@@ -14,6 +14,8 @@ import { useIgnoredFaces } from '../hooks/useIgnoredFaces'
 import { useBackgroundFaces } from '../hooks/useBackgroundFaces'
 import { useFetchedFaces } from '../hooks/useFetchedFaces'
 import EdgeCaseFilters, { EdgeCaseFilterType } from '../components/EdgeCaseFilters'
+import NonFaceSuggestions from '../components/NonFaceSuggestions'
+import { useNonFaceSuggestions } from '../hooks/useNonFaceSuggestions'
 import PersonCard from '../components/PersonCard'
 import ClusterList from '../components/ClusterList'
 import { useAlert } from '../context/AlertContext'
@@ -128,22 +130,12 @@ export default function People() {
     const [activeEdgeFilter, setActiveEdgeFilter] = useState<EdgeCaseFilterType>('unnamed');
     const { faces: ignoredFaces, ...ignoredCtrl } = useIgnoredFaces({ enabled: activeEdgeFilter === 'ignored' });
     const { candidates: backgroundFaces, ...bgCtrl } = useBackgroundFaces({ enabled: activeEdgeFilter === 'background' });
+    const nonFace = useNonFaceSuggestions({ enabled: activeEdgeFilter === 'nonface' });
     const { faces: ungroupableFetched, loadMore: loadMoreUngroupable } = useFetchedFaces({
         ids: ungroupableFaces,
         enabled: activeEdgeFilter === 'ungroupable'
     });
-    // Note: usePeopleCluster returns ungroupableFaces (ids). We use useFetchedFaces for rendering them.
-    // However, to supply them to useFetchedFaces, we need them from usePeopleCluster result.
-    // But hooks order matters. usePeopleCluster is called below.
-    // We'll move usePeopleCluster call UP or wrap the rest in a subsequent block.
-    // Actually, usePeopleCluster is a hook, called unconditionally.
-    // We can't access its result before it's called.
-    // So we must move usePeopleCluster call up.
-    // But usePeopleCluster depends on nothing local (except context).
-    // So we can move usePeopleCluster call up.
-
-
-
+    // usePeopleCluster (called above) supplies the ungroupable face ids; useFetchedFaces loads the faces to render.
 
     // --- Controllers for Buckets Tabs ---
 
@@ -803,7 +795,8 @@ export default function People() {
                                     unnamed: totalUnassigned,
                                     ignored: ignoredCtrl.totalCount,
                                     ungroupable: ungroupableFaces.length,
-                                    background: bgCtrl.totalCandidates
+                                    background: bgCtrl.totalCandidates,
+                                    nonface: nonFace.total
                                 }}
                             />
                         </div>
@@ -1191,6 +1184,8 @@ export default function People() {
                                 )}
                             </div>
                         )}
+
+                        {activeEdgeFilter === 'nonface' && <NonFaceSuggestions ctrl={nonFace} onViewPhoto={viewPhoto} />}
 
                         {activeEdgeFilter === 'ungroupable' && (
                             <div className="space-y-4">
