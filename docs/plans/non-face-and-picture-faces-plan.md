@@ -1,6 +1,6 @@
 # Review Queue: Non-Face Detections and Pictures of Faces (Implementation Plan)
 
-**Status:** DRAFT, awaiting approval. No code written. A first measurement was done read-only on 2026-11-19 (section 2).
+**Status:** DRAFT, awaiting approval of the phases. No code written. A first measurement was done read-only on 2026-11-19 (section 2). The user's answers to the open questions (2026-11-19) are in section 8 and are built into the phases.
 **Date:** 2026-11-19
 **Goal:** Take two kinds of junk out of the review queue without ignoring or deleting anything by itself:
 1. **Non-face detections:** the detector boxed something that is not a face (dark blobs, backs of heads, hair, crowd texture, grass).
@@ -25,9 +25,10 @@ it already ran on about 51,500 of the 55,700 queue faces (`verification_attempts
 | Cost of the model question | about 0.6 s per face per question on the RTX 4070 Ti SUPER with the app idle: one question over 56,000 faces is about 8 hours, two about 17 hours | Measured on 460 faces |
 | Detector score for 8 non-faces | 0.42 to 0.85 (queue median 0.84): it does **not** separate them | 8 examples |
 | Stored embedding size (norm) for the same 8 | two clearly low (9.8, 11.6), the rest near the lower quartile (18); stored norms are a mix of raw (about 21) and unit-length (1.0) values | Weak signal, 8 examples |
-| Head-through-cardboard cut-outs (the user's example) | **Not tested.** No such photos found by description search. | Needs examples |
+| Head-through-cardboard cut-outs (the user's example): 9 stock images in `M:\SamplePicturesCardCutouts` (scarecrows, sunflowers, witch, monster; 13 real faces) | The app's detector finds all 13 faces. **7 of the 13 score above the cut-off of the top 40 of the 300 held-out faces** (the "possible picture" list). The painted board around a real face looks like a picture to the model. | 13 faces, stock images, not the user's library |
 
-Conclusion: a zero-shot model question is a usable *ranking* but not a clean classifier. Both buckets must be review lists with a human decision. The "not a face" case has not been tested with any model yet.
+Conclusion: a zero-shot model question is a usable *ranking* but not a clean classifier, and cut-outs show it cannot tell "a picture of a face" from "a real face inside a painted board".
+Both buckets must be review lists with a human decision, and the picture list **never gets an unseen bulk ignore**. The "not a face" case has not been tested with any model yet.
 
 ## 3. Principles
 
@@ -47,11 +48,11 @@ Conclusion: a zero-shot model question is a usable *ranking* but not a clean cla
 ## 5. Phases
 
 ### Phase A: ground truth and measurement (no app code; about one session)
-- Build a labelled set of about 600 random queue faces plus any extra the user supplies. Classes: `real`, `non_face`, `picture`, `cutout` (a real face in a cut-out board, to be kept).
-  Labels come from contact sheets; the user spot-checks the ambiguous ones.
+- Build a labelled set of about 600 random queue faces plus the cut-out images. Classes: `real`, `non_face`, `picture`, `cutout` (a real face in a cut-out board, to be kept).
+  **The assistant labels from contact sheets, the user reviews** (every label can be overruled; the number of overrules is reported as the label error rate).
 - Score every signal on it: stored signals (detector score, quality, blur, pose, size, embedding norm), the two model questions, and a segmentation-based test ("is the face inside a frame / poster / screen / painting region", using the installed SAM 3).
 - Report precision and recall per signal and combined, **at a cut-off that gives the user a list worth reviewing**.
-- **Go/no-go (proposed, to be agreed):** a bucket ships only if the top 200 of its list are at least 60% correct and bulk ignore is only offered for a sub-list that measures at least 95% correct on held-out data. Otherwise that bucket stays per-item.
+- **Go/no-go (agreed in principle):** a bucket ships only if the top 200 of its list are at least 60% correct. A sub-list may offer bulk ignore only if it measures at least 95% correct on held-out data, and for pictures it does not (cut-outs, section 2).
 - Output: `docs/measurements/non-face-and-picture-faces.md` and the chosen scorers. Tests: none (analysis); scripts kept under `scripts/dev/` if reusable.
 
 ### Phase B: "not a face" suggestions
@@ -67,19 +68,26 @@ Conclusion: a zero-shot model question is a usable *ranking* but not a clean cla
 
 ### Phase C: "possibly a picture" suggestions
 - Uses the Phase A winner (the two model questions are the baseline; the segmentation test is the main alternative because it can say *where* the frame is).
-- Extra tasks over B: the scorer behind the Python provider with a timeout and batch size; GPU memory check before loading; the `cutout` class is part of the acceptance test (flag rate on cut-outs must be low, otherwise this bucket never gets a bulk ignore); filter "Possible pictures (suggested)".
-- Open design point: pictures of **named** people. The re-match (0.8.8) assigns a framed portrait of a named person to that person as unconfirmed. Decide whether Phase C also scans unconfirmed `auto_rematch` faces and offers them as "picture of {person}".
+- Extra tasks over B: the scorer behind the Python provider with a timeout and batch size; GPU memory check before loading; the `cutout` class is part of the acceptance test (the baseline flags 7 of 13 cut-out faces, so there is no unseen bulk ignore for pictures; Phase A/C try to lower that flag rate, for example with the segmentation test or a question about the face and its body); filter "Possible pictures (suggested)".
+- **Pictures of named people (decided):** also scan unconfirmed `auto_rematch` faces (the re-match attaches a framed portrait of a named person to that person). A face flagged as a picture of a named person is offered as **"picture of {name}"**: confirming it removes the face from the person and marks it as a picture, remembering whose picture it is (`ignore_source = picture_review`, `suggested_person_id` kept), reversible.
+- **Cut-outs:** the acceptance test includes the cut-out images. The list shows the face with its surroundings so the user can tell a real face in a board from a picture; "Keep" teaches the cut-off (Phase E).
 
 ### Phase D: background runner and cost control
-- Runs only when no scan or AI work is on, small batches, one second between batches (same pattern as `RematchService`), time budget per day configurable.
+- Runs only when no scan or AI work is on (see the pause mechanism below), small batches, one second between batches (same pattern as `RematchService`), time budget per day configurable.
 - Order of work: highest review value first (faces with at least one twin, then the rest), so the useful part is flagged early.
+- **Pause mechanism.** Today the app only knows three conditions: a scan is active, AI work is active, shutdown requested (`AppStateRepository`); the re-match checks them before every step (about a second apart) and a step takes about a quarter of a second. There is **no detection of the user working** in the app yet. Added here:
+  1. the same busy check before every batch (scan, AI work, shutdown), so a scan always wins;
+  2. a user-activity check with Electron's `powerMonitor.getSystemIdleTime()` (no new dependency): in "low usage" mode a batch only starts when the computer has had no keyboard or mouse input for N minutes (default 5, a setting), and the run pauses when input returns;
+  3. a model batch cannot be interrupted once started, so batches stay small (about 8 faces, a few seconds) and the pause happens at the next batch boundary;
+  4. the model is unloaded after a few idle minutes so its GPU memory is free again;
+  5. setting **Run when: Off / Only when I am away / Whenever nothing else is running**, plus a daily time budget, all on the card.
 - Estimated cost with the current model: about 8 hours of idle GPU for one question over the whole queue; Phase A decides whether a cheaper first pass (stored signals, tight crop) can cut that by most.
 
 ### Phase E: learn from the user's decisions (optional)
 - Every bulk ignore and dismissal is a new label. Re-measure precision on them and offer a suggested cut-off ("at 0.4 you keep 95% of what you ignore"). Cut-off changes stay a user choice.
 
 ## 6. Tests (written before code, per phase)
-Migration and repository tests on real SQLite; `FlagService` tests with fake scorer and store (due faces, batching, pause when busy, resume after restart, error handling, no re-offer of dismissed faces);
+Migration and repository tests on real SQLite; `FlagService` tests with fake scorer and store (due faces, batching, pause when busy, pause when the user is active and resume when idle (fake idle clock), resume after restart, error handling, no re-offer of dismissed faces);
 scorer tests against the labelled fixtures; IPC schema tests; hook and card tests like `useRematch`; legacy upgrade test. Full gate `scripts/dev/verify.ps1` before every push.
 
 ## 7. Risks
@@ -90,13 +98,14 @@ scorer tests against the labelled fixtures; IPC schema tests; hook and card test
 - **Disk and time:** flags are small; the cost is GPU hours, shown on the card.
 - **Downgrade:** older builds ignore `face_flags` (additive) but show a downgrade warning.
 
-## 8. Decisions needed from the user
-1. **Who labels** the Phase A set: the assistant labels from contact sheets and the user spot-checks, or the user labels in a small review page.
-2. **Cut-out photos:** a folder or a few photo names (amusement park, face-through-board) so they can be part of the test.
-3. **Bulk ignore policy:** allowed only for sub-lists that measure at least 95% correct (proposed), or always per-item?
-4. **GPU budget:** idle-only background hours per day, or a one-off "run now" overnight.
-5. **Order:** B (non-faces, no model needed, likely the larger win) before C (pictures), as proposed?
-6. **Pictures of named people:** keep them matched to the person, or offer them as "picture of {person}"?
+## 8. Decisions (answered by the user, 2026-11-19)
+1. **Labelling:** the assistant labels from contact sheets, the user reviews the labels (disagreements are re-labelled and counted).
+2. **Cut-out photos:** `M:SamplePicturesCardCutouts` (9 stock images, 13 real faces) is part of the Phase A and C acceptance tests, as class `cutout` (real, keep). Photos of this kind from the user's own library are added when found.
+3. **Bulk ignore:** sub-lists were considered; the plan's position (to be confirmed once the risks below are read): **no unseen bulk ignore for pictures** (cut-outs would be caught, section 2). For "not a face", a sub-list is allowed only if it measures at least 95% correct on held-out labels. In every case the user sees the thumbnails of the page before "Ignore selected", and Undo exists.
+   - Risks of a sub-list: (a) the 95% is measured on a small labelled set, so it has error bars (0 mistakes in 100 held-out faces still allows about 3% real mistakes); (b) a cut-off measured on this library can drift when new photos come (different cameras, lighting), so it is re-measured from the user's own decisions (Phase E); (c) a wrong bulk ignore hides a real face from the review queue (recoverable with Undo and the `ignore_source` tag, but only if the user notices); (d) people mistrust a list they cannot inspect, so the sub-list is shown, not applied silently.
+4. **When it may run:** idle-only, or at low usage. Mechanism in Phase D (what exists today and what is added).
+5. **Order:** B (non-faces) before C (pictures), as proposed.
+6. **Pictures of named people:** offered as "picture of {name}" (Phase C), not left matched to the person.
 
 ## 9. Change log and docs
 Each phase writes `aiChangeLog/feat-<phase>.md` (files, behaviour, tests, assumptions and risks) and updates README settings notes. Version bump per released phase.
