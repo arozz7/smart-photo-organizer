@@ -1,6 +1,17 @@
 
 
-export type EdgeCaseFilterType = 'unnamed' | 'ignored' | 'ungroupable' | 'background'
+export type EdgeCaseFilterType = 'unnamed' | 'ignored' | 'ungroupable' | 'background' | 'nonface'
+
+type FilterColor = 'indigo' | 'gray' | 'red' | 'amber' | 'orange'
+
+// Written out in full: Tailwind only generates the classes it can read in the source, so `bg-${color}-500/10` produced nothing.
+const ACTIVE_CLASSES: Record<FilterColor, { tab: string; badge: string }> = {
+    indigo: { tab: 'bg-indigo-500/10 text-indigo-400 ring-1 ring-indigo-500/50 shadow-lg shadow-indigo-500/10', badge: 'bg-indigo-500/20 text-indigo-300' },
+    gray: { tab: 'bg-gray-500/10 text-gray-400 ring-1 ring-gray-500/50 shadow-lg shadow-gray-500/10', badge: 'bg-gray-500/20 text-gray-300' },
+    red: { tab: 'bg-red-500/10 text-red-400 ring-1 ring-red-500/50 shadow-lg shadow-red-500/10', badge: 'bg-red-500/20 text-red-300' },
+    amber: { tab: 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/50 shadow-lg shadow-amber-500/10', badge: 'bg-amber-500/20 text-amber-300' },
+    orange: { tab: 'bg-orange-500/10 text-orange-400 ring-1 ring-orange-500/50 shadow-lg shadow-orange-500/10', badge: 'bg-orange-500/20 text-orange-300' },
+}
 
 interface EdgeCaseFiltersProps {
     activeFilter: EdgeCaseFilterType
@@ -10,12 +21,13 @@ interface EdgeCaseFiltersProps {
         ungroupable: number
         ignored: number
         background: number
+        nonface: number
     }
     className?: string
 }
 
 export default function EdgeCaseFilters({ activeFilter, onFilterChange, counts, className = '' }: EdgeCaseFiltersProps) {
-    const filters: { id: EdgeCaseFilterType; label: string; icon: JSX.Element; color: string }[] = [
+    const filters: { id: EdgeCaseFilterType; label: string; title?: string; icon: JSX.Element; color: FilterColor }[] = [
         {
             id: 'unnamed',
             label: 'Review Needed',
@@ -55,6 +67,17 @@ export default function EdgeCaseFilters({ activeFilter, onFilterChange, counts, 
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                 </svg>
             )
+        },
+        {
+            id: 'nonface',
+            label: 'Not a Face?',
+            title: 'Boxes the detector was unsure about (suggestions only; you decide)',
+            color: 'orange',
+            icon: (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            )
         }
     ]
 
@@ -68,10 +91,11 @@ export default function EdgeCaseFilters({ activeFilter, onFilterChange, counts, 
                     <button
                         key={filter.id}
                         onClick={() => onFilterChange(filter.id)}
+                        title={filter.title}
                         className={`
                             relative flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all
                             ${isActive
-                                ? `bg-${filter.color}-500/10 text-${filter.color}-400 ring-1 ring-${filter.color}-500/50 shadow-lg shadow-${filter.color}-500/10`
+                                ? ACTIVE_CLASSES[filter.color].tab
                                 : 'text-gray-400 hover:text-white hover:bg-gray-800'
                             }
                         `}
@@ -81,7 +105,7 @@ export default function EdgeCaseFilters({ activeFilter, onFilterChange, counts, 
                         <span className={`
                             px-1.5 py-0.5 rounded-full text-[10px] font-bold min-w-[20px] text-center
                             ${isActive
-                                ? `bg-${filter.color}-500/20 text-${filter.color}-300`
+                                ? ACTIVE_CLASSES[filter.color].badge
                                 : 'bg-gray-800 text-gray-500 group-hover:bg-gray-700'
                             }
                         `}>

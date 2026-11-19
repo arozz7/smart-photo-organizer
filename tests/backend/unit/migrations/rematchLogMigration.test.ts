@@ -8,9 +8,9 @@ describe('002_rematchLog migration', () => {
     beforeEach(() => { db = new Database(':memory:'); });
     afterEach(() => db.close());
 
-    it('is version 2 and registered after file identity', () => {
+    it('is version 2 and registered after file identity, before later migrations', () => {
         expect(rematchLogMigration.version).toBe(2);
-        expect(MIGRATIONS.map(m => m.version)).toEqual([1, 2]);
+        expect(MIGRATIONS.map(m => m.version).slice(0, 2)).toEqual([1, 2]);
     });
 
     it('creates a log keyed by face and person', () => {
