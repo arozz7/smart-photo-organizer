@@ -15,7 +15,7 @@ A list of **unassigned turned faces** (|yaw| 40 or more) with a **suggested pers
 - **Heavy work does not block the app:** the comparison runs in small steps with yields (see 4).
 
 ## 3. Rules (what makes a suggestion)
-- **Candidate face:** unassigned, not ignored, human, descriptor present, |yaw| at or above the turned setting, not kept as "not a face" (`face_flags` `non_face` dismissed), not already dismissed for that person.
+- **Candidate face:** unassigned, not ignored, human, descriptor present, |yaw| at or above the turned setting, not already dismissed for that person. (A face the user kept in the Not a Face? list is a real face and stays eligible; the plan first said the opposite.)
 - **Examples of a person:** confirmed, not ignored, human, descriptor present, |yaw| at or above the same setting, from any photo (no upper yaw limit; the measurement used none), not the candidate's own photo.
 - **Suggested person:** the person owning the nearest example, if that distance is within the setting.
 - **Two names (decision 5):** if examples of two different people are both within the setting, the face carries **both** names, nearest first (F0 found none up to 1.0, so this mainly matters at the wider setting). "Assign selected" assigns the nearest; the row also offers the second name. These rows are not part of "Select all": the user chooses them one by one. The main process checks that the chosen person is still one of that face's candidates within the distance setting (the renderer cannot pick an arbitrary person).

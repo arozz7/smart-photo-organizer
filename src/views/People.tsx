@@ -13,9 +13,9 @@ import { useDiscoveryMerge } from '../hooks/useDiscoveryMerge'
 import { useIgnoredFaces } from '../hooks/useIgnoredFaces'
 import { useBackgroundFaces } from '../hooks/useBackgroundFaces'
 import { useFetchedFaces } from '../hooks/useFetchedFaces'
-import EdgeCaseFilters, { EdgeCaseFilterType } from '../components/EdgeCaseFilters'
-import NonFaceSuggestions from '../components/NonFaceSuggestions'
-import { useNonFaceSuggestions } from '../hooks/useNonFaceSuggestions'
+import EdgeCaseFilters from '../components/EdgeCaseFilters'
+import EdgeCaseSuggestionPanels from '../components/EdgeCaseSuggestionPanels'
+import { useEdgeCaseSuggestions, pendingEdgeCaseTab } from '../hooks/useEdgeCaseSuggestions'
 import PersonCard from '../components/PersonCard'
 import ClusterList from '../components/ClusterList'
 import { useAlert } from '../context/AlertContext'
@@ -100,7 +100,7 @@ export default function People() {
     } = usePeopleCluster()
 
     // @ts-ignore
-    const [activeTab, setActiveTab] = useState<'identified' | 'unnamed' | 'discoveries'>('identified')
+    const [activeTab, setActiveTab] = useState<'identified' | 'unnamed' | 'discoveries'>(pendingEdgeCaseTab() ?? 'identified')
 
     // Buckets Hook (Suggestions & Discoveries)
     const {
@@ -117,7 +117,6 @@ export default function People() {
         recheckStatus
     } = useBuckets()
 
-
     // Discovery Merge State
     const [combineDiscoveries, setCombineDiscoveries] = useState(true);
     // @ts-ignore
@@ -127,10 +126,10 @@ export default function People() {
     });
 
     // --- Edge Case Filters ---
-    const [activeEdgeFilter, setActiveEdgeFilter] = useState<EdgeCaseFilterType>('unnamed');
+    const edge = useEdgeCaseSuggestions();
+    const { activeFilter: activeEdgeFilter, setActiveFilter: setActiveEdgeFilter } = edge;
     const { faces: ignoredFaces, ...ignoredCtrl } = useIgnoredFaces({ enabled: activeEdgeFilter === 'ignored' });
     const { candidates: backgroundFaces, ...bgCtrl } = useBackgroundFaces({ enabled: activeEdgeFilter === 'background' });
-    const nonFace = useNonFaceSuggestions({ enabled: activeEdgeFilter === 'nonface' });
     const { faces: ungroupableFetched, loadMore: loadMoreUngroupable } = useFetchedFaces({
         ids: ungroupableFaces,
         enabled: activeEdgeFilter === 'ungroupable'
@@ -796,7 +795,8 @@ export default function People() {
                                     ignored: ignoredCtrl.totalCount,
                                     ungroupable: ungroupableFaces.length,
                                     background: bgCtrl.totalCandidates,
-                                    nonface: nonFace.total
+                                    nonface: edge.nonFace.total,
+                                    profile: edge.profile.total
                                 }}
                             />
                         </div>
@@ -1185,7 +1185,7 @@ export default function People() {
                             </div>
                         )}
 
-                        {activeEdgeFilter === 'nonface' && <NonFaceSuggestions ctrl={nonFace} onViewPhoto={viewPhoto} />}
+                        <EdgeCaseSuggestionPanels active={activeEdgeFilter} suggestions={edge} onViewPhoto={viewPhoto} />
 
                         {activeEdgeFilter === 'ungroupable' && (
                             <div className="space-y-4">

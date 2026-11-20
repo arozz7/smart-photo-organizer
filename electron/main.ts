@@ -15,6 +15,7 @@ import { registerAlbumHandlers } from './ipc/albumHandlers';
 import { registerParkedFaceHandlers } from './ipc/parkedFaceHandlers';
 import { registerRematchHandlers } from './ipc/rematchHandlers';
 import { registerNonFaceHandlers } from './ipc/nonFaceHandlers';
+import { registerProfileHandlers } from './ipc/profileHandlers';
 import { registerFaceVisibilityHandlers } from './ipc/faceVisibilityHandlers';
 import { getFaceVisibilityService } from './core/services/FaceVisibilityDeps';
 import { getRematchService } from './core/services/RematchDeps';
@@ -188,6 +189,7 @@ app.whenReady().then(async () => {
   registerParkedFaceHandlers();
   registerRematchHandlers();
   registerNonFaceHandlers();
+  registerProfileHandlers();
   registerFaceVisibilityHandlers();
   registerCompositeHandlers();
   registerAdjustmentHandlers();
