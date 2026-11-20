@@ -1,6 +1,6 @@
 # Pictures of faces: suggestions, including faces already assigned to people (Phase C Implementation Plan)
 
-Status: **DRAFT, needs approval** (2026-11-20). Detail of Phase C in `non-face-and-picture-faces-plan.md`; adds the user's request of 2026-11-20: also check faces that are **already assigned** to people, in case a bulk assignment gave someone a picture of a picture (a billboard, poster, framed photo, screen, statue).
+Status: **APPROVED 2026-11-20** (decisions in section 9; Phase C0, the measurement, comes first). Detail of Phase C in `non-face-and-picture-faces-plan.md`; adds the user's request of 2026-11-20: also check faces that are **already assigned** to people, in case a bulk assignment gave someone a picture of a picture (a billboard, poster, framed photo, screen, statue).
 No app code is written before this plan is approved.
 
 ## 1. Problem
@@ -21,7 +21,7 @@ One Edge Cases tab, **Pictures?**, with a switch between two lists, both ranked 
 - **Unassigned faces** (Review Needed): tile with the face and its surroundings, likelihood, pose. Actions: **Ignore as picture**, **Keep (real face)**, Undo.
 - **Assigned faces**, grouped by person: tile, the person's name, **how it was assigned** (scan, re-match, naming a group; confirmed or not), likelihood. Actions: **Remove from {name} and ignore as picture**, **Keep**, Undo. Removing rebuilds that person's centroids; the search index follows (it is rebuilt when the set of named faces changes).
 - Header: how many faces are checked out of all, assigned faces first, likelihood choice (50 to 95%), and what the check is doing (card in Settings, below).
-- Optional, **off by default**: "Hide possible pictures from Review Needed" (same idea as for non-faces, but with a higher bar; see decisions).
+- **On by default** (decision 3): "Hide possible pictures from Review Needed", the same idea as for non-faces: the faces of the unassigned list at its current likelihood are left out of Review Needed's clusters and count, with the same notice, and are reviewed in Pictures?. Turning it off brings them back. Because about 1 in 4 hits at the Phase A cut-off could be a real face on a board, the default likelihood is set by Phase C0 so that the hidden set is the high-confidence part of the list.
 
 ## 5. Design
 - **Scorer (Python):** command `score_face_picture` (`src/python/commands/face_picture.py`), same shape as `score_face_visibility`: batches of at most 16, per-face errors, refuses a non-GPU engine, the crop helpers of `face_visibility.py`, the question and the crop set by Phase C0 (below). Score = log-odds of the first answer word (PICTURE against REAL). The packaged engine must be rebuilt (`npm run build:python`; the release guard enforces it).
@@ -54,12 +54,12 @@ The measurement runs on the GPU, so it runs when the user says the machine is fr
 - **GPU time and heat:** about 15 hours in total, idle only, paused by any activity, Off by default until the user chooses a mode.
 - **Both checks share one engine:** small batches, one at a time, the busy check before each batch.
 
-## 9. Decisions needed from the user
-1. **Assigned faces first** in the overnight order (proposed), then the queue by detector score.
-2. **Removing an assigned picture:** ignore it as a picture, which takes it out of the person, the centroids and the index (proposed), or return it to Review Needed as unassigned.
-3. **Hide possible pictures from Review Needed:** off by default (proposed; the bar is lower than for non-faces and some hits are real faces on boards), or on like the non-face setting.
-4. **Run mode default:** "Only when I am away" (proposed; overnight counts as away), or "Whenever nothing else runs".
-5. **Phase C0 first** (proposed), so the cut-off comes from numbers on the real library, with your review of the sheets.
+## 9. Decisions (answered by the user, 2026-11-20)
+1. **Assigned faces first** in the overnight order, then the queue by detector score.
+2. **Removing an assigned picture** ignores it as a picture (out of the person, the centroids and the index); Undo restores it exactly.
+3. **Hide possible pictures from Review Needed: ON by default** (see section 4 for how the default cut-off is chosen).
+4. **Run mode default:** "Only when I am away" (no keyboard or mouse input for the set time; the user will leave it running overnight).
+5. **Phase C0 first**: the cut-off comes from numbers on the real library, with the user's review of the sheets.
 
 ## 10. Change log and docs
 `aiChangeLog/feat-pictures-suggestions.md`, README settings notes, `docs/measurements/pictures.md`, the parent plan updated. Version bump per released step.
