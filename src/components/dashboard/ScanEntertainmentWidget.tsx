@@ -61,24 +61,19 @@ export default function ScanEntertainmentWidget({ memories }: ScanEntertainmentW
                         <StatBadge label="AI Queue" value={queueSize} color="text-amber-400" />
                     </div>
 
-                    {scanMetrics && (
-                        <div className="grid grid-cols-2 gap-2">
-                            <StatBadge
-                                label="Faces Found"
-                                value={scanMetrics.scan > 0 ? `${Math.round(scanMetrics.scan)}ms` : '—'}
-                                color="text-green-400"
-                            />
-                            {avgTime && (
-                                <StatBadge label="Avg Speed" value={avgTime} color="text-purple-400" />
-                            )}
-                        </div>
-                    )}
+                    {/* These rows are always there (with a dash until known): rows that come and go change the widget's height and push every card below it */}
+                    <div className="grid grid-cols-2 gap-2">
+                        <StatBadge
+                            label="Faces Found"
+                            value={scanMetrics && scanMetrics.scan > 0 ? `${Math.round(scanMetrics.scan)}ms` : '—'}
+                            color="text-green-400"
+                        />
+                        <StatBadge label="Avg Speed" value={avgTime ?? '—'} color="text-purple-400" />
+                    </div>
 
-                    {!isActive && (
-                        <p className="text-xs text-gray-400 mt-2">
-                            Scan finished! This panel will hide shortly.
-                        </p>
-                    )}
+                    <p className={`text-xs text-gray-400 mt-2 ${isActive ? 'invisible' : ''}`}>
+                        Scan finished! This panel will hide shortly.
+                    </p>
                 </div>
 
                 {/* Random Flashback */}
