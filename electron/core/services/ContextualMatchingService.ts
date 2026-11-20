@@ -9,7 +9,26 @@ export interface PropagationResult {
     propagated: number;
     skipped: number;
     error?: string;
+    /** True when the pass was not run because assigning is switched off (see ASSIGNMENT_ENABLED). */
+    disabled?: boolean;
+    message?: string;
 }
+
+/**
+ * Silent assignment is OFF. On the real library the pass assigned nothing only because of two defects (no anchor carries
+ * tier 'high'; the time window compares 'T' dates with datetime() text); repairing them would have started unseen,
+ * unreviewed assignments, and most photos hold several people. Phase G0 of docs/plans/contextual-suggestions-plan.md
+ * switches the writing off; Phase G2 replaces it with a reviewed suggestion list. Do not turn this on.
+ */
+const ASSIGNMENT_ENABLED = false;
+
+const DISABLED_RESULT: PropagationResult = {
+    success: true,
+    propagated: 0,
+    skipped: 0,
+    disabled: true,
+    message: 'Contextual label propagation is being redesigned as reviewed suggestions. Nothing was assigned.',
+};
 
 /**
  * Row returned from the context query.
@@ -66,6 +85,7 @@ export class ContextualMatchingService {
      * context as the given photo.
      */
     static propagateTemporalLabels(photoId: number): PropagationResult {
+        if (!ASSIGNMENT_ENABLED) return { ...DISABLED_RESULT };
         try {
             const db = getDB();
 
@@ -113,6 +133,7 @@ export class ContextualMatchingService {
      * as the given photo.
      */
     static propagateSpatialLabels(photoId: number): PropagationResult {
+        if (!ASSIGNMENT_ENABLED) return { ...DISABLED_RESULT };
         try {
             const db = getDB();
 
@@ -156,6 +177,7 @@ export class ContextualMatchingService {
      * Returns cumulative totals.
      */
     static batchPropagateForLibrary(): PropagationResult {
+        if (!ASSIGNMENT_ENABLED) return { ...DISABLED_RESULT };
         try {
             const db = getDB();
 
