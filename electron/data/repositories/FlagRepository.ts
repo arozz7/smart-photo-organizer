@@ -95,6 +95,19 @@ export class FlagRepository {
         return cutoffs.map((cutoff, i) => ({ cutoff, total: row[`total${i}`], turned: row[`turned${i}`] }));
     }
 
+    /**
+     * The ids of the suggestions at the cut-off that Review Needed may hide: the list (same candidates, same cut-off) without its
+     * turned faces (45 degrees or more, real faces seen from the side), which stay in Review Needed. An unknown pose counts as not turned.
+     */
+    static idsToHideBelow(cutoff: number): number[] {
+        const rows = getDB().prepare(`
+            SELECT f.id FROM faces f
+            WHERE ${NON_FACE_CANDIDATE} AND (f.pose_yaw IS NULL OR ABS(f.pose_yaw) < ${TURNED_YAW_DEGREES})
+            ORDER BY f.id
+        `).all(cutoff) as { id: number }[];
+        return rows.map(r => r.id);
+    }
+
     /** The suggestions, lowest detector score first (the most likely non-faces), `limit` at a time. */
     static listNonFace(cutoff: number, offset: number, limit: number): NonFaceTile[] {
         const rows = getDB().prepare(`

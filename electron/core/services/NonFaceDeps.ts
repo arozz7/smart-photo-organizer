@@ -13,8 +13,10 @@ export function createNonFaceDeps(): NonFaceDeps {
         dismiss: (ids, cutoff, at) => FlagRepository.dismissNonFace(ids, cutoff, at),
         restore: ids => FlagRepository.restoreNonFace(ids),
         countIgnored: () => FlagRepository.countIgnoredByNonFace(),
+        idsToHide: cutoff => FlagRepository.idsToHideBelow(cutoff),
         ranked: {
             countAtLeast: minLogits => RankedNonFaceRepository.countAtLeast(minLogits),
+            idsToHide: minLogit => RankedNonFaceRepository.idsToHideAtLeast(minLogit),
             list: (minLogit, offset, limit) => RankedNonFaceRepository.list(minLogit, offset, limit),
             ignore: (ids, minLogit, at) => RankedNonFaceRepository.ignore(ids, minLogit, at),
             keep: (ids, minLogit, at) => RankedNonFaceRepository.keep(ids, minLogit, at),

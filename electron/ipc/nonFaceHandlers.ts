@@ -7,6 +7,7 @@ import { MAX_LIKELIHOOD, MIN_LIKELIHOOD } from '../core/services/visibilityModel
 
 export const setCutoffSchema = z.object({ cutoff: z.number().finite() }).strict();
 export const setModeSchema = z.object({ mode: z.enum(LIST_MODES) }).strict();
+export const setHideSchema = z.object({ hide: z.boolean() }).strict();
 export const setLikelihoodSchema = z.object({ percent: z.number().int().min(MIN_LIKELIHOOD).max(MAX_LIKELIHOOD) }).strict();
 export const listSchema = z.object({
     offset: z.number().int().min(0),
@@ -36,6 +37,19 @@ export function registerNonFaceHandlers() {
             return { success: true, overview: service.getOverview() };
         } catch (error) {
             logger.error(`[IPC] nonface:setCutoff failed: ${String(error)}`);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('nonface:setHide', async (_event, payload: unknown) => {
+        const parsed = setHideSchema.safeParse(payload);
+        if (!parsed.success) return { success: false, error: 'Invalid request' };
+        try {
+            const service = getNonFaceService();
+            service.setHideFromReview(parsed.data.hide);
+            return { success: true, overview: service.getOverview() };
+        } catch (error) {
+            logger.error(`[IPC] nonface:setHide failed: ${String(error)}`);
             return { success: false, error: String(error) };
         }
     });

@@ -11,6 +11,7 @@ import { FaceService } from '../core/services/FaceService';
 import { ConfigService } from '../core/services/ConfigService';
 import { rebuildFaceIndexFromNamedFaces } from '../core/services/FaissIndexService';
 import { toIndexFaces } from '../core/services/faissSync';
+import { hiddenFromReview, withoutHidden, countWithoutHidden } from '../core/services/reviewHiding';
 
 const REVIEW_NEEDED_MIN_COHESION = 0.40;
 
@@ -327,12 +328,12 @@ export function registerAIHandlers() {
         // Logic should match getUnassignedDescriptors but just COUNT(*)
         const db = getDB();
         const res = db.prepare('SELECT COUNT(*) as count FROM faces WHERE descriptor IS NOT NULL AND person_id IS NULL AND (is_ignored = 0 OR is_ignored IS NULL)').get() as { count: number };
-        return res.count;
+        return countWithoutHidden(res.count, hiddenFromReview()); // faces the Not a Face? list hides are reviewed there
     });
 
     ipcMain.handle('ai:getClusteredFaces', async (_event, options) => {
         try {
-            let faces = FaceRepository.getUnassignedDescriptors();
+            let faces = withoutHidden(FaceRepository.getUnassignedDescriptors(), hiddenFromReview()); // faces the Not a Face? list hides are reviewed there
 
             const totalUnassigned = faces.length;
 

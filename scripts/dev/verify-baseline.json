@@ -6,7 +6,7 @@
                            "electron/ipc/dbHandlers.ts":  1216,
                            "src/context/AIContext.tsx":  901,
                            "src/python/main_backup.py":  1787,
-                           "src/views/People.tsx":  1345,
+                           "src/views/People.tsx":  1344,
                            "tests/backend/unit/repositories/FaceRepository.test.ts":  936
                        }
 }

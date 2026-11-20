@@ -64,6 +64,17 @@ export class RankedNonFaceRepository {
         return minLogits.map((minLogit, i) => ({ minLogit, total: row[`total${i}`], turned: row[`turned${i}`] }));
     }
 
+    /** The ids of the model list that Review Needed may hide: the list without its turned faces (45 degrees or more), which stay in Review Needed. */
+    static idsToHideAtLeast(minLogit: number): number[] {
+        const rows = getDB().prepare(`
+            SELECT f.id FROM faces f
+            ${WITH_MODEL_SCORE}
+            WHERE ${NON_FACE_CANDIDATE} AND ${LOGIT} >= ? AND (f.pose_yaw IS NULL OR ABS(f.pose_yaw) < ${TURNED_YAW_DEGREES})
+            ORDER BY f.id
+        `).all(VISIBILITY_MODEL, VISIBILITY_MAX_DETECTOR_SCORE, ...LOGIT_PARAMS, minLogit) as { id: number }[];
+        return rows.map(r => r.id);
+    }
+
     /** The suggestions, the most likely non-faces first, `limit` at a time. */
     static list(minLogit: number, offset: number, limit: number): RankedTile[] {
         const rows = getDB().prepare(`

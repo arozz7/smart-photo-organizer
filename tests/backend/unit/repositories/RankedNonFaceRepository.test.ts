@@ -181,4 +181,28 @@ describe('RankedNonFaceRepository (not a face, by the model and the detector tog
             expect(RankedNonFaceRepository.keep([], MIN, AT)).toBe(0);
         });
     });
+
+    describe('idsToHideAtLeast (the model list that Review Needed may hide)', () => {
+        it('returns the faces of the model list that are not turned 45 degrees or more', () => {
+            seed([
+                { id: 1, detector: 0.2, model: 5, yaw: 10 },
+                { id: 2, detector: 0.2, model: 5, yaw: 60 },
+                { id: 3, detector: 0.2, model: 5, yaw: null },
+                { id: 4, detector: 0.7, model: -2, yaw: 10 },
+            ]);
+
+            expect(RankedNonFaceRepository.idsToHideAtLeast(MIN).sort()).toEqual([1, 3]);
+        });
+
+        it('is exactly the model list minus its turned faces', () => {
+            seed([
+                { id: 1, detector: 0.2, model: 5, yaw: 10 }, { id: 2, detector: 0.2, model: 5, yaw: 70 },
+                { id: 3, detector: 0.3, model: 4, yaw: 20 }, { id: 4, detector: 0.2 }, { id: 5, detector: 0.2, model: 5, person: 3 },
+            ]);
+
+            const [count] = RankedNonFaceRepository.countAtLeast([MIN]);
+
+            expect(RankedNonFaceRepository.idsToHideAtLeast(MIN).length).toBe(count.total - count.turned);
+        });
+    });
 });

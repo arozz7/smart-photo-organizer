@@ -46,3 +46,25 @@ describe('EdgeCaseFilters', () => {
         expect(onFilterChange).toHaveBeenCalledWith('profile');
     });
 });
+
+describe('EdgeCaseFilters, faces hidden from Review Needed', () => {
+    const counts = { unnamed: 100, ignored: 2, ungroupable: 3, background: 4, nonface: 5, profile: 6 };
+
+    it('tells the user how many faces Review Needed leaves out, with a way to open them', () => {
+        const onFilterChange = vi.fn();
+        render(<EdgeCaseFilters activeFilter="unnamed" onFilterChange={onFilterChange} counts={{ ...counts, hidden: 1204 }} />);
+
+        expect(screen.getByText(/1,204 faces are not shown here/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: /Review them in Not a Face\?/ }));
+
+        expect(onFilterChange).toHaveBeenCalledWith('nonface');
+    });
+
+    it('says nothing when no face is hidden, or on the other filters', () => {
+        const { rerender } = render(<EdgeCaseFilters activeFilter="unnamed" onFilterChange={vi.fn()} counts={{ ...counts, hidden: 0 }} />);
+        expect(screen.queryByText(/not shown here/)).toBeNull();
+
+        rerender(<EdgeCaseFilters activeFilter="ignored" onFilterChange={vi.fn()} counts={{ ...counts, hidden: 50 }} />);
+        expect(screen.queryByText(/not shown here/)).toBeNull();
+    });
+});

@@ -13,6 +13,8 @@ import {
 const CUTOFF_KEY = 'nonface_cutoff';
 const MODE_KEY = 'nonface_mode';
 const LIKELIHOOD_KEY = 'nonface_min_likelihood';
+/** '0' switches hiding off; anything else (including nothing saved) means on. */
+const HIDE_KEY = 'nonface_hide_from_review';
 
 /** Faces with a detector score below this are suggested as "not a face". 3,846 of 55,665 in the user's library (Phase A). */
 export const DEFAULT_CUTOFF = 0.55;
@@ -33,6 +35,8 @@ export const MAX_IDS_PER_ACTION = 2000;
 /** The model-ranked half of the store (RankedNonFaceRepository in the app, a fake in the tests). */
 export interface RankedDeps {
     countAtLeast(minLogits: number[]): RankedCount[];
+    /** The ids of the list that Review Needed may hide (the list without its turned faces). */
+    idsToHide(minLogit: number): number[];
     list(minLogit: number, offset: number, limit: number): RankedTile[];
     ignore(ids: number[], minLogit: number, at: string): number[];
     keep(ids: number[], minLogit: number, at: string): number;
@@ -46,6 +50,8 @@ export interface NonFaceDeps {
     dismiss(ids: number[], cutoff: number, at: string): number;
     restore(ids: number[]): number[];
     countIgnored(): number;
+    /** The ids of the list that Review Needed may hide (the list without its turned faces). */
+    idsToHide(cutoff: number): number[];
     ranked: RankedDeps;
     /** How many uncertain faces need the model, and how many it has looked at. */
     visibilityCounts(): { candidates: number; scored: number; failed: number };
@@ -94,6 +100,12 @@ export interface NonFaceOverview {
     model: ModelOverview | null;
     /** Faces these lists ignored that are still ignored. */
     ignoredFromList: number;
+    /** Whether Review Needed leaves out the faces of the list now shown (on unless the user turned it off). */
+    hideFromReview: boolean;
+    /** How many faces the list now shown would hide: its faces except the turned ones, which stay in Review Needed. */
+    hideable: number;
+    /** How many faces are hidden from Review Needed right now (`hideable`, or 0 when hiding is off). */
+    hiddenFromReview: number;
 }
 
 /** A tile of either list; the model list adds the model's answer and the likelihood (percent) it ranked by. */
@@ -147,14 +159,34 @@ export class NonFaceSuggestionService {
         return true;
     }
 
+    isHidingFromReview(): boolean {
+        return this.deps.readFlag(HIDE_KEY) !== '0';
+    }
+
+    setHideFromReview(hide: boolean): void {
+        this.deps.writeFlag(HIDE_KEY, hide ? '1' : '0');
+    }
+
+    /**
+     * The faces Review Needed leaves out: the faces of the list now shown (its cut-off, its mode) except the turned ones, so they are
+     * exactly the faces the user finds, and reviews, in Not a Face?. Keeping or ignoring a face takes it out of the list, so it stops being hidden.
+     */
+    hiddenFromReviewIds(): number[] {
+        if (!this.isHidingFromReview()) return [];
+        return this.getMode() === 'model' ? this.deps.ranked.idsToHide(this.minLogit()) : this.deps.idsToHide(this.getCutoff());
+    }
+
     // ---- overview and lists --------------------------------------------------------------------------------------
 
     getOverview(): NonFaceOverview {
         const mode = this.getMode();
         const ignoredFromList = this.deps.countIgnored();
-        return mode === 'model'
+        const shown = mode === 'model'
             ? { mode, ignoredFromList, detector: null, ...this.modelOverview() }
             : { mode, ignoredFromList, model: null, ...this.detectorOverview() };
+        const hideFromReview = this.isHidingFromReview();
+        const hideable = Math.max(0, shown.current.total - shown.current.turned);
+        return { ...shown, hideFromReview, hideable, hiddenFromReview: hideFromReview ? hideable : 0 };
     }
 
     private detectorOverview(): { current: ListCount; detector: DetectorOverview } {

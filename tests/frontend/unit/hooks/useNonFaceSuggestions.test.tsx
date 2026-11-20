@@ -4,8 +4,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { loadFaces, loadPeople, addToast } = vi.hoisted(() => ({ loadFaces: vi.fn(), loadPeople: vi.fn(), addToast: vi.fn() }));
-vi.mock('../../../../src/context/PeopleContext', () => ({ usePeople: () => ({ loadFaces, loadPeople }) }));
+const { loadFaces, loadPeople, refreshUnassignedCount, addToast } = vi.hoisted(() => ({ loadFaces: vi.fn(), loadPeople: vi.fn(), refreshUnassignedCount: vi.fn(), addToast: vi.fn() }));
+vi.mock('../../../../src/context/PeopleContext', () => ({ usePeople: () => ({ loadFaces, loadPeople, refreshUnassignedCount }) }));
 vi.mock('../../../../src/context/ToastContext', () => ({ useToast: () => ({ addToast }) }));
 
 import { useNonFaceSuggestions, PAGE_SIZE } from '../../../../src/hooks/useNonFaceSuggestions';
@@ -25,7 +25,7 @@ const overviewWith = (total: number, extra: Record<string, unknown> = {}) => ({
         choices: [{ cutoff: 0.5, total: Math.max(0, total - 1), turned: 0 }, { cutoff: 0.55, total, turned: 1 }],
     },
     model: null,
-    ignoredFromList: 0, ...extra,
+    ignoredFromList: 0, hideFromReview: true, hideable: Math.max(0, total - 1), hiddenFromReview: Math.max(0, total - 1), ...extra,
 });
 
 /** A fake main process: one list of suggested faces that the ignore/keep/undo channels change. */
@@ -56,6 +56,8 @@ function mainProcess(initial: number[]) {
             }
             case 'nonface:setCutoff':
                 return { success: true, overview: overviewWith(suggested.length, { detector: { ...overviewWith(0).detector, cutoff: payload!.cutoff } }) };
+            case 'nonface:setHide':
+                return { success: true, overview: overviewWith(suggested.length, { hideFromReview: payload!.hide, hiddenFromReview: payload!.hide ? suggested.length - 1 : 0 }) };
             case 'nonface:setMode':
                 return { success: true, overview: overviewWith(suggested.length, { mode: payload!.mode }) };
             case 'nonface:setLikelihood':
@@ -70,6 +72,7 @@ beforeEach(() => {
     invoke.mockReset();
     loadFaces.mockReset();
     loadPeople.mockReset();
+    refreshUnassignedCount.mockReset();
     addToast.mockReset();
     (window as unknown as { ipcRenderer: { invoke: typeof invoke } }).ipcRenderer = { invoke };
 });
@@ -277,6 +280,54 @@ describe('useNonFaceSuggestions', () => {
             expect(result.current.overview?.detector?.cutoff).toBe(0.6);
             expect(result.current.selectedIds.size).toBe(0);
             expect(calls('nonface:list').at(-1)![1]).toEqual({ offset: 0, limit: PAGE_SIZE });
+        });
+    });
+
+    describe('hiding the list from Review Needed', () => {
+        it('saves the choice, shows the new overview and tells Review Needed to reload', async () => {
+            mainProcess([1, 2, 3]);
+            const onReviewChanged = vi.fn();
+            const { result } = renderHook(() => useNonFaceSuggestions({ enabled: true, onReviewChanged }));
+            await waitFor(() => expect(result.current.overview?.hideFromReview).toBe(true));
+
+            await act(async () => { await result.current.setHideFromReview(false); });
+
+            expect(calls('nonface:setHide')[0][1]).toEqual({ hide: false });
+            expect(result.current.overview?.hideFromReview).toBe(false);
+            expect(result.current.overview?.hiddenFromReview).toBe(0);
+            expect(onReviewChanged).toHaveBeenCalledTimes(1);
+            expect(refreshUnassignedCount).toHaveBeenCalled();
+        });
+
+        it('shows the error and does not reload Review Needed when the change is refused', async () => {
+            mainProcess([1, 2, 3]);
+            const onReviewChanged = vi.fn();
+            const { result } = renderHook(() => useNonFaceSuggestions({ enabled: true, onReviewChanged }));
+            await waitFor(() => expect(result.current.overview).not.toBeNull());
+            invoke.mockImplementation(async (channel: string) => (channel === 'nonface:setHide' ? { success: false, error: 'locked' } : { success: true }));
+
+            await act(async () => { await result.current.setHideFromReview(false); });
+
+            expect(addToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', description: expect.stringContaining('locked') }));
+            expect(onReviewChanged).not.toHaveBeenCalled();
+        });
+
+        it('tells Review Needed to reload after faces are ignored or kept (the hidden set changes), and after undo', async () => {
+            mainProcess([1, 2, 3]);
+            const onReviewChanged = vi.fn();
+            const { result } = renderHook(() => useNonFaceSuggestions({ enabled: true, onReviewChanged }));
+            await waitFor(() => expect(result.current.tiles).toHaveLength(3));
+
+            act(() => result.current.toggle(1));
+            await act(async () => { await result.current.ignoreSelected(); });
+            expect(onReviewChanged).toHaveBeenCalledTimes(1);
+
+            await act(async () => { await result.current.undoLast(); });
+            expect(onReviewChanged).toHaveBeenCalledTimes(2);
+
+            act(() => result.current.toggle(2));
+            await act(async () => { await result.current.keepSelected(); });
+            expect(onReviewChanged).toHaveBeenCalledTimes(3);
         });
     });
 });
