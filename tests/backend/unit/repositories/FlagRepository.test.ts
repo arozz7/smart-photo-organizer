@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
+import { applyLegacyBaseline } from '../../../../electron/data/migrations/legacyBaseline';
 import { faceFlagsMigration } from '../../../../electron/data/migrations/003_faceFlags';
 
 let testDb: Database.Database;
@@ -19,6 +20,8 @@ interface FaceSeed {
 
 const BOX = JSON.stringify({ x: 10, y: 20, width: 30, height: 40 });
 
+const addPerson = (id: number) => testDb.prepare(`INSERT OR IGNORE INTO people (id, name) VALUES (?, 'Person ' || ?)`).run(id, id);
+
 function seed(faces: FaceSeed[]) {
     testDb.prepare(`INSERT OR IGNORE INTO photos (id, file_path, preview_cache_path, width, height) VALUES (1, 'a.jpg', 'a_preview.jpg', 4000, 3000)`).run();
     const insert = testDb.prepare(
@@ -26,6 +29,7 @@ function seed(faces: FaceSeed[]) {
          VALUES (?, 1, ?, ?, 0.6, 120, ?, 5, ?, ?, ?, x'00', ?)`
     );
     for (const f of faces) {
+        if (f.person) addPerson(f.person);
         insert.run(
             f.id, BOX, f.score === undefined ? 0.4 : f.score, f.yaw === undefined ? 10 : f.yaw,
             f.person ?? null, f.ignored ?? 0, f.entity === undefined ? 'human' : f.entity, f.source ?? null
@@ -33,18 +37,18 @@ function seed(faces: FaceSeed[]) {
     }
 }
 
+const AT = '2026-11-19T10:00:00Z';
+const flagKinds = (id: number) =>
+    (testDb.prepare('SELECT kind FROM face_flags WHERE face_id = ? ORDER BY kind').all(id) as { kind: string }[]).map(r => r.kind);
+
 const row = (id: number) =>
     testDb.prepare('SELECT is_ignored, ignore_source, person_id FROM faces WHERE id = ?').get(id) as { is_ignored: number; ignore_source: string | null; person_id: number | null };
 
 describe('FlagRepository (not a face, by detector score)', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
         testDb = new Database(':memory:');
-        testDb.exec(`
-            CREATE TABLE photos (id INTEGER PRIMARY KEY, file_path TEXT, preview_cache_path TEXT, width INTEGER, height INTEGER);
-            CREATE TABLE faces (
-                id INTEGER PRIMARY KEY, photo_id INTEGER, box_json TEXT, score REAL, face_quality REAL, blur_score REAL,
-                pose_yaw REAL, pose_pitch REAL, person_id INTEGER, is_ignored BOOLEAN DEFAULT 0, entity_type TEXT DEFAULT 'human',
-                descriptor BLOB, ignore_source TEXT)`);
+        // the real legacy schema, constraints included (a hand-written copy once hid a CHECK on faces.ignore_source)
+        await applyLegacyBaseline(testDb);
         faceFlagsMigration.up(testDb);
     });
     afterEach(() => testDb.close());
@@ -131,10 +135,11 @@ describe('FlagRepository (not a face, by detector score)', () => {
         it('ignores the suggested faces, tags them, and returns which ones it changed', () => {
             seed([{ id: 1, score: 0.3 }, { id: 2, score: 0.4 }]);
 
-            const changed = FlagRepository.ignoreNonFace([1, 2], 0.55);
+            const changed = FlagRepository.ignoreNonFace([1, 2], 0.55, AT);
 
             expect(changed.sort()).toEqual([1, 2]);
-            expect(row(1)).toEqual({ is_ignored: 1, ignore_source: 'non_face_review', person_id: null });
+            expect(row(1)).toEqual({ is_ignored: 1, ignore_source: 'user', person_id: null });
+            expect(flagKinds(1)).toEqual(['non_face_ignored']);
             expect(FlagRepository.listNonFace(0.55, 0, 50)).toEqual([]);
         });
 
@@ -148,7 +153,7 @@ describe('FlagRepository (not a face, by detector score)', () => {
             ]);
             FlagRepository.dismissNonFace([4], 0.55, 'x');
 
-            const changed = FlagRepository.ignoreNonFace([1, 2, 3, 4, 5, 99], 0.55);
+            const changed = FlagRepository.ignoreNonFace([1, 2, 3, 4, 5, 99], 0.55, AT);
 
             expect(changed).toEqual([]);
             expect(row(1)).toEqual({ is_ignored: 0, ignore_source: null, person_id: 4 });
@@ -159,14 +164,14 @@ describe('FlagRepository (not a face, by detector score)', () => {
         });
 
         it('does nothing for an empty list', () => {
-            expect(FlagRepository.ignoreNonFace([], 0.55)).toEqual([]);
+            expect(FlagRepository.ignoreNonFace([], 0.55, AT)).toEqual([]);
         });
 
         it('handles more ids than one query can bind', () => {
             const many = Array.from({ length: 1200 }, (_, i) => ({ id: i + 1, score: 0.3 }));
             seed(many);
 
-            expect(FlagRepository.ignoreNonFace(many.map(f => f.id), 0.55)).toHaveLength(1200);
+            expect(FlagRepository.ignoreNonFace(many.map(f => f.id), 0.55, AT)).toHaveLength(1200);
         });
     });
 
@@ -184,23 +189,52 @@ describe('FlagRepository (not a face, by detector score)', () => {
         });
     });
 
+    describe('what counts as ignored by this list', () => {
+        it('counts only the faces this list ignored that are still ignored', () => {
+            seed([{ id: 1, score: 0.3 }, { id: 2, score: 0.3 }, { id: 3, score: 0.3, ignored: 1, source: 'user' }]);
+            FlagRepository.ignoreNonFace([1, 2], 0.55, AT);
+            testDb.prepare('UPDATE faces SET is_ignored = 0 WHERE id = 2').run(); // restored from the Ignored filter instead
+
+            expect(FlagRepository.countIgnoredByNonFace()).toBe(1);
+        });
+
+        it('keeping a face is not ignoring it', () => {
+            seed([{ id: 1, score: 0.3 }]);
+            FlagRepository.dismissNonFace([1], 0.55, AT);
+
+            expect(FlagRepository.countIgnoredByNonFace()).toBe(0);
+            expect(row(1).is_ignored).toBe(0);
+        });
+    });
+
     describe('undo', () => {
-        it('restores exactly the faces it is given, only if this list ignored them, and clears the tag', () => {
+        it('restores exactly the faces it is given, only if this list ignored them, and forgets that it did', () => {
             seed([{ id: 1, score: 0.3 }, { id: 2, score: 0.3 }, { id: 3, score: 0.3, ignored: 1, source: 'user' }, { id: 4, score: 0.3 }]);
-            FlagRepository.ignoreNonFace([1, 2, 4], 0.55);
+            FlagRepository.ignoreNonFace([1, 2, 4], 0.55, AT);
 
             const restored = FlagRepository.restoreNonFace([1, 3, 99]);
 
             expect(restored).toEqual([1]);
             expect(row(1)).toEqual({ is_ignored: 0, ignore_source: null, person_id: null });
+            expect(flagKinds(1)).toEqual([]);
             expect(row(2).is_ignored).toBe(1);
             expect(row(3)).toEqual({ is_ignored: 1, ignore_source: 'user', person_id: null });
             expect(FlagRepository.countIgnoredByNonFace()).toBe(2);
         });
 
+        it('offers a restored face as a suggestion again', () => {
+            seed([{ id: 1, score: 0.3 }]);
+            FlagRepository.ignoreNonFace([1], 0.55, AT);
+
+            FlagRepository.restoreNonFace([1]);
+
+            expect(FlagRepository.listNonFace(0.55, 0, 50).map(t => t.faceId)).toEqual([1]);
+        });
+
         it('does not restore a face the user has since given to a person', () => {
             seed([{ id: 1, score: 0.3 }]);
-            FlagRepository.ignoreNonFace([1], 0.55);
+            FlagRepository.ignoreNonFace([1], 0.55, AT);
+            addPerson(5);
             testDb.prepare('UPDATE faces SET person_id = 5 WHERE id = 1').run();
 
             expect(FlagRepository.restoreNonFace([1])).toEqual([]);

@@ -18,7 +18,7 @@ export const MAX_IDS_PER_ACTION = 2000;
 export interface NonFaceDeps {
     countBelow(cutoffs: number[]): NonFaceCount[];
     list(cutoff: number, offset: number, limit: number): NonFaceTile[];
-    ignore(ids: number[], cutoff: number): number[];
+    ignore(ids: number[], cutoff: number, at: string): number[];
     dismiss(ids: number[], cutoff: number, at: string): number;
     restore(ids: number[]): number[];
     countIgnored(): number;
@@ -85,7 +85,7 @@ export class NonFaceSuggestionService {
     /** Ignores the faces that are still suggestions; the ids it changed come back so the page can offer an exact undo. */
     ignore(ids: number[]): { ignoredIds: number[] } {
         const wanted = cleanIds(ids);
-        return { ignoredIds: wanted.length ? this.deps.ignore(wanted, this.getCutoff()) : [] };
+        return { ignoredIds: wanted.length ? this.deps.ignore(wanted, this.getCutoff(), this.deps.now()) : [] };
     }
 
     /** "These are faces, keep them": they are not offered again. */

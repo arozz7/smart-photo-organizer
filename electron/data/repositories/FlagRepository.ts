@@ -3,8 +3,12 @@ import { FaceRepository } from './FaceRepository';
 
 /** Kind written to `face_flags` for "this box does not hold a face". */
 export const NON_FACE_KIND = 'non_face';
-/** What the user's bulk ignore from the suggestion list is tagged with in `faces.ignore_source` (so only it can be undone). */
-export const NON_FACE_IGNORE_SOURCE = 'non_face_review';
+/**
+ * Written to `face_flags` for a face this list ignored, so only those can be undone and counted. (`faces.ignore_source` cannot
+ * carry its own value: the legacy column only accepts 'user' and 'background_verification', and SQLite cannot relax a CHECK
+ * without rebuilding the whole faces table.) The row is removed again when the face is restored.
+ */
+export const NON_FACE_IGNORED_KIND = 'non_face_ignored';
 /** A face turned this many degrees or more (either way) is counted as turned; shown to the user, never used to flag or sort. */
 export const TURNED_YAW_DEGREES = 45;
 /** Ids per query when checking or updating a batch; far below SQLite's limit on bound values. */
@@ -117,12 +121,18 @@ export class FlagRepository {
         );
     }
 
-    /** Ignores the faces that are still suggestions, tags them for undo, and returns the ids it changed. */
-    static ignoreNonFace(ids: number[], cutoff: number): number[] {
-        return getDB().transaction(() => {
+    /** Ignores the faces that are still suggestions, remembers that this list did it (for undo), and returns the ids it changed. */
+    static ignoreNonFace(ids: number[], cutoff: number, at: string): number[] {
+        const db = getDB();
+        const remember = db.prepare(
+            `INSERT OR REPLACE INTO face_flags (face_id, kind, score, model, status, created_at)
+             SELECT id, '${NON_FACE_IGNORED_KIND}', score, 'detector_score', 'dismissed', ? FROM faces WHERE id = ?`
+        );
+        return db.transaction(() => {
             const eligible = this.stillSuggested(ids, cutoff);
-            // same write as every other ignore (unassigns, tags the source)
-            FaceRepository.ignoreFaces(eligible, NON_FACE_IGNORE_SOURCE);
+            // the same write as every other ignore (unassigns the face, source 'user')
+            FaceRepository.ignoreFaces(eligible);
+            for (const id of eligible) remember.run(at, id);
             return eligible;
         })();
     }
@@ -137,18 +147,21 @@ export class FlagRepository {
         return db.transaction(() => ids.reduce((count, id) => count + record.run(at, id, cutoff).changes, 0))();
     }
 
-    /** Returns these faces to the review queue, but only those this list ignored and that are still unassigned. Returns the ids restored. */
+    /** Returns these faces to the review queue, but only those this list ignored and that are still ignored and unassigned. Returns the ids restored. */
     static restoreNonFace(ids: number[]): number[] {
         const db = getDB();
         return db.transaction(() => {
             const eligible = chunked(ids).flatMap(chunk =>
                 (db.prepare(
-                    `SELECT id FROM faces WHERE id IN (${marks(chunk)}) AND is_ignored = 1 AND person_id IS NULL AND ignore_source = '${NON_FACE_IGNORE_SOURCE}'`
+                    `SELECT f.id FROM faces f
+                     JOIN face_flags g ON g.face_id = f.id AND g.kind = '${NON_FACE_IGNORED_KIND}'
+                     WHERE f.id IN (${marks(chunk)}) AND f.is_ignored = 1 AND f.person_id IS NULL`
                 ).all(...chunk) as { id: number }[]).map(r => r.id)
             );
             FaceRepository.restoreFaces(eligible);
             for (const chunk of chunked(eligible)) {
                 db.prepare(`UPDATE faces SET ignore_source = NULL WHERE id IN (${marks(chunk)})`).run(...chunk);
+                db.prepare(`DELETE FROM face_flags WHERE kind = '${NON_FACE_IGNORED_KIND}' AND face_id IN (${marks(chunk)})`).run(...chunk);
             }
             return eligible;
         })();
@@ -156,7 +169,9 @@ export class FlagRepository {
 
     /** Faces this list has ignored and are still ignored; they can also be restored from the Ignored filter. */
     static countIgnoredByNonFace(): number {
-        const row = getDB().prepare(`SELECT COUNT(*) AS count FROM faces WHERE is_ignored = 1 AND ignore_source = '${NON_FACE_IGNORE_SOURCE}'`).get() as { count: number };
+        const row = getDB().prepare(
+            `SELECT COUNT(*) AS count FROM faces f JOIN face_flags g ON g.face_id = f.id AND g.kind = '${NON_FACE_IGNORED_KIND}' WHERE f.is_ignored = 1`
+        ).get() as { count: number };
         return row.count;
     }
 }
