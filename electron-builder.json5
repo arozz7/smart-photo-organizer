@@ -13,6 +13,7 @@
     "dist-electron"
   ],
   // Removes better-sqlite3 binaries for other operating systems from the packaged copy (see the script).
+  "beforePack": "scripts/release/beforePack.cjs",
   "afterPack": "scripts/release/afterPack.cjs",
   "extraResources": [
     {

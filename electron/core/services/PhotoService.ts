@@ -11,6 +11,7 @@ import logger from '../../logger';
 import { pythonProvider } from '../../infrastructure/PythonAIProvider';
 import { getLibraryPath } from '../../store'; // Config later
 import { isRawLikeExtension } from '../../utils/imageFormats';
+import { imageJobs } from '../../services/image/ImageJobTracker';
 import { FaceRepository } from '../../data/repositories/FaceRepository';
 import { PhotoRepository } from '../../data/repositories/PhotoRepository';
 // import { getDB } from '../../db'; // Transaction usage
@@ -109,9 +110,12 @@ export class PhotoService {
             // 2. Sharp
             if (!extracted) {
                 try {
-                    const pipeline = sharp(filePath, { failOn: 'none' });
-                    if (shouldRotate) pipeline.rotate(rotationDegrees);
-                    await pipeline.resize(2560, 2560, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(previewPath);
+                    // limited and recorded, see ImageJobTracker (native sharp crashes took the whole app down)
+                    await imageJobs.run('preview', filePath, async () => {
+                        const pipeline = sharp(filePath, { failOn: 'none' });
+                        if (shouldRotate) pipeline.rotate(rotationDegrees);
+                        await pipeline.resize(2560, 2560, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(previewPath);
+                    });
                     extracted = true;
                 } catch (e) { /* Fallback */ }
             }
