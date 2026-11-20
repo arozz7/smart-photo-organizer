@@ -766,6 +766,10 @@ def handle_command(command):
                 "reqId": req_id
             }
 
+    elif cmd_type == 'score_face_visibility':
+        from commands import face_visibility
+        response = face_visibility.handle_score_request(payload, req_id)
+
     else:
 
         response = {"error": f"Unknown command: {cmd_type}", "reqId": req_id}

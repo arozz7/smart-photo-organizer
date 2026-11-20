@@ -19,7 +19,7 @@ const ID_CHUNK = 500;
  * ParkedFaceRepository) whose detector score is below the cut-off and that the user has not said to keep.
  * The score is the only thing that makes a face a suggestion: pose, size and quality never do.
  */
-const NON_FACE_CANDIDATE = `
+export const NON_FACE_CANDIDATE = `
     f.person_id IS NULL
     AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
     AND COALESCE(f.entity_type, 'human') = 'human'
@@ -114,7 +114,7 @@ export class FlagRepository {
     }
 
     /** The ids among these that are still suggestions at the cut-off. */
-    private static stillSuggested(ids: number[], cutoff: number): number[] {
+    static stillSuggested(ids: number[], cutoff: number): number[] {
         const db = getDB();
         return chunked(ids).flatMap(chunk =>
             (db.prepare(`SELECT f.id FROM faces f WHERE f.id IN (${marks(chunk)}) AND ${NON_FACE_CANDIDATE}`).all(...chunk, cutoff) as { id: number }[]).map(r => r.id)
@@ -123,28 +123,36 @@ export class FlagRepository {
 
     /** Ignores the faces that are still suggestions, remembers that this list did it (for undo), and returns the ids it changed. */
     static ignoreNonFace(ids: number[], cutoff: number, at: string): number[] {
-        const db = getDB();
-        const remember = db.prepare(
+        return getDB().transaction(() => this.ignoreEligible(this.stillSuggested(ids, cutoff), at))();
+    }
+
+    /**
+     * The write half of ignoring, for ids the caller has already checked are suggestions (in whichever list): the same
+     * ignore as everywhere else (unassigns the face, source 'user') plus the note that this list did it, which undo needs.
+     * Call it inside the transaction that did the check.
+     */
+    static ignoreEligible(eligible: number[], at: string): number[] {
+        const remember = getDB().prepare(
             `INSERT OR REPLACE INTO face_flags (face_id, kind, score, model, status, created_at)
              SELECT id, '${NON_FACE_IGNORED_KIND}', score, 'detector_score', 'dismissed', ? FROM faces WHERE id = ?`
         );
-        return db.transaction(() => {
-            const eligible = this.stillSuggested(ids, cutoff);
-            // the same write as every other ignore (unassigns the face, source 'user')
-            FaceRepository.ignoreFaces(eligible);
-            for (const id of eligible) remember.run(at, id);
-            return eligible;
-        })();
+        FaceRepository.ignoreFaces(eligible);
+        for (const id of eligible) remember.run(at, id);
+        return eligible;
     }
 
     /** "This is a face, keep it": records the faces that are still suggestions as dismissed so they are not offered again. Returns how many. */
     static dismissNonFace(ids: number[], cutoff: number, at: string): number {
-        const db = getDB();
-        const record = db.prepare(
+        return getDB().transaction(() => this.dismissEligible(this.stillSuggested(ids, cutoff), at))();
+    }
+
+    /** The write half of keeping, for ids the caller has already checked. Returns how many were recorded. */
+    static dismissEligible(eligible: number[], at: string): number {
+        const record = getDB().prepare(
             `INSERT OR IGNORE INTO face_flags (face_id, kind, score, model, status, created_at)
-             SELECT f.id, '${NON_FACE_KIND}', f.score, 'detector_score', 'dismissed', ? FROM faces f WHERE f.id = ? AND ${NON_FACE_CANDIDATE}`
+             SELECT id, '${NON_FACE_KIND}', score, 'detector_score', 'dismissed', ? FROM faces WHERE id = ?`
         );
-        return db.transaction(() => ids.reduce((count, id) => count + record.run(at, id, cutoff).changes, 0))();
+        return eligible.reduce((count, id) => count + record.run(at, id).changes, 0);
     }
 
     /** Returns these faces to the review queue, but only those this list ignored and that are still ignored and unassigned. Returns the ids restored. */

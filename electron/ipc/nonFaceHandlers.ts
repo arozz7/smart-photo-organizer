@@ -2,9 +2,12 @@ import { ipcMain } from 'electron';
 import { z } from 'zod';
 import logger from '../logger';
 import { getNonFaceService } from '../core/services/NonFaceDeps';
-import { MAX_IDS_PER_ACTION, MAX_PAGE_SIZE, MAX_CUTOFF, MIN_CUTOFF } from '../core/services/NonFaceSuggestionService';
+import { MAX_IDS_PER_ACTION, MAX_PAGE_SIZE, MAX_CUTOFF, MIN_CUTOFF, LIST_MODES } from '../core/services/NonFaceSuggestionService';
+import { MAX_LIKELIHOOD, MIN_LIKELIHOOD } from '../core/services/visibilityModel';
 
 export const setCutoffSchema = z.object({ cutoff: z.number().finite() }).strict();
+export const setModeSchema = z.object({ mode: z.enum(LIST_MODES) }).strict();
+export const setLikelihoodSchema = z.object({ percent: z.number().int().min(MIN_LIKELIHOOD).max(MAX_LIKELIHOOD) }).strict();
 export const listSchema = z.object({
     offset: z.number().int().min(0),
     limit: z.number().int().min(1).max(MAX_PAGE_SIZE),
@@ -33,6 +36,32 @@ export function registerNonFaceHandlers() {
             return { success: true, overview: service.getOverview() };
         } catch (error) {
             logger.error(`[IPC] nonface:setCutoff failed: ${String(error)}`);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('nonface:setMode', async (_event, payload: unknown) => {
+        const parsed = setModeSchema.safeParse(payload);
+        if (!parsed.success) return { success: false, error: 'Invalid request' };
+        try {
+            const service = getNonFaceService();
+            service.setMode(parsed.data.mode);
+            return { success: true, overview: service.getOverview() };
+        } catch (error) {
+            logger.error(`[IPC] nonface:setMode failed: ${String(error)}`);
+            return { success: false, error: String(error) };
+        }
+    });
+
+    ipcMain.handle('nonface:setLikelihood', async (_event, payload: unknown) => {
+        const parsed = setLikelihoodSchema.safeParse(payload);
+        if (!parsed.success) return { success: false, error: 'Invalid request' };
+        try {
+            const service = getNonFaceService();
+            service.setMinLikelihood(parsed.data.percent);
+            return { success: true, overview: service.getOverview() };
+        } catch (error) {
+            logger.error(`[IPC] nonface:setLikelihood failed: ${String(error)}`);
             return { success: false, error: String(error) };
         }
     });

@@ -13,14 +13,29 @@ const tile = (faceId: number, extra: Partial<NonFaceTile> = {}): NonFaceTile => 
 });
 
 const overview = (extra: Partial<NonFaceOverview> = {}): NonFaceOverview => ({
-    cutoff: 0.55, defaultCutoff: 0.55, minCutoff: 0.3, maxCutoff: 0.75,
-    current: { cutoff: 0.55, total: 3846, turned: 819 },
-    choices: [
-        { cutoff: 0.5, total: 3000, turned: 600 },
-        { cutoff: 0.55, total: 3846, turned: 819 },
-        { cutoff: 0.6, total: 4500, turned: 900 },
-    ],
+    mode: 'detector',
+    current: { total: 3846, turned: 819 },
+    detector: {
+        cutoff: 0.55, defaultCutoff: 0.55, minCutoff: 0.3, maxCutoff: 0.75,
+        choices: [
+            { cutoff: 0.5, total: 3000, turned: 600 },
+            { cutoff: 0.55, total: 3846, turned: 819 },
+            { cutoff: 0.6, total: 4500, turned: 900 },
+        ],
+    },
+    model: null,
     ignoredFromList: 0, ...extra,
+});
+
+const modelOverview = (extra: Partial<NonFaceOverview> = {}): NonFaceOverview => overview({
+    mode: 'model',
+    current: { total: 2900, turned: 40 },
+    detector: null,
+    model: {
+        minLikelihood: 70, defaultLikelihood: 70, minAllowed: 50, maxAllowed: 95, checked: 4200, candidates: 11000,
+        choices: [{ likelihood: 50, total: 4000, turned: 300 }, { likelihood: 70, total: 2900, turned: 40 }, { likelihood: 90, total: 1500, turned: 5 }],
+    },
+    ...extra,
 });
 
 function makeCtrl(extra: Record<string, unknown> = {}) {
@@ -28,7 +43,7 @@ function makeCtrl(extra: Record<string, unknown> = {}) {
         overview: overview(), tiles: [tile(1), tile(2, { yaw: 62 }), tile(3, { yaw: null })], total: 3846, hasMore: false,
         loading: false, busy: false, selectedIds: new Set<number>(), undoBatch: null as number[] | null,
         loadMore: vi.fn(), toggle: vi.fn(), selectAllLoaded: vi.fn(), selectNone: vi.fn(),
-        ignoreSelected: vi.fn(), keepSelected: vi.fn(), undoLast: vi.fn(), setCutoff: vi.fn(), ...extra,
+        ignoreSelected: vi.fn(), keepSelected: vi.fn(), undoLast: vi.fn(), setCutoff: vi.fn(), setMode: vi.fn(), setLikelihood: vi.fn(), ...extra,
     };
 }
 
@@ -69,6 +84,46 @@ describe('NonFaceSuggestions', () => {
         fireEvent.change(select, { target: { value: '0.6' } });
 
         expect(ctrl.setCutoff).toHaveBeenCalledWith(0.6);
+    });
+
+    it('switches between the detector list and the model list', () => {
+        const { ctrl } = setup();
+
+        fireEvent.click(screen.getByText('Model + detector'));
+        fireEvent.click(screen.getByText('Detector score'));
+
+        expect(ctrl.setMode).toHaveBeenCalledTimes(1);
+        expect(ctrl.setMode).toHaveBeenCalledWith('model');
+    });
+
+    describe('model list', () => {
+        it('offers the likelihood choices with their counts and saves a new choice', () => {
+            const { ctrl } = setup({ overview: modelOverview(), total: 2900 });
+            const select = screen.getByLabelText(/likely not a face, at least/i) as HTMLSelectElement;
+
+            expect(within(select).getByText('90% (1,500 faces)')).toBeTruthy();
+            expect(select.value).toBe('70');
+            fireEvent.change(select, { target: { value: '90' } });
+
+            expect(ctrl.setLikelihood).toHaveBeenCalledWith(90);
+            expect(screen.queryByLabelText(/detector score below/i)).toBeNull();
+        });
+
+        it('says how much the model has looked at, and warns about turned faces', () => {
+            setup({ overview: modelOverview(), total: 2900 });
+
+            expect(screen.getByText(/looked at 4,200 of 11,000 uncertain faces/)).toBeTruthy();
+            expect(screen.getByText(/leans against faces seen from the side/)).toBeTruthy();
+            expect(screen.getByText(/40 of them are turned 45° or more/)).toBeTruthy();
+        });
+
+        it('shows the likelihood on each tile instead of the detector score', () => {
+            setup({ overview: modelOverview(), total: 2900, tiles: [tile(1, { likelihood: 93.4, modelScore: 3.2, score: 0.2 })] });
+
+            expect(screen.getByText('93%')).toBeTruthy();
+            expect(screen.getByTestId('nonface-tile-1').getAttribute('title')).toContain('93% likely not a face');
+            expect(screen.getByTestId('nonface-tile-1').getAttribute('title')).toContain('Detector score 0.20');
+        });
     });
 
     it('shows score and pose on every tile, marking turned faces and unknown poses', () => {

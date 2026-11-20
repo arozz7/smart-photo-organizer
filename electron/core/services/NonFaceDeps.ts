@@ -1,5 +1,7 @@
 import { AppStateRepository } from '../../data/repositories/AppStateRepository';
 import { FlagRepository } from '../../data/repositories/FlagRepository';
+import { RankedNonFaceRepository } from '../../data/repositories/RankedNonFaceRepository';
+import { VisibilityRepository } from '../../data/repositories/VisibilityRepository';
 import { NonFaceSuggestionService, type NonFaceDeps } from './NonFaceSuggestionService';
 
 /** The real collaborators for NonFaceSuggestionService. */
@@ -11,6 +13,13 @@ export function createNonFaceDeps(): NonFaceDeps {
         dismiss: (ids, cutoff, at) => FlagRepository.dismissNonFace(ids, cutoff, at),
         restore: ids => FlagRepository.restoreNonFace(ids),
         countIgnored: () => FlagRepository.countIgnoredByNonFace(),
+        ranked: {
+            countAtLeast: minLogits => RankedNonFaceRepository.countAtLeast(minLogits),
+            list: (minLogit, offset, limit) => RankedNonFaceRepository.list(minLogit, offset, limit),
+            ignore: (ids, minLogit, at) => RankedNonFaceRepository.ignore(ids, minLogit, at),
+            keep: (ids, minLogit, at) => RankedNonFaceRepository.keep(ids, minLogit, at),
+        },
+        visibilityCounts: () => VisibilityRepository.counts(),
         readFlag: key => AppStateRepository.getFlag(key),
         writeFlag: (key, value) => AppStateRepository.setFlag(key, value),
         now: () => new Date().toISOString(),

@@ -15,6 +15,8 @@ import { registerAlbumHandlers } from './ipc/albumHandlers';
 import { registerParkedFaceHandlers } from './ipc/parkedFaceHandlers';
 import { registerRematchHandlers } from './ipc/rematchHandlers';
 import { registerNonFaceHandlers } from './ipc/nonFaceHandlers';
+import { registerFaceVisibilityHandlers } from './ipc/faceVisibilityHandlers';
+import { getFaceVisibilityService } from './core/services/FaceVisibilityDeps';
 import { getRematchService } from './core/services/RematchDeps';
 import { registerCompositeHandlers } from './ipc/compositeHandlers';
 import { registerAdjustmentHandlers } from './ipc/adjustmentHandlers';
@@ -156,6 +158,10 @@ app.whenReady().then(async () => {
   const rematchService = getRematchService();
   rematchService.start();
 
+  // Face visibility check: asks the vision model about uncertain faces when the user is away (suggestions only)
+  const faceVisibilityService = getFaceVisibilityService();
+  faceVisibilityService.start();
+
   // Register Services
   const serviceManager = ServiceManager.getInstance();
   serviceManager.register('PythonAIProvider', pythonProvider);
@@ -166,6 +172,7 @@ app.whenReady().then(async () => {
   serviceManager.register('BackgroundFileIdentityService', fileIdentityService);
   serviceManager.register('BackgroundFaissSyncService', faissSyncService);
   serviceManager.register('RematchService', rematchService);
+  serviceManager.register('FaceVisibilityService', faceVisibilityService);
   serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();
@@ -181,6 +188,7 @@ app.whenReady().then(async () => {
   registerParkedFaceHandlers();
   registerRematchHandlers();
   registerNonFaceHandlers();
+  registerFaceVisibilityHandlers();
   registerCompositeHandlers();
   registerAdjustmentHandlers();
 

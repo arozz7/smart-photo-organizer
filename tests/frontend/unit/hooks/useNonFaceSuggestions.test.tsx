@@ -18,9 +18,13 @@ const tile = (faceId: number, extra: Record<string, unknown> = {}) => ({
 });
 
 const overviewWith = (total: number, extra: Record<string, unknown> = {}) => ({
-    cutoff: 0.55, defaultCutoff: 0.55, minCutoff: 0.3, maxCutoff: 0.75,
-    current: { cutoff: 0.55, total, turned: 1 },
-    choices: [{ cutoff: 0.5, total: Math.max(0, total - 1), turned: 0 }, { cutoff: 0.55, total, turned: 1 }],
+    mode: 'detector',
+    current: { total, turned: 1 },
+    detector: {
+        cutoff: 0.55, defaultCutoff: 0.55, minCutoff: 0.3, maxCutoff: 0.75,
+        choices: [{ cutoff: 0.5, total: Math.max(0, total - 1), turned: 0 }, { cutoff: 0.55, total, turned: 1 }],
+    },
+    model: null,
     ignoredFromList: 0, ...extra,
 });
 
@@ -28,7 +32,7 @@ const overviewWith = (total: number, extra: Record<string, unknown> = {}) => ({
 function mainProcess(initial: number[]) {
     let suggested = [...initial];
     const ignored: number[] = [];
-    invoke.mockImplementation(async (channel: string, payload?: { faceIds?: number[]; offset?: number; limit?: number; cutoff?: number }) => {
+    invoke.mockImplementation(async (channel: string, payload?: { faceIds?: number[]; offset?: number; limit?: number; cutoff?: number; mode?: string; percent?: number }) => {
         switch (channel) {
             case 'nonface:getOverview':
                 return { success: true, overview: overviewWith(suggested.length) };
@@ -51,7 +55,11 @@ function mainProcess(initial: number[]) {
                 return { success: true, restoredIds: done };
             }
             case 'nonface:setCutoff':
-                return { success: true, overview: overviewWith(suggested.length, { cutoff: payload!.cutoff }) };
+                return { success: true, overview: overviewWith(suggested.length, { detector: { ...overviewWith(0).detector, cutoff: payload!.cutoff } }) };
+            case 'nonface:setMode':
+                return { success: true, overview: overviewWith(suggested.length, { mode: payload!.mode }) };
+            case 'nonface:setLikelihood':
+                return { success: true, overview: overviewWith(suggested.length, { mode: 'model', detector: null, model: { minLikelihood: payload!.percent } }) };
             default:
                 throw new Error(`unexpected channel ${channel}`);
         }
@@ -204,6 +212,58 @@ describe('useNonFaceSuggestions', () => {
         });
     });
 
+    describe('list mode and likelihood', () => {
+        it('switches between the detector list and the model list and reloads the list from the start', async () => {
+            mainProcess([1, 2]);
+            const { result } = renderHook(() => useNonFaceSuggestions({ enabled: true }));
+            await waitFor(() => expect(result.current.tiles).toHaveLength(2));
+            act(() => result.current.toggle(1));
+
+            await act(async () => { await result.current.setMode('model'); });
+
+            expect(calls('nonface:setMode')[0][1]).toEqual({ mode: 'model' });
+            expect(result.current.overview?.mode).toBe('model');
+            expect(result.current.selectedIds.size).toBe(0);
+            expect(calls('nonface:list').at(-1)![1]).toEqual({ offset: 0, limit: PAGE_SIZE });
+        });
+
+        it('saves the likelihood the model list cuts at', async () => {
+            mainProcess([1]);
+            const { result } = renderHook(() => useNonFaceSuggestions({ enabled: true }));
+            await waitFor(() => expect(result.current.tiles).toHaveLength(1));
+
+            await act(async () => { await result.current.setLikelihood(80); });
+
+            expect(calls('nonface:setLikelihood')[0][1]).toEqual({ percent: 80 });
+            expect(result.current.overview?.model?.minLikelihood).toBe(80);
+        });
+
+        it('drops the undo offer when the list changes', async () => {
+            mainProcess([1, 2]);
+            const { result } = renderHook(() => useNonFaceSuggestions({ enabled: true }));
+            await waitFor(() => expect(result.current.tiles).toHaveLength(2));
+            act(() => result.current.toggle(1));
+            await act(async () => { await result.current.ignoreSelected(); });
+            expect(result.current.undoBatch).toEqual([1]);
+
+            await act(async () => { await result.current.setMode('model'); });
+
+            expect(result.current.undoBatch).toBeNull();
+        });
+
+        it('shows the error and keeps the list when the change is refused', async () => {
+            mainProcess([1]);
+            const { result } = renderHook(() => useNonFaceSuggestions({ enabled: true }));
+            await waitFor(() => expect(result.current.tiles).toHaveLength(1));
+            invoke.mockImplementationOnce(async () => ({ success: false, error: 'Invalid request' }));
+
+            await act(async () => { await result.current.setMode('model'); });
+
+            expect(result.current.overview?.mode).toBe('detector');
+            expect(addToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', description: expect.stringContaining('Invalid request') }));
+        });
+    });
+
     describe('cut-off', () => {
         it('saves the new cut-off, reloads the list from the start and clears the selection', async () => {
             mainProcess([1, 2]);
@@ -214,7 +274,7 @@ describe('useNonFaceSuggestions', () => {
             await act(async () => { await result.current.setCutoff(0.6); });
 
             expect(calls('nonface:setCutoff')[0][1]).toEqual({ cutoff: 0.6 });
-            expect(result.current.overview?.cutoff).toBe(0.6);
+            expect(result.current.overview?.detector?.cutoff).toBe(0.6);
             expect(result.current.selectedIds.size).toBe(0);
             expect(calls('nonface:list').at(-1)![1]).toEqual({ offset: 0, limit: PAGE_SIZE });
         });

@@ -3,6 +3,7 @@ import { useAI } from '../../context/AIContext';
 import { FaceDataHealthCard } from '../FaceDataHealthCard';
 import { ParkedFacesCard } from '../ParkedFacesCard';
 import { RematchCard } from '../RematchCard';
+import { FaceVisibilityCard } from '../FaceVisibilityCard';
 import SettingsSection from './SettingsSection';
 import FactoryResetModal from './FactoryResetModal';
 import { useDatabaseMaintenance } from '../../hooks/useDatabaseMaintenance';
@@ -115,6 +116,11 @@ export default function DatabaseManagementSection() {
                     {/* Matches unassigned faces against people named since they were scanned (unconfirmed, undoable) */}
                     <div className="border-t border-gray-700 pt-4 mt-4">
                         <RematchCard />
+                    </div>
+
+                    {/* Asks the vision model about uncertain faces to improve the Not a Face? list (ranks suggestions only) */}
+                    <div className="border-t border-gray-700 pt-4 mt-4">
+                        <FaceVisibilityCard />
                     </div>
                 </div>
             </SettingsSection>

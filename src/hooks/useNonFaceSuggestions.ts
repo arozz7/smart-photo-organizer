@@ -20,6 +20,10 @@ export interface NonFaceTile {
     previewPath: string | null
     photoWidth: number | null
     photoHeight: number | null
+    /** Model list only: the model's answer (higher means "no clear face visible"). */
+    modelScore?: number
+    /** Model list only: how likely (percent) it is that the box is not a face, which the list is sorted by. */
+    likelihood?: number
 }
 
 export interface NonFaceCount {
@@ -29,13 +33,43 @@ export interface NonFaceCount {
     turned: number
 }
 
-export interface NonFaceOverview {
+export type ListMode = 'detector' | 'model'
+
+export interface ListCount {
+    total: number
+    /** How many of `total` are turned 45 degrees or more. */
+    turned: number
+}
+
+export interface DetectorOverview {
     cutoff: number
     defaultCutoff: number
     minCutoff: number
     maxCutoff: number
-    current: NonFaceCount
     choices: NonFaceCount[]
+}
+
+export interface ModelChoice extends ListCount {
+    likelihood: number
+}
+
+export interface ModelOverview {
+    minLikelihood: number
+    defaultLikelihood: number
+    minAllowed: number
+    maxAllowed: number
+    choices: ModelChoice[]
+    /** Uncertain faces the model has looked at, out of all that need it. */
+    checked: number
+    candidates: number
+}
+
+/** Details of the list now shown only: the other mode's are null. */
+export interface NonFaceOverview {
+    mode: ListMode
+    current: ListCount
+    detector: DetectorOverview | null
+    model: ModelOverview | null
     ignoredFromList: number
 }
 
@@ -181,19 +215,24 @@ export function useNonFaceSuggestions({ enabled }: { enabled: boolean }) {
         setBusy(false)
     }, [undoBatch, busy, addToast, fail, reloadList, refreshOverview, refreshQueue])
 
-    const setCutoff = useCallback(async (cutoff: number) => {
+    /** Saves a list setting (cut-off, mode or likelihood), then shows the list from the start under the new setting. */
+    const change = useCallback(async (what: string, channel: string, payload: unknown) => {
         if (busy) return
         setBusy(true)
-        const response = await call('nonface:setCutoff', { cutoff })
+        const response = await call(channel, payload)
         if (response.success && response.overview) {
             setOverview(response.overview)
             setUndoBatch(null)
             await reloadList()
         } else {
-            fail('change the cut-off', response.error)
+            fail(what, response.error)
         }
         setBusy(false)
     }, [busy, fail, reloadList])
+
+    const setCutoff = useCallback((cutoff: number) => change('change the cut-off', 'nonface:setCutoff', { cutoff }), [change])
+    const setMode = useCallback((mode: ListMode) => change('change the list', 'nonface:setMode', { mode }), [change])
+    const setLikelihood = useCallback((percent: number) => change('change the likelihood', 'nonface:setLikelihood', { percent }), [change])
 
     return {
         overview,
@@ -212,6 +251,8 @@ export function useNonFaceSuggestions({ enabled }: { enabled: boolean }) {
         keepSelected,
         undoLast,
         setCutoff,
+        setMode,
+        setLikelihood,
     }
 }
 

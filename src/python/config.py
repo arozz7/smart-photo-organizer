@@ -61,6 +61,16 @@ AI_CONFIG = load_ai_config()
 MAX_VERIFICATION_ATTEMPTS = 3  # Auto-ignore after this many failed VLM verifications
 
 # VLM Settings
+# [Non-face plan, Phase B part 2] The YES/NO question asked about a tight crop of every uncertain face; only the odds of the
+# first word (NO against YES) are used, as a ranking signal. Measured on the user's reviewed labels (docs/measurements/
+# non-face-and-picture-faces.md, section 8): this wording ranks as well as the one that also said "not the side of the head",
+# and clearly better than wordings that spell out that turned faces count. Changing it means new weights in
+# electron/core/services/visibilityModel.ts and a new VISIBILITY_MODEL name there.
+FACE_VISIBILITY_PROMPT = (
+    "Is there a clearly visible human face (eyes, nose and mouth, not only the back of the head, not hair, "
+    "not an object) in the middle of this image? Answer with one word: YES or NO."
+)
+
 # [Phase 58] Simplified prompt - semantic verification only (detector handles face counting)
 # [Phase 82] Simplified Non-JSON Prompt (Robustness)
 # [Phase 89.3] Added balloon/decoration warnings

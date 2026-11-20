@@ -5,6 +5,8 @@ const { mockHandle, service } = vi.hoisted(() => ({
     service: {
         getOverview: vi.fn(),
         setCutoff: vi.fn(),
+        setMode: vi.fn(),
+        setMinLikelihood: vi.fn(),
         list: vi.fn(),
         ignore: vi.fn(),
         keep: vi.fn(),
@@ -36,7 +38,7 @@ describe('nonFaceHandlers', () => {
 
     it('registers one channel per action', () => {
         expect(mockHandle.mock.calls.map(([name]: [string]) => name).sort()).toEqual([
-            'nonface:getOverview', 'nonface:ignore', 'nonface:keep', 'nonface:list', 'nonface:setCutoff', 'nonface:undo',
+            'nonface:getOverview', 'nonface:ignore', 'nonface:keep', 'nonface:list', 'nonface:setCutoff', 'nonface:setLikelihood', 'nonface:setMode', 'nonface:undo',
         ]);
     });
 
@@ -76,6 +78,34 @@ describe('nonFaceHandlers', () => {
         it.each([[{}], [{ cutoff: '0.5' }], [{ cutoff: null }], [{ cutoff: 0.5, extra: 1 }], [undefined]])('rejects %j without calling the service', async payload => {
             expect((await handler('nonface:setCutoff')({}, payload)).success).toBe(false);
             expect(service.setCutoff).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('setMode', () => {
+        it.each(['detector', 'model'])('saves %s and returns the new overview', async mode => {
+            service.getOverview.mockReturnValue({ mode });
+
+            expect(await handler('nonface:setMode')({}, { mode })).toEqual({ success: true, overview: { mode } });
+            expect(service.setMode).toHaveBeenCalledWith(mode);
+        });
+
+        it.each([[{ mode: 'ranked' }], [{}], [{ mode: 1 }], [{ mode: 'model', extra: 1 }], [null]])('rejects %j without calling the service', async payload => {
+            expect((await handler('nonface:setMode')({}, payload)).success).toBe(false);
+            expect(service.setMode).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('setLikelihood', () => {
+        it.each([50, 70, 95])('saves %s percent and returns the new overview', async percent => {
+            service.getOverview.mockReturnValue({ ok: true });
+
+            expect(await handler('nonface:setLikelihood')({}, { percent })).toEqual({ success: true, overview: { ok: true } });
+            expect(service.setMinLikelihood).toHaveBeenCalledWith(percent);
+        });
+
+        it.each([[{ percent: 49 }], [{ percent: 96 }], [{ percent: 70.5 }], [{ percent: '70' }], [{}], [{ percent: 70, extra: 1 }]])('rejects %j without calling the service', async payload => {
+            expect((await handler('nonface:setLikelihood')({}, payload)).success).toBe(false);
+            expect(service.setMinLikelihood).not.toHaveBeenCalled();
         });
     });
 
