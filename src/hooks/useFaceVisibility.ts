@@ -46,8 +46,8 @@ function errorText(error: unknown): string {
     return error instanceof Error ? error.message : String(error)
 }
 
-/** Status and actions of the face visibility card. */
-export function useFaceVisibility(): FaceVisibilityState {
+/** Status and actions of a background check's card: `visibility` (the default) or `picturecheck`, the channels' prefix. */
+export function useFaceVisibility(prefix = 'visibility'): FaceVisibilityState {
     const [status, setStatus] = useState<VisibilityStatus | null>(null)
     const [message, setMessage] = useState<string | null>(null)
 
@@ -65,9 +65,9 @@ export function useFaceVisibility(): FaceVisibilityState {
     }, [])
 
     const refresh = useCallback(async () => {
-        const response = await call('visibility:getStatus')
+        const response = await call(`${prefix}:getStatus`)
         if (response && !response.success && response.error) setMessage(response.error)
-    }, [call])
+    }, [call, prefix])
 
     useEffect(() => { void refresh() }, [refresh])
 
@@ -80,20 +80,20 @@ export function useFaceVisibility(): FaceVisibilityState {
 
     const runNow = useCallback(async () => {
         setMessage(null)
-        const response = await call('visibility:runNow')
+        const response = await call(`${prefix}:runNow`)
         if (response && response.started === false && response.reason) setMessage(NOT_STARTED[response.reason])
         else if (response && response.error) setMessage(response.error)
-    }, [call])
+    }, [call, prefix])
 
     const setMode = useCallback(async (mode: RunMode) => {
         setMessage(null)
-        await call('visibility:setMode', { mode })
-    }, [call])
+        await call(`${prefix}:setMode`, { mode })
+    }, [call, prefix])
 
     const setAwayMinutes = useCallback(async (minutes: number) => {
         setMessage(null)
-        await call('visibility:setAwayMinutes', { minutes })
-    }, [call])
+        await call(`${prefix}:setAwayMinutes`, { minutes })
+    }, [call, prefix])
 
     return { status, message, runNow, setMode, setAwayMinutes }
 }

@@ -24,6 +24,9 @@ beforeEach(() => {
         if (channel === 'nonface:getOverview') return { success: true, overview: { mode: 'detector', current: { total: 9, turned: 2 }, detector: null, model: null, ignoredFromList: 0, hideFromReview: true, hideable: 7, hiddenFromReview: 7 } };
         if (channel === 'nonface:setHide') return { success: true, overview: { mode: 'detector', current: { total: 9, turned: 2 }, detector: null, model: null, ignoredFromList: 0, hideFromReview: false, hideable: 7, hiddenFromReview: 0 } };
         if (channel === 'nonface:list') return { success: true, faces: [] };
+        if (channel === 'picture:getOverview') return { success: true, overview: { list: 'unassigned', minLikelihood: 70, defaultLikelihood: 70, minAllowed: 50, maxAllowed: 95, choices: [], current: { total: 4 }, suggestedTotal: 5, checked: 0, candidates: 0, assignedChecked: 0, assignedCandidates: 0, ignoredFromList: 0, hideFromReview: true, hideable: 4, hiddenFromReview: 4 } };
+        if (channel === 'picture:list') return { success: true, faces: [] };
+        if (channel === 'picture:setHide') return { success: true, overview: { list: 'unassigned', minLikelihood: 70, defaultLikelihood: 70, minAllowed: 50, maxAllowed: 95, choices: [], current: { total: 4 }, suggestedTotal: 5, checked: 0, candidates: 0, assignedChecked: 0, assignedCandidates: 0, ignoredFromList: 0, hideFromReview: false, hideable: 4, hiddenFromReview: 0 } };
         throw new Error(`unexpected ${channel}`);
     });
     (window as unknown as { ipcRenderer: { invoke: typeof invoke } }).ipcRenderer = { invoke };
@@ -82,7 +85,7 @@ describe('useEdgeCaseSuggestions', () => {
         it('counts the faces hidden from Review Needed, for the notice under the tabs', async () => {
             const { result } = await mount();
 
-            expect(result.current.counts).toEqual({ nonface: 9, profile: 0, hidden: 7 });
+            expect(result.current.counts).toEqual({ nonface: 9, profile: 0, pictures: 5, hidden: 7, hiddenPictures: 4 });
         });
 
         it('reloads Review Needed when the user goes back to it after changing what is hidden, and not when nothing changed', async () => {
@@ -100,6 +103,29 @@ describe('useEdgeCaseSuggestions', () => {
 
             await act(async () => { result.current.setActiveFilter('nonface'); await Promise.resolve(); });
             await act(async () => { result.current.setActiveFilter('unnamed'); await Promise.resolve(); });
+            expect(reloadReview).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('Pictures? tab', () => {
+        it('loads the picture lists only when that tab is open', async () => {
+            const { result } = await mount();
+            expect(invoke.mock.calls.some(([name]) => name === 'picture:list')).toBe(false);
+
+            await act(async () => { result.current.setActiveFilter('pictures'); await Promise.resolve(); });
+            await act(async () => { await Promise.resolve(); });
+
+            expect(invoke.mock.calls.some(([name]) => name === 'picture:list')).toBe(true);
+        });
+
+        it('reloads Review Needed after hiding is changed in the Pictures? tab', async () => {
+            const reloadReview = vi.fn();
+            const { result } = await mount(reloadReview);
+            await act(async () => { result.current.setActiveFilter('pictures'); await Promise.resolve(); });
+            await act(async () => { await result.current.pictures.setHideFromReview(false); });
+
+            await act(async () => { result.current.setActiveFilter('unnamed'); await Promise.resolve(); });
+
             expect(reloadReview).toHaveBeenCalledTimes(1);
         });
     });

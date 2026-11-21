@@ -71,6 +71,14 @@ FACE_VISIBILITY_PROMPT = (
     "not an object) in the middle of this image? Answer with one word: YES or NO."
 )
 
+# [Pictures plan, Phase C] "Q1" of Phase A (docs/measurements/pictures.md): a real person, or only a picture of one? Only the odds of the
+# first word (PICTURE against REAL) are used, as a ranking signal. Changing it means new weights in electron/core/services/pictureModel.ts
+# and a new PICTURE_MODEL name there.
+FACE_PICTURE_PROMPT = (
+    "Look at the person in the middle of this image. Is this a real, living person who was physically there, or is it only a picture of a person "
+    "(a framed photo, portrait, painting, poster, mural, TV or video screen)? Answer with one word: REAL or PICTURE."
+)
+
 # [Phase 58] Simplified prompt - semantic verification only (detector handles face counting)
 # [Phase 82] Simplified Non-JSON Prompt (Robustness)
 # [Phase 89.3] Added balloon/decoration warnings

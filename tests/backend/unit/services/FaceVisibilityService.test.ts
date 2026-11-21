@@ -285,4 +285,24 @@ describe('FaceVisibilityService', () => {
             expect(service.getStatus().state).toBe('error');
         });
     });
+
+    describe('a second check with its own settings (the picture check)', () => {
+        it('keeps its mode and away time under its own keys, so the two checks are set separately', () => {
+            const picture = new FaceVisibilityService(world.deps, { batchSize: 8, modeKey: 'picture_mode', awayKey: 'picture_away_minutes', logTag: 'PictureCheck' });
+
+            picture.setMode('always');
+            picture.setAwayMinutes(15);
+
+            expect([...world.flags.entries()].sort()).toEqual([['picture_away_minutes', '15'], ['picture_mode', 'always']]);
+            expect(picture.getStatus()).toMatchObject({ mode: 'always', awayMinutes: 15 });
+            expect(service.getStatus()).toMatchObject({ mode: 'away', awayMinutes: DEFAULT_AWAY_MINUTES });
+        });
+
+        it('still uses the original keys when none are given', () => {
+            service.setMode('off');
+            service.setAwayMinutes(7);
+
+            expect([...world.flags.entries()].sort()).toEqual([['visibility_away_minutes', '7'], ['visibility_mode', 'off']]);
+        });
+    });
 });

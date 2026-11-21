@@ -4,6 +4,7 @@ import { BackgroundLoop } from './BackgroundLoop';
 
 const MODE_KEY = 'visibility_mode';
 const AWAY_KEY = 'visibility_away_minutes';
+const LOG_TAG = 'FaceVisibility';
 
 /** When the scoring may run: never, only while the user is away, or whenever no scan or AI work is running. */
 export const RUN_MODES = ['off', 'away', 'always'] as const;
@@ -60,6 +61,11 @@ export interface FaceVisibilityDeps {
 }
 
 export interface FaceVisibilityOptions {
+    /** Where this check keeps its run mode and away time (a second check, such as the picture check, uses its own). */
+    modeKey?: string;
+    awayKey?: string;
+    /** Prefix of its log lines. */
+    logTag?: string;
     batchSize?: number;
     /** How long to leave the model alone after a whole call failed. */
     backoffMs?: number;
@@ -93,6 +99,9 @@ export type RunNowResult = { started: true } | { started: false; reason: 'busy' 
 export class FaceVisibilityService implements IService {
     private readonly batchSize: number;
     private readonly backoffMs: number;
+    private readonly modeKey: string;
+    private readonly awayKey: string;
+    private readonly logTag: string;
     private readonly loop: BackgroundLoop;
 
     private inFlight = false;
@@ -104,25 +113,28 @@ export class FaceVisibilityService implements IService {
     constructor(private readonly deps: FaceVisibilityDeps, options: FaceVisibilityOptions = {}) {
         this.batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
         this.backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
+        this.modeKey = options.modeKey ?? MODE_KEY;
+        this.awayKey = options.awayKey ?? AWAY_KEY;
+        this.logTag = options.logTag ?? LOG_TAG;
         this.loop = new BackgroundLoop(() => this.tick(), () => (this.hasWork() ? STEP_PAUSE_MS : WAIT_MS), STARTUP_DELAY_MS);
     }
 
     // ---- settings ------------------------------------------------------------------------------------------------
 
     private mode(): RunMode {
-        const stored = this.deps.readFlag(MODE_KEY);
+        const stored = this.deps.readFlag(this.modeKey);
         return (RUN_MODES as readonly string[]).includes(stored ?? '') ? (stored as RunMode) : DEFAULT_MODE;
     }
 
     private awayMinutes(): number {
-        const stored = Number(this.deps.readFlag(AWAY_KEY));
+        const stored = Number(this.deps.readFlag(this.awayKey));
         return Number.isInteger(stored) && stored >= MIN_AWAY_MINUTES && stored <= MAX_AWAY_MINUTES ? stored : DEFAULT_AWAY_MINUTES;
     }
 
     /** Returns false (and changes nothing) for a mode that does not exist. */
     setMode(mode: string): boolean {
         if (!(RUN_MODES as readonly string[]).includes(mode)) return false;
-        this.deps.writeFlag(MODE_KEY, mode);
+        this.deps.writeFlag(this.modeKey, mode);
         this.loop.wake();
         return true;
     }
@@ -130,7 +142,7 @@ export class FaceVisibilityService implements IService {
     /** Returns false (and changes nothing) for a value that is not a whole number of minutes from 1 to 60. */
     setAwayMinutes(minutes: number): boolean {
         if (!Number.isInteger(minutes) || minutes < MIN_AWAY_MINUTES || minutes > MAX_AWAY_MINUTES) return false;
-        this.deps.writeFlag(AWAY_KEY, String(minutes));
+        this.deps.writeFlag(this.awayKey, String(minutes));
         return true;
     }
 
@@ -200,19 +212,19 @@ export class FaceVisibilityService implements IService {
     private fail(error: unknown): void {
         this.lastError = error instanceof Error ? error.message : String(error);
         this.retryAfter = this.deps.now() + this.backoffMs;
-        logger.error(`[FaceVisibility] Paused after an error: ${this.lastError}`);
+        logger.error(`[${this.logTag}] Paused after an error: ${this.lastError}`);
     }
 
     // ---- background loop -----------------------------------------------------------------------------------------
 
     start(): void {
         this.loop.start();
-        logger.info('[FaceVisibility] Started.');
+        logger.info(`[${this.logTag}] Started.`);
     }
 
     async stop(): Promise<void> {
         await this.loop.stop();
-        logger.info('[FaceVisibility] Stopped.');
+        logger.info(`[${this.logTag}] Stopped.`);
     }
 }
 

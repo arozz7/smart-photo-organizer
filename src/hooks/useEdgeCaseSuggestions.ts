@@ -2,17 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EdgeCaseFilterType } from '../components/EdgeCaseFilters'
 import { useNonFaceSuggestions } from './useNonFaceSuggestions'
 import { useProfileSuggestions } from './useProfileSuggestions'
+import { usePictureSuggestions } from './usePictureSuggestions'
 import { clearEdgeCaseIntent, pendingEdgeCaseIntent } from '../utils/edgeCaseIntent'
 
 /** The tab People opens on when another page asked for an Edge Cases filter (see edgeCaseIntent), else undefined. */
 export const pendingEdgeCaseTab = () => pendingEdgeCaseIntent()?.tab
 
 /**
- * The Edge Cases filter that is open and the two suggestion lists (Not a face, Turned faces), so the People page holds one hook
+ * The Edge Cases filter that is open and the three suggestion lists (Not a face, Turned faces, Pictures), so the People page holds one hook
  * instead of one per list. A list loads only while its filter is open. `focusPersonId` limits Turned faces to one person
  * (from the button on that person's page).
  *
- * What Review Needed shows depends on those lists (faces hidden in Not a face?, faces assigned in Turned faces). When a list changes
+ * What Review Needed shows depends on those lists (faces hidden in Not a face? and Pictures?, faces assigned in Turned faces). When a list changes
  * something, Review Needed is marked out of date and `reloadReview` runs when the user goes back to it, not before (grouping the faces takes a while).
  */
 export function useEdgeCaseSuggestions(reloadReview?: () => void) {
@@ -33,9 +34,17 @@ export function useEdgeCaseSuggestions(reloadReview?: () => void) {
     const nonFace = useNonFaceSuggestions({ enabled: activeFilter === 'nonface', onReviewChanged: markReviewOutOfDate })
     const profile = useProfileSuggestions({ enabled: activeFilter === 'profile', personId: focusPersonId, onReviewChanged: markReviewOutOfDate })
 
-    const counts = { nonface: nonFace.total, profile: profile.total, hidden: nonFace.overview?.hiddenFromReview ?? 0 }
+    const pictures = usePictureSuggestions({ enabled: activeFilter === 'pictures', onReviewChanged: markReviewOutOfDate })
 
-    return { activeFilter, setActiveFilter, nonFace, profile, counts, focusPersonId, showEveryone: () => setFocusPersonId(null) }
+    const counts = {
+        nonface: nonFace.total,
+        profile: profile.total,
+        pictures: pictures.total,
+        hidden: nonFace.overview?.hiddenFromReview ?? 0,
+        hiddenPictures: pictures.overview?.hiddenFromReview ?? 0,
+    }
+
+    return { activeFilter, setActiveFilter, nonFace, profile, pictures, counts, focusPersonId, showEveryone: () => setFocusPersonId(null) }
 }
 
 export type EdgeCaseSuggestions = ReturnType<typeof useEdgeCaseSuggestions>
