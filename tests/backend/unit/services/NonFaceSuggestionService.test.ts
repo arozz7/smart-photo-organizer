@@ -20,6 +20,7 @@ function makeWorld(scores: Record<number, number>, logits: Record<number, number
     const flags = new Map<string, string>();
     const ignored = new Set<number>();
     const kept = new Set<number>();
+    const turned = new Set<number>();
     const calls = {
         ignore: [] as number[][], dismiss: [] as number[][], restore: [] as number[][], list: [] as number[][],
         rankedIgnore: [] as unknown[][], rankedKeep: [] as unknown[][], rankedList: [] as number[][],
@@ -29,7 +30,7 @@ function makeWorld(scores: Record<number, number>, logits: Record<number, number
     const rankedSuggested = (minLogit: number) =>
         Object.keys(logits).map(Number).filter(id => open(id) && logits[id] >= minLogit).sort((a, b) => logits[b] - logits[a]);
     const deps: NonFaceDeps = {
-        countBelow: cutoffs => cutoffs.map((cutoff): NonFaceCount => ({ cutoff, total: suggested(cutoff).length, turned: 0 })),
+        countBelow: cutoffs => cutoffs.map((cutoff): NonFaceCount => ({ cutoff, total: suggested(cutoff).length, turned: suggested(cutoff).filter(id => turned.has(id)).length })),
         list: (cutoff, offset, limit) => {
             calls.list.push([cutoff, offset, limit]);
             return suggested(cutoff).slice(offset, offset + limit).map(id => ({ faceId: id, score: scores[id] }) as NonFaceTile);
@@ -38,8 +39,10 @@ function makeWorld(scores: Record<number, number>, logits: Record<number, number
         dismiss: (ids, cutoff) => { calls.dismiss.push(ids); const ok = ids.filter(id => suggested(cutoff).includes(id)); ok.forEach(id => kept.add(id)); return ok.length; },
         restore: ids => { calls.restore.push(ids); const ok = ids.filter(id => ignored.has(id)); ok.forEach(id => ignored.delete(id)); return ok; },
         countIgnored: () => ignored.size,
+        idsToHide: cutoff => suggested(cutoff).filter(id => !(turned.has(id))),
         ranked: {
-            countAtLeast: minLogits => minLogits.map((minLogit): RankedCount => ({ minLogit, total: rankedSuggested(minLogit).length, turned: 1 })),
+            countAtLeast: minLogits => minLogits.map((minLogit): RankedCount => ({ minLogit, total: rankedSuggested(minLogit).length, turned: rankedSuggested(minLogit).filter(id => turned.has(id)).length })),
+            idsToHide: minLogit => rankedSuggested(minLogit).filter(id => !turned.has(id)),
             list: (minLogit, offset, limit) => {
                 calls.rankedList.push([minLogit, offset, limit]);
                 return rankedSuggested(minLogit).slice(offset, offset + limit).map(id => ({ faceId: id, score: scores[id] ?? 0.3, modelScore: 2, logit: logits[id] }) as RankedTile);
@@ -52,7 +55,7 @@ function makeWorld(scores: Record<number, number>, logits: Record<number, number
         writeFlag: (key, value) => { if (value === null) flags.delete(key); else flags.set(key, value); },
         now: () => '2026-11-19T10:00:00Z',
     };
-    return { deps, flags, ignored, kept, calls };
+    return { deps, flags, ignored, kept, turned, calls };
 }
 
 describe('NonFaceSuggestionService', () => {
@@ -240,6 +243,62 @@ describe('NonFaceSuggestionService', () => {
 
             expect(world.calls.rankedIgnore).toEqual([]);
             expect(world.calls.rankedKeep).toEqual([]);
+        });
+    });
+
+    describe('hiding the suggestions from Review Needed', () => {
+        it('is on until the user turns it off', () => {
+            expect(service.isHidingFromReview()).toBe(true);
+
+            service.setHideFromReview(false);
+            expect(service.isHidingFromReview()).toBe(false);
+
+            service.setHideFromReview(true);
+            expect(service.isHidingFromReview()).toBe(true);
+        });
+
+        it('hides the faces of the list now shown (detector cut-off), except the turned ones', () => {
+            world.turned.add(2);
+
+            expect(service.hiddenFromReviewIds().sort()).toEqual([1, 3]);
+        });
+
+        it('follows the list the user chose: the model list in model mode', () => {
+            const modelWorld = makeWorld({ 1: 0.3, 2: 0.5, 3: 0.52, 4: 0.6 }, { 1: 5, 2: 4, 3: -3 });
+            const modelService = new NonFaceSuggestionService(modelWorld.deps);
+            modelWorld.turned.add(2);
+            modelService.setMode('model');
+
+            expect(modelService.hiddenFromReviewIds()).toEqual([1]);
+        });
+
+        it('changes with the cut-off, since the list does', () => {
+            service.setCutoff(0.4);
+            expect(service.hiddenFromReviewIds()).toEqual([1]);
+            service.setCutoff(0.7);
+            expect(service.hiddenFromReviewIds().sort()).toEqual([1, 2, 3, 4]);
+        });
+
+        it('hides nothing when it is off', () => {
+            service.setHideFromReview(false);
+
+            expect(service.hiddenFromReviewIds()).toEqual([]);
+        });
+
+        it('stops hiding a face once the user kept it or ignored it', () => {
+            service.keep([1]);
+            service.ignore([2]);
+
+            expect(service.hiddenFromReviewIds()).toEqual([3]);
+        });
+
+        it('says in the overview how many faces it hides and how many it would hide (the list without its turned faces)', () => {
+            world.turned.add(2);
+
+            expect(service.getOverview()).toMatchObject({ hideFromReview: true, hideable: 2, hiddenFromReview: 2 });
+
+            service.setHideFromReview(false);
+            expect(service.getOverview()).toMatchObject({ hideFromReview: false, hideable: 2, hiddenFromReview: 0 });
         });
     });
 });

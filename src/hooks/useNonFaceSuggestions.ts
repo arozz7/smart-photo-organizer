@@ -71,6 +71,12 @@ export interface NonFaceOverview {
     detector: DetectorOverview | null
     model: ModelOverview | null
     ignoredFromList: number
+    /** Whether Review Needed leaves out the faces of the list shown (on unless the user turned it off). */
+    hideFromReview: boolean
+    /** How many faces the list shown would hide: its faces except the turned ones, which stay in Review Needed. */
+    hideable: number
+    /** How many are hidden right now (`hideable`, or 0 when hiding is off). */
+    hiddenFromReview: number
 }
 
 interface Response {
@@ -101,8 +107,8 @@ const plural = (count: number) => `${count} ${count === 1 ? 'face' : 'faces'}`
  * The "Not a face (suggested)" list: faces the detector was unsure about. The overview (for the count on the tab) loads
  * with the page; the faces load when the list is opened. Nothing is ignored except what the user selects.
  */
-export function useNonFaceSuggestions({ enabled }: { enabled: boolean }) {
-    const { loadFaces, loadPeople } = usePeople()
+export function useNonFaceSuggestions({ enabled, onReviewChanged }: { enabled: boolean; onReviewChanged?: () => void }) {
+    const { loadFaces, loadPeople, refreshUnassignedCount } = usePeople()
     const { addToast } = useToast()
 
     const [overview, setOverview] = useState<NonFaceOverview | null>(null)
@@ -131,10 +137,17 @@ export function useNonFaceSuggestions({ enabled }: { enabled: boolean }) {
         setLoading(false)
     }, [fail])
 
+    /** What Review Needed shows depends on this list (faces it hides), so its count and clusters are refreshed when the list changes. */
+    const refreshReview = useCallback(() => {
+        void refreshUnassignedCount()
+        onReviewChanged?.()
+    }, [refreshUnassignedCount, onReviewChanged])
+
     const refreshQueue = useCallback(() => {
         loadFaces({ unnamed: true })
         loadPeople()
-    }, [loadFaces, loadPeople])
+        refreshReview()
+    }, [loadFaces, loadPeople, refreshReview])
 
     useEffect(() => { void refreshOverview() }, [refreshOverview])
     useEffect(() => { if (enabled) void reloadList() }, [enabled, reloadList])
@@ -194,11 +207,12 @@ export function useNonFaceSuggestions({ enabled }: { enabled: boolean }) {
             setSelectedIds(new Set())
             addToast({ type: 'success', description: `Kept ${plural(response.kept ?? faceIds.length)} in the review queue; they will not be suggested again` })
             void refreshOverview()
+            refreshReview()
         } else {
             fail('keep the selected faces', response.error)
         }
         setBusy(false)
-    }, [selectedIds, busy, removeFromList, addToast, fail, refreshOverview])
+    }, [selectedIds, busy, removeFromList, addToast, fail, refreshOverview, refreshReview])
 
     const undoLast = useCallback(async () => {
         if (!undoBatch || busy) return
@@ -234,6 +248,20 @@ export function useNonFaceSuggestions({ enabled }: { enabled: boolean }) {
     const setMode = useCallback((mode: ListMode) => change('change the list', 'nonface:setMode', { mode }), [change])
     const setLikelihood = useCallback((percent: number) => change('change the likelihood', 'nonface:setLikelihood', { percent }), [change])
 
+    /** Whether Review Needed hides the faces of this list. The list itself does not change; Review Needed does. */
+    const setHideFromReview = useCallback(async (hide: boolean) => {
+        if (busy) return
+        setBusy(true)
+        const response = await call('nonface:setHide', { hide })
+        if (response.success && response.overview) {
+            setOverview(response.overview)
+            refreshReview()
+        } else {
+            fail('change what Review Needed shows', response.error)
+        }
+        setBusy(false)
+    }, [busy, fail, refreshReview])
+
     return {
         overview,
         tiles,
@@ -253,6 +281,7 @@ export function useNonFaceSuggestions({ enabled }: { enabled: boolean }) {
         setCutoff,
         setMode,
         setLikelihood,
+        setHideFromReview,
     }
 }
 

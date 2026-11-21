@@ -4,8 +4,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { loadFaces, loadPeople, addToast } = vi.hoisted(() => ({ loadFaces: vi.fn(), loadPeople: vi.fn(), addToast: vi.fn() }));
-vi.mock('../../../../src/context/PeopleContext', () => ({ usePeople: () => ({ loadFaces, loadPeople }) }));
+const { loadFaces, loadPeople, refreshUnassignedCount, addToast } = vi.hoisted(() => ({ loadFaces: vi.fn(), loadPeople: vi.fn(), refreshUnassignedCount: vi.fn(), addToast: vi.fn() }));
+vi.mock('../../../../src/context/PeopleContext', () => ({ usePeople: () => ({ loadFaces, loadPeople, refreshUnassignedCount }) }));
 vi.mock('../../../../src/context/ToastContext', () => ({ useToast: () => ({ addToast }) }));
 
 import { useEdgeCaseSuggestions, pendingEdgeCaseTab } from '../../../../src/hooks/useEdgeCaseSuggestions';
@@ -21,15 +21,16 @@ beforeEach(() => {
     invoke.mockImplementation(async (channel: string) => {
         if (channel === 'profile:getOverview') return { success: true, overview };
         if (channel === 'profile:list') return { success: true, rows: [] };
-        if (channel === 'nonface:getOverview') return { success: true, overview: { mode: 'detector', current: { total: 0, turned: 0 }, detector: null, model: null, ignoredFromList: 0 } };
+        if (channel === 'nonface:getOverview') return { success: true, overview: { mode: 'detector', current: { total: 9, turned: 2 }, detector: null, model: null, ignoredFromList: 0, hideFromReview: true, hideable: 7, hiddenFromReview: 7 } };
+        if (channel === 'nonface:setHide') return { success: true, overview: { mode: 'detector', current: { total: 9, turned: 2 }, detector: null, model: null, ignoredFromList: 0, hideFromReview: false, hideable: 7, hiddenFromReview: 0 } };
         if (channel === 'nonface:list') return { success: true, faces: [] };
         throw new Error(`unexpected ${channel}`);
     });
     (window as unknown as { ipcRenderer: { invoke: typeof invoke } }).ipcRenderer = { invoke };
 });
 
-const mount = async () => {
-    const hook = renderHook(() => useEdgeCaseSuggestions());
+const mount = async (reloadReview?: () => void) => {
+    const hook = renderHook(() => useEdgeCaseSuggestions(reloadReview));
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
     return hook;
@@ -75,5 +76,31 @@ describe('useEdgeCaseSuggestions', () => {
         await act(async () => { result.current.showEveryone(); await Promise.resolve(); });
 
         expect(result.current.focusPersonId).toBeNull();
+    });
+
+    describe('Review Needed after changes made in the other lists', () => {
+        it('counts the faces hidden from Review Needed, for the notice under the tabs', async () => {
+            const { result } = await mount();
+
+            expect(result.current.counts).toEqual({ nonface: 9, profile: 0, hidden: 7 });
+        });
+
+        it('reloads Review Needed when the user goes back to it after changing what is hidden, and not when nothing changed', async () => {
+            const reloadReview = vi.fn();
+            const { result } = await mount(reloadReview);
+
+            await act(async () => { result.current.setActiveFilter('nonface'); await Promise.resolve(); });
+            await act(async () => { result.current.setActiveFilter('unnamed'); await Promise.resolve(); });
+            expect(reloadReview).not.toHaveBeenCalled();
+
+            await act(async () => { result.current.setActiveFilter('nonface'); await Promise.resolve(); });
+            await act(async () => { await result.current.nonFace.setHideFromReview(false); });
+            await act(async () => { result.current.setActiveFilter('unnamed'); await Promise.resolve(); });
+            expect(reloadReview).toHaveBeenCalledTimes(1);
+
+            await act(async () => { result.current.setActiveFilter('nonface'); await Promise.resolve(); });
+            await act(async () => { result.current.setActiveFilter('unnamed'); await Promise.resolve(); });
+            expect(reloadReview).toHaveBeenCalledTimes(1);
+        });
     });
 });

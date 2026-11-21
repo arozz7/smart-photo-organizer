@@ -136,6 +136,27 @@ export default function NonFaceSuggestions({ ctrl, onViewPhoto }: NonFaceSuggest
                     )}
                     {current && <span>{plural(current.total)} are suggested at this cut-off.</span>}
                 </div>
+                <div className="flex items-start gap-2 text-sm text-gray-300">
+                    <input
+                        id="nonface-hide"
+                        type="checkbox"
+                        checked={overview?.hideFromReview ?? true}
+                        disabled={!overview || busy}
+                        onChange={(event) => ctrl.setHideFromReview(event.target.checked)}
+                        className="mt-1 accent-orange-500"
+                    />
+                    <div>
+                        <label htmlFor="nonface-hide" className="cursor-pointer">Hide these faces from Review Needed</label>
+                        {overview && (
+                            <p className="text-xs text-gray-400">
+                                {overview.hideFromReview
+                                    ? `${plural(overview.hiddenFromReview)} ${overview.hiddenFromReview === 1 ? 'is' : 'are'} hidden there and reviewed here.`
+                                    : `${plural(overview.hideable)} would be hidden there.`}
+                                {' '}Faces turned 45° or more stay in Review Needed. Keep sends a face back to Review Needed; nothing is ignored by hiding it.
+                            </p>
+                        )}
+                    </div>
+                </div>
                 {model && (
                     <p className="text-xs text-gray-400">
                         The vision model has looked at {formatCount(model.checked)} of {formatCount(model.candidates)} uncertain faces; more appear here as the check runs

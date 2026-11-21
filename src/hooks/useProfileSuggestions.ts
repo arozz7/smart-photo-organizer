@@ -98,7 +98,7 @@ const plural = (count: number) => `${count} ${count === 1 ? 'face' : 'faces'}`
  * process and takes several seconds, so while it runs the overview is asked for again until it is ready. Nothing is assigned
  * except what the user selects; the last assignment can be undone.
  */
-export function useProfileSuggestions({ enabled, personId }: { enabled: boolean; personId?: number | null }) {
+export function useProfileSuggestions({ enabled, personId, onReviewChanged }: { enabled: boolean; personId?: number | null; onReviewChanged?: () => void }) {
     const { loadFaces, loadPeople } = usePeople()
     const { addToast } = useToast()
 
@@ -130,7 +130,8 @@ export function useProfileSuggestions({ enabled, personId }: { enabled: boolean;
     const refreshQueue = useCallback(() => {
         loadFaces({ unnamed: true })
         loadPeople()
-    }, [loadFaces, loadPeople])
+        onReviewChanged?.() // assigned faces leave Review Needed (and Undo brings them back)
+    }, [loadFaces, loadPeople, onReviewChanged])
 
     /** Takes an overview: while the search runs, asks again later; when it is ready, loads the list. */
     const applyOverview = useCallback(async (next: ProfileOverview) => {

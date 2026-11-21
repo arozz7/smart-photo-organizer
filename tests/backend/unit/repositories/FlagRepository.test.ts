@@ -240,4 +240,40 @@ describe('FlagRepository (not a face, by detector score)', () => {
             expect(FlagRepository.restoreNonFace([1])).toEqual([]);
         });
     });
+
+    describe('idsToHideBelow (the suggestions Review Needed may hide)', () => {
+        it('returns the suggestions at the cut-off, leaving out faces turned 45 degrees or more (real faces seen from the side)', () => {
+            seed([
+                { id: 1, score: 0.3, yaw: 10 },
+                { id: 2, score: 0.3, yaw: -50 },
+                { id: 3, score: 0.3, yaw: 45 },
+                { id: 4, score: 0.3, yaw: 44 },
+                { id: 5, score: 0.3, yaw: null },
+            ]);
+
+            expect(FlagRepository.idsToHideBelow(0.55).sort()).toEqual([1, 4, 5]);
+        });
+
+        it('is exactly the list minus its turned faces: same cut-off, same exclusions', () => {
+            seed([
+                { id: 1, score: 0.3, yaw: 10 }, { id: 2, score: 0.5, yaw: 60 }, { id: 3, score: 0.6, yaw: 10 },
+                { id: 4, score: 0.4, person: 7 }, { id: 5, score: 0.4, ignored: 1 }, { id: 6, score: 0.4, entity: 'pet' }, { id: 7, score: 0.4, yaw: 5 },
+            ]);
+            FlagRepository.dismissNonFace([7], 0.55, AT);
+
+            const [count] = FlagRepository.countNonFaceBelow([0.55]);
+
+            expect(FlagRepository.idsToHideBelow(0.55).length).toBe(count.total - count.turned);
+            expect(FlagRepository.idsToHideBelow(0.55)).toEqual([1]);
+        });
+
+        it('lets a face the user kept go back to Review Needed (it is no longer a suggestion)', () => {
+            seed([{ id: 1, score: 0.3, yaw: 5 }]);
+            expect(FlagRepository.idsToHideBelow(0.55)).toEqual([1]);
+
+            FlagRepository.dismissNonFace([1], 0.55, AT);
+
+            expect(FlagRepository.idsToHideBelow(0.55)).toEqual([]);
+        });
+    });
 });

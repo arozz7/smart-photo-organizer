@@ -24,6 +24,8 @@ interface EdgeCaseFiltersProps {
         background: number
         nonface: number
         profile: number
+        /** Faces Review Needed leaves out because the Not a Face? list holds them. */
+        hidden?: number
     }
     className?: string
 }
@@ -94,39 +96,51 @@ export default function EdgeCaseFilters({ activeFilter, onFilterChange, counts, 
         }
     ]
 
-    return (
-        <div className={`flex items-center gap-2 p-1 bg-gray-900/50 backdrop-blur rounded-xl border border-gray-800 ${className}`}>
-            {filters.map(filter => {
-                const isActive = activeFilter === filter.id
-                const count = counts[filter.id] || 0
+    const hidden = counts.hidden ?? 0
 
-                return (
-                    <button
-                        key={filter.id}
-                        onClick={() => onFilterChange(filter.id)}
-                        title={filter.title}
-                        className={`
-                            relative flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all
-                            ${isActive
-                                ? ACTIVE_CLASSES[filter.color].tab
-                                : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                            }
-                        `}
-                    >
-                        {filter.icon}
-                        <span>{filter.label}</span>
-                        <span className={`
-                            px-1.5 py-0.5 rounded-full text-[10px] font-bold min-w-[20px] text-center
-                            ${isActive
-                                ? ACTIVE_CLASSES[filter.color].badge
-                                : 'bg-gray-800 text-gray-500 group-hover:bg-gray-700'
-                            }
-                        `}>
-                            {count}
-                        </span>
-                    </button>
-                )
-            })}
+    return (
+        <div className="space-y-2">
+            <div className={`flex items-center gap-2 p-1 bg-gray-900/50 backdrop-blur rounded-xl border border-gray-800 ${className}`}>
+                {filters.map(filter => {
+                    const isActive = activeFilter === filter.id
+                    const count = counts[filter.id] || 0
+
+                    return (
+                        <button
+                            key={filter.id}
+                            onClick={() => onFilterChange(filter.id)}
+                            title={filter.title}
+                            className={`
+                                relative flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all
+                                ${isActive
+                                    ? ACTIVE_CLASSES[filter.color].tab
+                                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                                }
+                            `}
+                        >
+                            {filter.icon}
+                            <span>{filter.label}</span>
+                            <span className={`
+                                px-1.5 py-0.5 rounded-full text-[10px] font-bold min-w-[20px] text-center
+                                ${isActive
+                                    ? ACTIVE_CLASSES[filter.color].badge
+                                    : 'bg-gray-800 text-gray-500 group-hover:bg-gray-700'
+                                }
+                            `}>
+                                {count}
+                            </span>
+                        </button>
+                    )
+                })}
+            </div>
+            {activeFilter === 'unnamed' && hidden > 0 && (
+                <div className="flex items-center justify-between gap-3 bg-orange-500/10 border border-orange-500/30 rounded-xl px-4 py-2 text-sm text-orange-200">
+                    <span>
+                        {hidden.toLocaleString('en-US')} {hidden === 1 ? 'face is' : 'faces are'} not shown here because {hidden === 1 ? 'it is' : 'they are'} in Not a Face? (faces turned 45° or more are never hidden).
+                    </span>
+                    <button onClick={() => onFilterChange('nonface')} className="shrink-0 font-medium text-orange-300 hover:text-white">Review them in Not a Face?</button>
+                </div>
+            )}
         </div>
     )
 }

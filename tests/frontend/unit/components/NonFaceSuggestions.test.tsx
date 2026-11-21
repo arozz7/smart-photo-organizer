@@ -24,7 +24,7 @@ const overview = (extra: Partial<NonFaceOverview> = {}): NonFaceOverview => ({
         ],
     },
     model: null,
-    ignoredFromList: 0, ...extra,
+    ignoredFromList: 0, hideFromReview: true, hideable: 3027, hiddenFromReview: 3027, ...extra,
 });
 
 const modelOverview = (extra: Partial<NonFaceOverview> = {}): NonFaceOverview => overview({
@@ -43,7 +43,7 @@ function makeCtrl(extra: Record<string, unknown> = {}) {
         overview: overview(), tiles: [tile(1), tile(2, { yaw: 62 }), tile(3, { yaw: null })], total: 3846, hasMore: false,
         loading: false, busy: false, selectedIds: new Set<number>(), undoBatch: null as number[] | null,
         loadMore: vi.fn(), toggle: vi.fn(), selectAllLoaded: vi.fn(), selectNone: vi.fn(),
-        ignoreSelected: vi.fn(), keepSelected: vi.fn(), undoLast: vi.fn(), setCutoff: vi.fn(), setMode: vi.fn(), setLikelihood: vi.fn(), ...extra,
+        ignoreSelected: vi.fn(), keepSelected: vi.fn(), undoLast: vi.fn(), setCutoff: vi.fn(), setMode: vi.fn(), setLikelihood: vi.fn(), setHideFromReview: vi.fn(), ...extra,
     };
 }
 
@@ -199,5 +199,39 @@ describe('NonFaceSuggestions', () => {
         setup({ selectedIds: new Set([1]), busy: true });
 
         expect((screen.getByText('Ignore selected').closest('button') as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    describe('hiding the list from Review Needed', () => {
+        it('says what it does, with the number of faces, and that turned faces stay', () => {
+            setup();
+
+            expect(screen.getByRole('checkbox', { name: /Hide these faces from Review Needed/ })).toBeChecked();
+            expect(screen.getByText(/3,027 faces are hidden there/)).toBeInTheDocument();
+            expect(screen.getByText(/turned 45° or more stay in Review Needed/)).toBeInTheDocument();
+        });
+
+        it('turns it off', () => {
+            const { ctrl } = setup();
+
+            fireEvent.click(screen.getByRole('checkbox', { name: /Hide these faces from Review Needed/ }));
+
+            expect(ctrl.setHideFromReview).toHaveBeenCalledWith(false);
+        });
+
+        it('shows it unchecked when it is off, with the number it would hide, and turns it on', () => {
+            const { ctrl } = setup({ overview: overview({ hideFromReview: false, hiddenFromReview: 0, hideable: 3027 }) });
+
+            const box = screen.getByRole('checkbox', { name: /Hide these faces from Review Needed/ });
+            expect(box).not.toBeChecked();
+            expect(screen.getByText(/3,027 faces would be hidden/)).toBeInTheDocument();
+            fireEvent.click(box);
+            expect(ctrl.setHideFromReview).toHaveBeenCalledWith(true);
+        });
+
+        it('cannot be changed while another change is being saved', () => {
+            setup({ busy: true });
+
+            expect(screen.getByRole('checkbox', { name: /Hide these faces from Review Needed/ })).toBeDisabled();
+        });
     });
 });

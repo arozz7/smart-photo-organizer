@@ -126,7 +126,7 @@ export default function People() {
     });
 
     // --- Edge Case Filters ---
-    const edge = useEdgeCaseSuggestions();
+    const edge = useEdgeCaseSuggestions(loadClusteredFaces);
     const { activeFilter: activeEdgeFilter, setActiveFilter: setActiveEdgeFilter } = edge;
     const { faces: ignoredFaces, ...ignoredCtrl } = useIgnoredFaces({ enabled: activeEdgeFilter === 'ignored' });
     const { candidates: backgroundFaces, ...bgCtrl } = useBackgroundFaces({ enabled: activeEdgeFilter === 'background' });
@@ -795,8 +795,7 @@ export default function People() {
                                     ignored: ignoredCtrl.totalCount,
                                     ungroupable: ungroupableFaces.length,
                                     background: bgCtrl.totalCandidates,
-                                    nonface: edge.nonFace.total,
-                                    profile: edge.profile.total
+                                    ...edge.counts
                                 }}
                             />
                         </div>

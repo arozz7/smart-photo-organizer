@@ -7,6 +7,7 @@ const { mockHandle, service } = vi.hoisted(() => ({
         setCutoff: vi.fn(),
         setMode: vi.fn(),
         setMinLikelihood: vi.fn(),
+        setHideFromReview: vi.fn(),
         list: vi.fn(),
         ignore: vi.fn(),
         keep: vi.fn(),
@@ -38,7 +39,7 @@ describe('nonFaceHandlers', () => {
 
     it('registers one channel per action', () => {
         expect(mockHandle.mock.calls.map(([name]: [string]) => name).sort()).toEqual([
-            'nonface:getOverview', 'nonface:ignore', 'nonface:keep', 'nonface:list', 'nonface:setCutoff', 'nonface:setLikelihood', 'nonface:setMode', 'nonface:undo',
+            'nonface:getOverview', 'nonface:ignore', 'nonface:keep', 'nonface:list', 'nonface:setCutoff', 'nonface:setHide', 'nonface:setLikelihood', 'nonface:setMode', 'nonface:undo',
         ]);
     });
 
@@ -55,6 +56,20 @@ describe('nonFaceHandlers', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('db locked');
+    });
+
+    describe('setHide (hide the list from Review Needed)', () => {
+        it('saves the choice and returns the new overview', async () => {
+            service.getOverview.mockReturnValue({ hideFromReview: false });
+
+            expect(await handler('nonface:setHide')({}, { hide: false })).toEqual({ success: true, overview: { hideFromReview: false } });
+            expect(service.setHideFromReview).toHaveBeenCalledWith(false);
+        });
+
+        it.each([[{}], [{ hide: 'yes' }], [{ hide: 1 }], [{ hide: true, extra: 1 }], [undefined]])('rejects %j without calling the service', async payload => {
+            expect((await handler('nonface:setHide')({}, payload)).success).toBe(false);
+            expect(service.setHideFromReview).not.toHaveBeenCalled();
+        });
     });
 
     describe('setCutoff', () => {
