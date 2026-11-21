@@ -51,3 +51,16 @@ None of the 272 assigned faces reaches likelihood 50% (their highest Q1 is -2.36
 - **Go.** One question (Q1), default likelihood **70%** for the list and for hiding from Review Needed, choices 50 to 95%.
 - Caveats: labels are the assistant's (user review pending); 57 labelled pictures in all; the weights come from a rank-stratified sample, so thresholds shrink somewhat on new data; the model also rates some real faces on boards, masks and toys as picture-like (the review list shows the surroundings).
 - Cost: one question, 0.64 s a face: assigned faces (12,340) about 2.2 hours, then the queue (about 59,000) about 10.5 hours, 12.7 hours in all.
+
+## 4. After the user's review of the sheets (2026-11-21): these numbers replace the labelled-sample numbers in section 2
+The user went through the 216 tiles and the 272 assigned faces. **Assigned faces: "all good"** (none is a picture). Changes to my labels: four tiles I had called real or unsure are pictures (a picture frame, a picture in a frame twice, a face believed to be on a screen in an arena); several faces I had called not a face or unsure are real but partial, turned away or very low quality (27, 28, 153, 167, 178, 193, 19, 47, 75, 104); five are not faces after all (125, 134, 143, 173, 206 the back of a head); four are masks or a mirror reflection (9, 29, 70, 180) and one is heavily covered (52).
+Pictures are **about 2.8%** of the review queue (about 1,640 of 59,160). Refitted: `likelihood = sigmoid(4.782 * Q1 + 10.347)`.
+| Likelihood of picture at least | Q1 | Faces in the queue (est.) | Precision | Recall |
+|---|---|---|---|---|
+| 50% | -2.16 | about 1,020 | 75% | 46% |
+| 60% | -2.08 | about 820 | 78% | 39% |
+| **70% (default)** | **-1.99** | **about 680** | **79%** | **33%** |
+| 80% | -1.87 | about 440 | 96% | 26% |
+| 90% | -1.70 | about 280 | 100% | 17% |
+On the independent Phase A sample the same cut-offs flag 9 faces at 50% (8 pictures), 6 at 70% (all pictures), 4 at 90% (all pictures). None of the 272 assigned faces reaches 50%. The go decision stands (79% against the bar of 60%).
+Notes from the review that matter for the list: a face that is only partly visible, covered, turned away or very low quality is a real face, not a picture (the list must not call those pictures), masks and mirror reflections are a grey area, and a picture inside a frame at a small size is still a picture.
