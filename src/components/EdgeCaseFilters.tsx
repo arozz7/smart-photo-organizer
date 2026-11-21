@@ -1,8 +1,8 @@
 
 
-export type EdgeCaseFilterType = 'unnamed' | 'ignored' | 'ungroupable' | 'background' | 'nonface'
+export type EdgeCaseFilterType = 'unnamed' | 'ignored' | 'ungroupable' | 'background' | 'nonface' | 'profile'
 
-type FilterColor = 'indigo' | 'gray' | 'red' | 'amber' | 'orange'
+type FilterColor = 'indigo' | 'gray' | 'red' | 'amber' | 'orange' | 'sky'
 
 // Written out in full: Tailwind only generates the classes it can read in the source, so `bg-${color}-500/10` produced nothing.
 const ACTIVE_CLASSES: Record<FilterColor, { tab: string; badge: string }> = {
@@ -11,6 +11,7 @@ const ACTIVE_CLASSES: Record<FilterColor, { tab: string; badge: string }> = {
     red: { tab: 'bg-red-500/10 text-red-400 ring-1 ring-red-500/50 shadow-lg shadow-red-500/10', badge: 'bg-red-500/20 text-red-300' },
     amber: { tab: 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/50 shadow-lg shadow-amber-500/10', badge: 'bg-amber-500/20 text-amber-300' },
     orange: { tab: 'bg-orange-500/10 text-orange-400 ring-1 ring-orange-500/50 shadow-lg shadow-orange-500/10', badge: 'bg-orange-500/20 text-orange-300' },
+    sky: { tab: 'bg-sky-500/10 text-sky-400 ring-1 ring-sky-500/50 shadow-lg shadow-sky-500/10', badge: 'bg-sky-500/20 text-sky-300' },
 }
 
 interface EdgeCaseFiltersProps {
@@ -22,6 +23,7 @@ interface EdgeCaseFiltersProps {
         ignored: number
         background: number
         nonface: number
+        profile: number
     }
     className?: string
 }
@@ -76,6 +78,17 @@ export default function EdgeCaseFilters({ activeFilter, onFilterChange, counts, 
             icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            )
+        },
+        {
+            id: 'profile',
+            label: 'Turned faces',
+            title: 'Faces seen from the side, with the person whose turned faces they resemble (suggestions only; you decide)',
+            color: 'sky',
+            icon: (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
             )
         }

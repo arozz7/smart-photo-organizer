@@ -180,6 +180,16 @@ describe('Settings view', () => {
         expect(callsTo(calls, 'db:batchPropagateLabels')).toHaveLength(1);
     });
 
+    it('says nothing was assigned when propagation is switched off, instead of "Done"', async () => {
+        installIpc({ 'db:batchPropagateLabels': () => ({ success: true, propagated: 0, skipped: 0, disabled: true, message: 'Nothing was assigned. Being redesigned.' }) });
+        render(<Settings />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Run for Entire Library' }));
+
+        await waitFor(() => expect(screen.getByText('Nothing was assigned. Being redesigned.')).toBeInTheDocument());
+        expect(screen.queryByText(/Done —/)).not.toBeInTheDocument();
+    });
+
     it('alerts when batch propagation fails', async () => {
         installIpc({ 'db:batchPropagateLabels': () => ({ success: false, error: 'boom' }) });
         render(<Settings />);

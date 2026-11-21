@@ -1,7 +1,7 @@
 /**
  * @vitest-environment happy-dom
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import React, { useEffect } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AIProvider, useAI } from '../../../../src/context/AIContext';
@@ -160,5 +160,53 @@ describe('AIContext', () => {
         await waitFor(() => {
             expect(screen.getByTestId('queue-length')).toHaveTextContent('0');
         });
+    });
+
+    it('does not re-render its consumers when a status poll returns the same values (it did every second while grouping, which made Home flicker)', async () => {
+        vi.useFakeTimers();
+        try {
+            let renders = 0;
+            const Counter = () => {
+                const { bucketingStatus, systemStatus } = useAI();
+                renders++;
+                return <div data-testid="grouping">{bucketingStatus.offset}/{String(systemStatus?.system?.python)}</div>;
+            };
+            // every poll answers with a NEW object holding the same values
+            mockIpcRenderer.invoke.mockImplementation((channel) => {
+                if (channel === 'db:getBucketingStatus') return Promise.resolve({ active: true, offset: 5, total: 10, remaining: 5 });
+                if (channel === 'db:getIgnoredRecheckStatus') return Promise.resolve({ active: false, offset: 0, total: 0 });
+                if (channel === 'ai:command') return Promise.resolve({ type: 'system_status_result', status: { system: { python: '3.11' } } });
+                if (channel === 'settings:getQueueConfig') return Promise.resolve({ batchSize: 0, cooldownSeconds: 60 });
+                if (channel === 'settings:getAIQueue') return Promise.resolve([]);
+                return Promise.resolve({ success: true });
+            });
+            render(
+                <ToastProvider>
+                    <AlertProvider>
+                        <AIProvider>
+                            <Counter />
+                        </AIProvider>
+                    </AlertProvider>
+                </ToastProvider>
+            );
+            const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+            await tick(0);
+            await tick(1000);
+            await tick(1000);
+            expect(screen.getByTestId('grouping')).toHaveTextContent('5/3.11');
+            const settled = renders;
+
+            for (let i = 0; i < 5; i++) await tick(1000);
+
+            expect(mockIpcRenderer.invoke.mock.calls.filter(([channel]) => channel === 'db:getBucketingStatus').length).toBeGreaterThan(5);
+            expect(renders).toBe(settled);
+
+            // the counter is polled every second, but the (single-threaded) Python engine is asked for its status far less often
+            const asked = (type: string) => mockIpcRenderer.invoke.mock.calls.filter(([channel, payload]) => channel === 'ai:command' && payload?.type === type).length;
+            const groupingPolls = mockIpcRenderer.invoke.mock.calls.filter(([channel]) => channel === 'db:getBucketingStatus').length;
+            expect(asked('get_system_status')).toBeLessThan(groupingPolls / 2);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

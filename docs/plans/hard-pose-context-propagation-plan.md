@@ -1,5 +1,7 @@
 # Hard Pose Handling & Context Propagation — Implementation Plan
 
+> **Update 2026-11-19:** Phases 3 and 6 below (silent propagation) assign nothing on the real library and would be unsafe if repaired as written. They are replaced by `contextual-suggestions-plan.md` (reviewed suggestions).
+
 ## Overview
 
 Improve face recognition accuracy for challenging poses (side profiles, top-down views, extreme angles) by leveraging pose-aware processing, quality-weighted centroids, and contextual identity propagation using temporal/spatial proximity.

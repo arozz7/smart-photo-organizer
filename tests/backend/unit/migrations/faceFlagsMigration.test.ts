@@ -16,7 +16,7 @@ describe('003_faceFlags migration', () => {
 
     it('is version 3 and registered after the re-match log', () => {
         expect(faceFlagsMigration.version).toBe(3);
-        expect(MIGRATIONS.map(m => m.version)).toEqual([1, 2, 3]);
+        expect(MIGRATIONS.map(m => m.version).slice(0, 3)).toEqual([1, 2, 3]);
     });
 
     it('keeps one row per face and kind, and a face may carry both kinds', () => {

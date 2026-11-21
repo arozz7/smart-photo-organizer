@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { useAlert } from './AlertContext';
 import { useToast } from './ToastContext';
+import { keepIfSame } from '../utils/keepIfSame';
 
 interface SystemStatus {
     insightface: {
@@ -226,7 +227,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             // @ts-ignore
             const result = await window.ipcRenderer.invoke('ai:command', { type: 'get_system_status' });
             if (result && result.type === 'system_status_result') {
-                setSystemStatus(result.status);
+                setSystemStatus(prev => keepIfSame(prev, result.status));
             }
             // Also check ping for live mode
             // @ts-ignore
@@ -247,11 +248,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         try {
             // @ts-ignore
             const bStatus = await window.ipcRenderer.invoke('db:getBucketingStatus');
-            if (bStatus) setBucketingStatus(bStatus);
+            if (bStatus) setBucketingStatus(prev => keepIfSame(prev, bStatus)); // unchanged poll: no re-render
 
             // @ts-ignore
             const rStatus = await window.ipcRenderer.invoke('db:getIgnoredRecheckStatus');
-            if (rStatus) setRecheckStatus(rStatus);
+            if (rStatus) setRecheckStatus(prev => keepIfSame(prev, rStatus));
         } catch (e) {
             console.error("Failed to fetch bucketing status", e);
         }
@@ -259,7 +260,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     // Status Polling Effect
     useEffect(() => {
-        // Run once on mount
         fetchSystemStatus();
         fetchBucketingStatus();
 
@@ -271,8 +271,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (bucketingStatus.active || recheckStatus.active) intervalTime = 1000;
         else if (isProcessing || aiMode === 'UNKNOWN') intervalTime = 5000;
 
+        let tick = 0; // while grouping, the counter is polled every second but the busy, single-threaded engine only every 5th second
         const intervalId = setInterval(() => {
-            fetchSystemStatus();
+            if (intervalTime > 1000 || tick++ % 5 === 0) fetchSystemStatus();
             fetchBucketingStatus();
         }, intervalTime);
 
@@ -536,7 +537,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const handleRetryDecision = (photoId: number, scanData: any, tags: string[]) => {
         const { faces, mode } = scanData;
-
 
 
 

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { requestProfileViews } from '../utils/edgeCaseIntent';
 import { useDynamicGrid } from '../hooks/useDynamicGrid';
 import PersonFaceItem from '../components/PersonFaceItem';
 import BlurryFacesModal from '../components/BlurryFacesModal';
@@ -247,6 +248,14 @@ const PersonDetail = () => {
 
                 {/* Center/Right: Action buttons */}
                 <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                        onClick={() => { requestProfileViews(person.id); navigate('/people'); }}
+                        title="Unassigned faces seen from the side that resemble this person's confirmed turned faces (you confirm each)"
+                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 shrink-0"
+                    >
+                        Find profile views
+                    </button>
+
                     <button
                         onClick={() => setIsBlurryModalOpen(true)}
                         className="bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 shrink-0"

@@ -86,6 +86,12 @@ export class BackgroundPropagationService implements IService {
                 const result = ContextualMatchingService.batchPropagateForLibrary();
                 this.lastRunAt = Date.now();
 
+                if (result.disabled) {
+                    logger.info('[BackgroundPropagationService] Pass skipped: silent assignment is off (reviewed suggestions are planned).');
+                    await this.sleep(this.idleCheckMs);
+                    continue;
+                }
+
                 logger.info(
                     { propagated: result.propagated, skipped: result.skipped },
                     '[BackgroundPropagationService] Pass complete.'

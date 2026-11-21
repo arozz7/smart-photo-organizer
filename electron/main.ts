@@ -1,6 +1,10 @@
 import './setup-env'; // Must be first
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, crashReporter } from 'electron'
 import { registerImageProtocol } from './services/imageProtocol';
+import sharp from 'sharp';
+import { readdirSync } from 'node:fs';
+import { startCrashDumps } from './lib/crashDumps';
+import { imageJobs, SHARP_THREADS_PER_JOB } from './services/image/ImageJobTracker';
 import { pythonProvider } from './infrastructure/PythonAIProvider';
 import { registerAIHandlers } from './ipc/aiHandlers';
 import { registerDBHandlers } from './ipc/dbHandlers';
@@ -15,6 +19,7 @@ import { registerAlbumHandlers } from './ipc/albumHandlers';
 import { registerParkedFaceHandlers } from './ipc/parkedFaceHandlers';
 import { registerRematchHandlers } from './ipc/rematchHandlers';
 import { registerNonFaceHandlers } from './ipc/nonFaceHandlers';
+import { registerProfileHandlers } from './ipc/profileHandlers';
 import { registerFaceVisibilityHandlers } from './ipc/faceVisibilityHandlers';
 import { getFaceVisibilityService } from './core/services/FaceVisibilityDeps';
 import { getRematchService } from './core/services/RematchDeps';
@@ -53,6 +58,23 @@ const __dirname = path.dirname(__filename);
 const LIBRARY_PATH = getLibraryPath();
 logger.info(`[Main] Library Path: ${LIBRARY_PATH}`);
 
+// Native image crashes (0.8.11, 0.8.13: inside the sharp module) leave no JavaScript error: keep local crash dumps, remember which
+// files were being processed, and limit the native parallelism (ImageJobTracker).
+sharp.concurrency(SHARP_THREADS_PER_JOB);
+const crashDumpsDir = app.getPath('crashDumps');
+startCrashDumps({
+  crashReporter,
+  logger,
+  dumpsDir: crashDumpsDir,
+  listDumps: () => {
+    try { return readdirSync(path.join(crashDumpsDir, 'completed')).filter(name => name.endsWith('.dmp')); } catch { return []; }
+  },
+});
+const unfinishedImageJobs = imageJobs.attachStateFile(path.join(app.getPath('userData'), 'logs', 'image-jobs.json'));
+if (unfinishedImageJobs.length > 0) {
+  logger.warn(`[Main] The last session ended while these image jobs were running: ${unfinishedImageJobs.map(job => `${job.op} ${job.file}`).join(' | ')}`);
+}
+
 process.env.APP_ROOT = path.join(__dirname, '..')
 
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
@@ -76,6 +98,7 @@ app.on('before-quit', async (event) => {
   }
 
   AppStateRepository.recordCleanShutdown();
+  imageJobs.markCleanShutdown();
   logger.info('[Main] Graceful shutdown complete.');
   app.quit();
 });
@@ -188,6 +211,7 @@ app.whenReady().then(async () => {
   registerParkedFaceHandlers();
   registerRematchHandlers();
   registerNonFaceHandlers();
+  registerProfileHandlers();
   registerFaceVisibilityHandlers();
   registerCompositeHandlers();
   registerAdjustmentHandlers();

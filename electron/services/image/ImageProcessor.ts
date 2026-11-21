@@ -1,13 +1,17 @@
 import sharp, { Sharp } from 'sharp';
 import { IImageProcessor, ProcessingOptions } from './interfaces';
+import { imageJobs } from './ImageJobTracker';
 
 export class SharpImageProcessor implements IImageProcessor {
 
     async process(filePath: string, options: ProcessingOptions, dbOrientation: number = 1): Promise<Buffer> {
         // [Phase 83] Relax Error Handling
         // Metadata warnings (e.g. "ASCII value ... contains null byte") should not fail the pipeline
-        const pipeline = sharp(filePath, { failOn: 'none' });
-        return this.processPipeline(pipeline, options, dbOrientation, false);
+        // limited and recorded, see ImageJobTracker (native sharp crashes took the whole app down)
+        return imageJobs.run('thumbnail', filePath, () => {
+            const pipeline = sharp(filePath, { failOn: 'none' });
+            return this.processPipeline(pipeline, options, dbOrientation, false);
+        });
     }
 
     async processPipeline(pipeline: Sharp, options: ProcessingOptions, dbOrientation: number = 1, _isPreview: boolean = false): Promise<Buffer> {
@@ -84,9 +88,9 @@ export class SharpImageProcessor implements IImageProcessor {
     }
 
     async convertRaw(filePath: string): Promise<Buffer> {
-        return await sharp(filePath, { failOn: 'none' })
+        return imageJobs.run('convert', filePath, () => sharp(filePath, { failOn: 'none' })
             .rotate()
             .toFormat('jpeg', { quality: 80 })
-            .toBuffer();
+            .toBuffer());
     }
 }
