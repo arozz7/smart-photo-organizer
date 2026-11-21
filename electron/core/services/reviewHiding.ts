@@ -1,20 +1,31 @@
 import logger from '../../logger';
 import { getNonFaceService } from './NonFaceDeps';
+import { getPictureSuggestionService } from './PictureDeps';
 
 /**
- * Faces the Not a Face? list holds (except turned ones) are left out of Review Needed while the user keeps that setting on
- * (it is on by default). They are not changed in any way: they are still in the database, still unassigned, and are reviewed in
- * Not a Face?, where Keep sends a face back here and Ignore moves it to the Ignored filter.
+ * Faces the Not a Face? list holds (except turned ones) and the unassigned faces of the Pictures? list are left out of Review Needed while the
+ * user keeps those settings on (both are on by default). They are not changed in any way: they are still in the database, still unassigned,
+ * and are reviewed in their own lists, where Keep sends a face back to Review Needed and Ignore moves it to the Ignored filter.
  */
 
-/** The ids Review Needed leaves out right now. If the list cannot be read, nothing is hidden: Review Needed must never lose faces to an error. */
-export function hiddenFromReview(getService: () => { hiddenFromReviewIds(): number[] } = getNonFaceService): Set<number> {
-    try {
-        return new Set(getService().hiddenFromReviewIds());
-    } catch (error) {
-        logger.warn(`[ReviewHiding] Could not read the Not a Face? list, nothing is hidden: ${String(error)}`);
-        return new Set();
+type HiddenSource = () => { hiddenFromReviewIds(): number[] };
+
+const APP_SOURCES: HiddenSource[] = [getNonFaceService, getPictureSuggestionService];
+
+/**
+ * The ids Review Needed leaves out right now. If a list cannot be read, it hides nothing: Review Needed must never lose faces to an error
+ * (the other list still hides its faces).
+ */
+export function hiddenFromReview(sources: HiddenSource[] = APP_SOURCES): Set<number> {
+    const hidden = new Set<number>();
+    for (const source of sources) {
+        try {
+            for (const id of source().hiddenFromReviewIds()) hidden.add(id);
+        } catch (error) {
+            logger.warn(`[ReviewHiding] Could not read a suggestion list, it hides nothing: ${String(error)}`);
+        }
     }
+    return hidden;
 }
 
 export function withoutHidden<T extends { id: number }>(faces: T[], hidden: Set<number>): T[] {

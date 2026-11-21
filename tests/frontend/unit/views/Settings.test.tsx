@@ -40,6 +40,9 @@ vi.mock('../../../../src/components/FaceDataHealthCard', () => ({
 vi.mock('../../../../src/components/RematchCard', () => ({
     RematchCard: () => <div>Rematch Card</div>,
 }));
+vi.mock('../../../../src/components/PictureCheckCard', () => ({
+    PictureCheckCard: () => <div>Picture Check Card</div>,
+}));
 vi.mock('../../../../src/components/FaceVisibilityCard', () => ({
     FaceVisibilityCard: () => <div>Face Visibility Card</div>,
 }));

@@ -15,13 +15,14 @@ const replySchema = z.object({
 });
 
 /**
- * Asks the engine's vision model "is a clear face visible?" about a few faces (command `score_face_visibility`).
+ * Asks the engine's vision model about a few faces: "is a clear face visible?" (command `score_face_visibility`, the default) or "a real
+ * person, or only a picture of one?" (command `score_face_picture`).
  * Throws when the whole call fails; a face that could not be scored comes back with a null score and its own error.
  */
-export async function scoreWithEngine(faces: VisibilityFace[], send: SendRequest): Promise<VisibilityResult[]> {
+export async function scoreWithEngine(faces: VisibilityFace[], send: SendRequest, command = 'score_face_visibility'): Promise<VisibilityResult[]> {
     if (faces.length === 0) return [];
     const items = faces.map(face => ({ faceId: face.id, imagePath: face.imagePath, box: face.box, photoWidth: face.photoWidth }));
-    const reply = await send('score_face_visibility', { items }, SCORE_TIMEOUT_MS);
+    const reply = await send(command, { items }, SCORE_TIMEOUT_MS);
 
     const failure = reply && typeof reply === 'object' ? (reply as { success?: unknown; error?: unknown }) : {};
     if (failure.success === false || typeof failure.error === 'string') {

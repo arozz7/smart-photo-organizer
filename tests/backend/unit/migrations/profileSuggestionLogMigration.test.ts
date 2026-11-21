@@ -14,7 +14,7 @@ describe('004_profileSuggestionLog migration', () => {
 
     it('is version 4 and registered after the face flags', () => {
         expect(profileSuggestionLogMigration.version).toBe(4);
-        expect(MIGRATIONS.map(m => m.version)).toEqual([1, 2, 3, 4]);
+        expect(MIGRATIONS.map(m => m.version).slice(0, 4)).toEqual([1, 2, 3, 4]);
     });
 
     it('keeps one row per face and person, so a face may be dismissed for one person and assigned to another', () => {

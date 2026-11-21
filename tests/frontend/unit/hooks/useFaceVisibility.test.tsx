@@ -95,4 +95,20 @@ describe('useFaceVisibility', () => {
 
         expect(invoke.mock.calls.length).toBe(settled);
     });
+
+    it('talks to the channels of another check when given its prefix (the picture check)', async () => {
+        invoke.mockResolvedValue({ success: true, status: status() });
+
+        const { result } = renderHook(() => useFaceVisibility('picturecheck'));
+        await waitFor(() => expect(result.current.status?.scored).toBe(100));
+        await act(async () => { await result.current.setMode('always'); });
+        await act(async () => { await result.current.setAwayMinutes(10); });
+        await act(async () => { await result.current.runNow(); });
+
+        expect(invoke).toHaveBeenCalledWith('picturecheck:getStatus');
+        expect(invoke).toHaveBeenCalledWith('picturecheck:setMode', { mode: 'always' });
+        expect(invoke).toHaveBeenCalledWith('picturecheck:setAwayMinutes', { minutes: 10 });
+        expect(invoke).toHaveBeenCalledWith('picturecheck:runNow');
+        expect(invoke.mock.calls.some(([channel]) => String(channel).startsWith('visibility:'))).toBe(false);
+    });
 });

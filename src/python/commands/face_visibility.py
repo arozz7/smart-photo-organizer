@@ -59,8 +59,12 @@ def crop_window(box: Box, scale: float, multiplier: float, img_w: int, img_h: in
     return left, top, right, bottom
 
 
-def open_crop(item: Item) -> Image.Image:
+def open_crop(item: Item, multiplier: Optional[float] = None) -> Image.Image:
     """Opens the item's image (a preview or the photo itself) and returns the square model crop.
+
+    Args:
+        item: The face to crop (see `crop_window` for the fields).
+        multiplier: How many times the box's longer side the crop spans; CROP_MULTIPLIER when not given.
 
     Raises:
         FaceVisibilityError: The file cannot be opened or the box is outside the image.
@@ -72,7 +76,7 @@ def open_crop(item: Item) -> Image.Image:
         raise FaceVisibilityError(f'Could not open the image: {error}') from error
 
     photo_width = float(item.get('photoWidth') or image.width)
-    window = crop_window(item.get('box') or {}, image.width / photo_width, CROP_MULTIPLIER, image.width, image.height)
+    window = crop_window(item.get('box') or {}, image.width / photo_width, CROP_MULTIPLIER if multiplier is None else multiplier, image.width, image.height)
     if window is None:
         raise FaceVisibilityError('The face box is outside the image')
     return image.crop(window).resize((CROP_SIZE, CROP_SIZE))
@@ -97,13 +101,17 @@ def score_faces(items: List[Item], open_crop_fn: Callable[[Item], Image.Image], 
     return results
 
 
-def make_vlm_ask(processor: Any, model: Any, question: str) -> Ask:
-    """Builds the real `ask`: the log-odds of NO against YES as the first word of the model's answer."""
+def make_vlm_ask(processor: Any, model: Any, question: str, higher_word: str = 'NO', lower_word: str = 'YES') -> Ask:
+    """Builds the real `ask`: the log-odds of `higher_word` against `lower_word` as the first word of the model's answer.
+
+    The defaults give the visibility score (NO against YES: higher means "no clear face visible"); the picture check
+    asks for PICTURE against REAL (higher means "only a picture of a person").
+    """
     import torch
 
     tokenizer = processor.tokenizer
-    yes_id = tokenizer.encode('YES', add_special_tokens=False)[0]
-    no_id = tokenizer.encode('NO', add_special_tokens=False)[0]
+    lower_id = tokenizer.encode(lower_word, add_special_tokens=False)[0]
+    higher_id = tokenizer.encode(higher_word, add_special_tokens=False)[0]
     messages = [{'role': 'user', 'content': [{'type': 'image'}, {'type': 'text', 'text': question}]}]
     prompt = processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 
@@ -112,7 +120,7 @@ def make_vlm_ask(processor: Any, model: Any, question: str) -> Ask:
         with torch.no_grad():
             output = model.generate(**inputs, max_new_tokens=1, do_sample=False, output_scores=True, return_dict_in_generate=True)
         log_probs = torch.log_softmax(output.scores[0][0].float(), dim=-1)
-        return float(log_probs[no_id] - log_probs[yes_id])
+        return float(log_probs[higher_id] - log_probs[lower_id])
 
     return ask
 
@@ -135,8 +143,31 @@ def load_vlm_ask(question: Optional[str] = None) -> Ask:
     return make_vlm_ask(vlm.vlm_processor, vlm.vlm_model, question or FACE_VISIBILITY_PROMPT)
 
 
-def _response(req_id: Any, success: bool, **fields: Any) -> Dict[str, Any]:
-    return {'type': 'score_face_visibility_result', 'success': success, **fields, 'reqId': req_id}
+def _response(req_id: Any, success: bool, response_type: str = 'score_face_visibility_result', **fields: Any) -> Dict[str, Any]:
+    return {'type': response_type, 'success': success, **fields, 'reqId': req_id}
+
+
+def handle_batch_request(
+    payload: Any,
+    req_id: Any,
+    ask: Optional[Ask],
+    load_model: Callable[[], Ask],
+    crop_fn: Callable[[Item], Image.Image],
+    response_type: str,
+) -> Dict[str, Any]:
+    """Shared body of the scoring commands: validates the batch, loads the model if needed, scores each face with `crop_fn`."""
+    items = payload.get('items') if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return _response(req_id, False, response_type, error='items must be a list')
+    if len(items) > MAX_BATCH:
+        return _response(req_id, False, response_type, error=f'Too many faces in one request (the limit is {MAX_BATCH})')
+    if not items:
+        return _response(req_id, True, response_type, results=[])
+    try:
+        ask_fn = ask if ask is not None else load_model()
+    except FaceVisibilityError as error:
+        return _response(req_id, False, response_type, error=str(error))
+    return _response(req_id, True, response_type, results=score_faces(items, crop_fn, ask_fn))
 
 
 def handle_score_request(
@@ -146,15 +177,4 @@ def handle_score_request(
     load_model: Callable[[], Ask] = load_vlm_ask,
 ) -> Dict[str, Any]:
     """Command `score_face_visibility`: payload `{items: [{faceId, imagePath, box, photoWidth}]}`, at most MAX_BATCH."""
-    items = payload.get('items') if isinstance(payload, dict) else None
-    if not isinstance(items, list):
-        return _response(req_id, False, error='items must be a list')
-    if len(items) > MAX_BATCH:
-        return _response(req_id, False, error=f'Too many faces in one request (the limit is {MAX_BATCH})')
-    if not items:
-        return _response(req_id, True, results=[])
-    try:
-        ask_fn = ask if ask is not None else load_model()
-    except FaceVisibilityError as error:
-        return _response(req_id, False, error=str(error))
-    return _response(req_id, True, results=score_faces(items, open_crop, ask_fn))
+    return handle_batch_request(payload, req_id, ask, load_model, open_crop, 'score_face_visibility_result')

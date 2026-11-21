@@ -23,6 +23,15 @@ describe('scoreWithEngine', () => {
         expect(results).toEqual([{ faceId: 1, score: 2.5 }, { faceId: 2, score: null, error: 'could not open' }]);
     });
 
+    it('can ask another command (the picture check)', async () => {
+        const send = vi.fn().mockResolvedValue({ success: true, results: [{ faceId: 1, score: -2 }] });
+
+        const results = await scoreWithEngine([face(1)], send, 'score_face_picture');
+
+        expect(send).toHaveBeenCalledWith('score_face_picture', expect.any(Object), expect.any(Number));
+        expect(results).toEqual([{ faceId: 1, score: -2 }]);
+    });
+
     it('allows a long first call (the model has to load)', async () => {
         const send = vi.fn().mockResolvedValue({ success: true, results: [] });
 

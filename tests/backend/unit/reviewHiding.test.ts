@@ -3,25 +3,32 @@ import { describe, it, expect, vi } from 'vitest';
 const { warn } = vi.hoisted(() => ({ warn: vi.fn() }));
 vi.mock('../../../electron/logger', () => ({ default: { info: vi.fn(), warn, error: vi.fn() } }));
 vi.mock('../../../electron/core/services/NonFaceDeps', () => ({ getNonFaceService: () => ({ hiddenFromReviewIds: () => [1, 2] }) }));
+vi.mock('../../../electron/core/services/PictureDeps', () => ({ getPictureSuggestionService: () => ({ hiddenFromReviewIds: () => [2, 3] }) }));
 
 import { hiddenFromReview, withoutHidden, countWithoutHidden } from '../../../electron/core/services/reviewHiding';
 
 describe('hiddenFromReview', () => {
     it('is the set of faces the Not a Face? list currently hides from Review Needed', () => {
-        expect(hiddenFromReview(() => ({ hiddenFromReviewIds: () => [3, 4, 4] }))).toEqual(new Set([3, 4]));
+        expect(hiddenFromReview([() => ({ hiddenFromReviewIds: () => [3, 4, 4] })])).toEqual(new Set([3, 4]));
     });
 
     it('hides nothing, and does not fail, when the list cannot be read (Review Needed must still show every face)', () => {
         warn.mockClear();
 
-        const hidden = hiddenFromReview(() => ({ hiddenFromReviewIds: () => { throw new Error('face_flags is missing'); } }));
+        const hidden = hiddenFromReview([() => ({ hiddenFromReviewIds: () => { throw new Error('face_flags is missing'); } })]);
 
         expect(hidden.size).toBe(0);
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('face_flags is missing'));
     });
 
-    it('uses the app\'s own suggestion service by default', () => {
-        expect(hiddenFromReview()).toEqual(new Set([1, 2]));
+    it('uses both of the app\'s lists by default: the faces of each, once', () => {
+        expect(hiddenFromReview()).toEqual(new Set([1, 2, 3]));
+    });
+
+    it('keeps hiding what the other list hides when one list cannot be read', () => {
+        const hidden = hiddenFromReview([() => ({ hiddenFromReviewIds: () => { throw new Error('boom'); } }), () => ({ hiddenFromReviewIds: () => [7] })]);
+
+        expect(hidden).toEqual(new Set([7]));
     });
 });
 

@@ -36,6 +36,10 @@ describe('describeState', () => {
         expect(describeState(status(extra))).toBe(text);
     });
 
+    it('names what was checked: faces in general for another check', () => {
+        expect(describeState(status({ state: 'done' }), 'face')).toBe('Every face has been checked.');
+    });
+
     it('shows the error and how to recover', () => {
         const text = describeState(status({ state: 'error', lastError: 'A GPU is required for this check' }));
 

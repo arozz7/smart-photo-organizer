@@ -769,6 +769,9 @@ def handle_command(command):
     elif cmd_type == 'score_face_visibility':
         from commands import face_visibility
         response = face_visibility.handle_score_request(payload, req_id)
+    elif cmd_type == 'score_face_picture':
+        from commands import face_picture
+        response = face_picture.handle_score_request(payload, req_id)
 
     else:
 
