@@ -26,3 +26,6 @@ Migration, model, Python module and generalised batch handler, repositories on t
 - The check is slow (about two thirds of a second a face on the GPU): assigned faces about 2 hours, the whole library about 13 hours of away time.
 - The packaged engine must be rebuilt (`node scripts/build-python.js`) so it answers `score_face_picture`; the stale-engine guard blocks a build with an old engine.
 - Ignoring assigned faces changes people's centroids; Undo restores the face and rebuilds again.
+
+## 0.8.18 fix: Pictures? counts went stale
+The tab loaded its overview once, when People opened, so "Checked N of M faces" stayed frozen while Settings (which polls) kept moving. The overview now reloads when the tab is opened and every 30 s while it is open (`OVERVIEW_REFRESH_MS`); the tab count loads once when closed. The face tiles are not reloaded by the timer (it would disturb a selection); "Load More" picks up newly scored faces.

@@ -2,13 +2,13 @@
  * @vitest-environment happy-dom
  */
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { loadFaces, loadPeople, refreshUnassignedCount, addToast } = vi.hoisted(() => ({ loadFaces: vi.fn(), loadPeople: vi.fn(), refreshUnassignedCount: vi.fn(), addToast: vi.fn() }));
 vi.mock('../../../../src/context/PeopleContext', () => ({ usePeople: () => ({ loadFaces, loadPeople, refreshUnassignedCount }) }));
 vi.mock('../../../../src/context/ToastContext', () => ({ useToast: () => ({ addToast }) }));
 
-import { usePictureSuggestions, PAGE_SIZE } from '../../../../src/hooks/usePictureSuggestions';
+import { usePictureSuggestions, PAGE_SIZE, OVERVIEW_REFRESH_MS } from '../../../../src/hooks/usePictureSuggestions';
 
 const invoke = vi.fn();
 
@@ -68,6 +68,44 @@ beforeEach(() => {
 const calls = (channel: string) => invoke.mock.calls.filter(([name]) => name === channel);
 
 describe('usePictureSuggestions', () => {
+    describe('keeping the overview current while the background check runs', () => {
+        afterEach(() => { vi.useRealTimers(); });
+
+        it('reloads the overview on a timer while the list is open, so the counts follow the check', async () => {
+            vi.useFakeTimers();
+            mainProcess([1, 2]);
+            renderHook(() => usePictureSuggestions({ enabled: true }));
+            await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+            const before = calls('picture:getOverview').length;
+
+            await act(async () => { await vi.advanceTimersByTimeAsync(OVERVIEW_REFRESH_MS * 2); });
+
+            expect(calls('picture:getOverview').length).toBe(before + 2);
+        });
+
+        it('does not poll while the list is closed (the tab count loads once)', async () => {
+            vi.useFakeTimers();
+            mainProcess([1, 2]);
+            renderHook(() => usePictureSuggestions({ enabled: false }));
+            await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+            const before = calls('picture:getOverview').length;
+
+            await act(async () => { await vi.advanceTimersByTimeAsync(OVERVIEW_REFRESH_MS * 3); });
+
+            expect(calls('picture:getOverview').length).toBe(before);
+        });
+
+        it('reloads the overview when the list is opened, since the tab may have been closed for hours', async () => {
+            mainProcess([1]);
+            const { rerender } = renderHook(({ enabled }) => usePictureSuggestions({ enabled }), { initialProps: { enabled: false } });
+            await waitFor(() => expect(calls('picture:getOverview').length).toBe(1));
+
+            rerender({ enabled: true });
+
+            await waitFor(() => expect(calls('picture:getOverview').length).toBe(2));
+        });
+    });
+
     it('loads only the overview (for the count on the tab) while the list is not open', async () => {
         mainProcess([1, 2, 3]);
 

@@ -4,6 +4,8 @@ import { useToast } from '../context/ToastContext'
 
 /** Faces loaded per page of the Pictures? list. */
 export const PAGE_SIZE = 100
+/** How often the counts are reloaded while the list is open (the background check keeps scoring faces). */
+export const OVERVIEW_REFRESH_MS = 30_000
 
 export type PictureList = 'unassigned' | 'assigned'
 
@@ -126,7 +128,12 @@ export function usePictureSuggestions({ enabled, onReviewChanged }: { enabled: b
         refreshReview()
     }, [loadFaces, loadPeople, refreshReview])
 
-    useEffect(() => { void refreshOverview() }, [refreshOverview])
+    useEffect(() => { void refreshOverview() }, [refreshOverview, enabled])
+    useEffect(() => {
+        if (!enabled) return
+        const timer = setInterval(() => { void refreshOverview() }, OVERVIEW_REFRESH_MS)
+        return () => clearInterval(timer)
+    }, [enabled, refreshOverview])
     useEffect(() => { if (enabled) void reloadList() }, [enabled, reloadList])
 
     const loadMore = useCallback(async () => {
