@@ -11,5 +11,6 @@ from . import clustering
 from . import index
 from . import utilities
 from . import face_visibility
+from . import face_picture
 
-__all__ = ['scan', 'face_analysis', 'clustering', 'index', 'utilities', 'face_visibility']
+__all__ = ['scan', 'face_analysis', 'clustering', 'index', 'utilities', 'face_visibility', 'face_picture']

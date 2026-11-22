@@ -4,6 +4,7 @@ import { FaceDataHealthCard } from '../FaceDataHealthCard';
 import { ParkedFacesCard } from '../ParkedFacesCard';
 import { RematchCard } from '../RematchCard';
 import { FaceVisibilityCard } from '../FaceVisibilityCard';
+import { PictureCheckCard } from '../PictureCheckCard';
 import SettingsSection from './SettingsSection';
 import FactoryResetModal from './FactoryResetModal';
 import { useDatabaseMaintenance } from '../../hooks/useDatabaseMaintenance';
@@ -121,6 +122,7 @@ export default function DatabaseManagementSection() {
                     {/* Asks the vision model about uncertain faces to improve the Not a Face? list (ranks suggestions only) */}
                     <div className="border-t border-gray-700 pt-4 mt-4">
                         <FaceVisibilityCard />
+                        <PictureCheckCard />
                     </div>
                 </div>
             </SettingsSection>

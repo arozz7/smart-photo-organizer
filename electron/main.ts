@@ -22,6 +22,9 @@ import { registerNonFaceHandlers } from './ipc/nonFaceHandlers';
 import { registerProfileHandlers } from './ipc/profileHandlers';
 import { registerFaceVisibilityHandlers } from './ipc/faceVisibilityHandlers';
 import { getFaceVisibilityService } from './core/services/FaceVisibilityDeps';
+import { registerPictureHandlers } from './ipc/pictureHandlers';
+import { registerPictureCheckHandlers } from './ipc/pictureCheckHandlers';
+import { getPictureCheckService } from './core/services/PictureCheckDeps';
 import { getRematchService } from './core/services/RematchDeps';
 import { registerCompositeHandlers } from './ipc/compositeHandlers';
 import { registerAdjustmentHandlers } from './ipc/adjustmentHandlers';
@@ -184,6 +187,9 @@ app.whenReady().then(async () => {
   // Face visibility check: asks the vision model about uncertain faces when the user is away (suggestions only)
   const faceVisibilityService = getFaceVisibilityService();
   faceVisibilityService.start();
+  // Picture check: asks the vision model whether faces are real people or only pictures of them, when the user is away (suggestions only)
+  const pictureCheckService = getPictureCheckService();
+  pictureCheckService.start();
 
   // Register Services
   const serviceManager = ServiceManager.getInstance();
@@ -196,6 +202,7 @@ app.whenReady().then(async () => {
   serviceManager.register('BackgroundFaissSyncService', faissSyncService);
   serviceManager.register('RematchService', rematchService);
   serviceManager.register('FaceVisibilityService', faceVisibilityService);
+  serviceManager.register('PictureCheckService', pictureCheckService);
   serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();
@@ -213,6 +220,8 @@ app.whenReady().then(async () => {
   registerNonFaceHandlers();
   registerProfileHandlers();
   registerFaceVisibilityHandlers();
+  registerPictureCheckHandlers();
+  registerPictureHandlers();
   registerCompositeHandlers();
   registerAdjustmentHandlers();
 
