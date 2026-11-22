@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { usePeople } from '../context/PeopleContext'
 import { useToast } from '../context/ToastContext'
+import { useListSelection } from './useListSelection'
 
 /** Faces loaded per page of the "Not a face (suggested)" list. */
 export const PAGE_SIZE = 150
@@ -115,7 +116,8 @@ export function useNonFaceSuggestions({ enabled, onReviewChanged }: { enabled: b
     const [tiles, setTiles] = useState<NonFaceTile[]>([])
     const [loading, setLoading] = useState(false)
     const [busy, setBusy] = useState(false)
-    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+    const tileIds = useMemo(() => tiles.map(tile => tile.faceId), [tiles])
+    const { selectedIds, setSelectedIds, toggle, selectAllLoaded, selectNone, addToSelection } = useListSelection(tileIds)
     /** The faces the last "Ignore selected" ignored, so Undo restores exactly those. */
     const [undoBatch, setUndoBatch] = useState<number[] | null>(null)
 
@@ -135,7 +137,7 @@ export function useNonFaceSuggestions({ enabled, onReviewChanged }: { enabled: b
         if (response.success && response.faces) setTiles(response.faces)
         else fail('load the list', response.error)
         setLoading(false)
-    }, [fail])
+    }, [fail, setSelectedIds])
 
     /** What Review Needed shows depends on this list (faces it hides), so its count and clusters are refreshed when the list changes. */
     const refreshReview = useCallback(() => {
@@ -152,28 +154,29 @@ export function useNonFaceSuggestions({ enabled, onReviewChanged }: { enabled: b
     useEffect(() => { void refreshOverview() }, [refreshOverview])
     useEffect(() => { if (enabled) void reloadList() }, [enabled, reloadList])
 
-    const loadMore = useCallback(async () => {
-        if (loading) return
+    /** Loads the next page and returns the ids of the faces it added. */
+    const loadMore = useCallback(async (): Promise<number[]> => {
+        if (loading) return []
         setLoading(true)
         const response = await call('nonface:list', { offset: tiles.length, limit: PAGE_SIZE })
+        let added: number[] = []
         if (response.success && response.faces) {
-            const more = response.faces
-            setTiles(prev => [...prev, ...more.filter(face => !prev.some(shown => shown.faceId === face.faceId))])
+            const shown = new Set(tiles.map(tile => tile.faceId))
+            const fresh = response.faces.filter(face => !shown.has(face.faceId))
+            added = fresh.map(face => face.faceId)
+            setTiles(prev => [...prev, ...fresh])
         } else {
             fail('load more faces', response.error)
         }
         setLoading(false)
-    }, [loading, tiles.length, fail])
+        return added
+    }, [loading, tiles, fail])
 
-    const toggle = useCallback((faceId: number) => {
-        setSelectedIds(prev => {
-            const next = new Set(prev)
-            if (!next.delete(faceId)) next.add(faceId)
-            return next
-        })
-    }, [])
-    const selectAllLoaded = useCallback(() => setSelectedIds(new Set(tiles.map(tile => tile.faceId))), [tiles])
-    const selectNone = useCallback(() => setSelectedIds(new Set()), [])
+    /** Loads the next page and selects exactly the faces it added (the review flow: look through a page, then take the next one with it). */
+    const loadMoreAndSelect = useCallback(async () => {
+        addToSelection(await loadMore())
+    }, [loadMore, addToSelection])
+
 
     const removeFromList = useCallback((faceIds: number[]) => {
         const gone = new Set(faceIds)
@@ -195,7 +198,7 @@ export function useNonFaceSuggestions({ enabled, onReviewChanged }: { enabled: b
             fail('ignore the selected faces', response.error)
         }
         setBusy(false)
-    }, [selectedIds, busy, removeFromList, addToast, fail, refreshOverview, refreshQueue])
+    }, [selectedIds, busy, removeFromList, addToast, fail, refreshOverview, refreshQueue, setSelectedIds])
 
     const keepSelected = useCallback(async () => {
         if (selectedIds.size === 0 || busy) return
@@ -212,7 +215,7 @@ export function useNonFaceSuggestions({ enabled, onReviewChanged }: { enabled: b
             fail('keep the selected faces', response.error)
         }
         setBusy(false)
-    }, [selectedIds, busy, removeFromList, addToast, fail, refreshOverview, refreshReview])
+    }, [selectedIds, busy, removeFromList, addToast, fail, refreshOverview, refreshReview, setSelectedIds])
 
     const undoLast = useCallback(async () => {
         if (!undoBatch || busy) return
@@ -272,6 +275,7 @@ export function useNonFaceSuggestions({ enabled, onReviewChanged }: { enabled: b
         selectedIds,
         undoBatch,
         loadMore,
+        loadMoreAndSelect,
         toggle,
         selectAllLoaded,
         selectNone,

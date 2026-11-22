@@ -1,5 +1,7 @@
 import FaceThumbnail from './FaceThumbnail'
 import { FloatingActionBar, FloatingActionButton } from './FloatingActionBar'
+import { FloatingBarClearance, LoadMoreControls, SelectionToolbar } from './SelectionControls'
+import { useSelectionShortcuts } from '../hooks/useSelectionShortcuts'
 import type { ProfileFaceTile, ProfileRow, ProfileSuggestionsController } from '../hooks/useProfileSuggestions'
 import { describePose } from '../utils/nonFacePose'
 
@@ -25,7 +27,7 @@ interface RowProps {
     row: ProfileRow
     selected: boolean
     busy: boolean
-    onToggle: (faceId: number) => void
+    onToggle: (faceId: number, extend?: boolean) => void
     onAssignTo: (faceId: number, personId: number) => void
     onViewPhoto: (photoId: number) => void
 }
@@ -36,7 +38,7 @@ function SuggestionRow({ row, selected, busy, onToggle, onAssignTo, onViewPhoto 
         <div data-testid={`profile-row-${row.faceId}`} className="flex items-center gap-4 bg-gray-800/30 border border-gray-700/50 rounded-xl p-2">
             <div
                 data-testid={`profile-face-${row.faceId}`}
-                onClick={() => onToggle(row.faceId)}
+                onClick={(event) => onToggle(row.faceId, event.shiftKey)}
                 className={`w-28 h-28 shrink-0 rounded-lg overflow-hidden border-2 cursor-pointer relative group ${selected ? 'border-emerald-500' : 'border-transparent hover:border-gray-600'}`}
             >
                 <Thumb tile={row.tile} className="w-full h-full object-cover" />
@@ -107,6 +109,13 @@ interface ProfileSuggestionsProps {
  */
 export default function ProfileSuggestions({ ctrl, onViewPhoto, personName, onShowEveryone }: ProfileSuggestionsProps) {
     const { overview, rows, selectedIds, undoBatch, busy } = ctrl
+    useSelectionShortcuts({
+        selectAll: ctrl.selectAllLoaded,
+        selectNone: ctrl.selectNone,
+        loadMoreAndSelect: ctrl.loadMoreAndSelect,
+        hasSelection: selectedIds.size > 0,
+        canLoadMore: ctrl.hasMore && !ctrl.loading,
+    })
     const settings = overview?.settings
 
     const groups: { personId: number; name: string; rows: ProfileRow[] }[] = []
@@ -203,20 +212,17 @@ export default function ProfileSuggestions({ ctrl, onViewPhoto, personName, onSh
             )}
 
             {rows.length > 0 && (
-                <div className="flex justify-between items-center bg-gray-800/30 p-4 rounded-xl border border-gray-700/50">
-                    <div className="text-sm text-gray-400">
-                        {selectedIds.size} selected · showing {formatCount(rows.length)}
-                        <span className="text-gray-600"> · Select all skips faces with two names: choose those yourself</span>
-                    </div>
-                    <div className="flex gap-2">
-                        <button onClick={ctrl.selectAllLoaded} className="text-xs text-indigo-400 hover:text-indigo-300">Select all loaded</button>
-                        <button onClick={ctrl.selectNone} className="text-xs text-gray-500 hover:text-gray-400">Deselect</button>
-                    </div>
-                </div>
+                <SelectionToolbar
+                    selectedCount={selectedIds.size}
+                    summary={`showing ${formatCount(rows.length)}`}
+                    note="Select all skips faces with two names: choose those yourself"
+                    onSelectAll={ctrl.selectAllLoaded}
+                    onSelectNone={ctrl.selectNone}
+                />
             )}
 
             {groups.map(group => (
-                <section key={`${group.personId}-${group.rows[0].faceId}`} className="space-y-2">
+                <section key={`${group.personId}-${group.rows[0].faceId}`} className="space-y-2 select-none">
                     <h3 className="text-sm font-semibold text-white">{group.name} <span className="font-normal text-gray-400">{plural(countOf(group.personId) || group.rows.length)}</span></h3>
                     {group.rows.map(row => (
                         <SuggestionRow key={row.faceId} row={row} selected={selectedIds.has(row.faceId)} busy={busy} onToggle={ctrl.toggle} onAssignTo={ctrl.assignTo} onViewPhoto={onViewPhoto} />
@@ -225,9 +231,7 @@ export default function ProfileSuggestions({ ctrl, onViewPhoto, personName, onSh
             ))}
 
             {ctrl.hasMore && (
-                <div className="flex justify-center mt-8">
-                    <button onClick={ctrl.loadMore} disabled={ctrl.loading} className="px-6 py-2 bg-gray-800 hover:bg-gray-700 rounded-full text-sm font-medium transition-colors disabled:opacity-50">Load More</button>
-                </div>
+                <LoadMoreControls loading={ctrl.loading} onLoadMore={ctrl.loadMore} onLoadMoreAndSelect={ctrl.loadMoreAndSelect} />
             )}
 
             <FloatingActionBar selectedCount={selectedIds.size} onClearSelection={ctrl.selectNone}>
@@ -235,6 +239,7 @@ export default function ProfileSuggestions({ ctrl, onViewPhoto, personName, onSh
                 <div className="h-4 w-px bg-gray-700" />
                 <FloatingActionButton label="Assign selected" onClick={ctrl.assignSelected} disabled={busy} variant="success" />
             </FloatingActionBar>
+            <FloatingBarClearance active={selectedIds.size > 0} />
         </div>
     )
 }

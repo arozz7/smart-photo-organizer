@@ -255,7 +255,7 @@ export default function People() {
 
     // Effect for Unnamed Tab Keydown
     useEffect(() => {
-        if (activeTab !== 'unnamed') return;
+        if (activeTab !== 'unnamed' || activeEdgeFilter !== 'unnamed') return;
 
         // @ts-ignore
         const handler = (e: KeyboardEvent) => handleKeyDown(e, {
@@ -281,7 +281,7 @@ export default function People() {
 
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, [activeTab, clusters, handleOpenNaming, handleIgnoreGroup, handleConfirmName]);
+    }, [activeTab, activeEdgeFilter, clusters, handleOpenNaming, handleIgnoreGroup, handleConfirmName]);
 
     // --- Bulk Action Handlers (Discoveries) ---
     const handleBulkIgnoreDiscoveries = async () => {

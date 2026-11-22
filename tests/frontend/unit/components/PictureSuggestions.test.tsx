@@ -26,7 +26,7 @@ function makeCtrl(extra: Record<string, unknown> = {}) {
     return {
         overview: overview(), tiles: [tile(1), tile(2), tile(3)], total: 681, hasMore: false, loading: false, busy: false,
         selectedIds: new Set<number>(), undoBatch: null as number[] | null,
-        loadMore: vi.fn(), toggle: vi.fn(), selectAllLoaded: vi.fn(), selectNone: vi.fn(), ignoreSelected: vi.fn(), keepSelected: vi.fn(), undoLast: vi.fn(),
+        loadMore: vi.fn(), loadMoreAndSelect: vi.fn(), toggle: vi.fn(), selectAllLoaded: vi.fn(), selectNone: vi.fn(), ignoreSelected: vi.fn(), keepSelected: vi.fn(), undoLast: vi.fn(),
         setList: vi.fn(), setLikelihood: vi.fn(), setHideFromReview: vi.fn(), ...extra,
     };
 }
@@ -96,7 +96,7 @@ describe('PictureSuggestions', () => {
         expect(screen.getByTestId('picture-tile-1')).toHaveTextContent('85%');
         fireEvent.click(screen.getByTestId('picture-tile-2'));
 
-        expect(ctrl.toggle).toHaveBeenCalledWith(2);
+        expect(ctrl.toggle).toHaveBeenCalledWith(2, false);
     });
 
     it('shows the person and how an assigned face was assigned', () => {
@@ -149,6 +149,38 @@ describe('PictureSuggestions', () => {
         fireEvent.click(within1('picture-tile-1').getByTitle('View Original Photo'));
 
         expect(onViewPhoto).toHaveBeenCalledWith(10);
+    });
+
+    it('passes shift-click on to the selection so a range can be chosen', () => {
+        const { ctrl } = setup();
+
+        fireEvent.click(screen.getByTestId('picture-tile-2'), { shiftKey: true });
+
+        expect(ctrl.toggle).toHaveBeenCalledWith(2, true);
+    });
+
+    it('offers Load more and select next to Load More', () => {
+        const { ctrl } = setup({ hasMore: true });
+
+        fireEvent.click(screen.getByRole('button', { name: /Load more and select/ }));
+
+        expect(ctrl.loadMoreAndSelect).toHaveBeenCalled();
+    });
+
+    it('leaves room under the list while faces are selected, so the floating bar does not cover Load More', () => {
+        setup({ hasMore: true, selectedIds: new Set([2]) });
+
+        expect(screen.getByTestId('bar-clearance')).toBeInTheDocument();
+    });
+
+    it('answers the keys: Ctrl+A selects all loaded, L loads the next page and selects it', () => {
+        const { ctrl } = setup({ hasMore: true });
+
+        fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
+        fireEvent.keyDown(window, { key: 'l' });
+
+        expect(ctrl.selectAllLoaded).toHaveBeenCalled();
+        expect(ctrl.loadMoreAndSelect).toHaveBeenCalled();
     });
 });
 

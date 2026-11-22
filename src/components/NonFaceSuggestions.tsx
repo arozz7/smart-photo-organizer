@@ -1,5 +1,7 @@
 import FaceThumbnail from './FaceThumbnail'
 import { FloatingActionBar, FloatingActionButton } from './FloatingActionBar'
+import { FloatingBarClearance, LoadMoreControls, SelectionToolbar } from './SelectionControls'
+import { useSelectionShortcuts } from '../hooks/useSelectionShortcuts'
 import type { ListMode, NonFaceSuggestionsController, NonFaceTile } from '../hooks/useNonFaceSuggestions'
 import { describePose } from '../utils/nonFacePose'
 
@@ -14,7 +16,7 @@ const plural = (count: number) => `${formatCount(count)} ${count === 1 ? 'face' 
 interface TileProps {
     tile: NonFaceTile
     selected: boolean
-    onToggle: (faceId: number) => void
+    onToggle: (faceId: number, extend?: boolean) => void
     onViewPhoto: (photoId: number) => void
 }
 
@@ -32,7 +34,7 @@ function SuggestionTile({ tile, selected, onToggle, onViewPhoto }: TileProps) {
         <div
             data-testid={`nonface-tile-${tile.faceId}`}
             title={details.filter(Boolean).join(', ')}
-            onClick={() => onToggle(tile.faceId)}
+            onClick={(event) => onToggle(tile.faceId, event.shiftKey)}
             className={`aspect-square rounded-lg overflow-hidden border-2 cursor-pointer relative group ${selected ? 'border-red-500' : 'border-transparent hover:border-gray-700'}`}
         >
             <FaceThumbnail
@@ -75,6 +77,13 @@ interface NonFaceSuggestionsProps {
  */
 export default function NonFaceSuggestions({ ctrl, onViewPhoto }: NonFaceSuggestionsProps) {
     const { overview, tiles, selectedIds, undoBatch, busy } = ctrl
+    useSelectionShortcuts({
+        selectAll: ctrl.selectAllLoaded,
+        selectNone: ctrl.selectNone,
+        loadMoreAndSelect: ctrl.loadMoreAndSelect,
+        hasSelection: selectedIds.size > 0,
+        canLoadMore: ctrl.hasMore && !ctrl.loading,
+    })
     const current = overview?.current
     const detector = overview?.detector
     const model = overview?.model
@@ -180,28 +189,25 @@ export default function NonFaceSuggestions({ ctrl, onViewPhoto }: NonFaceSuggest
                 </div>
             )}
 
-            <div className="flex justify-between items-center bg-gray-800/30 p-4 rounded-xl border border-gray-700/50">
-                <div className="text-sm text-gray-400">{selectedIds.size} selected · showing {formatCount(tiles.length)} of {formatCount(ctrl.total)}</div>
-                <div className="flex gap-2">
-                    <button onClick={ctrl.selectAllLoaded} className="text-xs text-indigo-400 hover:text-indigo-300">Select all loaded</button>
-                    <button onClick={ctrl.selectNone} className="text-xs text-gray-500 hover:text-gray-400">Deselect</button>
-                </div>
-            </div>
+            <SelectionToolbar
+                selectedCount={selectedIds.size}
+                summary={`showing ${formatCount(tiles.length)} of ${formatCount(ctrl.total)}`}
+                onSelectAll={ctrl.selectAllLoaded}
+                onSelectNone={ctrl.selectNone}
+            />
 
             {tiles.length === 0 && !ctrl.loading && (
                 <div className="text-center text-sm text-gray-500 py-12">No faces below this cut-off.</div>
             )}
 
-            <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(120px,1fr))]">
+            <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(120px,1fr))] select-none">
                 {tiles.map(tile => (
                     <SuggestionTile key={tile.faceId} tile={tile} selected={selectedIds.has(tile.faceId)} onToggle={ctrl.toggle} onViewPhoto={onViewPhoto} />
                 ))}
             </div>
 
             {ctrl.hasMore && (
-                <div className="flex justify-center mt-8">
-                    <button onClick={ctrl.loadMore} disabled={ctrl.loading} className="px-6 py-2 bg-gray-800 hover:bg-gray-700 rounded-full text-sm font-medium transition-colors disabled:opacity-50">Load More</button>
-                </div>
+                <LoadMoreControls loading={ctrl.loading} onLoadMore={ctrl.loadMore} onLoadMoreAndSelect={ctrl.loadMoreAndSelect} />
             )}
 
             <FloatingActionBar selectedCount={selectedIds.size} onClearSelection={ctrl.selectNone}>
@@ -209,6 +215,7 @@ export default function NonFaceSuggestions({ ctrl, onViewPhoto }: NonFaceSuggest
                 <div className="h-4 w-px bg-gray-700" />
                 <FloatingActionButton label="Ignore selected" onClick={ctrl.ignoreSelected} disabled={busy} variant="danger" />
             </FloatingActionBar>
+            <FloatingBarClearance active={selectedIds.size > 0} />
         </div>
     )
 }
