@@ -468,7 +468,7 @@ export function registerDBHandlers() {
                 threshold ?? 0.6,
                 checkConfirmed ?? false
             );
-            return { success: true, ...result };
+            return { success: true, ...result, alertsCleared: PersonService.resolveDriftAlerts(personId, result) };
         } catch (error) {
             console.error('[Main] person:findOutliers failed:', error);
             return { success: false, error: String(error) };
@@ -501,7 +501,7 @@ export function registerDBHandlers() {
     // --- FACE CONFIRMATION (Centroid Stability Feature) ---
     ipcMain.handle('db:confirmFaces', async (_, faceIds: number[]) => {
         try {
-            FaceRepository.setConfirmed(faceIds, true);
+            await PersonService.setFacesConfirmed(faceIds, true);
             return { success: true, confirmed: faceIds.length };
         } catch (error) {
             console.error('[Main] db:confirmFaces failed:', error);
@@ -511,7 +511,7 @@ export function registerDBHandlers() {
 
     ipcMain.handle('db:unconfirmFaces', async (_, faceIds: number[]) => {
         try {
-            FaceRepository.setConfirmed(faceIds, false);
+            await PersonService.setFacesConfirmed(faceIds, false);
             return { success: true, unconfirmed: faceIds.length };
         } catch (error) {
             console.error('[Main] db:unconfirmFaces failed:', error);

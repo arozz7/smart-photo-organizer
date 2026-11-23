@@ -357,6 +357,21 @@ export class PersonRepository {
     /**
      * Dismiss all alerts for a person.
      */
+    /** The people (not unassigned) that the given faces are assigned to. */
+    static getPersonIdsOfFaces(faceIds: number[]): number[] {
+        if (!faceIds || faceIds.length === 0) return [];
+        const placeholders = faceIds.map(() => '?').join(',');
+        const rows = getDB().prepare(`SELECT DISTINCT person_id FROM faces WHERE id IN (${placeholders}) AND person_id IS NOT NULL`).all(...faceIds) as { person_id: number }[];
+        return rows.map(r => r.person_id);
+    }
+
+    static dismissAlertsOfType(personId: number, alertType: string) {
+        const db = getDB();
+        db.prepare(`
+            UPDATE person_alerts SET dismissed_at = CURRENT_TIMESTAMP WHERE person_id = ? AND alert_type = ? AND dismissed_at IS NULL
+        `).run(personId, alertType);
+    }
+
     static dismissAllAlerts(personId: number) {
         const db = getDB();
         db.prepare(`

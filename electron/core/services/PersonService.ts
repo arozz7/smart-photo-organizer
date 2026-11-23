@@ -3,7 +3,29 @@ import { FaceRepository } from '../../data/repositories/FaceRepository';
 import { getAISettings } from '../../store'; // Will be replaced by ConfigService later
 
 export class PersonService {
-    static async recalculatePersonMean(personId: number) {
+    /**
+     * Marks faces as confirmed (or not) and recalculates the model of every person they belong to, so the user does not
+     * need a separate "Recalculate Model" step: the model is built from confirmed faces only. No drift alert is raised,
+     * because the model moved on the user's own say-so.
+     */
+    static async setFacesConfirmed(faceIds: number[], confirmed: boolean): Promise<{ people: number }> {
+        FaceRepository.setConfirmed(faceIds, confirmed);
+        const personIds = PersonRepository.getPersonIdsOfFaces(faceIds);
+        for (const personId of personIds) {
+            await this.recalculatePersonMean(personId, { raiseDriftAlert: false });
+        }
+        return { people: personIds.length };
+    }
+
+    /** A check for misassigned faces found nothing, so any drift alert for the person was a false alarm (a face changing over the years). */
+    static resolveDriftAlerts(personId: number, check: { centroidValid: boolean; outliers: unknown[] }): boolean {
+        const clean = check.centroidValid && check.outliers.length === 0;
+        if (clean) PersonRepository.dismissAlertsOfType(personId, 'drift_detected');
+        return clean;
+    }
+
+    static async recalculatePersonMean(personId: number, options: { raiseDriftAlert?: boolean } = {}) {
+        const raiseDriftAlert = options.raiseDriftAlert ?? true;
         console.time(`recalculatePersonMean-${personId}`);
         const settings = getAISettings();
         const blurThreshold = settings.faceBlurThreshold ?? 20;
@@ -123,7 +145,7 @@ export class PersonService {
                     diff = l2Dist(oldMean, mean);
                     console.log(`[DriftCheck] Person ${personId} centroid shift: ${diff.toFixed(6)} (Threshold: ${DRIFT_THRESHOLD})`);
 
-                    if (diff > DRIFT_THRESHOLD) {
+                    if (diff > DRIFT_THRESHOLD && raiseDriftAlert) {
                         console.warn(`[DriftAlert] Person ${personId} centroid drifted by ${diff.toFixed(3)} (Threshold: ${DRIFT_THRESHOLD})`);
                         driftDetected = true;
 
