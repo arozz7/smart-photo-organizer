@@ -93,10 +93,11 @@ describe('Settings view', () => {
         render(<Settings />);
         for (const heading of [
             'Library Storage', 'AI Performance Profile', 'Person Identification', 'Era Generation',
-            'Smart Assignment', 'Preview Cache', 'Database Management', 'Integrations', 'Health & Logs',
+            'Preview Cache', 'Database Management', 'Integrations', 'Health & Logs',
         ]) {
             expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument();
         }
+        expect(screen.queryByRole('heading', { name: 'Smart Assignment' })).not.toBeInTheDocument();
         expect(screen.getByText('Face Data Health Card')).toBeInTheDocument();
         expect(screen.getByText('Send To Settings Card')).toBeInTheDocument();
         await waitFor(() => expect(screen.getByText('D:\\Library')).toBeInTheDocument());
@@ -171,35 +172,6 @@ describe('Settings view', () => {
         fireEvent.change(strength, { target: { value: '0.7' } });
 
         expect(updateSmartIgnoreSettings).toHaveBeenCalledWith({ aiSuggestionThreshold: 0.7 });
-    });
-
-    it('runs batch propagation and shows the result', async () => {
-        const calls = installIpc({ 'db:batchPropagateLabels': () => ({ success: true, propagated: 3, skipped: 1 }) });
-        render(<Settings />);
-
-        fireEvent.click(screen.getByRole('button', { name: 'Run for Entire Library' }));
-
-        await waitFor(() => expect(screen.getByText(/Done — 3 faces assigned/)).toBeInTheDocument());
-        expect(callsTo(calls, 'db:batchPropagateLabels')).toHaveLength(1);
-    });
-
-    it('says nothing was assigned when propagation is switched off, instead of "Done"', async () => {
-        installIpc({ 'db:batchPropagateLabels': () => ({ success: true, propagated: 0, skipped: 0, disabled: true, message: 'Nothing was assigned. Being redesigned.' }) });
-        render(<Settings />);
-
-        fireEvent.click(screen.getByRole('button', { name: 'Run for Entire Library' }));
-
-        await waitFor(() => expect(screen.getByText('Nothing was assigned. Being redesigned.')).toBeInTheDocument());
-        expect(screen.queryByText(/Done —/)).not.toBeInTheDocument();
-    });
-
-    it('alerts when batch propagation fails', async () => {
-        installIpc({ 'db:batchPropagateLabels': () => ({ success: false, error: 'boom' }) });
-        render(<Settings />);
-
-        fireEvent.click(screen.getByRole('button', { name: 'Run for Entire Library' }));
-
-        await waitFor(() => expect(showAlert).toHaveBeenCalledWith(expect.objectContaining({ title: 'Propagation Failed', description: 'boom', variant: 'danger' })));
     });
 
     it('asks for confirmation before clearing AI tags, then reports success', async () => {
