@@ -232,4 +232,31 @@ describe('useProfileSuggestions', () => {
             expect(result.current.overview?.state).toBe('computing');
         });
     });
+
+    describe('selecting many faces', () => {
+        it('selects a range on shift-click but leaves out faces with two names, which are chosen one by one', async () => {
+            const two = { personId: 11, name: 'Person 11', distance: 0.95 };
+            mainProcess([row(1, 10), row(2, 10, { also: two }), row(3, 10), row(4, 10)]);
+            const { result } = await mounted();
+            expect(result.current.rows).toHaveLength(4);
+            act(() => result.current.toggle(1));
+
+            act(() => result.current.toggle(4, true));
+
+            expect([...result.current.selectedIds].sort((a, b) => a - b)).toEqual([1, 3, 4]);
+        });
+
+        it('loads the next page and selects the faces it added, except those with two names', async () => {
+            const two = { personId: 11, name: 'Person 11', distance: 0.95 };
+            const faces = Array.from({ length: PAGE_SIZE + 3 }, (_, i) => row(i + 1, 10, i === PAGE_SIZE + 1 ? { also: two } : {}));
+            mainProcess(faces);
+            const { result } = await mounted();
+            expect(result.current.rows).toHaveLength(PAGE_SIZE);
+
+            await act(async () => { await result.current.loadMoreAndSelect(); });
+
+            expect(result.current.rows).toHaveLength(PAGE_SIZE + 3);
+            expect([...result.current.selectedIds].sort((a, b) => a - b)).toEqual([PAGE_SIZE + 1, PAGE_SIZE + 3]);
+        });
+    });
 });

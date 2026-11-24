@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePeople } from '../context/PeopleContext'
 import { useToast } from '../context/ToastContext'
+import { useListSelection } from './useListSelection'
 
 /** Faces loaded per page of the "Turned faces" list. */
 export const PAGE_SIZE = 100
@@ -106,7 +107,9 @@ export function useProfileSuggestions({ enabled, personId, onReviewChanged }: { 
     const [rows, setRows] = useState<ProfileRow[]>([])
     const [loading, setLoading] = useState(false)
     const [busy, setBusy] = useState(false)
-    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+    /** Faces with two names are not selected by Select all or a range: the user chooses those one by one. */
+    const selectableIds = useMemo(() => rows.filter(row => row.also === null).map(row => row.faceId), [rows])
+    const { selectedIds, setSelectedIds, toggle, selectAllLoaded, selectNone, addToSelection } = useListSelection(selectableIds)
     /** The faces the last "Assign selected" gave away, so Undo returns exactly those. */
     const [undoBatch, setUndoBatch] = useState<number[] | null>(null)
     const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -125,7 +128,7 @@ export function useProfileSuggestions({ enabled, personId, onReviewChanged }: { 
         if (response.success && response.rows) setRows(response.rows)
         else fail('load the list', response.error)
         setLoading(false)
-    }, [listPayload, fail])
+    }, [listPayload, fail, setSelectedIds])
 
     const refreshQueue = useCallback(() => {
         loadFaces({ unnamed: true })
@@ -169,29 +172,29 @@ export function useProfileSuggestions({ enabled, personId, onReviewChanged }: { 
         }
     }, [enabled, onlyPerson, applyOverview, fail])
 
-    const loadMore = useCallback(async () => {
-        if (loading) return
+    /** Loads the next page and returns the ids of the selectable faces it added. */
+    const loadMore = useCallback(async (): Promise<number[]> => {
+        if (loading) return []
         setLoading(true)
         const response = await call('profile:list', listPayload(rows.length))
+        let added: number[] = []
         if (response.success && response.rows) {
-            const more = response.rows
-            setRows(prev => [...prev, ...more.filter(face => !prev.some(shown => shown.faceId === face.faceId))])
+            const shown = new Set(rows.map(row => row.faceId))
+            const fresh = response.rows.filter(face => !shown.has(face.faceId))
+            added = fresh.filter(face => face.also === null).map(face => face.faceId)
+            setRows(prev => [...prev, ...fresh])
         } else {
             fail('load more faces', response.error)
         }
         setLoading(false)
-    }, [loading, rows.length, listPayload, fail])
+        return added
+    }, [loading, rows, listPayload, fail])
 
-    const toggle = useCallback((faceId: number) => {
-        setSelectedIds(prev => {
-            const next = new Set(prev)
-            if (!next.delete(faceId)) next.add(faceId)
-            return next
-        })
-    }, [])
-    /** Faces with two names are not selected here: the user chooses those one by one. */
-    const selectAllLoaded = useCallback(() => setSelectedIds(new Set(rows.filter(row => row.also === null).map(row => row.faceId))), [rows])
-    const selectNone = useCallback(() => setSelectedIds(new Set()), [])
+    /** Loads the next page and selects exactly the faces it added (the review flow: look through a page, then take the next one with it). */
+    const loadMoreAndSelect = useCallback(async () => {
+        addToSelection(await loadMore())
+    }, [loadMore, addToSelection])
+
 
     const assignPairs = useCallback(async (pairs: Pair[]) => {
         if (pairs.length === 0 || busy) return
@@ -210,7 +213,7 @@ export function useProfileSuggestions({ enabled, personId, onReviewChanged }: { 
             fail('assign the selected faces', response.error)
         }
         setBusy(false)
-    }, [busy, addToast, fail, refreshOverview, refreshQueue])
+    }, [busy, addToast, fail, refreshOverview, refreshQueue, setSelectedIds])
 
     const assignSelected = useCallback(
         () => assignPairs(rows.filter(row => selectedIds.has(row.faceId)).map(row => ({ faceId: row.faceId, personId: row.person.personId }))),
@@ -277,6 +280,7 @@ export function useProfileSuggestions({ enabled, personId, onReviewChanged }: { 
         selectedIds,
         undoBatch,
         loadMore,
+        loadMoreAndSelect,
         toggle,
         selectAllLoaded,
         selectNone,

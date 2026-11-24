@@ -64,19 +64,20 @@ const PersonDetail = () => {
     }, [setThrottled]);
 
     // Fetch alerts for this person
-    useEffect(() => {
-        const loadAlerts = async () => {
-            if (!personId) return;
-            try {
-                // @ts-ignore
-                const personAlerts = await window.ipcRenderer.invoke('person:getAlerts', parseInt(personId));
-                setAlerts(personAlerts || []);
-            } catch (err) {
-                console.error('Failed to load alerts:', err);
-            }
-        };
-        loadAlerts();
+    const loadAlerts = useCallback(async () => {
+        if (!personId) return;
+        try {
+            // @ts-ignore
+            const personAlerts = await window.ipcRenderer.invoke('person:getAlerts', parseInt(personId));
+            setAlerts(personAlerts || []);
+        } catch (err) {
+            console.error('Failed to load alerts:', err);
+        }
     }, [personId]);
+
+    useEffect(() => {
+        loadAlerts();
+    }, [loadAlerts]);
 
     const dismissAlert = async (alertId: number) => {
         try {
@@ -292,6 +293,7 @@ const PersonDetail = () => {
                                 onClick: async () => {
                                     setAuditMode(false);
                                     const found = await actions.findOutliers();
+                                    await loadAlerts(); // a clean check clears the drift alert
                                     if (found && found.length > 0) {
                                         setIsOutlierModalOpen(true);
                                     }
@@ -309,6 +311,7 @@ const PersonDetail = () => {
                                     setAuditMode(true);
                                     // @ts-ignore
                                     const found = await actions.auditConfirmed();
+                                    await loadAlerts();
                                     if (found && found.length > 0) {
                                         setIsOutlierModalOpen(true);
                                     }

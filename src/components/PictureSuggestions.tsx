@@ -1,5 +1,7 @@
 import FaceThumbnail from './FaceThumbnail'
 import { FloatingActionBar, FloatingActionButton } from './FloatingActionBar'
+import { FloatingBarClearance, LoadMoreControls, SelectionToolbar } from './SelectionControls'
+import { useSelectionShortcuts } from '../hooks/useSelectionShortcuts'
 import type { PictureList, PictureSuggestionsController, PictureTile } from '../hooks/usePictureSuggestions'
 import { surroundingBox } from '../utils/pictureCrop'
 
@@ -27,7 +29,7 @@ function describeSource(source: string | null): string {
 interface TileProps {
     tile: PictureTile
     selected: boolean
-    onToggle: (faceId: number) => void
+    onToggle: (faceId: number, extend?: boolean) => void
     onViewPhoto: (photoId: number) => void
 }
 
@@ -37,7 +39,7 @@ function SuggestionTile({ tile, selected, onToggle, onViewPhoto }: TileProps) {
         <div
             data-testid={`picture-tile-${tile.faceId}`}
             title={`${Math.round(tile.likelihood)}% likely only a picture (model answer ${tile.score.toFixed(2)})`}
-            onClick={() => onToggle(tile.faceId)}
+            onClick={(event) => onToggle(tile.faceId, event.shiftKey)}
             className={`rounded-lg overflow-hidden border-2 cursor-pointer relative group bg-gray-900 ${selected ? 'border-rose-500' : 'border-transparent hover:border-gray-700'}`}
         >
             <div className="aspect-square relative">
@@ -87,6 +89,13 @@ interface PictureSuggestionsProps {
  */
 export default function PictureSuggestions({ ctrl, onViewPhoto }: PictureSuggestionsProps) {
     const { overview, tiles, selectedIds, undoBatch, busy } = ctrl
+    useSelectionShortcuts({
+        selectAll: ctrl.selectAllLoaded,
+        selectNone: ctrl.selectNone,
+        loadMoreAndSelect: ctrl.loadMoreAndSelect,
+        hasSelection: selectedIds.size > 0,
+        canLoadMore: ctrl.hasMore && !ctrl.loading,
+    })
     const assigned = overview?.list === 'assigned'
     const countFor = (choice: { unassigned: number; assigned: number }) => (assigned ? choice.assigned : choice.unassigned)
     const atChosen = overview?.choices.find(choice => choice.likelihood === overview.minLikelihood)
@@ -174,28 +183,25 @@ export default function PictureSuggestions({ ctrl, onViewPhoto }: PictureSuggest
                 </div>
             )}
 
-            <div className="flex justify-between items-center bg-gray-800/30 p-4 rounded-xl border border-gray-700/50">
-                <div className="text-sm text-gray-400">{selectedIds.size} selected · showing {formatCount(tiles.length)} of {formatCount(overview?.current.total ?? 0)}</div>
-                <div className="flex gap-2">
-                    <button onClick={ctrl.selectAllLoaded} className="text-xs text-indigo-400 hover:text-indigo-300">Select all loaded</button>
-                    <button onClick={ctrl.selectNone} className="text-xs text-gray-500 hover:text-gray-400">Deselect</button>
-                </div>
-            </div>
+            <SelectionToolbar
+                selectedCount={selectedIds.size}
+                summary={`showing ${formatCount(tiles.length)} of ${formatCount(overview?.current.total ?? 0)}`}
+                onSelectAll={ctrl.selectAllLoaded}
+                onSelectNone={ctrl.selectNone}
+            />
 
             {tiles.length === 0 && !ctrl.loading && (
                 <div className="text-center text-sm text-gray-500 py-12">No faces reach this likelihood yet.</div>
             )}
 
-            <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(160px,1fr))]">
+            <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(160px,1fr))] select-none">
                 {tiles.map(tile => (
                     <SuggestionTile key={tile.faceId} tile={tile} selected={selectedIds.has(tile.faceId)} onToggle={ctrl.toggle} onViewPhoto={onViewPhoto} />
                 ))}
             </div>
 
             {ctrl.hasMore && (
-                <div className="flex justify-center mt-8">
-                    <button onClick={ctrl.loadMore} disabled={ctrl.loading} className="px-6 py-2 bg-gray-800 hover:bg-gray-700 rounded-full text-sm font-medium transition-colors disabled:opacity-50">Load More</button>
-                </div>
+                <LoadMoreControls loading={ctrl.loading} onLoadMore={ctrl.loadMore} onLoadMoreAndSelect={ctrl.loadMoreAndSelect} />
             )}
 
             <FloatingActionBar selectedCount={selectedIds.size} onClearSelection={ctrl.selectNone}>
@@ -203,6 +209,7 @@ export default function PictureSuggestions({ ctrl, onViewPhoto }: PictureSuggest
                 <div className="h-4 w-px bg-gray-700" />
                 <FloatingActionButton label={assigned ? 'Remove from person and ignore as picture' : 'Ignore as picture'} onClick={ctrl.ignoreSelected} disabled={busy} variant="danger" />
             </FloatingActionBar>
+            <FloatingBarClearance active={selectedIds.size > 0} />
         </div>
     )
 }

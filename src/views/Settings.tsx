@@ -4,7 +4,6 @@ import LibraryStorageSection from '../components/settings/LibraryStorageSection'
 import AiPerformanceSection from '../components/settings/AiPerformanceSection';
 import PersonIdentificationSection from '../components/settings/PersonIdentificationSection';
 import EraGenerationSection from '../components/settings/EraGenerationSection';
-import SmartAssignmentSection from '../components/settings/SmartAssignmentSection';
 import DatabaseManagementSection from '../components/settings/DatabaseManagementSection';
 import IntegrationsSection from '../components/settings/IntegrationsSection';
 import HealthLogsSection from '../components/settings/HealthLogsSection';
@@ -38,8 +37,6 @@ export default function Settings() {
                         onMergeThresholdChange={ai.changeEraMergeThreshold}
                         onMinFacesChange={ai.changeEraMinFaces}
                     />
-
-                    <SmartAssignmentSection />
                 </div>
 
                 {/* Right Column */}

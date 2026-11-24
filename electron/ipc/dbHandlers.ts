@@ -12,7 +12,6 @@ import { FaceAnalysisService } from '../core/services/FaceAnalysisService';
 import { pythonProvider } from '../infrastructure/PythonAIProvider';
 import { getDB } from '../db';
 import { ConfigService } from '../core/services/ConfigService';
-import { ContextualMatchingService } from '../core/services/ContextualMatchingService';
 
 export function registerDBHandlers() {
     // --- METRICS & STATS ---
@@ -468,7 +467,7 @@ export function registerDBHandlers() {
                 threshold ?? 0.6,
                 checkConfirmed ?? false
             );
-            return { success: true, ...result };
+            return { success: true, ...result, alertsCleared: PersonService.resolveDriftAlerts(personId, result) };
         } catch (error) {
             console.error('[Main] person:findOutliers failed:', error);
             return { success: false, error: String(error) };
@@ -501,7 +500,7 @@ export function registerDBHandlers() {
     // --- FACE CONFIRMATION (Centroid Stability Feature) ---
     ipcMain.handle('db:confirmFaces', async (_, faceIds: number[]) => {
         try {
-            FaceRepository.setConfirmed(faceIds, true);
+            await PersonService.setFacesConfirmed(faceIds, true);
             return { success: true, confirmed: faceIds.length };
         } catch (error) {
             console.error('[Main] db:confirmFaces failed:', error);
@@ -511,7 +510,7 @@ export function registerDBHandlers() {
 
     ipcMain.handle('db:unconfirmFaces', async (_, faceIds: number[]) => {
         try {
-            FaceRepository.setConfirmed(faceIds, false);
+            await PersonService.setFacesConfirmed(faceIds, false);
             return { success: true, unconfirmed: faceIds.length };
         } catch (error) {
             console.error('[Main] db:unconfirmFaces failed:', error);
@@ -633,33 +632,6 @@ export function registerDBHandlers() {
             return { success: true, ...stats };
         } catch (error) {
             console.error('[Main] db:getPoseStatistics failed:', error);
-            return { success: false, error: String(error) };
-        }
-    });
-
-    // --- CONTEXTUAL MATCHING (Phase 105-4) ---
-    ipcMain.handle('db:propagateLabelsInSession', async (_event, photoId: number) => {
-        try {
-            if (typeof photoId !== 'number') throw new Error('photoId must be a number');
-            const r1 = ContextualMatchingService.propagateTemporalLabels(photoId);
-            const r2 = ContextualMatchingService.propagateSpatialLabels(photoId);
-            return {
-                success: true,
-                propagated: r1.propagated + r2.propagated,
-                skipped: r1.skipped + r2.skipped
-            };
-        } catch (error) {
-            console.error('[Main] db:propagateLabelsInSession failed:', error);
-            return { success: false, error: String(error) };
-        }
-    });
-
-    ipcMain.handle('db:batchPropagateLabels', async () => {
-        try {
-            const result = ContextualMatchingService.batchPropagateForLibrary();
-            return result;
-        } catch (error) {
-            console.error('[Main] db:batchPropagateLabels failed:', error);
             return { success: false, error: String(error) };
         }
     });

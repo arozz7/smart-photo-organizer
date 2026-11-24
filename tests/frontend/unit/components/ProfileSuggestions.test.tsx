@@ -26,7 +26,7 @@ function makeCtrl(extra: Record<string, unknown> = {}) {
         overview: overview(),
         rows: [row(1, 10), row(2, 10, { also: { personId: 12, name: 'Name12', distance: 0.97 } }), row(3, 11)],
         total: 3, hasMore: false, loading: false, busy: false, selectedIds: new Set<number>(), undoBatch: null as number[] | null,
-        loadMore: vi.fn(), toggle: vi.fn(), selectAllLoaded: vi.fn(), selectNone: vi.fn(), assignSelected: vi.fn(), assignTo: vi.fn(), dismissSelected: vi.fn(),
+        loadMore: vi.fn(), loadMoreAndSelect: vi.fn(), toggle: vi.fn(), selectAllLoaded: vi.fn(), selectNone: vi.fn(), assignSelected: vi.fn(), assignTo: vi.fn(), dismissSelected: vi.fn(),
         undoLast: vi.fn(), setDistance: vi.fn(), setMinYaw: vi.fn(), refresh: vi.fn(), ...extra,
     };
 }
@@ -71,7 +71,7 @@ describe('ProfileSuggestions', () => {
         fireEvent.click(screen.getByTestId('profile-face-1'));
         fireEvent.click(screen.getByRole('button', { name: 'Select all loaded' }));
 
-        expect(ctrl.toggle).toHaveBeenCalledWith(1);
+        expect(ctrl.toggle).toHaveBeenCalledWith(1, false);
         expect(ctrl.selectAllLoaded).toHaveBeenCalled();
         expect(screen.getByText(/skips faces with two names/i)).toBeInTheDocument();
     });
@@ -149,5 +149,37 @@ describe('ProfileSuggestions', () => {
         fireEvent.click(within(screen.getByTestId('profile-row-1')).getByTitle('View Original Photo'));
 
         expect(onViewPhoto).toHaveBeenCalledWith(10);
+    });
+
+    it('passes shift-click on to the selection so a range can be chosen', () => {
+        const { ctrl } = setup();
+
+        fireEvent.click(screen.getByTestId('profile-face-1'), { shiftKey: true });
+
+        expect(ctrl.toggle).toHaveBeenCalledWith(1, true);
+    });
+
+    it('offers Load more and select next to Load More', () => {
+        const { ctrl } = setup({ hasMore: true });
+
+        fireEvent.click(screen.getByRole('button', { name: /Load more and select/ }));
+
+        expect(ctrl.loadMoreAndSelect).toHaveBeenCalled();
+    });
+
+    it('leaves room under the list while faces are selected, so the floating bar does not cover Load More', () => {
+        setup({ hasMore: true, selectedIds: new Set([1]) });
+
+        expect(screen.getByTestId('bar-clearance')).toBeInTheDocument();
+    });
+
+    it('answers the keys: Ctrl+A selects all loaded, L loads the next page and selects it', () => {
+        const { ctrl } = setup({ hasMore: true });
+
+        fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
+        fireEvent.keyDown(window, { key: 'l' });
+
+        expect(ctrl.selectAllLoaded).toHaveBeenCalled();
+        expect(ctrl.loadMoreAndSelect).toHaveBeenCalled();
     });
 });

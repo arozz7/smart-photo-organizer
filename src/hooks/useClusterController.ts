@@ -110,6 +110,8 @@ export function useClusterController<T>({
         onName?: (index: number) => void;
     }) => {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+        // Ctrl+A (select all) and other shortcuts with a modifier are not the cluster keys
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
 
         switch (e.key) {
             case 'ArrowDown':

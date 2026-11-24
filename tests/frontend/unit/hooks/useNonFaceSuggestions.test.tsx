@@ -330,4 +330,27 @@ describe('useNonFaceSuggestions', () => {
             expect(onReviewChanged).toHaveBeenCalledTimes(3);
         });
     });
+
+    it('loads the next page and selects only the faces it added, keeping what was selected', async () => {
+        mainProcess(Array.from({ length: PAGE_SIZE + 5 }, (_, i) => i + 1));
+        const { result } = renderHook(() => useNonFaceSuggestions({ enabled: true }));
+        await waitFor(() => expect(result.current.tiles).toHaveLength(PAGE_SIZE));
+        act(() => result.current.toggle(1));
+
+        await act(async () => { await result.current.loadMoreAndSelect(); });
+
+        expect(result.current.tiles).toHaveLength(PAGE_SIZE + 5);
+        expect([...result.current.selectedIds].sort((a, b) => a - b)).toEqual([1, PAGE_SIZE + 1, PAGE_SIZE + 2, PAGE_SIZE + 3, PAGE_SIZE + 4, PAGE_SIZE + 5]);
+    });
+
+    it('selects the range between two faces on shift-click, in the order shown', async () => {
+        mainProcess([1, 2, 3, 4, 5]);
+        const { result } = renderHook(() => useNonFaceSuggestions({ enabled: true }));
+        await waitFor(() => expect(result.current.tiles).toHaveLength(5));
+        act(() => result.current.toggle(2));
+
+        act(() => result.current.toggle(4, true));
+
+        expect([...result.current.selectedIds].sort((a, b) => a - b)).toEqual([2, 3, 4]);
+    });
 });
