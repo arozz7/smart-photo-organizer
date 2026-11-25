@@ -1,5 +1,7 @@
 import { useAI } from '../context/AIContext';
 import { useScan } from '../context/ScanContext';
+import { useScanProgress } from '../hooks/useScanProgress';
+import { describeScanProgress, scanPercent } from '../utils/scanProgress';
 
 export default function StatusBar() {
     const {
@@ -16,7 +18,8 @@ export default function StatusBar() {
         recheckStatus,
         bucketingStatus
     } = useAI();
-    const { scanning, scanCount } = useScan();
+    const { scanning } = useScan();
+    const { progress: scanProgress, elapsedMs } = useScanProgress(scanning);
 
     // Show if ANY activity is happening
     const isActive = calculatingBlur || isModelLoading || isCoolingDown || processingQueue.length > 0 || scanning || recheckStatus.active || bucketingStatus.active;
@@ -36,7 +39,7 @@ export default function StatusBar() {
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
-                        Scanning Files ({scanCount})
+                        Scanning Files{scanProgress ? ` (${scanPercent(scanProgress)}%) · ${describeScanProgress(scanProgress, elapsedMs)}` : ''}
                     </span>
                 )}
 

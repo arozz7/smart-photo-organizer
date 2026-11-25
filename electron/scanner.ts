@@ -9,6 +9,7 @@ import { collectImageFiles } from './scanning/collectImageFiles';
 import { processFile, type ProcessOptions, type ScannedPhoto } from './scanning/processFile';
 import { ScanStatements } from './scanning/ScanStatements';
 import { mapWithConcurrency } from './utils/mapWithConcurrency';
+import { createProgressReporter, type ScanProgress } from './scanning/scanProgress';
 
 export interface ScanOptions extends ProcessOptions {
     /** Files processed at once (previews, metadata and hashing overlap; DB writes stay synchronous). Defaults to the scanner setting. */
@@ -34,7 +35,7 @@ async function processAll(
     files: string[],
     libraryPath: string,
     options: ScanOptions,
-    onSettled: (photo: ScannedPhoto | null) => void,
+    onSettled: (file: string, photo: ScannedPhoto | null) => void,
 ): Promise<ScannedPhoto[]> {
     const previewDir = path.join(libraryPath, 'previews');
     await fs.mkdir(previewDir, { recursive: true });
@@ -51,13 +52,13 @@ async function processAll(
                 return null;
             }
         },
-        (_index, photo) => onSettled(photo),
+        (index, photo) => onSettled(files[index], photo),
     );
 
     return results.filter((photo): photo is ScannedPhoto => photo !== null);
 }
 
-export async function scanFiles(filePaths: string[], libraryPath: string, onProgress?: (count: number) => void, options: ScanOptions = {}) {
+export async function scanFiles(filePaths: string[], libraryPath: string, onProgress?: (progress: ScanProgress) => void, options: ScanOptions = {}) {
     logger.info(`Scanning ${filePaths.length} specific files...`);
 
     // Only files that still exist are processed
@@ -71,27 +72,21 @@ export async function scanFiles(filePaths: string[], libraryPath: string, onProg
         }
     }
 
-    let count = 0;
-    const photos = await processAll(existing, libraryPath, options, photo => {
-        if (!photo) return;
-        count++;
-        if (onProgress && count % 5 === 0) onProgress(count);
-    });
+    const progress = createProgressReporter(existing.length, onProgress ?? (() => undefined));
+    const photos = await processAll(existing, libraryPath, options, file => progress.advance(file));
 
-    if (onProgress) onProgress(count);
+    progress.finish();
     return photos;
 }
 
-export async function scanDirectory(dirPath: string, libraryPath: string, onProgress?: (count: number) => void, options: ScanOptions = {}) {
+export async function scanDirectory(dirPath: string, libraryPath: string, onProgress?: (progress: ScanProgress) => void, options: ScanOptions = {}) {
+    onProgress?.({ phase: 'collecting', done: 0, total: 0, folder: '' });
     const { files, totalFiles, skipped } = await collectImageFiles(dirPath);
 
-    let count = 0;
-    const photos = await processAll(files, libraryPath, options, photo => {
-        if (!photo) return;
-        count++;
-        if (onProgress && (count % 10 === 0 || photo.needsUpdate)) onProgress(count);
-    });
+    const progress = createProgressReporter(files.length, onProgress ?? (() => undefined));
+    const photos = await processAll(files, libraryPath, options, file => progress.advance(file));
 
-    logger.info(`[Scanner] Scanning Finished. Details: Total=${totalFiles}, New=${count}, Returned=${photos.length}, Skipped=${JSON.stringify(skipped)}`);
+    progress.finish();
+    logger.info(`[Scanner] Scanning Finished. Details: Total=${totalFiles}, Images=${files.length}, Returned=${photos.length}, Skipped=${JSON.stringify(skipped)}`);
     return photos;
 }

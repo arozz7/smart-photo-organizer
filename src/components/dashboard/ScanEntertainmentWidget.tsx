@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 import { useScan } from '../../context/ScanContext'
 import { useAI } from '../../context/AIContext'
+import { useScanProgress } from '../../hooks/useScanProgress'
+import { describeScanProgress, scanPercent } from '../../utils/scanProgress'
 
 interface ScanEntertainmentWidgetProps {
     memories: any[];
 }
 
 export default function ScanEntertainmentWidget({ memories }: ScanEntertainmentWidgetProps) {
-    const { scanning, scanCount } = useScan();
+    const { scanning } = useScan();
+    const { progress, elapsedMs } = useScanProgress(scanning);
     const { isProcessing, processingQueue, scanMetrics } = useAI();
     const [flashbackIndex, setFlashbackIndex] = useState(0);
     const [showWidget, setShowWidget] = useState(false);
@@ -57,8 +60,16 @@ export default function ScanEntertainmentWidget({ memories }: ScanEntertainmentW
                 {/* Live Stats */}
                 <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-2">
-                        <StatBadge label="Photos Scanned" value={scanCount} color="text-blue-400" />
+                        <StatBadge label="Photos Scanned" value={progress?.done ?? 0} color="text-blue-400" />
                         <StatBadge label="AI Queue" value={queueSize} color="text-amber-400" />
+                    </div>
+
+                    {/* Always present (empty until the file list is known) so the widget keeps its height */}
+                    <div className="space-y-1">
+                        <div className="h-1.5 bg-gray-900 rounded-full overflow-hidden" role="progressbar" aria-label="Scan progress" aria-valuemin={0} aria-valuemax={progress?.total ?? 0} aria-valuenow={progress?.done ?? 0}>
+                            <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${scanPercent(progress)}%` }} />
+                        </div>
+                        <p className="text-[10px] text-gray-500 truncate min-h-[1rem]">{isActive && progress ? describeScanProgress(progress, elapsedMs) : ''}</p>
                     </div>
 
                     {/* These rows are always there (with a dash until known): rows that come and go change the widget's height and push every card below it */}

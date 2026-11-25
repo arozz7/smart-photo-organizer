@@ -4,6 +4,7 @@ import { registerImageProtocol } from './services/imageProtocol';
 import sharp from 'sharp';
 import { readdirSync } from 'node:fs';
 import { startCrashDumps } from './lib/crashDumps';
+import { EventLoopLagMonitor } from './utils/EventLoopLagMonitor';
 import { imageJobs, SHARP_THREADS_PER_JOB } from './services/image/ImageJobTracker';
 import { pythonProvider } from './infrastructure/PythonAIProvider';
 import { registerAIHandlers } from './ipc/aiHandlers';
@@ -118,7 +119,14 @@ app.on('activate', () => {
   }
 })
 
+// Measures how long the main process is blocked and logs it with what was running (the window stalls during scans; see feat-scan-progress-total.md).
+const lagMonitor = new EventLoopLagMonitor({
+  activity: () => [scanQueue.busy ? 'scan' : '', imageJobs.inFlight().length > 0 ? `${imageJobs.inFlight().length} image jobs` : ''].filter(Boolean).join(', ') || 'idle',
+  report: ({ count, maxMs, totalMs, activity }) => logger.warn(`[Lag] main process blocked ${count} times in 10 s (worst ${maxMs} ms, total ${totalMs} ms) while: ${activity}`),
+});
+
 app.whenReady().then(async () => {
+  lagMonitor.start();
   try {
     await fs.mkdir(LIBRARY_PATH, { recursive: true });
   } catch (e) {
