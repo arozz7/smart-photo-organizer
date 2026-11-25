@@ -165,10 +165,10 @@ describe('PhotoService', () => {
             expect(mockSharpInstance.toFile).toHaveBeenCalled();
         });
 
-        it('should use sharp for RAW file extraction (ExifTool path disabled)', async () => {
+        it('should use sharp for a DNG (ExifTool path disabled; libvips can read many DNGs)', async () => {
             // Arrange — the ExifTool RAW extraction branch is intentionally disabled (&& false)
-            // so RAW files fall straight through to the Sharp step.
-            const filePath = '/path/to/photo.ARW';
+            // so such files fall straight through to the Sharp step.
+            const filePath = '/path/to/photo.DNG';
             const previewDir = '/previews';
 
             // access(previewPath) fails so extraction is triggered
@@ -180,9 +180,22 @@ describe('PhotoService', () => {
             // Act
             const result = await PhotoService.extractPreview(filePath, previewDir);
 
-            // Assert — ExifTool extractPreview is NOT called; sharp receives the RAW path
+            // Assert — ExifTool extractPreview is NOT called; sharp receives the file
             expect(mockExifToolInstance.extractPreview).not.toHaveBeenCalled();
             expect(sharp).toHaveBeenCalledWith(filePath, { failOn: 'none' });
+            expect(result).not.toBeNull();
+        });
+
+        it.each(['/path/to/photo.ARW', '/path/to/photo.cr2', '/path/to/photo.NEF'])('hands camera RAW %s to the Python engine and never to sharp', async filePath => {
+            vi.mocked(sharp).mockClear();
+            vi.mocked(fs.access).mockRejectedValue(new Error('Missing'));
+            mockExifToolInstance.read.mockResolvedValue({ Orientation: 1 });
+            vi.mocked(pythonProvider.generateThumbnail).mockResolvedValue({ success: true, data: Buffer.from('fake-image-data').toString('base64') });
+
+            const result = await PhotoService.extractPreview(filePath, '/previews');
+
+            expect(sharp).not.toHaveBeenCalled();
+            expect(pythonProvider.generateThumbnail).toHaveBeenCalledWith(filePath, expect.objectContaining({ width: 2560 }));
             expect(result).not.toBeNull();
         });
 
