@@ -4,6 +4,10 @@ import { IService } from '../interfaces/IService';
 import { FaceRepository } from '../../data/repositories/FaceRepository';
 import { pythonProvider } from '../../infrastructure/PythonAIProvider';
 import { AppStateRepository } from '../../data/repositories/AppStateRepository';
+import { QuietGate } from './QuietGate';
+
+/** Background face checks start only after this long without a scan (see the quiet gate in the class). */
+const QUIET_BEFORE_START_MS = 10_000;
 
 /**
  * Background service that verifies low-confidence face detections using VLM.
@@ -14,6 +18,14 @@ export class BackgroundVerificationService implements IService {
     private isRunning = false;
     private shouldStop = false;
     private lastLogTime = 0;
+    // Each check holds the engine for about a second and the engine answers one request at a time, so a batch that starts
+    // between two photos of a scan makes the scan's own requests wait (saving the faces of one photo took 3.6 s, up to 11.5 s).
+    private readonly quietGate = new QuietGate(QUIET_BEFORE_START_MS);
+
+    /** A scan, a folder import or the face analysis queue is running. */
+    private workIsRunning(): boolean {
+        return AppStateRepository.isAIProcessingActive() || AppStateRepository.isScanActive();
+    }
 
     async start(): Promise<void> {
         if (this.isRunning) {
@@ -43,9 +55,8 @@ export class BackgroundVerificationService implements IService {
     private async runLoop(): Promise<void> {
         while (!this.shouldStop) {
             try {
-                // Pause if scanning is active
-                const isScanning = AppStateRepository.isAIProcessingActive();
-                if (isScanning) {
+                // Wait while anything is scanning, and for a stretch of quiet after it (the busy flag drops between photos)
+                if (!this.quietGate.isQuiet(this.workIsRunning())) {
                     await this.sleep(5000);
                     continue;
                 }
@@ -73,21 +84,20 @@ export class BackgroundVerificationService implements IService {
 
         // Fetch suspect faces (ordered by recent photos first)
         const suspects = FaceRepository.getSuspectFaces(BATCH_SIZE);
-        const totalSuspect = FaceRepository.countSuspectFaces();
 
         if (suspects.length === 0) {
-            // Log periodically to show service is alive (every ~30 seconds = 6 iterations * 5s sleep)
+            // Log periodically to show service is alive (every ~30 seconds); the count is only read when it is logged
             if (!this.lastLogTime || Date.now() - this.lastLogTime > 30000) {
-                logger.info(`[BackgroundVerificationService] No suspect faces to verify (total pending: ${totalSuspect})`);
+                logger.info(`[BackgroundVerificationService] No suspect faces to verify (total pending: ${FaceRepository.countSuspectFaces()})`);
                 this.lastLogTime = Date.now();
             }
             return;
         }
 
-        logger.info(`[BackgroundVerificationService] Processing ${suspects.length} suspect faces (${totalSuspect} total pending)`);
+        logger.info(`[BackgroundVerificationService] Processing ${suspects.length} suspect faces`);
 
         for (const face of suspects) {
-            if (this.shouldStop) break;
+            if (this.shouldStop || this.workIsRunning()) break; // a scan started: leave the rest for the next quiet time
 
             try {
                 // Parse box coordinates
@@ -240,16 +250,15 @@ export class BackgroundVerificationService implements IService {
         const BATCH_SIZE = 10;
 
         const orphans = FaceRepository.getOrphanedFaces(BATCH_SIZE);
-        const totalOrphans = FaceRepository.countOrphanedFaces();
 
         if (orphans.length === 0) {
             return;
         }
 
-        logger.info(`[BackgroundVerificationService] Verifying ${orphans.length} orphaned faces (${totalOrphans} total orphans)`);
+        logger.info(`[BackgroundVerificationService] Verifying ${orphans.length} orphaned faces`);
 
         for (const face of orphans) {
-            if (this.shouldStop) break;
+            if (this.shouldStop || this.workIsRunning()) break;
 
             try {
                 const box = JSON.parse(face.box_json);

@@ -2,6 +2,17 @@ import numpy as np
 import pytest
 from facelib import faces
 
+def test_default_face_modules_keep_what_the_scan_uses():
+    # detection (boxes, 5 points), recognition (embedding), 3D landmarks (pose), genderage (age and gender)
+    for needed in ('detection', 'recognition', 'landmark_3d_68', 'genderage'):
+        assert needed in faces.DEFAULT_MODULES
+
+
+def test_default_face_modules_leave_out_the_unused_106_point_landmarks():
+    # Nothing reads face.landmark_2d_106; computing it for every face on every pass is wasted time.
+    assert 'landmark_2d_106' not in faces.DEFAULT_MODULES
+
+
 def test_calculate_mean_embedding():
     # 2 simple 2D vectors (for testing concepts, arcface uses 512D)
     v1 = [1.0, 0.0]

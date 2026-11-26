@@ -323,9 +323,6 @@ export class PhotoService {
                 } else {
                     logger.info(`[PhotoService] No existing faces to delete.`);
                 }
-            } else {
-                logger.info(`[PhotoService] cleanRescan=FALSE (or undefined) for Photo ${photoId}. Caller Trace:`);
-                console.trace(`[PhotoService] Analyze Trigger Trace`);
             }
 
             // Call Python Provider

@@ -26,8 +26,12 @@ export default function Settings() {
                     <AiPerformanceSection
                         aiProfile={ai.aiProfile}
                         vlmEnabled={ai.vlmEnabled}
+                        captionTiming={ai.captionTiming}
+                        backgroundDuringScan={ai.backgroundDuringScan}
                         onProfileChange={ai.changeProfile}
                         onVlmToggle={ai.toggleVlm}
+                        onCaptionTimingChange={ai.changeCaptionTiming}
+                        onBackgroundDuringScanChange={ai.changeBackgroundDuringScan}
                     />
 
                     <PersonIdentificationSection />

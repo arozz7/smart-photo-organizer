@@ -102,6 +102,7 @@ export class WindowManager {
             webPreferences: {
                 preload: preloadPath,
                 webSecurity: false,
+                backgroundThrottling: false, // The face queue lives in this window: keep its timers running when it is hidden or minimized
                 // @ts-ignore
                 enableAutofill: false, // Fixes DevTools console error
             },

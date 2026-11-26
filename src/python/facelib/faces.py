@@ -22,6 +22,10 @@ LAST_CONFIG = None
 APP_CACHE = {}
 MAX_CACHE_SIZE = 4
 
+# Modules the scan uses: boxes and 5 points (detection), embedding (recognition), pose (landmark_3d_68), age and gender (genderage).
+# landmark_2d_106 is left out on purpose: nothing reads its output, and it ran for every face on every detector pass.
+DEFAULT_MODULES = ['detection', 'recognition', 'landmark_3d_68', 'genderage']
+
 # Default Config
 DET_THRESH = 0.7 # Increased further to eliminate background noise (windows/patterns)
 NMS_THRESH = 0.65 # High overlap allowed
@@ -47,7 +51,7 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
     # OPTIMIZATION: Default to only essential modules to prevent GPU crashes in auxiliary models (3d landmarks)
     # NOTE: genderage module added for age-based ERA categorization
     if allowed_modules is None:
-        allowed_modules = ['detection', 'recognition', 'landmark_2d_106', 'landmark_3d_68', 'genderage']
+        allowed_modules = list(DEFAULT_MODULES)
 
     # [OPTIMIZATION] Check Cache
     # Use tuple for specific config including thresh (as it's baked into model params)
@@ -101,7 +105,7 @@ def init_insightface(providers=None, ctx_id=0, allowed_modules=None, det_size=(1
                  from insightface.data import get_object
                  if get_object('meanshape_68.pkl') is None:
                      logger.warning("meanshape_68.pkl not found — landmark_3d_68 will fail. "
-                                    "Falling back to landmark_2d_106 only. "
+                                    "Pose will be unavailable. "
                                     "Rebuild with '--collect-data insightface' to fix.")
                      allowed_modules = [m for m in allowed_modules if m != 'landmark_3d_68']
 

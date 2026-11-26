@@ -1,4 +1,5 @@
 import { getDB } from '../../db';
+import { SUSPECT_COUNT_SQL, SUSPECT_LIST_SQL, ORPHAN_COUNT_SQL, ORPHAN_LIST_SQL } from './verificationQueries';
 
 export class FaceRepository {
     private static parseFace(row: any) {
@@ -1016,16 +1017,7 @@ export class FaceRepository {
         face_quality: number | null;
     }> {
         const db = getDB();
-        return db.prepare(`
-            SELECT f.id, f.photo_id, f.box_json, f.verification_attempts, f.score, f.face_quality,
-                   p.file_path, p.preview_cache_path
-            FROM faces f
-            JOIN photos p ON f.photo_id = p.id
-            WHERE f.entity_type = 'suspect'
-              AND (f.is_ignored = 0 OR f.is_ignored IS NULL)
-            ORDER BY p.created_at DESC
-            LIMIT ?
-        `).all(limit) as Array<{
+        return db.prepare(SUSPECT_LIST_SQL).all(limit) as Array<{
             id: number;
             photo_id: number;
             box_json: string;
@@ -1042,12 +1034,7 @@ export class FaceRepository {
      */
     static countSuspectFaces(): number {
         const db = getDB();
-        const result = db.prepare(`
-            SELECT COUNT(*) as count
-            FROM faces
-            WHERE entity_type = 'suspect'
-              AND (is_ignored = 0 OR is_ignored IS NULL)
-        `).get() as { count: number };
+        const result = db.prepare(SUSPECT_COUNT_SQL).get() as { count: number };
         return result.count;
     }
 
@@ -1067,22 +1054,7 @@ export class FaceRepository {
         preview_cache_path: string | null;
     }> {
         const db = getDB();
-        return db.prepare(`
-            SELECT f.id, f.photo_id, f.box_json,
-                   p.file_path, p.preview_cache_path
-            FROM faces f
-            JOIN photos p ON f.photo_id = p.id
-            WHERE f.entity_type = 'human'
-              AND (f.confidence_tier = 'human' OR f.confidence_tier = 'unknown')
-              AND f.needs_bucketing = 0
-              AND f.bucket_id IS NULL
-              AND f.person_id IS NULL
-              AND f.is_ignored = 0
-              AND f.descriptor IS NOT NULL
-              AND f.verification_attempts = 0
-            ORDER BY p.created_at DESC
-            LIMIT ?
-        `).all(limit) as Array<{
+        return db.prepare(ORPHAN_LIST_SQL).all(limit) as Array<{
             id: number;
             photo_id: number;
             box_json: string;
@@ -1096,18 +1068,7 @@ export class FaceRepository {
      */
     static countOrphanedFaces(): number {
         const db = getDB();
-        const result = db.prepare(`
-            SELECT COUNT(*) as count
-            FROM faces
-            WHERE entity_type = 'human'
-              AND (confidence_tier = 'human' OR confidence_tier = 'unknown')
-              AND needs_bucketing = 0
-              AND bucket_id IS NULL
-              AND person_id IS NULL
-              AND is_ignored = 0
-              AND descriptor IS NOT NULL
-              AND verification_attempts = 0
-        `).get() as { count: number };
+        const result = db.prepare(ORPHAN_COUNT_SQL).get() as { count: number };
         return result.count;
     }
 

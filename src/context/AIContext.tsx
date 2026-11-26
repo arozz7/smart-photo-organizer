@@ -784,9 +784,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setCooldownTimeLeft(queueConfig.cooldownSeconds);
 
             // Start Countdown
-            let timeLeft = queueConfig.cooldownSeconds;
+            const endsAt = Date.now() + queueConfig.cooldownSeconds * 1000; // by the clock: a hidden window runs timers only about once a minute
             const interval = setInterval(() => {
-                timeLeft -= 1;
+                const timeLeft = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
                 setCooldownTimeLeft(timeLeft);
                 if (timeLeft <= 0) {
                     clearInterval(interval);

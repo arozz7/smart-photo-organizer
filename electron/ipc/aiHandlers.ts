@@ -9,6 +9,9 @@ import { getDB, getDBLock } from '../db';
 import { FaceRepository } from '../data/repositories/FaceRepository';
 import { FaceService } from '../core/services/FaceService';
 import { ConfigService } from '../core/services/ConfigService';
+import { captionsRunInScan } from '../core/services/captionTiming';
+import { backgroundIdleGraceMs } from '../core/services/backgroundPolicy';
+import { AppStateRepository } from '../data/repositories/AppStateRepository';
 import { rebuildFaceIndexFromNamedFaces } from '../core/services/FaissIndexService';
 import { toIndexFaces } from '../core/services/faissSync';
 import { hiddenFromReview, withoutHidden, countWithoutHidden } from '../core/services/reviewHiding';
@@ -56,7 +59,8 @@ export function registerAIHandlers() {
             // Debug & VLM logging
             logger.info(`[Main] Analyze Request ${photoId}`);
 
-            return await PhotoService.analyzeImage({ photoId, filePath, ...rest });
+            // Descriptions and tags take ~80% of a scan; unless set to run with the scan they follow in the background (BackgroundCaptionService).
+            return await PhotoService.analyzeImage({ photoId, filePath, ...rest, enableVLM: Boolean(rest.enableVLM) && captionsRunInScan(getAISettings()) });
         } catch (e: any) {
             if (e.message === 'Shutdown') return { success: false, error: 'Shutdown' };
             throw e;
@@ -108,6 +112,7 @@ export function registerAIHandlers() {
 
     ipcMain.handle('ai:saveSettings', (_event, settings) => {
         setAISettings(settings);
+        AppStateRepository.setAIIdleGraceMs(backgroundIdleGraceMs(getAISettings())); // takes effect at once, no reload
         pythonProvider.syncSettings(); // Use new method
         return true;
     });

@@ -144,6 +144,8 @@ export class PythonAIProvider implements IAIProvider, IService {
 
         // 3. Process Logic (Delegated to Services)
         if (message.type === 'analysis_result') {
+            const resultReceivedAt = Date.now();
+            let facesSavedMs = 0;
             if (!message.error && message.faces && message.faces.length > 0) {
                 // Extract session data for Phase P2
                 const sessionFolder = message.filePath ? path.dirname(message.filePath) : undefined;
@@ -178,6 +180,7 @@ export class PythonAIProvider implements IAIProvider, IService {
                 } catch (e) {
                     logger.error(`[Main] processAnalysisResult failed for photo ${message.photoId}:`, e);
                 }
+                facesSavedMs = Date.now() - resultReceivedAt;
             }
 
             // Save global blur score, description, and pHash to photos table
@@ -216,6 +219,8 @@ export class PythonAIProvider implements IAIProvider, IService {
             } catch (e) {
                 logger.error('[Main] Failed to record scan history:', e);
             }
+            // Where the time between two photos goes on the main side (the engine's own time is in the Python log)
+            logger.info(`[Timing] Photo ${message.photoId}: result handled in ${Date.now() - resultReceivedAt} ms (faces saved in ${facesSavedMs} ms)`);
         }
 
 

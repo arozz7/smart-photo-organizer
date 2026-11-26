@@ -1,7 +1,7 @@
 {
   "name": "smart-photo-organizer",
   "private": true,
-  "version": "0.8.22",
+  "version": "0.8.26",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "scripts": {

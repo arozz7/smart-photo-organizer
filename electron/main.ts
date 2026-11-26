@@ -33,7 +33,8 @@ import { scanQueue } from './scanQueue';
 import { initDB } from './db'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { getLibraryPath } from './store';
+import { getLibraryPath, getAISettings } from './store';
+import { backgroundIdleGraceMs } from './core/services/backgroundPolicy';
 import * as fs from 'node:fs/promises';
 import logger from './logger';
 import { WindowManager } from './windows/windowManager';
@@ -42,6 +43,7 @@ import { BackgroundVerificationService } from './core/services/BackgroundVerific
 import { BackgroundPropagationService } from './core/services/BackgroundPropagationService';
 import { BackgroundDuplicateCheckerService } from './core/services/BackgroundDuplicateCheckerService';
 import { BackgroundFileIdentityService } from './core/services/BackgroundFileIdentityService';
+import { BackgroundCaptionService } from './core/services/BackgroundCaptionService';
 import { BackgroundFaissSyncService } from './core/services/BackgroundFaissSyncService';
 import { createFaissSyncDeps } from './core/services/FaissIndexService';
 import { AppStateRepository } from './data/repositories/AppStateRepository';
@@ -160,6 +162,9 @@ app.whenReady().then(async () => {
     logger.error("DB Init Failed", e);
   }
 
+  // Background tasks wait for the face scan unless the user lets them run alongside it
+  AppStateRepository.setAIIdleGraceMs(backgroundIdleGraceMs(getAISettings()));
+
   // Start Services
   // Old: startPythonBackend();
   pythonProvider.start();
@@ -183,6 +188,9 @@ app.whenReady().then(async () => {
   // Start Background File Identity Service (Phase 130): records size / modified time / file id for older photos
   const fileIdentityService = new BackgroundFileIdentityService();
   fileIdentityService.start();
+  // Photo descriptions and tags, after the faces and only while nothing else is working
+  const captionService = new BackgroundCaptionService();
+  captionService.start();
 
   // Start Background FAISS Sync Service: keeps the face search index in step with the named faces
   const faissSyncService = new BackgroundFaissSyncService(createFaissSyncDeps());
@@ -207,6 +215,7 @@ app.whenReady().then(async () => {
   serviceManager.register('BackgroundPropagationService', propagationService);
   serviceManager.register('BackgroundDuplicateCheckerService', duplicateCheckerService);
   serviceManager.register('BackgroundFileIdentityService', fileIdentityService);
+  serviceManager.register('BackgroundCaptionService', captionService);
   serviceManager.register('BackgroundFaissSyncService', faissSyncService);
   serviceManager.register('RematchService', rematchService);
   serviceManager.register('FaceVisibilityService', faceVisibilityService);
