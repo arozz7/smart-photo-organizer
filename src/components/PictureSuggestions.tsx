@@ -4,6 +4,7 @@ import { FloatingBarClearance, LoadMoreControls, SelectionToolbar } from './Sele
 import { useSelectionShortcuts } from '../hooks/useSelectionShortcuts'
 import type { PictureList, PictureSuggestionsController, PictureTile } from '../hooks/usePictureSuggestions'
 import { surroundingBox } from '../utils/pictureCrop'
+import { describeSource } from '../utils/assignmentSource'
 
 const LISTS: { list: PictureList; label: string }[] = [
     { list: 'unassigned', label: 'In Review Needed' },
@@ -12,19 +13,6 @@ const LISTS: { list: PictureList; label: string }[] = [
 
 const formatCount = (count: number) => count.toLocaleString('en-US')
 const plural = (count: number) => `${formatCount(count)} ${count === 1 ? 'face' : 'faces'}`
-
-/** Plain words for how an assigned face was given to its person. */
-function describeSource(source: string | null): string {
-    switch (source) {
-        case 'ai_scan': return 'by a scan'
-        case 'auto_rematch': return 'by the re-match'
-        case 'auto_scan': return 'by an automatic match'
-        case 'auto_suggestion': return 'from a suggestion'
-        case 'profile_match': return 'from the Turned faces list'
-        case null: return 'unknown'
-        default: return 'by you'
-    }
-}
 
 interface TileProps {
     tile: PictureTile

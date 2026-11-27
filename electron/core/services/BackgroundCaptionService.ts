@@ -7,6 +7,7 @@ import { BackgroundLoop } from './BackgroundLoop';
 import { CaptionBackfill, type CaptionStepResult } from './CaptionBackfill';
 import { captionsRunInBackground } from './captionTiming';
 import { PhotoService } from './PhotoService';
+import { BACKGROUND } from '../interfaces/IAIProvider';
 
 const STARTUP_DELAY_MS = 60_000;
 
@@ -20,7 +21,7 @@ export class BackgroundCaptionService implements IService {
     private readonly backfill = new CaptionBackfill({
         fetchBatch: (skip, limit) => CaptionRepository.getPhotosNeedingCaption(skip, limit).map(photo => ({ id: photo.id, filePath: photo.file_path })),
         caption: async photo => {
-            const result = await PhotoService.generateTags(photo.id, photo.filePath);
+            const result = await PhotoService.generateTags(photo.id, photo.filePath, BACKGROUND);
             return Boolean(result && !result.error && (result.description || result.tags?.length));
         },
         isBusy: () => AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive(),

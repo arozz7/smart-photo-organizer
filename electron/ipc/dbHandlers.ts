@@ -5,6 +5,7 @@ import { FaceRepository } from '../data/repositories/FaceRepository';
 import { PersonRepository } from '../data/repositories/PersonRepository';
 import { BucketRepository } from '../data/repositories/BucketRepository';
 import { AppStateRepository } from '../data/repositories/AppStateRepository';
+import { REMAINING_BUCKETING_SQL } from '../data/repositories/bucketingQueries';
 import { SmartAlbumRepository } from '../data/repositories/SmartAlbumRepository';
 import { PersonService } from '../core/services/PersonService';
 import { FaceService } from '../core/services/FaceService';
@@ -878,7 +879,7 @@ export function registerDBHandlers() {
         try {
             const db = getDB();
             // Count remaining faces needing bucketing
-            const remaining = db.prepare('SELECT COUNT(*) as count FROM faces WHERE needs_bucketing = 1 AND person_id IS NULL AND is_ignored = 0').get() as { count: number };
+            const remaining = db.prepare(REMAINING_BUCKETING_SQL).get() as { count: number };
             // Get checkpoint offset (faces already processed)
             const offset = AppStateRepository.getBucketingOffset();
             let total = AppStateRepository.getBucketingTotal();

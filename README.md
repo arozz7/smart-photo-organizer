@@ -146,6 +146,10 @@ Robust matching for difficult conditions using multi-sample voting and pose-awar
 
 The app continuously analyzes each person's face collection for outliers — faces that don't match the person's embedding model. Suspected misassignments are flagged for review. You can also **confirm** correct faces to exclude them from future outlier checks.
 
+#### Doubtful Faces
+
+Animals, objects, hands and pictures of faces can end up under a named person. **People > Edge Cases > Doubtful faces** lists faces already assigned to a person where the vision model finds no clear face, the most doubtful first, each cropped to the face. A background check (Settings > Database Management > Check Assigned Faces) scores them, the person with the most faces first, and only when the app is otherwise idle. Nothing changes until you choose: **Keep** (a real face), **Back to suggestions** (out of the person, into Review Needed), or **Not a face** (ignore). The last change can be undone.
+
 #### Person Thumbnail Management
 
 - **Pin a Cover:** Manually set any face crop as a person's cover photo.

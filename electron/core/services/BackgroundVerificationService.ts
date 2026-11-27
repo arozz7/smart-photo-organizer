@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron';
+import { BACKGROUND } from '../interfaces/IAIProvider';
 import logger from '../../logger';
 import { IService } from '../interfaces/IService';
 import { FaceRepository } from '../../data/repositories/FaceRepository';
@@ -114,7 +115,7 @@ export class BackgroundVerificationService implements IService {
                 const isSuspiciousAspectRatio = aspectRatio > 1.5 || aspectRatio < 0.67;
 
                 // Call VLM verification
-                const result = await pythonProvider.verifyFace(face.file_path, boxCoords);
+                const result = await pythonProvider.verifyFace(face.file_path, boxCoords, BACKGROUND);
 
                 // [Phase 90] VLM as Negative Filter Only
                 // VLM can reject (is_face===false) but cannot override detector.
@@ -139,7 +140,8 @@ export class BackgroundVerificationService implements IService {
                             {
                                 orientation: 1,
                                 detThreshold: 0.5
-                            }
+                            },
+                            BACKGROUND
                         );
 
                         // [Phase 58 Fix] Multi-Scale Split Strategy
@@ -154,7 +156,8 @@ export class BackgroundVerificationService implements IService {
                                     orientation: 1,
                                     detThreshold: 0.5,
                                     detSize: [640, 640]
-                                }
+                                },
+                                BACKGROUND
                             );
 
                             if (lowResResult.faceCount > (regionResult.faceCount || 0)) {
@@ -269,7 +272,7 @@ export class BackgroundVerificationService implements IService {
                     y2: box.y + box.height
                 };
 
-                const result = await pythonProvider.verifyFace(face.file_path, boxCoords);
+                const result = await pythonProvider.verifyFace(face.file_path, boxCoords, BACKGROUND);
 
                 if (result.is_face === false) {
                     FaceRepository.ignoreFaces([face.id], 'background_verification');

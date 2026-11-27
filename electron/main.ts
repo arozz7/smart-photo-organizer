@@ -26,6 +26,9 @@ import { getFaceVisibilityService } from './core/services/FaceVisibilityDeps';
 import { registerPictureHandlers } from './ipc/pictureHandlers';
 import { registerPictureCheckHandlers } from './ipc/pictureCheckHandlers';
 import { getPictureCheckService } from './core/services/PictureCheckDeps';
+import { getAssignedVisibilityService } from './core/services/AssignedVisibilityDeps';
+import { registerAssignedCheckHandlers } from './ipc/assignedCheckHandlers';
+import { registerDoubtfulHandlers } from './ipc/doubtfulHandlers';
 import { getRematchService } from './core/services/RematchDeps';
 import { registerCompositeHandlers } from './ipc/compositeHandlers';
 import { registerAdjustmentHandlers } from './ipc/adjustmentHandlers';
@@ -206,6 +209,9 @@ app.whenReady().then(async () => {
   // Picture check: asks the vision model whether faces are real people or only pictures of them, when the user is away (suggestions only)
   const pictureCheckService = getPictureCheckService();
   pictureCheckService.start();
+  // Assigned-face check: the same question about faces already assigned to people, the biggest person first (suggestions only)
+  const assignedVisibilityService = getAssignedVisibilityService();
+  assignedVisibilityService.start();
 
   // Register Services
   const serviceManager = ServiceManager.getInstance();
@@ -220,6 +226,7 @@ app.whenReady().then(async () => {
   serviceManager.register('RematchService', rematchService);
   serviceManager.register('FaceVisibilityService', faceVisibilityService);
   serviceManager.register('PictureCheckService', pictureCheckService);
+  serviceManager.register('AssignedVisibilityService', assignedVisibilityService);
   serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();
@@ -238,6 +245,8 @@ app.whenReady().then(async () => {
   registerProfileHandlers();
   registerFaceVisibilityHandlers();
   registerPictureCheckHandlers();
+  registerAssignedCheckHandlers();
+  registerDoubtfulHandlers();
   registerPictureHandlers();
   registerCompositeHandlers();
   registerAdjustmentHandlers();

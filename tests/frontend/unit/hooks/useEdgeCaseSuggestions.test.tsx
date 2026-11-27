@@ -26,6 +26,8 @@ beforeEach(() => {
         if (channel === 'nonface:list') return { success: true, faces: [] };
         if (channel === 'picture:getOverview') return { success: true, overview: { list: 'unassigned', minLikelihood: 70, defaultLikelihood: 70, minAllowed: 50, maxAllowed: 95, choices: [], current: { total: 4 }, suggestedTotal: 5, checked: 0, candidates: 0, assignedChecked: 0, assignedCandidates: 0, ignoredFromList: 0, hideFromReview: true, hideable: 4, hiddenFromReview: 4 } };
         if (channel === 'picture:list') return { success: true, faces: [] };
+        if (channel === 'doubtful:getOverview') return { success: true, overview: { minScore: 3, defaultMinScore: 3, minAllowed: 0, maxAllowed: 6, choices: [], current: { total: 6 }, people: [], checked: 0, candidates: 0, changed: 0 } };
+        if (channel === 'doubtful:list') return { success: true, faces: [] };
         if (channel === 'picture:setHide') return { success: true, overview: { list: 'unassigned', minLikelihood: 70, defaultLikelihood: 70, minAllowed: 50, maxAllowed: 95, choices: [], current: { total: 4 }, suggestedTotal: 5, checked: 0, candidates: 0, assignedChecked: 0, assignedCandidates: 0, ignoredFromList: 0, hideFromReview: false, hideable: 4, hiddenFromReview: 0 } };
         throw new Error(`unexpected ${channel}`);
     });
@@ -85,7 +87,7 @@ describe('useEdgeCaseSuggestions', () => {
         it('counts the faces hidden from Review Needed, for the notice under the tabs', async () => {
             const { result } = await mount();
 
-            expect(result.current.counts).toEqual({ nonface: 9, profile: 0, pictures: 5, hidden: 7, hiddenPictures: 4 });
+            expect(result.current.counts).toEqual({ nonface: 9, profile: 0, pictures: 5, doubtful: 6, hidden: 7, hiddenPictures: 4 });
         });
 
         it('reloads Review Needed when the user goes back to it after changing what is hidden, and not when nothing changed', async () => {

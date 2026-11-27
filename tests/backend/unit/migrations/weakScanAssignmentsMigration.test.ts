@@ -44,9 +44,9 @@ describe('007_weakScanAssignments migration', () => {
     beforeEach(() => { db = createLibrary(); });
     afterEach(() => db.close());
 
-    it('is version 7 and registered last', () => {
+    it('is version 7 and registered in order', () => {
         expect(weakScanAssignmentsMigration.version).toBe(7);
-        expect(MIGRATIONS[MIGRATIONS.length - 1].version).toBe(7);
+        expect(MIGRATIONS[6]).toBe(weakScanAssignmentsMigration);
     });
 
     it('moves a weak scan assignment back to a suggestion and keeps the person as the suggestion', () => {

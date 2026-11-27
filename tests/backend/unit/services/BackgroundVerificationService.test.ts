@@ -299,7 +299,8 @@ describe('BackgroundVerificationService', () => {
             expect(pythonProvider.detectFacesInRegion).toHaveBeenLastCalledWith(
                 face.file_path,
                 expect.any(Object),
-                expect.objectContaining({ detSize: [640, 640] })
+                expect.objectContaining({ detSize: [640, 640] }),
+                { lane: 'background' }
             );
             expect(FaceRepository.markFaceAsRejected).toHaveBeenCalledWith(face.id);
             expect(mockPrepare.run).toHaveBeenCalledTimes(2);
@@ -382,6 +383,24 @@ describe('BackgroundVerificationService', () => {
             await (service as any).processOrphanedFaces();
 
             expect(pythonProvider.verifyFace).toHaveBeenCalledTimes(1);
+        });
+
+        it('asks the engine for suspect faces in the background lane, so a page the user opens is not kept waiting behind it', async () => {
+            vi.mocked(FaceRepository.getSuspectFaces).mockReturnValue([createSuspectFace({ id: 1 })] as any);
+            vi.mocked(pythonProvider.verifyFace).mockResolvedValue({ is_face: true, confidence: 0.9 });
+
+            await (service as any).processNextBatch();
+
+            expect(pythonProvider.verifyFace).toHaveBeenCalledWith(expect.any(String), expect.any(Object), { lane: 'background' });
+        });
+
+        it('asks the engine for orphaned faces in the background lane too', async () => {
+            vi.mocked(FaceRepository.getOrphanedFaces).mockReturnValue([createSuspectFace({ id: 1 })] as any);
+            vi.mocked(pythonProvider.verifyFace).mockResolvedValue({ is_face: true, confidence: 0.9 });
+
+            await (service as any).processOrphanedFaces();
+
+            expect(pythonProvider.verifyFace).toHaveBeenCalledWith(expect.any(String), expect.any(Object), { lane: 'background' });
         });
 
         it('reads the pending count only for the idle log line (at most every 30 s), never while there is work', async () => {

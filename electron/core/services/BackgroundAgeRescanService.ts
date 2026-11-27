@@ -1,4 +1,5 @@
 import { getDB } from '../../db';
+import { BACKGROUND } from '../interfaces/IAIProvider';
 import { PersonRepository } from '../../data/repositories/PersonRepository';
 import { AppStateRepository } from '../../data/repositories/AppStateRepository';
 import { PersonService } from './PersonService';
@@ -244,7 +245,7 @@ export class BackgroundAgeRescanService implements IService {
                     filePath: face.file_path,
                     previewPath: face.preview_cache_path,
                     box: face.box_json
-                });
+                }, BACKGROUND);
 
                 if (result) {
                     // Update face record

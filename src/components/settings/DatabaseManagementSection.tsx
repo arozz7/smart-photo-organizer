@@ -5,6 +5,7 @@ import { ParkedFacesCard } from '../ParkedFacesCard';
 import { RematchCard } from '../RematchCard';
 import { FaceVisibilityCard } from '../FaceVisibilityCard';
 import { PictureCheckCard } from '../PictureCheckCard';
+import { AssignedCheckCard } from '../AssignedCheckCard';
 import SettingsSection from './SettingsSection';
 import FactoryResetModal from './FactoryResetModal';
 import { useDatabaseMaintenance } from '../../hooks/useDatabaseMaintenance';
@@ -123,6 +124,7 @@ export default function DatabaseManagementSection() {
                     <div className="border-t border-gray-700 pt-4 mt-4">
                         <FaceVisibilityCard />
                         <PictureCheckCard />
+                        <AssignedCheckCard />
                     </div>
                 </div>
             </SettingsSection>

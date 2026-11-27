@@ -1,8 +1,8 @@
 
 
-export type EdgeCaseFilterType = 'unnamed' | 'ignored' | 'ungroupable' | 'background' | 'nonface' | 'profile' | 'pictures'
+export type EdgeCaseFilterType = 'unnamed' | 'ignored' | 'ungroupable' | 'background' | 'nonface' | 'profile' | 'pictures' | 'doubtful'
 
-type FilterColor = 'indigo' | 'gray' | 'red' | 'amber' | 'orange' | 'sky' | 'rose'
+type FilterColor = 'indigo' | 'gray' | 'red' | 'amber' | 'orange' | 'sky' | 'rose' | 'violet'
 
 // Written out in full: Tailwind only generates the classes it can read in the source, so `bg-${color}-500/10` produced nothing.
 const ACTIVE_CLASSES: Record<FilterColor, { tab: string; badge: string }> = {
@@ -13,6 +13,7 @@ const ACTIVE_CLASSES: Record<FilterColor, { tab: string; badge: string }> = {
     orange: { tab: 'bg-orange-500/10 text-orange-400 ring-1 ring-orange-500/50 shadow-lg shadow-orange-500/10', badge: 'bg-orange-500/20 text-orange-300' },
     sky: { tab: 'bg-sky-500/10 text-sky-400 ring-1 ring-sky-500/50 shadow-lg shadow-sky-500/10', badge: 'bg-sky-500/20 text-sky-300' },
     rose: { tab: 'bg-rose-500/10 text-rose-400 ring-1 ring-rose-500/50 shadow-lg shadow-rose-500/10', badge: 'bg-rose-500/20 text-rose-300' },
+    violet: { tab: 'bg-violet-500/10 text-violet-400 ring-1 ring-violet-500/50 shadow-lg shadow-violet-500/10', badge: 'bg-violet-500/20 text-violet-300' },
 }
 
 interface EdgeCaseFiltersProps {
@@ -26,6 +27,8 @@ interface EdgeCaseFiltersProps {
         nonface: number
         profile: number
         pictures: number
+        /** Faces assigned to a person that the vision model finds show no clear face. */
+        doubtful?: number
         /** Faces Review Needed leaves out because the Not a Face? list holds them. */
         hidden?: number
         /** Faces Review Needed leaves out because the Pictures? list holds them. */
@@ -106,6 +109,17 @@ export default function EdgeCaseFilters({ activeFilter, onFilterChange, counts, 
             icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+            )
+        },
+        {
+            id: 'doubtful',
+            label: 'Doubtful faces',
+            title: 'Faces already assigned to a person where the vision model finds no clear face: an animal, an object, a hand or a picture (suggestions only; you decide)',
+            color: 'violet',
+            icon: (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
             )
         }

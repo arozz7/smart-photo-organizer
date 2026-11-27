@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { BACKGROUND } from '../interfaces/IAIProvider';
 import { powerMonitor } from 'electron';
 import { AppStateRepository } from '../../data/repositories/AppStateRepository';
 import { PictureRepository, PICTURE_MODEL } from '../../data/repositories/PictureRepository';
@@ -20,7 +21,7 @@ export function createPictureCheckDeps(): FaceVisibilityDeps {
             photoWidth: face.photoWidth,
             box: face.box,
         })),
-        score: faces => scoreWithEngine(faces, (type, payload, timeoutMs) => pythonProvider.sendRequest(type, payload, timeoutMs), 'score_face_picture'),
+        score: faces => scoreWithEngine(faces, (type, payload, timeoutMs) => pythonProvider.sendRequest(type, payload, timeoutMs, BACKGROUND), 'score_face_picture'),
         save: results => PictureRepository.save(results, PICTURE_MODEL, new Date().toISOString()),
         isBusy: () =>
             AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive() || AppStateRepository.isShutdownRequested(),

@@ -1,4 +1,5 @@
 import { FaceService } from './FaceService';
+import type { RequestOptions } from '../interfaces/IAIProvider';
 import { ConfigService } from './ConfigService';
 import { exiftoolTaskTimeoutMs } from './scannerSettings';
 import { PhotoIdentityService } from './PhotoIdentityService';
@@ -270,8 +271,8 @@ export class PhotoService {
     }
 
     // --- AI WRAPPERS ---
-    static async generateTags(photoId: number, filePath: string) {
-        const result = await pythonProvider.sendRequest('generate_tags', { photoId, filePath }, 60000);
+    static async generateTags(photoId: number, filePath: string, requestOptions?: RequestOptions) {
+        const result = await pythonProvider.sendRequest('generate_tags', { photoId, filePath }, 60000, requestOptions);
 
         if (result && !result.error && (result.description || result.tags)) {
             // DB Updates

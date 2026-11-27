@@ -97,11 +97,11 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
 
     it('upgrades to the latest schema on first open, taking exactly one backup first', () => {
         // Assert
-        expect(firstOpen).toMatchObject({ fromVersion: 0, toVersion: 7, applied: ['file_identity', 'rematch_log', 'face_flags', 'profile_suggestion_log', 'picture_log', 'verification_indexes', 'weak_scan_assignments'], downgradeDetected: false });
-        expect(db.pragma('user_version', { simple: true })).toBe(7);
+        expect(firstOpen).toMatchObject({ fromVersion: 0, toVersion: 9, applied: ['file_identity', 'rematch_log', 'face_flags', 'profile_suggestion_log', 'picture_log', 'verification_indexes', 'weak_scan_assignments', 'doubtful_log', 'bucketing_status_index'], downgradeDetected: false });
+        expect(db.pragma('user_version', { simple: true })).toBe(9);
         const backups = fs.readdirSync(path.join(libraryDir, 'backups')).filter(f => f.endsWith('.db'));
         expect(backups).toHaveLength(1);
-        expect(backups[0]).toMatch(/^library\.v0-to-v7\./);
+        expect(backups[0]).toMatch(/^library\.v0-to-v9\./);
         expect(firstOpen.backupPath).toBe(path.join(libraryDir, 'backups', backups[0]));
     });
 
@@ -158,13 +158,13 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         db = getDB();
 
         // Assert
-        expect(second).toMatchObject({ fromVersion: 7, toVersion: 7, applied: [], downgradeDetected: false });
+        expect(second).toMatchObject({ fromVersion: 9, toVersion: 9, applied: [], downgradeDetected: false });
         expect(fs.readdirSync(path.join(libraryDir, 'backups')).filter(f => f.endsWith('.db'))).toHaveLength(1);
     });
 
     it('reports a downgrade for a library written by a newer version, and keeps it usable', async () => {
         // Arrange — simulate a library upgraded by a future build
-        db.pragma('user_version = 9');
+        db.pragma('user_version = 10');
         closeDB();
 
         // Act
@@ -172,9 +172,9 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         db = getDB();
 
         // Assert
-        expect(result).toMatchObject({ fromVersion: 9, downgradeDetected: true, applied: [] });
+        expect(result).toMatchObject({ fromVersion: 10, downgradeDetected: true, applied: [] });
         expect((db.prepare('SELECT COUNT(*) AS c FROM people').get() as { c: number }).c).toBe(3);
-        expect(db.pragma('user_version', { simple: true })).toBe(9);
+        expect(db.pragma('user_version', { simple: true })).toBe(10);
     });
 
     it('is idempotent: opening the library a second time changes nothing', async () => {
