@@ -4,291 +4,35 @@ import { PersonService } from './PersonService';
 import logger from '../../logger';
 import { getDB } from '../../db';
 import { getAISettings, ConfigService } from '../../store';
-import { STRICT_SCORE_THRESHOLD_ACCEPT } from './ConfigService';
+import { buildScanThresholds } from './scanThresholds';
 import { FaceAnalysisService } from './FaceAnalysisService';
 import { classifyDetection } from './detectionTier';
+import { boxIoU, boxIoMin } from './faceBoxes';
+import { FaceMatcher } from './FaceMatcher';
+import type { FaceMatch } from './FaceMatcher';
+
+export type { FaceMatch, MatchOptions } from './FaceMatcher';
 
 /**
- * Result of a face matching operation.
+ * Scan-time face handling. Matching a descriptor to a person lives in FaceMatcher; the methods below that
+ * start with "match" and calculateL2Distance are thin delegates so every caller keeps working.
  */
-export interface FaceMatch {
-    personId: number;
-    personName: string;
-    similarity: number;
-    distance: number;
-    matchType: 'centroid' | 'faiss';
-}
-
-/**
- * Options for face matching, allowing overrides of global settings.
- */
-export interface MatchOptions {
-    threshold?: number;
-    topK?: number;
-    candidatePeople?: { id: number, name: string, mean: number[] }[];
-    searchFn?: (descriptors: number[][], k?: number, threshold?: number) => Promise<{ id: number, distance: number }[][]>;
-}
-
 export class FaceService {
 
-    /**
-     * Modular formula for matching a descriptor against the entire library.
-     * Uses a Hybrid Strategy: Centroids first, then FAISS fallback.
-     */
-    static async matchFace(descriptor: any, options: MatchOptions = {}): Promise<FaceMatch | null> {
-        const settings = getAISettings();
-        const threshold = options.threshold ?? settings.faceSimilarityThreshold ?? 0.65;
-
-        let descArray: number[] = [];
-        if (descriptor instanceof Buffer || descriptor instanceof Uint8Array) {
-            descArray = Array.from(new Float32Array(descriptor.buffer, descriptor.byteOffset, descriptor.byteLength / 4));
-        } else if (typeof descriptor === 'string') {
-            descArray = JSON.parse(descriptor);
-        } else if (Array.isArray(descriptor)) {
-            descArray = descriptor;
-        } else {
-            return null;
-        }
-
-        // 1. Try Centroid Matching (Highly Reliable)
-        const candidates = options.candidatePeople ?? PersonRepository.getPeopleWithDescriptors();
-        const centroidMatch = this.matchAgainstCentroids(descArray, candidates, threshold);
-
-        if (centroidMatch) return { ...centroidMatch, matchType: 'centroid' };
-
-        // 2. Fallback to FAISS (Individual Face matching)
-        if (options.searchFn) {
-            const faissResults = await options.searchFn([descArray], options.topK ?? 5, threshold * threshold); // FAISS reports squared L2
-
-            if (faissResults.length > 0 && faissResults[0].length > 0) {
-                const matches = faissResults[0];
-                const matchedFaceIds = matches.map(m => m.id);
-
-                const db = getDB();
-                const placeholders = matchedFaceIds.map(() => '?').join(',');
-                const rows = db.prepare(`
-                    SELECT f.person_id, p.name 
-                    FROM faces f 
-                    JOIN people p ON f.person_id = p.id 
-                    WHERE f.id IN (${placeholders}) AND f.person_id IS NOT NULL 
-                    LIMIT 1
-                `).all(...matchedFaceIds) as { person_id: number, name: string }[];
-
-                if (rows.length > 0) {
-                    const bestMatch = matches[0]; // Already sorted by distance
-                    const distance = Math.sqrt(bestMatch?.distance ?? 0); // squared L2 from FAISS -> L2
-
-                    return {
-                        personId: rows[0].person_id,
-                        personName: rows[0].name,
-                        similarity: 1 / (1 + distance),
-                        distance,
-                        matchType: 'faiss'
-                    };
-                }
-            }
-        }
-
-        return null;
+    static matchFace(...args: Parameters<typeof FaceMatcher.matchFace>) {
+        return FaceMatcher.matchFace(...args);
     }
 
-    /**
-     * Efficient batch matching for multiple descriptors.
-     */
-    static async matchBatch(descriptors: any[], options: MatchOptions = {}): Promise<(FaceMatch | null)[]> {
-        const settings = getAISettings();
-        const threshold = options.threshold ?? settings.faceSimilarityThreshold ?? 0.65;
-        const results: (FaceMatch | null)[] = new Array(descriptors.length).fill(null);
-
-        // Normalize all descriptors
-        const parsedDescriptors = descriptors.map(d => {
-            if (d instanceof Buffer || d instanceof Uint8Array) {
-                return Array.from(new Float32Array(d.buffer, d.byteOffset, d.byteLength / 4));
-            }
-            if (typeof d === 'string') return JSON.parse(d);
-            return d;
-        });
-
-        // 1. Centroid Pass
-        const candidates = options.candidatePeople ?? PersonRepository.getPeopleWithDescriptors();
-        logger.info(`[FaceService] matchBatch: Checking ${parsedDescriptors.length} centroids against ${candidates.length} person candidates (threshold=${threshold}).`);
-
-        for (let i = 0; i < parsedDescriptors.length; i++) {
-            const match = this.matchAgainstCentroids(parsedDescriptors[i], candidates, threshold);
-            if (match) {
-                logger.info(`[FaceService] Centroid Match Found: Face ${i} -> ${match.personName} (dist: ${match.distance.toFixed(3)})`);
-                results[i] = { ...match, matchType: 'centroid' };
-            } else {
-                // Log the closest failure to understand why
-                const debugBest = this.matchAgainstCentroids(parsedDescriptors[i], candidates, 10.0); // High threshold
-                if (debugBest) {
-                    logger.debug(`[FaceService] No match for Face ${i}. Closest candidate: ${debugBest.personName} (dist: ${debugBest.distance.toFixed(3)}) > threshold ${threshold}`);
-                } else {
-                    logger.debug(`[FaceService] No match for Face ${i} and NO candidates found within safety threshold.`);
-                }
-            }
-        }
-
-        // 2. FAISS Pass for remainders
-        const pendingIndices = results.map((r, i) => r === null ? i : -1).filter(i => i !== -1);
-        logger.info(`[FaceService] FAISS fallback: ${pendingIndices.length} of ${parsedDescriptors.length} need FAISS lookup`);
-        if (pendingIndices.length > 0 && options.searchFn) {
-            const pendingDescriptors = pendingIndices.map(i => parsedDescriptors[i]);
-            // NOTE: FAISS compares/returns SQUARED L2; matchFace converts, this scan path does not (see aiChangeLog/fix-match-distance-setting.md)
-            // A timeout/failure here must degrade to "no FAISS matches" rather
-            // than aborting the whole batch — callers (e.g. per-photo scan
-            // classification) must still complete so downstream state (queue
-            // advancement, processing flags) doesn't get stuck.
-            let batchFaiss: { id: number; distance: number }[][];
-            try {
-                batchFaiss = await options.searchFn(pendingDescriptors, options.topK ?? 5, threshold);
-            } catch (e) {
-                logger.error('[FaceService] matchBatch FAISS search failed:', e);
-                return results;
-            }
-
-            // Fetch Person IDs for all matched faces in one go
-            const allMatchedFaceIds = new Set<number>();
-            batchFaiss.forEach(mList => mList.forEach(m => allMatchedFaceIds.add(m.id)));
-            logger.info(`[FaceService] FAISS returned ${allMatchedFaceIds.size} unique face matches`);
-
-            if (allMatchedFaceIds.size > 0) {
-                const db = getDB();
-                const placeholders = Array.from(allMatchedFaceIds).map(() => '?').join(',');
-                const rows = db.prepare(`
-                    SELECT f.id, f.person_id, p.name 
-                    FROM faces f 
-                    JOIN people p ON f.person_id = p.id 
-                    WHERE f.id IN (${placeholders}) AND f.person_id IS NOT NULL
-                `).all(...Array.from(allMatchedFaceIds)) as { id: number, person_id: number, name: string }[];
-
-                logger.info(`[FaceService] Of ${allMatchedFaceIds.size} FAISS matches, ${rows.length} belong to named persons`);
-
-                const faceToPerson = new Map<number, { personId: number, name: string }>();
-                rows.forEach(r => faceToPerson.set(r.id, { personId: r.person_id, name: r.name }));
-
-                for (let j = 0; j < pendingIndices.length; j++) {
-                    const originalIdx = pendingIndices[j];
-                    const matches = batchFaiss[j];
-
-                    // Phase 5: Multi-Sample Voting
-                    const candidates: { personId: number; distance: number }[] = [];
-                    const personNames = new Map<number, string>();
-
-                    for (const m of matches) {
-                        if (faceToPerson.has(m.id)) {
-                            const p = faceToPerson.get(m.id)!;
-                            candidates.push({ personId: p.personId, distance: m.distance });
-                            if (!personNames.has(p.personId)) personNames.set(p.personId, p.name);
-                        }
-                    }
-
-                    const consensus = FaceAnalysisService.consensusVoting(candidates);
-
-                    if (consensus) {
-                        results[originalIdx] = {
-                            personId: consensus.personId,
-                            personName: personNames.get(consensus.personId)!,
-                            similarity: 1 / (1 + consensus.distance),
-                            distance: consensus.distance,
-                            matchType: 'faiss'
-                        };
-                    } else if (candidates.length > 0) {
-                        // Fallback to best single match if voting fails (unlikely)
-                        const best = candidates[0];
-                        results[originalIdx] = {
-                            personId: best.personId,
-                            personName: personNames.get(best.personId)!,
-                            similarity: 1 / (1 + best.distance),
-                            distance: best.distance,
-                            matchType: 'faiss'
-                        };
-                    }
-                }
-            }
-        }
-
-        return results;
+    static matchBatch(...args: Parameters<typeof FaceMatcher.matchBatch>) {
+        return FaceMatcher.matchBatch(...args);
     }
 
-    public static matchAgainstCentroids(
-        descriptor: number[],
-        candidates: { id: number, name: string, mean: number[], eras?: any[], entity_type?: string }[],
-        threshold: number,
-        entityType: string = 'human'
-    ) {
-        if (!descriptor || candidates.length === 0) return null;
-
-        // Phase P3: Filter candidates by entity_type (humans match humans, pets match pets)
-        const filteredCandidates = candidates.filter(c => (c.entity_type || 'human') === entityType);
-        if (filteredCandidates.length === 0) return null;
-
-        let mag = 0;
-        for (const val of descriptor) mag += val * val;
-        mag = Math.sqrt(mag);
-        const normalized = mag > 0 ? descriptor.map(v => v / mag) : descriptor;
-
-        let bestMatch = null;
-        let minDist = Infinity;
-
-
-
-        for (const person of filteredCandidates) {
-            // Check global centroid
-            const globalCentroid = (person as any).descriptor || (person as any).mean;
-
-            if (globalCentroid && globalCentroid.length === normalized.length) {
-                const dist = this.calculateL2Distance(normalized, globalCentroid);
-                if (dist < minDist) {
-                    minDist = dist;
-                    bestMatch = person;
-                }
-            }
-
-            // Check Eras (Phase E)
-            if (person.eras && person.eras.length > 0) {
-                for (const era of person.eras) {
-                    if (era.centroid && era.centroid.length === normalized.length) {
-                        const dist = this.calculateL2Distance(normalized, era.centroid);
-                        if (dist < minDist) {
-                            minDist = dist; // If era matches better, use it
-                            bestMatch = person; // Still matches the same person
-                        }
-                    }
-                }
-            }
-
-            // Check pose-specific centroids (Phase 105-3)
-            // They compete alongside global centroid and eras — minimum distance wins
-            if ((person as any).poseCentroids?.length > 0) {
-                for (const poseCentroid of (person as any).poseCentroids) {
-                    if (poseCentroid && poseCentroid.length === normalized.length) {
-                        const dist = this.calculateL2Distance(normalized, poseCentroid);
-                        if (dist < minDist) {
-                            minDist = dist;
-                            bestMatch = person;
-                        }
-                    }
-                }
-            }
-        }
-
-        const similarity = 1 / (1 + minDist);
-        // Compare distance against threshold (lower distance = better match)
-        if (bestMatch && minDist <= threshold) {
-            return { personId: bestMatch.id, personName: bestMatch.name, distance: minDist, similarity };
-        }
-        return null;
+    static matchAgainstCentroids(...args: Parameters<typeof FaceMatcher.matchAgainstCentroids>) {
+        return FaceMatcher.matchAgainstCentroids(...args);
     }
 
-    // Public helper for other services
-    static calculateL2Distance(v1: number[], v2: number[]): number {
-        let sumSq = 0;
-        for (let i = 0; i < v1.length; i++) {
-            const diff = v1[i] - v2[i];
-            sumSq += diff * diff;
-        }
-        return Math.sqrt(sumSq);
+    static calculateL2Distance(...args: Parameters<typeof FaceMatcher.calculateL2Distance>) {
+        return FaceMatcher.calculateL2Distance(...args);
     }
 
     /**
@@ -458,6 +202,7 @@ export class FaceService {
     ) {
         logger.info(`[FaceService] Processing ${faces.length} faces for photo ${photoId}`);
         const db = getDB();
+        const thresholds = buildScanThresholds(getAISettings(), ConfigService.getAdvancedFaceSettings());
         // [Phase 79 Fix] Load ALL faces including ignored ones for proper cleanup
         // Without this, ignored faces are invisible to deduplication and get re-inserted as new faces
         let existingFaces = FaceRepository.getFacesByPhotoIncludingIgnored(photoId) as any[];
@@ -484,20 +229,7 @@ export class FaceService {
                     const f1: any = sortedExisting[i];
                     const f2: any = sortedExisting[j];
 
-                    // Simple IOU Check
-                    const interX1 = Math.max(f1.box.x, f2.box.x);
-                    const interY1 = Math.max(f1.box.y, f2.box.y);
-                    const interX2 = Math.min(f1.box.x + f1.box.width, f2.box.x + f2.box.width);
-                    const interY2 = Math.min(f1.box.y + f1.box.height, f2.box.y + f2.box.height);
-                    const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
-                    const unionArea = (f1.box.width * f1.box.height) + (f2.box.width * f2.box.height) - interArea;
-                    const iou = unionArea > 0 ? interArea / unionArea : 0;
-
-                    // [Phase 68] Centralized Config for Deduplication
-                    const advancedSettings = ConfigService.getAdvancedFaceSettings();
-                    const DEDUP_THRESHOLD = advancedSettings.dedupIoUThresh ?? 0.55;
-
-                    if (iou > DEDUP_THRESHOLD) {
+                    if (boxIoU(f1.box, f2.box) > thresholds.dedupIoU) {
                         const f1Protected = f1.is_confirmed;
                         const f2Protected = f2.is_confirmed;
 
@@ -539,10 +271,9 @@ export class FaceService {
         // Pre-calculate matches for all faces (returns null if no match found within default threshold)
         // IMPORTANT: FAISS uses L2 distance on NORMALIZED vectors (range 0-2, lower = better match)
         // Read thresholds from settings
-        const settings = getAISettings();
-        const HIGH_THRESHOLD = settings.autoAssignThreshold || 0.7;     // L2 distance for auto-assign
-        const REVIEW_THRESHOLD = settings.reviewThreshold || 0.9;       // L2 distance for review tier
-        const SEARCH_CUTOFF = Math.max(REVIEW_THRESHOLD + 0.1, 1.0);    // Search a bit beyond review tier
+        const HIGH_THRESHOLD = thresholds.autoAssign;     // L2 distance for auto-assign
+        const REVIEW_THRESHOLD = thresholds.review;       // L2 distance for review tier
+        const SEARCH_CUTOFF = thresholds.searchCutoff;    // Search a bit beyond review tier
         let matchResults: (FaceMatch | null)[] = [];
         if (descriptorsToMatch.length > 0) {
             matchResults = await this.matchBatch(descriptorsToMatch, {
@@ -560,10 +291,7 @@ export class FaceService {
         let assignedCount = 0;
 
         // Scan-time assignment needs a sure detection ('human'); a weak one that looks like a person (animal, object, picture) stays a suggestion.
-        const advancedFaceSettings = ConfigService.getAdvancedFaceSettings();
-        const ACCEPT_SCORE = advancedFaceSettings.strictFalsePositiveMode
-            ? STRICT_SCORE_THRESHOLD_ACCEPT
-            : (advancedFaceSettings.scoreThresholdAccept ?? 0.70);
+        const ACCEPT_SCORE = thresholds.acceptScore;
 
         const updateStmt = db.prepare(`
             UPDATE faces 
@@ -612,21 +340,9 @@ export class FaceService {
                 let maxIoU = 0;
 
                 for (const oldFace of existingFaces) {
-                    const oldBox = oldFace.box;
-                    const newBox = face.box;
-                    const interX1 = Math.max(newBox.x, oldBox.x);
-                    const interY1 = Math.max(newBox.y, oldBox.y);
-                    const interX2 = Math.min(newBox.x + newBox.width, oldBox.x + oldBox.width);
-                    const interY2 = Math.min(newBox.y + newBox.height, oldBox.y + oldBox.height);
-                    const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
-                    const unionArea = (newBox.width * newBox.height) + (oldBox.width * oldBox.height) - interArea;
-                    const iou = unionArea > 0 ? interArea / unionArea : 0;
+                    const iou = boxIoU(face.box, oldFace.box);
 
-                    // [Phase 68] Retroactive Hysteresis (Cleanup Existing Trash)
-                    // Use Centralized Deduplication Threshold
-                    const DEDUP_THRESHOLD = advancedFaceSettings.dedupIoUThresh ?? 0.55;
-
-                    if (iou > DEDUP_THRESHOLD && iou > maxIoU) {
+                    if (iou > thresholds.dedupIoU && iou > maxIoU) {
                         maxIoU = iou;
                         bestMatch = oldFace;
                     }
@@ -652,17 +368,7 @@ export class FaceService {
                 if (!bestMatch) { // Only check for new faces, not updates
                     let overlapsWithIgnored = false;
                     for (const ignoredFace of ignoredFaces) {
-                        const ignoredBox = ignoredFace.box;
-                        const newBox = face.box;
-                        const interX1 = Math.max(newBox.x, ignoredBox.x);
-                        const interY1 = Math.max(newBox.y, ignoredBox.y);
-                        const interX2 = Math.min(newBox.x + newBox.width, ignoredBox.x + ignoredBox.width);
-                        const interY2 = Math.min(newBox.y + newBox.height, ignoredBox.y + ignoredBox.height);
-                        const interArea = Math.max(0, interX2 - interX1) * Math.max(0, interY2 - interY1);
-                        const newArea = newBox.width * newBox.height;
-                        const ignoredArea = ignoredBox.width * ignoredBox.height;
-                        const minArea = Math.min(newArea, ignoredArea);
-                        const ioMin = minArea > 0 ? interArea / minArea : 0;
+                        const ioMin = boxIoMin(face.box, ignoredFace.box);
 
                         // If >50% overlap with ignored face, skip this detection
                         if (ioMin > 0.5) {
@@ -773,7 +479,7 @@ export class FaceService {
                     // [Phase 90] 3-Tier Detection Score System
                     // Reject (<0.40), Verify/suspect (0.40-0.69), Accept/human (>=0.70)
                     // [Phase 106] Lever 1: raise ceiling to 0.75 in Strict False Positive Mode
-                    const REJECT_FLOOR = advancedFaceSettings.scoreThresholdReject ?? 0.40;
+                    const REJECT_FLOOR = thresholds.rejectFloor;
 
 
                     const detectionScore = face.score ?? 0.95;
@@ -787,9 +493,9 @@ export class FaceService {
 
                     const isLargeBox = boxArea > 4000000;
 
-                    // [Phase 91] Large Face Exception: Allow large faces (>300px) even if score is low
+                    // [Phase 91] Large Face Exception: Allow large faces even if score is low (the "large face" setting, 300px by default)
                     // This matches Python detector.py 'Large Face Fallback' logic which keeps them
-                    const isLargeWidth = boxWidth > 300;
+                    const isLargeWidth = boxWidth > thresholds.largeFaceWidth;
                     const isSquare = Math.abs(aspectRatio - 1.0) < 0.05;
 
                     if (detectionScore < REJECT_FLOOR) {
