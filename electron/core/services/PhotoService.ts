@@ -1,4 +1,5 @@
 import { FaceService } from './FaceService';
+import type { RequestOptions } from '../interfaces/IAIProvider';
 import { ConfigService } from './ConfigService';
 import { exiftoolTaskTimeoutMs } from './scannerSettings';
 import { PhotoIdentityService } from './PhotoIdentityService';
@@ -10,7 +11,7 @@ import sharp from 'sharp';
 import logger from '../../logger';
 import { pythonProvider } from '../../infrastructure/PythonAIProvider';
 import { getLibraryPath } from '../../store'; // Config later
-import { isRawLikeExtension } from '../../utils/imageFormats';
+import { isCameraRawExtension, isRawLikeExtension } from '../../utils/imageFormats';
 import { imageJobs } from '../../services/image/ImageJobTracker';
 import { FaceRepository } from '../../data/repositories/FaceRepository';
 import { PhotoRepository } from '../../data/repositories/PhotoRepository';
@@ -107,8 +108,8 @@ export class PhotoService {
                 } catch (e) { /* Fallback */ }
             }
 
-            // 2. Sharp
-            if (!extracted) {
+            // 2. Sharp (never for camera RAW: it cannot decode them, and its native code can end the app)
+            if (!extracted && !isCameraRawExtension(ext)) {
                 try {
                     // limited and recorded, see ImageJobTracker (native sharp crashes took the whole app down)
                     await imageJobs.run('preview', filePath, async () => {
@@ -270,8 +271,8 @@ export class PhotoService {
     }
 
     // --- AI WRAPPERS ---
-    static async generateTags(photoId: number, filePath: string) {
-        const result = await pythonProvider.sendRequest('generate_tags', { photoId, filePath }, 60000);
+    static async generateTags(photoId: number, filePath: string, requestOptions?: RequestOptions) {
+        const result = await pythonProvider.sendRequest('generate_tags', { photoId, filePath }, 60000, requestOptions);
 
         if (result && !result.error && (result.description || result.tags)) {
             // DB Updates
@@ -323,9 +324,6 @@ export class PhotoService {
                 } else {
                     logger.info(`[PhotoService] No existing faces to delete.`);
                 }
-            } else {
-                logger.info(`[PhotoService] cleanRescan=FALSE (or undefined) for Photo ${photoId}. Caller Trace:`);
-                console.trace(`[PhotoService] Analyze Trigger Trace`);
             }
 
             // Call Python Provider

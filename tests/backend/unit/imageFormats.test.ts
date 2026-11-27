@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isRawLikeExtension, isStandardImageExtension, isSupportedImageExtension } from '../../../electron/utils/imageFormats';
+import { isCameraRawExtension, isRawLikeExtension, isStandardImageExtension, isSupportedImageExtension } from '../../../electron/utils/imageFormats';
 
 describe('imageFormats', () => {
     it.each(['.jpg', '.jpeg', '.png', '.jfif', '.webp'])('treats %s as a supported standard (non-RAW) image', ext => {
@@ -16,6 +16,14 @@ describe('imageFormats', () => {
 
     it.each(['.txt', '.mp4', '.gif', '.heic', ''])('does not support %s', ext => {
         expect(isSupportedImageExtension(ext)).toBe(false);
+    });
+
+    it.each(['.arw', '.cr2', '.nef', '.orf', '.rw2', '.ARW'])('treats %s as camera RAW, which the Python engine decodes and sharp never sees', ext => {
+        expect(isCameraRawExtension(ext)).toBe(true);
+    });
+
+    it.each(['.dng', '.tif', '.tiff', '.jpg', '.png', '.webp'])('lets sharp read %s', ext => {
+        expect(isCameraRawExtension(ext)).toBe(false);
     });
 
     it('is case-insensitive', () => {

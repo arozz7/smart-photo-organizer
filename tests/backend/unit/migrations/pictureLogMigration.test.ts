@@ -15,7 +15,7 @@ describe('005_pictureLog migration', () => {
 
     it('is version 5 and registered after the profile suggestion log', () => {
         expect(pictureLogMigration.version).toBe(5);
-        expect(MIGRATIONS.map(m => m.version)).toEqual([1, 2, 3, 4, 5]);
+        expect(MIGRATIONS.map(m => m.version).slice(0, 5)).toEqual([1, 2, 3, 4, 5]);
     });
 
     it('keeps one row per face: what the user did with it, and how it was assigned before (so Undo gives it back exactly)', () => {

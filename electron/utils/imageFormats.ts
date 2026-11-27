@@ -11,6 +11,13 @@ const STANDARD_IMAGE_EXTENSIONS: readonly string[] = ['.jpg', '.jpeg', '.png', '
 /** Formats that need the RAW-like path (embedded previews, RAW decoding). */
 const RAW_LIKE_EXTENSIONS: readonly string[] = ['.arw', '.cr2', '.nef', '.dng', '.orf', '.rw2', '.tif', '.tiff'];
 
+/**
+ * Camera RAW formats libvips (sharp) cannot decode. They are decoded by the Python engine, and sharp is never given them:
+ * sharp can only fail on them, and its native code can end the whole app (see aiChangeLog/fix-sharp-raw-and-breadcrumb.md).
+ * DNG and TIFF stay out of this list because libvips can read many of them.
+ */
+const CAMERA_RAW_EXTENSIONS: readonly string[] = ['.arw', '.cr2', '.nef', '.orf', '.rw2'];
+
 export const SUPPORTED_IMAGE_EXTENSIONS: readonly string[] = [...STANDARD_IMAGE_EXTENSIONS, ...RAW_LIKE_EXTENSIONS];
 
 const normalise = (ext: string): string => ext.toLowerCase();
@@ -21,6 +28,11 @@ export function isSupportedImageExtension(ext: string): boolean {
 
 export function isStandardImageExtension(ext: string): boolean {
     return STANDARD_IMAGE_EXTENSIONS.includes(normalise(ext));
+}
+
+/** True for camera RAW formats that only the Python engine decodes. */
+export function isCameraRawExtension(ext: string): boolean {
+    return CAMERA_RAW_EXTENSIONS.includes(normalise(ext));
 }
 
 /** True for supported formats that are not directly decodable. */

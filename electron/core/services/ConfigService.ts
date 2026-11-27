@@ -21,6 +21,9 @@ export interface AISettings {
     aiProfile: 'fast' | 'balanced' | 'high';
     useGpu: boolean;
     vlmEnabled: boolean;
+    /** When photo descriptions and tags are made: 'background' (after the face scan, when idle; default) or 'scan' (inside it, slower). */
+    captionTiming?: 'scan' | 'background';
+    backgroundDuringScan?: boolean; // Default false - background tasks wait until the face scan is done
     vlmVerificationThreshold?: number; // Default 0.65 - faces below this score are marked as 'suspect' for VLM verification
     runtimeUrl?: string;
     // L2 distance thresholds for scan-time face classification
@@ -164,6 +167,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         aiProfile: 'balanced',
         useGpu: true,
         vlmEnabled: false, // Default to off for performance
+        captionTiming: 'background', // Faces first; descriptions and tags follow when nothing else is working
+        backgroundDuringScan: false, // Face checks, grouping and captions wait for the face scan; it runs at full speed
         vlmVerificationThreshold: 0.85, // Phase 56: VLM Verification threshold
         runtimeUrl: undefined,
         autoAssignThreshold: 0.7,       // Scan-time auto-assign distance (what the code already fell back to)

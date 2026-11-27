@@ -1,4 +1,5 @@
 import { getDB } from '../../db';
+import { BACKGROUND } from '../interfaces/IAIProvider';
 import { getAISettings } from '../../store';
 import { FaceRepository } from '../../data/repositories/FaceRepository';
 import { PersonRepository } from '../../data/repositories/PersonRepository';
@@ -383,7 +384,7 @@ export class BackgroundBucketingService implements IService {
             const eps = 0.17;
             const minSamples = 2; // Low to catch small groups
 
-            const result = await this.aiProvider.clusterFaces(pyFaces, eps, minSamples, anchorOnlyFrontal);
+            const result = await this.aiProvider.clusterFaces(pyFaces, eps, minSamples, anchorOnlyFrontal, undefined, BACKGROUND);
 
             // Python returns { clusters: [[id1, id2], [id3, id4]], singles: [...] }
             if (!result || !result.clusters || result.clusters.length === 0) {

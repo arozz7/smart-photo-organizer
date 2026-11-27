@@ -4,7 +4,8 @@ import path from 'node:path';
 import { app, BrowserWindow } from 'electron';
 import logger from '../logger';
 import { IService } from '../core/interfaces/IService';
-import { IAIProvider } from '../core/interfaces/IAIProvider';
+import { IAIProvider, RequestOptions } from '../core/interfaces/IAIProvider';
+import { RequestScheduler } from './RequestScheduler';
 import { FaceService } from '../core/services/FaceService';
 import { PhotoRepository } from '../data/repositories/PhotoRepository';
 import { ConfigService } from '../core/services/ConfigService';
@@ -13,7 +14,9 @@ import { getAISettings, getLibraryPath } from '../store'; // ConfigService later
 export class PythonAIProvider implements IAIProvider, IService {
     private process: ChildProcess | null = null;
     private mainWindow: BrowserWindow | null = null;
-    private scanPromises = new Map<number, { resolve: (v: any) => void, reject: (err: any) => void }>();
+    private scanPromises = new Map<number, { resolve: (v: any) => void, reject: (err: any) => void, finish?: () => void }>();
+    /** Decides when each request is written to the engine (background work waits for requests the user is waiting for). */
+    private readonly scheduler = new RequestScheduler();
     private isShuttingDown = false;
 
     // [Phase 65] HTTP fallback for standalone backend mode
@@ -119,6 +122,7 @@ export class PythonAIProvider implements IAIProvider, IService {
         this.process.on('close', (code) => {
             logger.warn(`Python process exited with code ${code}`);
             this.process = null;
+            this.scheduler.reset();
 
             // If the process died unexpectedly (not via our own stop()), any
             // in-flight request would otherwise hang until its own timeout
@@ -140,10 +144,13 @@ export class PythonAIProvider implements IAIProvider, IService {
             if (message.error) p?.reject(message.error);
             else p?.resolve(message);
             this.scanPromises.delete(resId);
+            p?.finish?.(); // the engine is free for the next request in line
         }
 
         // 3. Process Logic (Delegated to Services)
         if (message.type === 'analysis_result') {
+            const resultReceivedAt = Date.now();
+            let facesSavedMs = 0;
             if (!message.error && message.faces && message.faces.length > 0) {
                 // Extract session data for Phase P2
                 const sessionFolder = message.filePath ? path.dirname(message.filePath) : undefined;
@@ -178,6 +185,7 @@ export class PythonAIProvider implements IAIProvider, IService {
                 } catch (e) {
                     logger.error(`[Main] processAnalysisResult failed for photo ${message.photoId}:`, e);
                 }
+                facesSavedMs = Date.now() - resultReceivedAt;
             }
 
             // Save global blur score, description, and pHash to photos table
@@ -216,6 +224,8 @@ export class PythonAIProvider implements IAIProvider, IService {
             } catch (e) {
                 logger.error('[Main] Failed to record scan history:', e);
             }
+            // Where the time between two photos goes on the main side (the engine's own time is in the Python log)
+            logger.info(`[Timing] Photo ${message.photoId}: result handled in ${Date.now() - resultReceivedAt} ms (faces saved in ${facesSavedMs} ms)`);
         }
 
 
@@ -245,6 +255,7 @@ export class PythonAIProvider implements IAIProvider, IService {
         // Reject any pending promises
         this.scanPromises.forEach(p => p.reject(new Error('Shutdown')));
         this.scanPromises.clear();
+        this.scheduler.reset();
     }
 
     syncSettings() {
@@ -333,23 +344,27 @@ export class PythonAIProvider implements IAIProvider, IService {
         }
     }
 
-    sendRequest(type: string, payload: any, timeoutMs = 120000): Promise<any> {
+    sendRequest(type: string, payload: any, timeoutMs = 120000, options?: RequestOptions): Promise<any> {
         // [Phase 65] Use HTTP if standalone backend is running
         if (this.httpFallbackEnabled) {
             return this.sendHttpRequest(type, payload, timeoutMs);
         }
 
-        // Default: IPC mode
+        // Default: IPC mode. The scheduler writes the request when it is its turn (background work waits for foreground requests) and starts
+        // the timeout then; a request waiting in line is rejected at once if the engine stops.
         return new Promise((resolve, reject) => {
             const requestId = Math.floor(Math.random() * 1000000);
-            this.scanPromises.set(requestId, { resolve, reject });
-            this.sendCommand(type, { ...payload, reqId: requestId });
-            setTimeout(() => {
-                if (this.scanPromises.has(requestId)) {
-                    this.scanPromises.delete(requestId);
-                    reject('Timeout');
-                }
-            }, timeoutMs);
+            const pending: { resolve: (v: any) => void, reject: (err: any) => void, finish?: () => void } = { resolve, reject };
+            this.scanPromises.set(requestId, pending);
+            const turn = this.scheduler.schedule({
+                lane: options?.lane ?? 'foreground',
+                timeoutMs,
+                start: () => this.sendCommand(type, { ...payload, reqId: requestId }),
+                onTimeout: () => {
+                    if (this.scanPromises.delete(requestId)) reject('Timeout');
+                },
+            });
+            pending.finish = turn.finish;
         });
     }
 
@@ -370,9 +385,10 @@ export class PythonAIProvider implements IAIProvider, IService {
         eps?: number,
         minSamples?: number,
         anchorOnlyFrontal = false,
-        timeoutMs = 900000
+        timeoutMs = 900000,
+        requestOptions?: RequestOptions
     ): Promise<any> {
-        return this.sendRequest('cluster_faces', { faces, eps, minSamples, anchor_only_frontal: anchorOnlyFrontal }, timeoutMs);
+        return this.sendRequest('cluster_faces', { faces, eps, minSamples, anchor_only_frontal: anchorOnlyFrontal }, timeoutMs, requestOptions);
     }
 
     async searchFaces(descriptors: number[][], k?: number, threshold?: number, timeoutMs = 300000): Promise<{ id: number; distance: number; }[][]> {
@@ -408,7 +424,7 @@ export class PythonAIProvider implements IAIProvider, IService {
         filePath: string;
         previewPath: string | null;
         box: string;
-    }): Promise<{
+    }, requestOptions?: RequestOptions): Promise<{
         age: number | null;
         gender: string | null;
         poseYaw: number | null;
@@ -424,7 +440,7 @@ export class PythonAIProvider implements IAIProvider, IService {
                 filePath: faceData.filePath,
                 previewPath: faceData.previewPath,
                 box: faceData.box
-            }, 30000);
+            }, 30000, requestOptions);
 
             if (result.error) {
                 throw new Error(result.error);
@@ -453,7 +469,7 @@ export class PythonAIProvider implements IAIProvider, IService {
      * Verify if a detected region is actually a human face using VLM.
      * Used by BackgroundVerificationService (Phase 56).
      */
-    async verifyFace(imagePath: string, box: { x1: number; y1: number; x2: number; y2: number }): Promise<{
+    async verifyFace(imagePath: string, box: { x1: number; y1: number; x2: number; y2: number }, requestOptions?: RequestOptions): Promise<{
         is_face: boolean | null;
         confidence: number;
         reason?: string;
@@ -464,7 +480,7 @@ export class PythonAIProvider implements IAIProvider, IService {
             const result = await this.sendRequest('verify_face', {
                 imagePath,
                 box
-            }, 120000);
+            }, 120000, requestOptions);
 
             if (result.error) {
                 return {
@@ -505,7 +521,8 @@ export class PythonAIProvider implements IAIProvider, IService {
             orientation?: number;
             detThreshold?: number;
             detSize?: [number, number];
-        } = {}
+        } = {},
+        requestOptions?: RequestOptions
     ): Promise<{
         faceCount: number;
         faces: Array<{
@@ -524,7 +541,7 @@ export class PythonAIProvider implements IAIProvider, IService {
                 orientation,
                 detThreshold,
                 detSize
-            }, 30000);
+            }, 30000, requestOptions);
 
             if (result.error) {
                 return {

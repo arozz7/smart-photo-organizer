@@ -1,17 +1,21 @@
 import { useState } from 'react'
 import SettingsModal from '../SettingsModal';
 import SettingsSection from './SettingsSection';
-import type { AiProfile } from '../../hooks/useAiSettings';
+import type { AiProfile, CaptionTiming } from '../../hooks/useAiSettings';
 
 interface AiPerformanceSectionProps {
     aiProfile: AiProfile
     vlmEnabled: boolean
+    captionTiming: CaptionTiming
+    backgroundDuringScan: boolean
     onProfileChange: (profile: AiProfile) => void
     onVlmToggle: () => void
+    onCaptionTimingChange: (timing: CaptionTiming) => void
+    onBackgroundDuringScanChange: (enabled: boolean) => void
 }
 
-/** AI Performance Profile: model profile, Smart Tags (VLM) and the advanced model configuration dialog. */
-export default function AiPerformanceSection({ aiProfile, vlmEnabled, onProfileChange, onVlmToggle }: AiPerformanceSectionProps) {
+/** AI Performance Profile: model profile, Smart Tags (VLM), background tasks and the advanced model configuration dialog. */
+export default function AiPerformanceSection({ aiProfile, vlmEnabled, captionTiming, backgroundDuringScan, onProfileChange, onVlmToggle, onCaptionTimingChange, onBackgroundDuringScanChange }: AiPerformanceSectionProps) {
     const [showSettingsModal, setShowSettingsModal] = useState(false);
 
     return (
@@ -31,6 +35,7 @@ export default function AiPerformanceSection({ aiProfile, vlmEnabled, onProfileC
                             </p>
                         </div>
                         <select
+                            aria-label="AI model profile"
                             className="bg-gray-700 text-white text-sm px-3 py-2 rounded focus:ring-1 focus:ring-indigo-500 outline-none border border-gray-600"
                             value={aiProfile}
                             onChange={(e) => onProfileChange(e.target.value as AiProfile)}
@@ -69,6 +74,42 @@ export default function AiPerformanceSection({ aiProfile, vlmEnabled, onProfileC
                                 />
                             </button>
                         </div>
+                    </div>
+
+                    {vlmEnabled && (
+                        <div className="flex justify-between items-center gap-4 flex-wrap">
+                            <div>
+                                <h4 className="font-medium text-white">Descriptions and tags</h4>
+                                <p className="text-sm text-gray-400 mt-1">
+                                    In the background they follow the face scan when nothing else is working, so scanning is about four times faster. While scanning, each photo waits for its description.
+                                </p>
+                            </div>
+                            <select
+                                aria-label="When to make descriptions and tags"
+                                className="bg-gray-700 text-white text-sm px-3 py-2 rounded focus:ring-1 focus:ring-indigo-500 outline-none border border-gray-600"
+                                value={captionTiming}
+                                onChange={(e) => onCaptionTimingChange(e.target.value as CaptionTiming)}
+                            >
+                                <option value="background">In the background (faster scans)</option>
+                                <option value="scan">While scanning</option>
+                            </select>
+                        </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-4 pt-4 border-t border-gray-700">
+                        <div>
+                            <h4 className="font-medium text-white">Background tasks while scanning</h4>
+                            <p className="text-sm text-gray-400 mt-1">
+                                Face checks, grouping and descriptions normally wait until the face scan is done, so scanning runs at full speed. Turn this on to run them at the same time (the scan gets slower).
+                            </p>
+                        </div>
+                        <input
+                            type="checkbox"
+                            aria-label="Run background tasks while scanning"
+                            className="h-5 w-5 shrink-0 accent-indigo-600"
+                            checked={backgroundDuringScan}
+                            onChange={(e) => onBackgroundDuringScanChange(e.target.checked)}
+                        />
                     </div>
 
                     {/* Advanced Configuration (Moved from Header) */}

@@ -1,6 +1,7 @@
 import { scanDirectory, scanFiles } from './scanner';
 import { getLibraryPath } from './store';
 import logger from './logger';
+import type { ScanProgress } from './scanning/scanProgress';
 import { AppStateRepository } from './data/repositories/AppStateRepository';
 
 import { IService } from './core/interfaces/IService';
@@ -13,6 +14,11 @@ class ScanQueue implements IService {
     private queue: ScanTask[] = [];
     private isProcessing = false;
     private shouldStop = false;
+
+    /** True while a scan task is running. */
+    get busy(): boolean {
+        return this.isProcessing;
+    }
 
     start() {
         this.shouldStop = false;
@@ -56,19 +62,14 @@ class ScanQueue implements IService {
         try {
             const libraryPath = getLibraryPath();
             let result;
+            const sendProgress = (progress: ScanProgress): void => {
+                if (!task.sender.isDestroyed()) task.sender.send('scan-progress', progress);
+            };
 
             if (task.type === 'directory') {
-                result = await scanDirectory(task.path, libraryPath, (count) => {
-                    if (!task.sender.isDestroyed()) {
-                        task.sender.send('scan-progress', count);
-                    }
-                }, task.options);
+                result = await scanDirectory(task.path, libraryPath, sendProgress, task.options);
             } else {
-                result = await scanFiles(task.paths, libraryPath, (count) => {
-                    if (!task.sender.isDestroyed()) {
-                        task.sender.send('scan-progress', count);
-                    }
-                }, task.options);
+                result = await scanFiles(task.paths, libraryPath, sendProgress, task.options);
             }
 
             task.resolve(result);

@@ -7,7 +7,6 @@ import { buildScanQueueItems } from '../utils/scanQueueItems'
 
 interface ScanContextType {
     scanning: boolean
-    scanCount: number
     startScan: (path: string, options?: { forceRescan?: boolean }) => Promise<void>
     scanPath: string
     photos: any[]
@@ -42,7 +41,6 @@ const ScanContext = createContext<ScanContextType | undefined>(undefined)
 export function ScanProvider({ children }: { children: ReactNode }) {
     const [activeScanRequests, setActiveScanRequests] = useState(0)
     const scanning = activeScanRequests > 0
-    const [scanCount, setScanCount] = useState(0)
     const [scanPath, setScanPath] = useState('')
     const [photos, setPhotos] = useState<any[]>([])
     const [hasMore, setHasMore] = useState(false)
@@ -57,20 +55,6 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     const metadata = useLibraryMetadata()
     const errors = useScanErrors()
     const navigation = usePhotoNavigation(photos, setPhotos)
-
-    useEffect(() => {
-        // Global listener for progress
-        const listener = (_event: any, count: number) => {
-            setScanCount(count)
-        }
-        // @ts-ignore
-        const removeListener = (window as any).ipcRenderer.on('scan-progress', listener)
-        return () => {
-            if (typeof removeListener === 'function') {
-                removeListener()
-            }
-        }
-    }, [])
 
     const isFilterComplete = (f: any) => {
         if (f.initial) return false
@@ -172,7 +156,6 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
     const startScan = async (path: string, options: { forceRescan?: boolean } = {}) => {
         setActiveScanRequests(prev => prev + 1)
-        setScanCount(0)
         setScanPath(path)
         try {
             console.log(`[ScanContext] Starting scan of ${path} (forceRescan=${options.forceRescan})`);
@@ -259,7 +242,6 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     return (
         <ScanContext.Provider value={{
             scanning,
-            scanCount,
             startScan,
             scanPath,
             photos,

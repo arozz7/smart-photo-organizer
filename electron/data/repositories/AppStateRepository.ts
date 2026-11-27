@@ -183,18 +183,33 @@ export class AppStateRepository {
 
     // --- AI Processing State (Concurrency Control) ---
 
+    /** Time of the last change of the face queue's flag; the queue counts as working until `aiIdleGraceMs` after it. */
+    private static lastAIActivityAt = Number.NEGATIVE_INFINITY;
+    private static aiIdleGraceMs = 15_000;
+
     /**
-     * Check if AI processing is currently active (queue running).
+     * How long the queue still counts as working after it last worked. The flag drops for a moment between two photos
+     * of a scan; without this wait, background tasks start in that gap and make the next photo wait for the engine.
+     * Zero follows the flag exactly (background tasks may run alongside the scan).
      */
-    static isAIProcessingActive(): boolean {
-        return this.getFlag('ai_processing_active') === '1';
+    static setAIIdleGraceMs(ms: number): void {
+        this.aiIdleGraceMs = ms;
+    }
+
+    /**
+     * Check if AI processing is currently active (queue running, or stopped less than the waiting time ago).
+     */
+    static isAIProcessingActive(now: number = Date.now()): boolean {
+        if (this.getFlag('ai_processing_active') === '1') return true;
+        return now - this.lastAIActivityAt < this.aiIdleGraceMs;
     }
 
     /**
      * Set AI processing state.
      */
-    static setAIProcessingActive(active: boolean): void {
+    static setAIProcessingActive(active: boolean, now: number = Date.now()): void {
         this.setFlag('ai_processing_active', active ? '1' : '0');
+        this.lastAIActivityAt = now;
     }
 
     // --- Phase 107: Duplicate Check ---

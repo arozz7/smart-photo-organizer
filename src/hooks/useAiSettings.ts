@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useAlert } from '../context/AlertContext'
 
 export type AiProfile = 'balanced' | 'high'
+/** When photo descriptions and tags are made: after the face scan when idle, or inside the scan. */
+export type CaptionTiming = 'background' | 'scan'
 
 export interface EraConfig {
     minFaces: number
@@ -24,6 +26,8 @@ export function useAiSettings() {
     const { showConfirm } = useAlert();
     const [aiProfile, setAiProfile] = useState<AiProfile>('balanced');
     const [vlmEnabled, setVlmEnabled] = useState(false);
+    const [captionTiming, setCaptionTiming] = useState<CaptionTiming>('background');
+    const [backgroundDuringScan, setBackgroundDuringScan] = useState(false);
     const [eraConfig, setEraConfig] = useState<EraConfig>({ minFaces: 50, mergeThreshold: 0.75 });
 
     useEffect(() => {
@@ -32,6 +36,8 @@ export function useAiSettings() {
             if (settings) {
                 if (settings.aiProfile) setAiProfile(settings.aiProfile);
                 if (settings.vlmEnabled !== undefined) setVlmEnabled(settings.vlmEnabled);
+                if (settings.captionTiming) setCaptionTiming(settings.captionTiming);
+                if (settings.backgroundDuringScan !== undefined) setBackgroundDuringScan(Boolean(settings.backgroundDuringScan));
                 setEraConfig({
                     minFaces: settings.minFacesForEra ?? 50,
                     mergeThreshold: settings.eraMergeThreshold ?? 0.75
@@ -65,6 +71,18 @@ export function useAiSettings() {
         });
     }
 
+    // Read by the main process for every photo, so no reload is needed.
+    const changeCaptionTiming = async (timing: CaptionTiming) => {
+        setCaptionTiming(timing);
+        await saveMergedAiSettings({ captionTiming: timing });
+    }
+
+    // The main process applies it at once when it is saved, so no reload is needed.
+    const changeBackgroundDuringScan = async (enabled: boolean) => {
+        setBackgroundDuringScan(enabled);
+        await saveMergedAiSettings({ backgroundDuringScan: enabled });
+    }
+
     const changeEraMergeThreshold = async (value: number) => {
         setEraConfig(prev => ({ ...prev, mergeThreshold: value }));
         await saveMergedAiSettings({ eraMergeThreshold: value });
@@ -75,5 +93,5 @@ export function useAiSettings() {
         await saveMergedAiSettings({ minFacesForEra: value });
     }
 
-    return { aiProfile, vlmEnabled, eraConfig, changeProfile, toggleVlm, changeEraMergeThreshold, changeEraMinFaces }
+    return { aiProfile, vlmEnabled, captionTiming, backgroundDuringScan, eraConfig, changeProfile, toggleVlm, changeCaptionTiming, changeBackgroundDuringScan, changeEraMergeThreshold, changeEraMinFaces }
 }

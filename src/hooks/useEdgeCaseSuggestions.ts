@@ -3,6 +3,7 @@ import type { EdgeCaseFilterType } from '../components/EdgeCaseFilters'
 import { useNonFaceSuggestions } from './useNonFaceSuggestions'
 import { useProfileSuggestions } from './useProfileSuggestions'
 import { usePictureSuggestions } from './usePictureSuggestions'
+import { useDoubtfulFaces } from './useDoubtfulFaces'
 import { clearEdgeCaseIntent, pendingEdgeCaseIntent } from '../utils/edgeCaseIntent'
 
 /** The tab People opens on when another page asked for an Edge Cases filter (see edgeCaseIntent), else undefined. */
@@ -35,16 +36,18 @@ export function useEdgeCaseSuggestions(reloadReview?: () => void) {
     const profile = useProfileSuggestions({ enabled: activeFilter === 'profile', personId: focusPersonId, onReviewChanged: markReviewOutOfDate })
 
     const pictures = usePictureSuggestions({ enabled: activeFilter === 'pictures', onReviewChanged: markReviewOutOfDate })
+    const doubtful = useDoubtfulFaces({ enabled: activeFilter === 'doubtful', onReviewChanged: markReviewOutOfDate })
 
     const counts = {
         nonface: nonFace.total,
         profile: profile.total,
         pictures: pictures.total,
+        doubtful: doubtful.total,
         hidden: nonFace.overview?.hiddenFromReview ?? 0,
         hiddenPictures: pictures.overview?.hiddenFromReview ?? 0,
     }
 
-    return { activeFilter, setActiveFilter, nonFace, profile, pictures, counts, focusPersonId, showEveryone: () => setFocusPersonId(null) }
+    return { activeFilter, setActiveFilter, nonFace, profile, pictures, doubtful, counts, focusPersonId, showEveryone: () => setFocusPersonId(null) }
 }
 
 export type EdgeCaseSuggestions = ReturnType<typeof useEdgeCaseSuggestions>

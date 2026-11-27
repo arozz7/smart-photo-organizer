@@ -90,7 +90,8 @@ export class ImageJobTracker {
         await this.acquire();
         const id = ++this.nextId;
         this.running.set(id, { op, file, since: new Date(this.io.now()).toISOString() });
-        this.scheduleFlush();
+        // At once, not after the delay: a crash inside the job (native code) must find the file already on disk.
+        this.flushNow();
         try {
             return await job();
         } finally {

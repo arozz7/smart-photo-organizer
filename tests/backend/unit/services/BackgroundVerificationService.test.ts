@@ -59,7 +59,8 @@ vi.mock('../../../../electron/infrastructure/PythonAIProvider', () => ({
 
 vi.mock('../../../../electron/data/repositories/AppStateRepository', () => ({
     AppStateRepository: {
-        isAIProcessingActive: vi.fn(() => false)
+        isAIProcessingActive: vi.fn(() => false),
+        isScanActive: vi.fn(() => false)
     }
 }));
 
@@ -104,6 +105,7 @@ describe('BackgroundVerificationService', () => {
         vi.mocked(FaceRepository.incrementVerificationAttempts).mockReturnValue(1);
         vi.mocked(FaceRepository.getFacesByPhoto).mockReturnValue([]);
         vi.mocked(AppStateRepository.isAIProcessingActive).mockReturnValue(false);
+        vi.mocked(AppStateRepository.isScanActive).mockReturnValue(false);
         vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([mockWindow as any]);
     });
 
@@ -297,7 +299,8 @@ describe('BackgroundVerificationService', () => {
             expect(pythonProvider.detectFacesInRegion).toHaveBeenLastCalledWith(
                 face.file_path,
                 expect.any(Object),
-                expect.objectContaining({ detSize: [640, 640] })
+                expect.objectContaining({ detSize: [640, 640] }),
+                { lane: 'background' }
             );
             expect(FaceRepository.markFaceAsRejected).toHaveBeenCalledWith(face.id);
             expect(mockPrepare.run).toHaveBeenCalledTimes(2);
@@ -329,6 +332,89 @@ describe('BackgroundVerificationService', () => {
 
             // Assert
             expect(FaceRepository.getSuspectFaces).not.toHaveBeenCalled();
+        });
+
+        /** Runs the loop until its first sleep, so only the first pass over the guard is seen. */
+        async function runLoopOnePass() {
+            const sleepSpy = vi.spyOn(service as any, 'sleep').mockImplementation(async () => {
+                (service as any).shouldStop = true;
+            });
+            (service as any).shouldStop = false;
+            await (service as any).runLoop();
+            return sleepSpy;
+        }
+
+        it('pauses while a folder import (file scan) is running, not only while faces are analysed', async () => {
+            vi.mocked(AppStateRepository.isScanActive).mockReturnValue(true);
+
+            await runLoopOnePass();
+
+            expect(FaceRepository.getSuspectFaces).not.toHaveBeenCalled();
+            expect(FaceRepository.getOrphanedFaces).not.toHaveBeenCalled();
+        });
+
+        it('waits for a stretch of quiet before the first batch (the busy flag drops between two photos of a scan)', async () => {
+            await runLoopOnePass(); // nothing is running, but it was not quiet before
+
+            expect(FaceRepository.getSuspectFaces).not.toHaveBeenCalled();
+        });
+
+        it('leaves the rest of a batch when a scan starts in the middle of it', async () => {
+            const faces = [1, 2, 3].map(id => createSuspectFace({ id }));
+            vi.mocked(FaceRepository.getSuspectFaces).mockReturnValue(faces as any);
+            vi.mocked(pythonProvider.verifyFace).mockImplementation(async () => {
+                vi.mocked(AppStateRepository.isAIProcessingActive).mockReturnValue(true); // the user unpauses the scan
+                return { is_face: true, confidence: 0.9 };
+            });
+
+            await (service as any).processNextBatch();
+
+            expect(pythonProvider.verifyFace).toHaveBeenCalledTimes(1);
+        });
+
+        it('leaves the rest of an orphan batch when a scan starts in the middle of it', async () => {
+            const faces = [1, 2, 3].map(id => createSuspectFace({ id }));
+            vi.mocked(FaceRepository.getOrphanedFaces).mockReturnValue(faces as any);
+            vi.mocked(pythonProvider.verifyFace).mockImplementation(async () => {
+                vi.mocked(AppStateRepository.isScanActive).mockReturnValue(true);
+                return { is_face: true, confidence: 0.9 };
+            });
+
+            await (service as any).processOrphanedFaces();
+
+            expect(pythonProvider.verifyFace).toHaveBeenCalledTimes(1);
+        });
+
+        it('asks the engine for suspect faces in the background lane, so a page the user opens is not kept waiting behind it', async () => {
+            vi.mocked(FaceRepository.getSuspectFaces).mockReturnValue([createSuspectFace({ id: 1 })] as any);
+            vi.mocked(pythonProvider.verifyFace).mockResolvedValue({ is_face: true, confidence: 0.9 });
+
+            await (service as any).processNextBatch();
+
+            expect(pythonProvider.verifyFace).toHaveBeenCalledWith(expect.any(String), expect.any(Object), { lane: 'background' });
+        });
+
+        it('asks the engine for orphaned faces in the background lane too', async () => {
+            vi.mocked(FaceRepository.getOrphanedFaces).mockReturnValue([createSuspectFace({ id: 1 })] as any);
+            vi.mocked(pythonProvider.verifyFace).mockResolvedValue({ is_face: true, confidence: 0.9 });
+
+            await (service as any).processOrphanedFaces();
+
+            expect(pythonProvider.verifyFace).toHaveBeenCalledWith(expect.any(String), expect.any(Object), { lane: 'background' });
+        });
+
+        it('reads the pending count only for the idle log line (at most every 30 s), never while there is work', async () => {
+            vi.mocked(FaceRepository.getSuspectFaces).mockReturnValue([]);
+            await (service as any).processNextBatch();
+            await (service as any).processNextBatch();
+            expect(FaceRepository.countSuspectFaces).toHaveBeenCalledTimes(1);
+
+            vi.mocked(FaceRepository.countSuspectFaces).mockClear();
+            vi.mocked(FaceRepository.getSuspectFaces).mockReturnValue([createSuspectFace() as any]);
+            vi.mocked(pythonProvider.verifyFace).mockResolvedValue({ is_face: true, confidence: 0.9 });
+            await (service as any).processNextBatch();
+            expect(FaceRepository.countSuspectFaces).not.toHaveBeenCalled();
+            expect(FaceRepository.countOrphanedFaces).not.toHaveBeenCalled();
         });
 
         it('exception during processing → attempts incremented', async () => {

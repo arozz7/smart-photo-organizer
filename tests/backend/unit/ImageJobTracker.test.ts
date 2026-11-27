@@ -70,7 +70,20 @@ describe('ImageJobTracker', () => {
     });
 
     describe('breadcrumb', () => {
-        it('writes the files being processed to the state file (after a short delay, not on every change)', async () => {
+        it('writes a job to the state file before it runs, so a crash inside the job still names the file', async () => {
+            const { io, files } = fakeIO();
+            const tracker = new ImageJobTracker(io, 4);
+            tracker.attachStateFile('state.json');
+            let seenWhileRunning: string[] = [];
+
+            await tracker.run('thumbnail', 'R:\\Pictures\\a.ARW', async () => {
+                seenWhileRunning = saved(files, 'state.json').jobs.map(job => job.file);
+            });
+
+            expect(seenWhileRunning).toEqual(['R:\\Pictures\\a.ARW']);
+        });
+
+        it('writes the finished jobs out after a short delay, not on every change', async () => {
             const { io, files, fire, pending } = fakeIO();
             const tracker = new ImageJobTracker(io, 4);
             tracker.attachStateFile('state.json');
@@ -80,13 +93,13 @@ describe('ImageJobTracker', () => {
             await flush();
             tracker.run('preview', 'b.jpg', () => g.promise).catch(() => undefined);
             await flush();
-            expect(pending()).toBe(1);
-
-            fire();
             expect(saved(files, 'state.json').jobs.map(job => [job.op, job.file])).toEqual([['thumbnail', 'R:\\Pictures\\a.ARW'], ['preview', 'b.jpg']]);
 
             g.release();
             await run;
+            expect(pending()).toBe(1);
+            expect(saved(files, 'state.json').jobs).toHaveLength(2);
+
             fire();
             expect(saved(files, 'state.json').jobs).toEqual([]);
         });
@@ -121,7 +134,6 @@ describe('ImageJobTracker', () => {
             await flush();
             fire();
             expect(saved(files, 'state.json').jobs).toHaveLength(1);
-
             tracker.markCleanShutdown();
 
             expect(saved(files, 'state.json').jobs).toEqual([]);

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { BACKGROUND } from '../interfaces/IAIProvider';
 import { powerMonitor } from 'electron';
 import { AppStateRepository } from '../../data/repositories/AppStateRepository';
 import { VisibilityRepository, VISIBILITY_MODEL } from '../../data/repositories/VisibilityRepository';
@@ -17,7 +18,7 @@ export function createFaceVisibilityDeps(): FaceVisibilityDeps {
             photoWidth: face.photoWidth,
             box: face.box,
         })),
-        score: faces => scoreWithEngine(faces, (type, payload, timeoutMs) => pythonProvider.sendRequest(type, payload, timeoutMs)),
+        score: faces => scoreWithEngine(faces, (type, payload, timeoutMs) => pythonProvider.sendRequest(type, payload, timeoutMs, BACKGROUND)),
         save: results => VisibilityRepository.save(results, VISIBILITY_MODEL, new Date().toISOString()),
         isBusy: () =>
             AppStateRepository.isScanActive() || AppStateRepository.isAIProcessingActive() || AppStateRepository.isShutdownRequested(),

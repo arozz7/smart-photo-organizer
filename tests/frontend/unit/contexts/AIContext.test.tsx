@@ -162,6 +162,48 @@ describe('AIContext', () => {
         });
     });
 
+    it('ends the pause between batches by the clock, not by counting timer ticks (a hidden window runs a 1-second timer about once a minute, which made a 60 s pause last 54 minutes)', async () => {
+        vi.useFakeTimers();
+        try {
+            mockIpcRenderer.invoke.mockImplementation((channel) => {
+                if (channel === 'settings:getQueueConfig') return Promise.resolve({ batchSize: 1, cooldownSeconds: 60 });
+                if (channel === 'settings:getAIQueue') return Promise.resolve([{ id: 1, file_path: 'a.jpg' }, { id: 2, file_path: 'b.jpg' }]);
+                return Promise.resolve({ success: true });
+            });
+            render(
+                <ToastProvider>
+                    <AlertProvider>
+                        <AIProvider>
+                            <TestComponent />
+                        </AIProvider>
+                    </AlertProvider>
+                </ToastProvider>
+            );
+            const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+            const analysed = () => mockIpcRenderer.invoke.mock.calls
+                .filter(([channel]) => channel === 'ai:analyzeImage')
+                .map(([, payload]) => payload.photoId);
+            await tick(0);
+            await act(async () => { screen.getByTestId('btn-resume').click(); });
+            await tick(0);
+            expect(analysed()).toEqual([1]);
+
+            // the first photo is done: the batch limit (1) starts the pause
+            await act(async () => { mockIpcRenderer.emit('ai:scan-result', { photoId: 1, type: 'analysis_result', faces: [], tags: [] }); });
+            await tick(0);
+            expect(analysed()).toEqual([1]);
+
+            // the window was hidden: a whole minute passed, but the timer ran only once
+            vi.setSystemTime(Date.now() + 61_000);
+            await tick(1000);
+            await tick(0);
+
+            expect(analysed()).toEqual([1, 2]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('does not re-render its consumers when a status poll returns the same values (it did every second while grouping, which made Home flicker)', async () => {
         vi.useFakeTimers();
         try {

@@ -108,7 +108,8 @@ describe('Settings view', () => {
         render(<Settings />);
 
         await waitFor(() => expect(screen.getByText('D:\\Library')).toBeInTheDocument());
-        expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('high');
+        expect((screen.getByLabelText('AI model profile') as HTMLSelectElement).value).toBe('high');
+        expect((screen.getByLabelText('When to make descriptions and tags') as HTMLSelectElement).value).toBe('background');
         expect(screen.getByText('ENABLED')).toBeInTheDocument();
         expect(screen.getByText('1.10')).toBeInTheDocument();
         expect(screen.getByText('120')).toBeInTheDocument();
@@ -122,11 +123,35 @@ describe('Settings view', () => {
         render(<Settings />);
         await waitFor(() => expect(screen.getByText('D:\\Library')).toBeInTheDocument());
 
-        fireEvent.change(screen.getByRole('combobox'), { target: { value: 'balanced' } });
+        fireEvent.change(screen.getByLabelText('AI model profile'), { target: { value: 'balanced' } });
 
         await waitFor(() => expect(callsTo(calls, 'ai:saveSettings')).toHaveLength(1));
         expect(callsTo(calls, 'ai:saveSettings')[0].args[0]).toEqual({ ...AI_SETTINGS, aiProfile: 'balanced' });
         await waitFor(() => expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Reload Required', confirmLabel: 'Reload Now' })));
+    });
+
+    it('saves when descriptions and tags are made, merged with the current settings, with no reload', async () => {
+        const calls = installIpc();
+        render(<Settings />);
+        await waitFor(() => expect(screen.getByText('D:\\Library')).toBeInTheDocument());
+
+        fireEvent.change(screen.getByLabelText('When to make descriptions and tags'), { target: { value: 'scan' } });
+
+        await waitFor(() => expect(callsTo(calls, 'ai:saveSettings')).toHaveLength(1));
+        expect(callsTo(calls, 'ai:saveSettings')[0].args[0]).toEqual({ ...AI_SETTINGS, captionTiming: 'scan' });
+        expect(showConfirm).not.toHaveBeenCalled();
+    });
+
+    it('saves "run background tasks while scanning", merged with the current settings, with no reload', async () => {
+        const calls = installIpc();
+        render(<Settings />);
+        await waitFor(() => expect(screen.getByText('D:\\Library')).toBeInTheDocument());
+
+        fireEvent.click(screen.getByLabelText('Run background tasks while scanning'));
+
+        await waitFor(() => expect(callsTo(calls, 'ai:saveSettings')).toHaveLength(1));
+        expect(callsTo(calls, 'ai:saveSettings')[0].args[0]).toEqual({ ...AI_SETTINGS, backgroundDuringScan: true });
+        expect(showConfirm).not.toHaveBeenCalled();
     });
 
     it('toggles Smart Tags, saves it merged and offers a reload', async () => {

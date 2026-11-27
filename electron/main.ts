@@ -4,6 +4,7 @@ import { registerImageProtocol } from './services/imageProtocol';
 import sharp from 'sharp';
 import { readdirSync } from 'node:fs';
 import { startCrashDumps } from './lib/crashDumps';
+import { EventLoopLagMonitor } from './utils/EventLoopLagMonitor';
 import { imageJobs, SHARP_THREADS_PER_JOB } from './services/image/ImageJobTracker';
 import { pythonProvider } from './infrastructure/PythonAIProvider';
 import { registerAIHandlers } from './ipc/aiHandlers';
@@ -25,6 +26,9 @@ import { getFaceVisibilityService } from './core/services/FaceVisibilityDeps';
 import { registerPictureHandlers } from './ipc/pictureHandlers';
 import { registerPictureCheckHandlers } from './ipc/pictureCheckHandlers';
 import { getPictureCheckService } from './core/services/PictureCheckDeps';
+import { getAssignedVisibilityService } from './core/services/AssignedVisibilityDeps';
+import { registerAssignedCheckHandlers } from './ipc/assignedCheckHandlers';
+import { registerDoubtfulHandlers } from './ipc/doubtfulHandlers';
 import { getRematchService } from './core/services/RematchDeps';
 import { registerCompositeHandlers } from './ipc/compositeHandlers';
 import { registerAdjustmentHandlers } from './ipc/adjustmentHandlers';
@@ -32,7 +36,8 @@ import { scanQueue } from './scanQueue';
 import { initDB } from './db'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { getLibraryPath } from './store';
+import { getLibraryPath, getAISettings } from './store';
+import { backgroundIdleGraceMs } from './core/services/backgroundPolicy';
 import * as fs from 'node:fs/promises';
 import logger from './logger';
 import { WindowManager } from './windows/windowManager';
@@ -41,6 +46,7 @@ import { BackgroundVerificationService } from './core/services/BackgroundVerific
 import { BackgroundPropagationService } from './core/services/BackgroundPropagationService';
 import { BackgroundDuplicateCheckerService } from './core/services/BackgroundDuplicateCheckerService';
 import { BackgroundFileIdentityService } from './core/services/BackgroundFileIdentityService';
+import { BackgroundCaptionService } from './core/services/BackgroundCaptionService';
 import { BackgroundFaissSyncService } from './core/services/BackgroundFaissSyncService';
 import { createFaissSyncDeps } from './core/services/FaissIndexService';
 import { AppStateRepository } from './data/repositories/AppStateRepository';
@@ -118,7 +124,14 @@ app.on('activate', () => {
   }
 })
 
+// Measures how long the main process is blocked and logs it with what was running (the window stalls during scans; see feat-scan-progress-total.md).
+const lagMonitor = new EventLoopLagMonitor({
+  activity: () => [scanQueue.busy ? 'scan' : '', imageJobs.inFlight().length > 0 ? `${imageJobs.inFlight().length} image jobs` : ''].filter(Boolean).join(', ') || 'idle',
+  report: ({ count, maxMs, totalMs, activity }) => logger.warn(`[Lag] main process blocked ${count} times in 10 s (worst ${maxMs} ms, total ${totalMs} ms) while: ${activity}`),
+});
+
 app.whenReady().then(async () => {
+  lagMonitor.start();
   try {
     await fs.mkdir(LIBRARY_PATH, { recursive: true });
   } catch (e) {
@@ -152,6 +165,9 @@ app.whenReady().then(async () => {
     logger.error("DB Init Failed", e);
   }
 
+  // Background tasks wait for the face scan unless the user lets them run alongside it
+  AppStateRepository.setAIIdleGraceMs(backgroundIdleGraceMs(getAISettings()));
+
   // Start Services
   // Old: startPythonBackend();
   pythonProvider.start();
@@ -175,6 +191,9 @@ app.whenReady().then(async () => {
   // Start Background File Identity Service (Phase 130): records size / modified time / file id for older photos
   const fileIdentityService = new BackgroundFileIdentityService();
   fileIdentityService.start();
+  // Photo descriptions and tags, after the faces and only while nothing else is working
+  const captionService = new BackgroundCaptionService();
+  captionService.start();
 
   // Start Background FAISS Sync Service: keeps the face search index in step with the named faces
   const faissSyncService = new BackgroundFaissSyncService(createFaissSyncDeps());
@@ -190,6 +209,9 @@ app.whenReady().then(async () => {
   // Picture check: asks the vision model whether faces are real people or only pictures of them, when the user is away (suggestions only)
   const pictureCheckService = getPictureCheckService();
   pictureCheckService.start();
+  // Assigned-face check: the same question about faces already assigned to people, the biggest person first (suggestions only)
+  const assignedVisibilityService = getAssignedVisibilityService();
+  assignedVisibilityService.start();
 
   // Register Services
   const serviceManager = ServiceManager.getInstance();
@@ -199,10 +221,12 @@ app.whenReady().then(async () => {
   serviceManager.register('BackgroundPropagationService', propagationService);
   serviceManager.register('BackgroundDuplicateCheckerService', duplicateCheckerService);
   serviceManager.register('BackgroundFileIdentityService', fileIdentityService);
+  serviceManager.register('BackgroundCaptionService', captionService);
   serviceManager.register('BackgroundFaissSyncService', faissSyncService);
   serviceManager.register('RematchService', rematchService);
   serviceManager.register('FaceVisibilityService', faceVisibilityService);
   serviceManager.register('PictureCheckService', pictureCheckService);
+  serviceManager.register('AssignedVisibilityService', assignedVisibilityService);
   serviceManager.register('ScanQueue', scanQueue);
 
   registerAIHandlers();
@@ -221,6 +245,8 @@ app.whenReady().then(async () => {
   registerProfileHandlers();
   registerFaceVisibilityHandlers();
   registerPictureCheckHandlers();
+  registerAssignedCheckHandlers();
+  registerDoubtfulHandlers();
   registerPictureHandlers();
   registerCompositeHandlers();
   registerAdjustmentHandlers();

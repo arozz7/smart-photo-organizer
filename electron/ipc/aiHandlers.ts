@@ -9,11 +9,22 @@ import { getDB, getDBLock } from '../db';
 import { FaceRepository } from '../data/repositories/FaceRepository';
 import { FaceService } from '../core/services/FaceService';
 import { ConfigService } from '../core/services/ConfigService';
+import { captionsRunInScan } from '../core/services/captionTiming';
+import { backgroundIdleGraceMs } from '../core/services/backgroundPolicy';
+import { AppStateRepository } from '../data/repositories/AppStateRepository';
 import { rebuildFaceIndexFromNamedFaces } from '../core/services/FaissIndexService';
 import { toIndexFaces } from '../core/services/faissSync';
 import { hiddenFromReview, withoutHidden, countWithoutHidden } from '../core/services/reviewHiding';
+import { toUngroupableCentroids } from '../core/services/ungroupableCentroids';
+import { clusterUnassignedFaces } from '../core/services/ReviewClustering';
+import { ClusterCache } from '../core/services/clusterCache';
+import { ClusterCacheFileStore } from '../infrastructure/ClusterCacheFileStore';
+import { requestClusteringFromPython } from '../infrastructure/ClusterRequest';
 
 const REVIEW_NEEDED_MIN_COHESION = 0.40;
+
+/** The remembered Review Needed grouping, kept in the user data folder so the first open after a restart is fast too. */
+const clusterCache = new ClusterCache(new ClusterCacheFileStore(path.join(app.getPath('userData'), 'cluster-cache.json')));
 
 /**
  * Compute centroid L2 magnitude for a cluster of face IDs (cohesion metric, range 0–1).
@@ -56,7 +67,8 @@ export function registerAIHandlers() {
             // Debug & VLM logging
             logger.info(`[Main] Analyze Request ${photoId}`);
 
-            return await PhotoService.analyzeImage({ photoId, filePath, ...rest });
+            // Descriptions and tags take ~80% of a scan; unless set to run with the scan they follow in the background (BackgroundCaptionService).
+            return await PhotoService.analyzeImage({ photoId, filePath, ...rest, enableVLM: Boolean(rest.enableVLM) && captionsRunInScan(getAISettings()) });
         } catch (e: any) {
             if (e.message === 'Shutdown') return { success: false, error: 'Shutdown' };
             throw e;
@@ -108,6 +120,7 @@ export function registerAIHandlers() {
 
     ipcMain.handle('ai:saveSettings', (_event, settings) => {
         setAISettings(settings);
+        AppStateRepository.setAIIdleGraceMs(backgroundIdleGraceMs(getAISettings())); // takes effect at once, no reload
         pythonProvider.syncSettings(); // Use new method
         return true;
     });
@@ -223,14 +236,7 @@ export function registerAIHandlers() {
 
             // Get named person centroids (filter out those without descriptors)
             const { PersonRepository } = await import('../data/repositories/PersonRepository');
-            const people = PersonRepository.getPeopleWithDescriptors();
-            const centroids = people
-                .filter((p: any) => p.descriptor_mean_json) // Skip people without descriptor
-                .map((p: any) => ({
-                    descriptor: JSON.parse(p.descriptor_mean_json),
-                    name: p.name,
-                    personId: p.id
-                }));
+            const centroids = toUngroupableCentroids(PersonRepository.getPeopleWithDescriptors());
 
             logger.info(`[Main] Finding ungroupable faces: ${faces.length} faces, ${centroids.length} centroids, threshold=${distanceThreshold}`);
 
@@ -366,50 +372,12 @@ export function registerAIHandlers() {
 
             logger.info(`[Main] Clustering ${faces.length} faces with eps=${eps.toFixed(3)}, max_spread=${maxSpread}, groupBySuggestion=${options?.groupBySuggestion || false}`);
 
-            // File-based transfer for large payloads to avoid RangeError: Invalid string length
-            const LARGE_CLUSTER_THRESHOLD = 5000;
-            let clusteringResult: any;
-
-            if (faces.length > LARGE_CLUSTER_THRESHOLD) {
-                const fsSync = await import('fs');
-                const fsPromises = await import('fs/promises');
-                const os = await import('os');
-                const path = await import('path');
-
-                const dataPath = path.join(os.tmpdir(), `spo_cluster_${Date.now()}.json`);
-                try {
-                    const writeStream = fsSync.createWriteStream(dataPath, { encoding: 'utf-8' });
-                    await new Promise<void>((resolve, reject) => {
-                        writeStream.on('error', reject);
-                        writeStream.write('{"faces":[');
-                        for (let i = 0; i < faces.length; i++) {
-                            if (i > 0) writeStream.write(',');
-                            writeStream.write(JSON.stringify(faces[i]));
-                        }
-                        writeStream.write(']}');
-                        writeStream.end(() => resolve());
-                    });
-                    clusteringResult = await pythonProvider.sendRequest('cluster_faces', {
-                        dataPath,
-                        eps,
-                        min_samples: options?.min_samples || 2,
-                        max_size: 200,
-                        min_cohesion: 0.6,
-                        max_spread: maxSpread
-                    }, 900000);
-                } finally {
-                    try { await fsPromises.unlink(dataPath); } catch { /* ignore */ }
-                }
-            } else {
-                clusteringResult = await pythonProvider.sendRequest('cluster_faces', {
-                    faces,
-                    eps,
-                    min_samples: options?.min_samples || 2,
-                    max_size: 200,
-                    min_cohesion: 0.6,
-                    max_spread: maxSpread
-                }, 900000);
-            }
+            // The engine takes minutes for a whole library, so the last answer is remembered (on disk too) and reused while it still fits.
+            const clusteringResult: any = await clusterUnassignedFaces(
+                faces,
+                { eps, minSamples: options?.min_samples || 2, maxSize: 200, minCohesion: 0.6, maxSpread },
+                { cache: clusterCache, requestClustering: (toCluster, params) => requestClusteringFromPython(pythonProvider, toCluster, params) },
+            );
 
             // Pre-build descriptor lookup used for cohesion filtering in both code paths below
             const faceMap = new Map<number, number[]>();

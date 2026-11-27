@@ -1,10 +1,21 @@
+import path from 'node:path';
 import sharp, { Sharp } from 'sharp';
 import { IImageProcessor, ProcessingOptions } from './interfaces';
 import { imageJobs } from './ImageJobTracker';
+import { isCameraRawExtension } from '../../utils/imageFormats';
+
+/**
+ * Camera RAW is for the Python engine. Refusing it here with an ordinary error sends every caller down the path it already
+ * took when sharp failed on a RAW (stored preview, then Python), without sharp's native code ever touching the file.
+ */
+function refuseCameraRaw(filePath: string): void {
+    if (isCameraRawExtension(path.extname(filePath))) throw new Error('Camera RAW is decoded by the Python engine, not sharp');
+}
 
 export class SharpImageProcessor implements IImageProcessor {
 
     async process(filePath: string, options: ProcessingOptions, dbOrientation: number = 1): Promise<Buffer> {
+        refuseCameraRaw(filePath);
         // [Phase 83] Relax Error Handling
         // Metadata warnings (e.g. "ASCII value ... contains null byte") should not fail the pipeline
         // limited and recorded, see ImageJobTracker (native sharp crashes took the whole app down)
@@ -88,6 +99,7 @@ export class SharpImageProcessor implements IImageProcessor {
     }
 
     async convertRaw(filePath: string): Promise<Buffer> {
+        refuseCameraRaw(filePath);
         return imageJobs.run('convert', filePath, () => sharp(filePath, { failOn: 'none' })
             .rotate()
             .toFormat('jpeg', { quality: 80 })

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { BACKGROUND } from '../interfaces/IAIProvider';
 import { createReadStream } from 'node:fs';
 import { IService } from '../interfaces/IService';
 import { AppStateRepository } from '../../data/repositories/AppStateRepository';
@@ -175,7 +176,8 @@ export class BackgroundDuplicateCheckerService implements IService {
             const result = await this.aiProvider.sendRequest(
                 'compute_phash_batch',
                 { entries: photos },
-                120_000
+                120_000,
+                BACKGROUND
             );
             const results: { id: number; phash: string }[] = result?.results ?? [];
             const succeededIds = new Set(results.map(r => r.id));
@@ -252,7 +254,8 @@ export class BackgroundDuplicateCheckerService implements IService {
             result = await this.aiProvider.sendRequest(
                 'group_near_duplicates',
                 { entries, threshold: this.nearDuplicateThreshold },
-                this.nearPassTimeoutMs
+                this.nearPassTimeoutMs,
+                BACKGROUND
             );
         } catch (e) {
             logger.error('[BackgroundDuplicateCheckerService] Near-duplicate Python call failed:', e);
