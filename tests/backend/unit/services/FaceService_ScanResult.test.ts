@@ -106,14 +106,33 @@ describe('FaceService.processAnalysisResult (characterization)', () => {
             expect(ids()).toEqual([10]);
         });
 
-        // Current behavior, pinned before the refactor: the comment on the rejection memory says ignored faces must not be
-        // deleted, but an unconfirmed ignored face that no new detection matches is removed by the orphan cleanup at the end of the scan.
-        it('currently removes an unconfirmed ignored face that no detection matches, even though it still blocks the new detection', async () => {
+        it('keeps an unconfirmed ignored face that no detection matches, so the rejection memory survives the rescan', async () => {
             seedExisting([{ id: 10, box: box(0, 0, 200, 200), ignored: 1 }]);
 
             await scan([{ box: box(20, 20, 100, 100), score: 0.9 }], [null]);
 
-            expect(rows()).toHaveLength(0);
+            expect(ids()).toEqual([10]);
+        });
+
+        it('gives each detection its own match even when an earlier detection was skipped by the rejection memory', async () => {
+            seedExisting([{ id: 10, box: box(0, 0, 200, 200), ignored: 1 }]);
+            testDb.prepare(`INSERT INTO people (id, name) VALUES (3, 'Person 3'), (7, 'Person 7')`).run();
+
+            await scan(
+                [{ box: box(20, 20, 100, 100), score: 0.9 }, { box: box(1000, 1000, 200, 220), score: 0.9 }],
+                [{ personId: 3, distance: 0.2 }, { personId: 7, distance: 0.2 }],
+            );
+
+            const newFace = rows().find(r => r.id !== 10);
+            expect(newFace).toMatchObject({ person_id: 7, suggested_person_id: 7 });
+        });
+
+        it('keeps an ignored face even when the rescan detects nothing', async () => {
+            seedExisting([{ id: 10, box: box(0, 0, 200, 200), ignored: 1 }]);
+
+            await scan([], []);
+
+            expect(ids()).toEqual([10]);
         });
     });
 
