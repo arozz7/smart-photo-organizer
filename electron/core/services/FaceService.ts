@@ -6,6 +6,7 @@ import { getDB } from '../../db';
 import { getAISettings, ConfigService } from '../../store';
 import { STRICT_SCORE_THRESHOLD_ACCEPT } from './ConfigService';
 import { FaceAnalysisService } from './FaceAnalysisService';
+import { classifyDetection } from './detectionTier';
 
 /**
  * Result of a face matching operation.
@@ -558,6 +559,12 @@ export class FaceService {
         let matchIdx = 0;
         let assignedCount = 0;
 
+        // Scan-time assignment needs a sure detection ('human'); a weak one that looks like a person (animal, object, picture) stays a suggestion.
+        const advancedFaceSettings = ConfigService.getAdvancedFaceSettings();
+        const ACCEPT_SCORE = advancedFaceSettings.strictFalsePositiveMode
+            ? STRICT_SCORE_THRESHOLD_ACCEPT
+            : (advancedFaceSettings.scoreThresholdAccept ?? 0.70);
+
         const updateStmt = db.prepare(`
             UPDATE faces 
             SET descriptor = ?, box_json = ?, blur_score = ?,
@@ -617,8 +624,7 @@ export class FaceService {
 
                     // [Phase 68] Retroactive Hysteresis (Cleanup Existing Trash)
                     // Use Centralized Deduplication Threshold
-                    const advancedSettings = ConfigService.getAdvancedFaceSettings();
-                    const DEDUP_THRESHOLD = advancedSettings.dedupIoUThresh ?? 0.55;
+                    const DEDUP_THRESHOLD = advancedFaceSettings.dedupIoUThresh ?? 0.55;
 
                     if (iou > DEDUP_THRESHOLD && iou > maxIoU) {
                         maxIoU = iou;
@@ -700,6 +706,8 @@ export class FaceService {
                 if (matchData) {
                     const dist = matchData.distance;
                     matchDistance = dist;
+                    const detectionIsSolid = bestMatch?.entity_type !== 'suspect'
+                        && classifyDetection(face.score ?? 0.95, face.box, ACCEPT_SCORE) === 'human';
 
 
                     // Phase 5: Quality-Adjusted Thresholds
@@ -707,7 +715,7 @@ export class FaceService {
                     const adjHighThreshold = FaceAnalysisService.getQualityAdjustedThreshold(HIGH_THRESHOLD, fQuality);
                     const adjReviewThreshold = FaceAnalysisService.getQualityAdjustedThreshold(REVIEW_THRESHOLD, fQuality);
 
-                    if (dist < adjHighThreshold) {
+                    if (dist < adjHighThreshold && detectionIsSolid) {
                         // High Confidence -> Auto Assign
                         if (!personId) {
                             personId = matchData.personId;
@@ -765,11 +773,7 @@ export class FaceService {
                     // [Phase 90] 3-Tier Detection Score System
                     // Reject (<0.40), Verify/suspect (0.40-0.69), Accept/human (>=0.70)
                     // [Phase 106] Lever 1: raise ceiling to 0.75 in Strict False Positive Mode
-                    const advancedSettings = ConfigService.getAdvancedFaceSettings();
-                    const REJECT_FLOOR = advancedSettings.scoreThresholdReject ?? 0.40;
-                    const ACCEPT_CEILING = advancedSettings.strictFalsePositiveMode
-                        ? STRICT_SCORE_THRESHOLD_ACCEPT
-                        : (advancedSettings.scoreThresholdAccept ?? 0.70);
+                    const REJECT_FLOOR = advancedFaceSettings.scoreThresholdReject ?? 0.40;
 
 
                     const detectionScore = face.score ?? 0.95;
@@ -813,12 +817,7 @@ export class FaceService {
                     // Accept (>= 0.70) → 'human', Verify (0.40-0.69) → 'suspect'
                     // Also flag large/unusual boxes as suspect for multi-face split checking
 
-                    let entityType: string;
-                    if (detectionScore >= ACCEPT_CEILING && !isLargeBox && !isUnusualAspect) {
-                        entityType = 'human';
-                    } else {
-                        entityType = 'suspect';
-                    }
+                    const entityType = classifyDetection(detectionScore, box, ACCEPT_SCORE);
 
                     if (isLargeBox || isUnusualAspect) {
                         logger.info(`[FaceService] Flagged face as suspect: ${isLargeBox ? `large box (${boxArea.toLocaleString()}px)` : ''} ${isUnusualAspect ? `unusual aspect (${aspectRatio.toFixed(2)})` : ''}`);

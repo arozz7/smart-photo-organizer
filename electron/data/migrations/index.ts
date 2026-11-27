@@ -9,6 +9,7 @@ import { faceFlagsMigration } from './003_faceFlags';
 import { profileSuggestionLogMigration } from './004_profileSuggestionLog';
 import { pictureLogMigration } from './005_pictureLog';
 import { verificationIndexesMigration } from './006_verificationIndexes';
+import { weakScanAssignmentsMigration } from './007_weakScanAssignments';
 import type { Migration, MigrationLogger, MigrationResult } from './types';
 
 /**
@@ -21,7 +22,7 @@ import type { Migration, MigrationLogger, MigrationResult } from './types';
  * Existing libraries have `user_version = 0` (the frozen legacy baseline predates versioning) until
  * migration 1 runs on first launch of a version that includes it.
  */
-export const MIGRATIONS: readonly Migration[] = [fileIdentityMigration, rematchLogMigration, faceFlagsMigration, profileSuggestionLogMigration, pictureLogMigration, verificationIndexesMigration];
+export const MIGRATIONS: readonly Migration[] = [fileIdentityMigration, rematchLogMigration, faceFlagsMigration, profileSuggestionLogMigration, pictureLogMigration, verificationIndexesMigration, weakScanAssignmentsMigration];
 
 const BACKUP_FOLDER = 'backups';
 const BACKUPS_TO_KEEP = 3;

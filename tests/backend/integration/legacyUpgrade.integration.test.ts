@@ -97,11 +97,11 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
 
     it('upgrades to the latest schema on first open, taking exactly one backup first', () => {
         // Assert
-        expect(firstOpen).toMatchObject({ fromVersion: 0, toVersion: 6, applied: ['file_identity', 'rematch_log', 'face_flags', 'profile_suggestion_log', 'picture_log', 'verification_indexes'], downgradeDetected: false });
-        expect(db.pragma('user_version', { simple: true })).toBe(6);
+        expect(firstOpen).toMatchObject({ fromVersion: 0, toVersion: 7, applied: ['file_identity', 'rematch_log', 'face_flags', 'profile_suggestion_log', 'picture_log', 'verification_indexes', 'weak_scan_assignments'], downgradeDetected: false });
+        expect(db.pragma('user_version', { simple: true })).toBe(7);
         const backups = fs.readdirSync(path.join(libraryDir, 'backups')).filter(f => f.endsWith('.db'));
         expect(backups).toHaveLength(1);
-        expect(backups[0]).toMatch(/^library\.v0-to-v6\./);
+        expect(backups[0]).toMatch(/^library\.v0-to-v7\./);
         expect(firstOpen.backupPath).toBe(path.join(libraryDir, 'backups', backups[0]));
     });
 
@@ -158,7 +158,7 @@ describe('Legacy library upgrade (v0.8.1 fixture)', () => {
         db = getDB();
 
         // Assert
-        expect(second).toMatchObject({ fromVersion: 6, toVersion: 6, applied: [], downgradeDetected: false });
+        expect(second).toMatchObject({ fromVersion: 7, toVersion: 7, applied: [], downgradeDetected: false });
         expect(fs.readdirSync(path.join(libraryDir, 'backups')).filter(f => f.endsWith('.db'))).toHaveLength(1);
     });
 

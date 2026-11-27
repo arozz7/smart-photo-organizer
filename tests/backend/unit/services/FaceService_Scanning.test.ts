@@ -128,6 +128,40 @@ describe('FaceService Scanning Verification', () => {
         expect(insertCall![1]).toBe(11); // Person ID should be assigned automatically
     });
 
+    describe('a weak detection that matches a person closely', () => {
+        const closeMatch = [{ personId: 12, personName: 'Close Match', similarity: 0.9, distance: 0.2, matchType: 'faiss' as const }];
+        const scan = async (face: Record<string, unknown>) => {
+            vi.spyOn(FaceService, 'matchBatch').mockResolvedValue(closeMatch);
+            await FaceService.processAnalysisResult(130, [{ box: { x: 0, y: 0, width: 100, height: 100 }, descriptor: Array(128).fill(0.1), blurScore: 100, ...face }] as any, 1000, 1000, { addToIndex: vi.fn(), searchFaces: vi.fn() } as any);
+            return mockRun.mock.calls.find(args => args.length > 10)!;
+        };
+
+        it('is kept as a suggestion, not assigned (it may be an animal or an object; the vision check decides)', async () => {
+            const insert = await scan({ score: 0.55 });
+
+            expect(insert[1]).toBeNull();            // person_id
+            expect(insert[6]).toBe('review');        // confidence_tier
+            expect(insert[7]).toBe(12);              // suggested_person_id
+            expect(insert[20]).toBe('suspect');      // entity_type
+        });
+
+        it('is assigned once the detector is sure (score at the accept line)', async () => {
+            const insert = await scan({ score: 0.7 });
+
+            expect(insert[1]).toBe(12);
+            expect(insert[6]).toBe('high');
+            expect(insert[20]).toBe('human');
+        });
+
+        it('is kept as a suggestion when the box is not shaped like a face', async () => {
+            const insert = await scan({ score: 0.95, box: { x: 0, y: 0, width: 330, height: 100 } });
+
+            expect(insert[1]).toBeNull();
+            expect(insert[6]).toBe('review');
+            expect(insert[20]).toBe('suspect');
+        });
+    });
+
     it('should populate session_folder, session_date and needs_bucketing=1 for unassigned faces', async () => {
         // Arrange
         const photoId = 125;

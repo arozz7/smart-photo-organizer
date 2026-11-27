@@ -26,9 +26,9 @@ describe('006_verificationIndexes migration', () => {
     beforeEach(() => { db = createLibrary(); });
     afterEach(() => db.close());
 
-    it('is version 6 and registered last', () => {
+    it('is version 6 and registered in order', () => {
         expect(verificationIndexesMigration.version).toBe(6);
-        expect(MIGRATIONS[MIGRATIONS.length - 1].version).toBe(6);
+        expect(MIGRATIONS[5]).toBe(verificationIndexesMigration);
     });
 
     it.each([
